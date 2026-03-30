@@ -1,0 +1,25 @@
+{
+  "name": "@pi-extensions/file-tools",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/file-tools.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@pi-extensions/shared": "workspace:*",
+    "diff": "*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

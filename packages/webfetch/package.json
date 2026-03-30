@@ -1,0 +1,25 @@
+{
+  "name": "@pi-extensions/webfetch",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/webfetch.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "*",
+    "turndown": "*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

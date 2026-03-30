@@ -1,0 +1,27 @@
+{
+  "name": "@pi-extensions/code-mode",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/code-mode.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@pi-extensions/fff": "workspace:*",
+    "@pi-extensions/shared": "workspace:*",
+    "@pi-extensions/tldr-code": "workspace:*",
+    "turndown": "*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

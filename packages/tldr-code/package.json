@@ -1,0 +1,28 @@
+{
+  "name": "@pi-extensions/tldr-code",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/tldr-code.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "files": [
+    "extensions"
+  ],
+  "exports": {
+    "./api": "./extensions/tldr-code.ts"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@pi-extensions/hashline-tools",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/hashline-tools.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@pi-extensions/lipgloss-theme",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "themes": [
+      "./themes"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@pi-extensions/brave-search",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/brave-search.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

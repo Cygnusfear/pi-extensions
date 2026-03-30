@@ -1,0 +1,24 @@
+{
+  "name": "@pi-extensions/mid-mortem",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/mid-mortem.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

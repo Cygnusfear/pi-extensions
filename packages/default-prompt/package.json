@@ -1,0 +1,22 @@
+{
+  "name": "@pi-extensions/default-prompt",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/default-prompt.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "files": [
+    "extensions",
+    "prompts"
+  ]
+}

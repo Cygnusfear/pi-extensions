@@ -1,0 +1,25 @@
+{
+  "name": "@pi-extensions/context7",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/context7.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

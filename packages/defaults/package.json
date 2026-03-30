@@ -1,0 +1,24 @@
+{
+  "name": "@pi-extensions/defaults",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@aliou/pi-utils-settings": "^0.1.0",
+    "@aliou/pi-utils-ui": "^0.1.0",
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.51.0",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*",
+    "@mariozechner/pi-ai": "*"
+  },
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ]
+}

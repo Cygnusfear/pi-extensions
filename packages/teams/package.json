@@ -1,0 +1,22 @@
+{
+  "name": "@pi-extensions/teams",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "@pi-extensions/shared": "workspace:*",
+    "@pi-extensions/pi-mesh": "workspace:*"
+  }
+}

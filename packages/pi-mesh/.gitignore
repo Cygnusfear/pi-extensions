@@ -1,0 +1,10 @@
+target/
+node_modules/
+*.dylib
+*.so
+pi-mesh
+.DS_Store
+.env
+.env.local
+.pi/presence/
+.tickets/

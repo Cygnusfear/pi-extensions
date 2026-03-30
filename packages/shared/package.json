@@ -1,0 +1,26 @@
+{
+  "name": "@pi-extensions/shared",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./foresight-env": "./src/foresight-env.ts",
+    "./git-guards": "./src/git-guards.ts",
+    "./model-utils": "./src/model-utils.ts",
+    "./safe-json": "./src/safe-json.ts",
+    "./session-activity-summary": "./src/session-activity-summary.ts",
+    "./session-nickname": "./src/session-nickname.ts",
+    "./session-view": "./src/session-view.ts",
+    "./tool-ui-utils": "./src/tool-ui-utils.ts",
+    "./tui-diff-renderer": "./src/tui-diff-renderer.ts",
+    "./foresight-read": "./src/foresight-read.ts",
+    "./foresight-write": "./src/foresight-write.ts"
+  },
+  "dependencies": {
+    "diff": "^8.0.4",
+    "jsonrepair": "^3.13.2",
+    "shiki": "^4.0.2"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*"
+  }
+}

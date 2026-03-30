@@ -1,0 +1,24 @@
+{
+  "name": "@pi-extensions/model-shortcuts",
+  "version": "0.0.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/model-shortcuts.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "files": [
+    "extensions"
+  ],
+  "dependencies": {
+    "@pi-extensions/shared": "workspace:*"
+  }
+}
