@@ -20,8 +20,32 @@ import {
 	projectMeaningfulSessionEntries,
 	sliceSessionViewEntries,
 } from "../../shared/src/session-view.ts";
-import type { AnnouncePayload, ChannelMessage, MeshConfig, MeshMessage, PeerInfo, RequestEvent } from "./types.js";
+import type {
+	AnnouncePayload,
+	ChannelMessage,
+	MeshConfig,
+	MeshMessage,
+	MeshAskReceiptEnvelope,
+	MeshTellAckEnvelope,
+	MeshTellEnvelope,
+	MeshTellReceiptPhase,
+	PeerInfo,
+	RequestEvent,
+} from "./types.js";
 import { getSessionNicknameText, setStableId } from "@pi-extensions/shared/session-nickname";
+import {
+	buildTellReceiptAck,
+	createDeliveryId,
+	isMeshTellAckEnvelope,
+	isMeshTellEnvelope,
+	unwrapInboundTell,
+} from "./tell-protocol.ts";
+import {
+	buildMeshAskEnvelope,
+	buildMeshAskReceipt,
+	isMeshAskEnvelope,
+	isMeshAskReceiptEnvelope,
+} from "./ask-protocol.ts";
 
 const ambientChatBatchMsRaw = Number(process.env.PI_MESH_AMBIENT_CHAT_BATCH_MS ?? "750");
 const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientChatBatchMsRaw >= 0
@@ -58,6 +82,8 @@ export class PiMesh {
 	private announceIntervalMs = 30_000;
 	private lineBuf = "";
 	private pendingGets: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }> = new Map();
+	private pendingAskReceipts: Map<string, { phase: "delivered" | "visible"; resolve: (v: MeshAskReceiptEnvelope) => void; reject: (e: Error) => void }> = new Map();
+	private pendingTellReceipts: Map<string, { phase: MeshTellReceiptPhase; resolve: (v: MeshTellAckEnvelope) => void; reject: (e: Error) => void }> = new Map();
 	private serveIds: number[] = [];
 	private subIds: number[] = [];
 	private channelSubs: Set<string> = new Set();
@@ -152,17 +178,87 @@ export class PiMesh {
 		this.channelWildcardSubbed = false;
 		this.myClientId = "";
 		this.pendingGets.clear();
+		for (const pending of this.pendingAskReceipts.values()) {
+			pending.reject(new Error("mesh stopped before ask receipt arrived"));
+		}
+		this.pendingAskReceipts.clear();
+		for (const pending of this.pendingTellReceipts.values()) {
+			pending.reject(new Error("mesh stopped before delivery receipt arrived"));
+		}
+		this.pendingTellReceipts.clear();
 	}
 
 	setName(name: string | undefined): void {
 		this.myName = name;
 	}
 
-	tell(sessionId: string, message: unknown): void {
+	tell(sessionId: string, message: unknown): { deliveryId: string } {
+		const deliveryId = createDeliveryId();
+		const tellEnvelope: MeshTellEnvelope = {
+			kind: "mesh:tell",
+			deliveryId,
+			from: this.myClientId,
+			payload: message,
+			timestamp: Date.now(),
+		};
 		const envelope: MeshMessage = {
 			from: this.myClientId,
 			topic: `session/${sessionId}`,
-			payload: message,
+			payload: tellEnvelope,
+			timestamp: Date.now(),
+		};
+		this._send({ cmd: "publish", topic: `pi/mesh/session/${sessionId}`, payload: JSON.stringify(envelope) });
+		return { deliveryId };
+	}
+
+	tellAndWaitForReceipt(
+		sessionId: string,
+		message: unknown,
+		phase: MeshTellReceiptPhase,
+		timeoutMs = 10_000,
+	): Promise<MeshTellAckEnvelope> {
+		return new Promise((resolve, reject) => {
+			const deliveryId = createDeliveryId();
+			const timer = setTimeout(() => {
+				this.pendingTellReceipts.delete(deliveryId);
+				reject(new Error(`mesh_tell: timeout waiting for ${phase} receipt after ${timeoutMs}ms`));
+			}, timeoutMs);
+
+			this.pendingTellReceipts.set(deliveryId, {
+				phase,
+				resolve: (ack) => {
+					clearTimeout(timer);
+					resolve(ack);
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					reject(error);
+				},
+			});
+
+			const tellEnvelope: MeshTellEnvelope = {
+				kind: "mesh:tell",
+				deliveryId,
+				from: this.myClientId,
+				ackRequested: phase,
+				payload: message,
+				timestamp: Date.now(),
+			};
+			const envelope: MeshMessage = {
+				from: this.myClientId,
+				topic: `session/${sessionId}`,
+				payload: tellEnvelope,
+				timestamp: Date.now(),
+			};
+			this._send({ cmd: "publish", topic: `pi/mesh/session/${sessionId}`, payload: JSON.stringify(envelope) });
+		});
+	}
+
+	sendTellReceipt(sessionId: string, ack: MeshTellAckEnvelope): void {
+		const envelope: MeshMessage = {
+			from: this.myClientId,
+			topic: `session/${sessionId}`,
+			payload: ack,
 			timestamp: Date.now(),
 		};
 		this._send({ cmd: "publish", topic: `pi/mesh/session/${sessionId}`, payload: JSON.stringify(envelope) });
@@ -181,13 +277,70 @@ export class PiMesh {
 				reject: (e) => { clearTimeout(timer); reject(e); },
 			});
 
-			// Wrap with sender identity so receiver knows who's asking
-			const envelope = { __meshFrom: this.myClientId, __meshTs: Date.now(), __meshPayload: message };
+			const envelope = buildMeshAskEnvelope(this.myClientId, message);
 			this._send({
 				cmd: "get",
 				topic: `pi/mesh/rpc/${sessionId}`,
 				payload: JSON.stringify(envelope),
 				timeout_ms: timeoutMs + 5000, // Rust safety net
+				req_id: reqId,
+			});
+		});
+	}
+
+	askWithReceipt(
+		sessionId: string,
+		message: unknown,
+		timeoutMs = 30_000,
+		receiptPhase: "delivered" | "visible" = "delivered",
+	): Promise<{ reply: unknown; receipt?: MeshAskReceiptEnvelope }> {
+		return new Promise((resolve, reject) => {
+			const reqId = `ask-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+			let receipt: MeshAskReceiptEnvelope | undefined;
+			let settled = false;
+			const finish = (fn: () => void) => {
+				if (settled) return;
+				settled = true;
+				this.pendingGets.delete(reqId);
+				this.pendingAskReceipts.delete(reqId);
+				fn();
+			};
+
+			const timer = setTimeout(() => {
+				finish(() => {
+					const receiptNote = receipt ? ` request ${receipt.phase} by ${receipt.from} but no final reply arrived` : " no delivery receipt arrived";
+					reject(new Error(`mesh_ask: timeout after ${timeoutMs}ms;${receiptNote}`));
+				});
+			}, timeoutMs);
+
+			this.pendingAskReceipts.set(reqId, {
+				phase: receiptPhase,
+				resolve: (ack) => {
+					receipt = ack;
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					finish(() => reject(error));
+				},
+			});
+
+			this.pendingGets.set(reqId, {
+				resolve: (reply) => {
+					clearTimeout(timer);
+					finish(() => resolve({ reply, receipt }));
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					finish(() => reject(error));
+				},
+			});
+
+			const envelope = buildMeshAskEnvelope(this.myClientId, message, reqId, receiptPhase);
+			this._send({
+				cmd: "get",
+				topic: `pi/mesh/rpc/${sessionId}`,
+				payload: JSON.stringify(envelope),
+				timeout_ms: timeoutMs + 5000,
 				req_id: reqId,
 			});
 		});
@@ -338,6 +491,21 @@ export class PiMesh {
 		} else if (topic.startsWith("pi/mesh/session/") || topic.startsWith("pi/mesh/broadcast/")) {
 			try {
 				const msg: MeshMessage = JSON.parse(payload);
+				if (isMeshAskReceiptEnvelope(msg.payload)) {
+					const pending = this.pendingAskReceipts.get(msg.payload.askId);
+					if (pending && pending.phase === msg.payload.phase) {
+						pending.resolve(msg.payload);
+					}
+					return;
+				}
+				if (isMeshTellAckEnvelope(msg.payload)) {
+					const pending = this.pendingTellReceipts.get(msg.payload.deliveryId);
+					if (pending && pending.phase === msg.payload.phase) {
+						this.pendingTellReceipts.delete(msg.payload.deliveryId);
+						pending.resolve(msg.payload);
+					}
+					return;
+				}
 				this._emit("message", msg);
 			} catch {}
 		}
@@ -346,16 +514,24 @@ export class PiMesh {
 	private _handleQuery(queryId: number, _topic: string, payload: string): void {
 		let requestPayload: unknown;
 		let fromId = "unknown";
+		let askId: string | undefined;
+		let askReceiptRequested: "delivered" | "visible" | undefined;
 		try {
 			const parsed = payload ? JSON.parse(payload) : undefined;
 			// Unwrap ask envelope (sent by ask() method)
-			if (parsed && typeof parsed === "object" && "__meshFrom" in parsed && "__meshPayload" in parsed) {
-				fromId = (parsed as Record<string, unknown>).__meshFrom as string;
-				requestPayload = (parsed as Record<string, unknown>).__meshPayload;
+			if (isMeshAskEnvelope(parsed)) {
+				fromId = parsed.__meshFrom;
+				requestPayload = parsed.__meshPayload;
+				askId = parsed.__meshAskId;
+				askReceiptRequested = parsed.__meshAskReceiptRequested;
 			} else {
 				requestPayload = parsed;
 			}
 		} catch { requestPayload = payload; }
+
+		if (fromId !== "unknown" && askId && askReceiptRequested) {
+			this.sendTellReceipt(fromId, buildMeshAskReceipt(askId, this.myClientId, "delivered"));
+		}
 
 		const senderPeer = this.peerMap.get(fromId) ?? { id: fromId, lastSeen: Date.now() };
 
@@ -370,6 +546,8 @@ export class PiMesh {
 			requestId: queryId,
 			from: senderPeer,
 			payload: requestPayload,
+			askId,
+			askReceiptRequested,
 			reply: replyFn,
 		};
 		this._emit("request", event);
@@ -632,18 +810,27 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			mesh.start(binPath, sessionId, ctx.cwd, { mode: "peer", scouting: true }, name);
 
 			// Wire inbound tells into the conversation
-			mesh.on<MeshMessage>("message", (msg) => {
+			mesh.on<MeshMessage>("message", (rawMsg) => {
+				const { message: msg, deliveryId, ackRequested, originalFrom } = unwrapInboundTell(rawMsg);
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
+				const shouldAppendNow = agentBusy || ackRequested === "visible";
+				const deliveryOptions = shouldAppendNow
+					? ({ deliverAs: "appendNow" } as { deliverAs: "steer" | "followUp" | "nextTurn" })
+					: { deliverAs: "followUp" as const, triggerTurn: true };
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound",
 						content: `[mesh-tell] From ${senderLabel}:\n\n${typeof msg.payload === "string" ? msg.payload : JSON.stringify(msg.payload)}`,
 						display: true,
-						details: { from: msg.from, senderLabel, topic: msg.topic },
+						details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
 					},
-					{ deliverAs: "followUp", triggerTurn: true },
+					deliveryOptions,
 				);
+				if (deliveryId && originalFrom && ackRequested) {
+					const phase: MeshTellReceiptPhase = shouldAppendNow ? "visible" : "delivered";
+					mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, phase));
+				}
 			});
 
 			// Wire inbound channel messages — ambient context, visible immediately.
@@ -693,14 +880,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const senderLabel = req.from.id !== "unknown" ? getPeerLabel(req.from) : "unknown";
 				const ts = new Date().toLocaleTimeString();
 				const payloadText = extractPayloadText(req.payload);
+				const shouldAppendNow = agentBusy || req.askReceiptRequested === "visible";
+				const deliveryOptions = shouldAppendNow
+					? ({ deliverAs: "appendNow" } as { deliverAs: "steer" | "followUp" | "nextTurn" })
+					: { deliverAs: "followUp" as const, triggerTurn: true };
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound-ask",
 						content: `[${reqId}] ${ts} ${senderLabel} asks: ${payloadText}\n\nUse mesh_reply(requestId: ${reqId}, response: your answer) to respond.`,
 						display: true,
 					},
-					{ deliverAs: "followUp", triggerTurn: true },
+					deliveryOptions,
 				);
+				if (req.askId && req.askReceiptRequested === "visible" && req.from.id !== "unknown") {
+					mesh.sendTellReceipt(req.from.id, buildMeshAskReceipt(req.askId, mesh.self().id, "visible"));
+				}
 			});
 		} catch (e) {
 			console.warn(`[pi-mesh] Failed to start: ${e}`);
@@ -750,13 +944,20 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "mesh_tell",
 		label: "Mesh Tell",
-		description: "Send a fire-and-forget message to another pi session over the mesh network.",
+		description: "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing.",
 		parameters: Type.Object({
 			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
 			message: Type.Unknown({ description: "Message payload (any JSON value)" }),
+			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for: 'none', 'delivered', or 'visible'. Default: 'delivered'" })),
+			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms when waiting for receipt (default: 10000)", minimum: 100 })),
 		}),
 		async execute(_toolCallId, params) {
-			const { sessionId, message } = params as { sessionId: string; message: unknown };
+			const { sessionId, message, waitFor, timeoutMs } = params as {
+				sessionId: string;
+				message: unknown;
+				waitFor?: "none" | MeshTellReceiptPhase;
+				timeoutMs?: number;
+			};
 			let resolved: string;
 			try {
 				resolved = resolveTargetSessionId(sessionId);
@@ -768,25 +969,48 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			mesh.tell(resolved, message);
-			return {
-				content: [{ type: "text", text: `Message sent to session ${resolved}` }],
-				details: { sessionId, resolvedSessionId: resolved, sent: true },
-			};
+			const receiptMode = waitFor ?? "delivered";
+			if (receiptMode === "none") {
+				const { deliveryId } = mesh.tell(resolved, message);
+				return {
+					content: [{ type: "text", text: `Message sent to session ${resolved} (${deliveryId})` }],
+					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none" },
+				};
+			}
+
+			try {
+				const ack = await mesh.tellAndWaitForReceipt(resolved, message, receiptMode, timeoutMs ?? 10_000);
+				return {
+					content: [{ type: "text", text: `Message delivered to session ${resolved} (${ack.phase}, deliveryId=${ack.deliveryId})` }],
+					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode },
+				};
+			} catch (e) {
+				return {
+					content: [{ type: "text", text: `Error: ${e}` }],
+					details: { sessionId, resolvedSessionId: resolved, error: String(e), waitFor: receiptMode },
+					isError: true,
+				};
+			}
 		},
 	});
 
 	pi.registerTool({
 		name: "mesh_ask",
 		label: "Mesh Ask",
-		description: "Send a request to another pi session and wait for a reply.",
+		description: "Send a request to another pi session and wait for a reply. Includes delivery receipt tracking so timeouts distinguish 'not delivered' from 'delivered but no reply'.",
 		parameters: Type.Object({
 			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
 			message: Type.Unknown({ description: "Request payload (any JSON value)" }),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms (default: 30000)", minimum: 100 })),
+			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for before timing out diagnostics: 'delivered' or 'visible'. Default: 'delivered'" })),
 		}),
 		async execute(_toolCallId, params) {
-			const { sessionId, message, timeoutMs } = params as { sessionId: string; message: unknown; timeoutMs?: number };
+			const { sessionId, message, timeoutMs, waitFor } = params as {
+				sessionId: string;
+				message: unknown;
+				timeoutMs?: number;
+				waitFor?: "delivered" | "visible";
+			};
 			let resolved: string;
 			try {
 				resolved = resolveTargetSessionId(sessionId);
@@ -799,15 +1023,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				const reply = await mesh.ask(resolved, message, timeoutMs ?? 30_000);
+				const result = await mesh.askWithReceipt(resolved, message, timeoutMs ?? 30_000, waitFor ?? "delivered");
+				const receiptLine = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from} (${result.receipt.askId})` : "\nreceipt: none";
 				return {
-					content: [{ type: "text", text: JSON.stringify(reply) }],
-					details: { sessionId, resolvedSessionId: resolved, reply },
+					content: [{ type: "text", text: `${JSON.stringify(result.reply)}${receiptLine}` }],
+					details: { sessionId, resolvedSessionId: resolved, reply: result.reply, receipt: result.receipt, waitFor: waitFor ?? "delivered" },
 				};
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Error: ${e}` }],
-					details: { sessionId, resolvedSessionId: resolved, error: String(e) },
+					details: { sessionId, resolvedSessionId: resolved, error: String(e), waitFor: waitFor ?? "delivered" },
 					isError: true,
 				};
 			}
@@ -958,7 +1183,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 	pi.registerCommand("mesh", {
 		description:
-			"Mesh. Usage: /mesh [list] | /mesh tell <peer-id-or-nickname> <msg> | /mesh view <peer-id-or-nickname> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg>",
+			"Mesh. Usage: /mesh [list] | /mesh tell <peer-id-or-nickname> <msg> [--visible|--no-wait] | /mesh ask <peer-id-or-nickname> <msg> [--visible] | /mesh view <peer-id-or-nickname> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg>",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0] ?? "list";
@@ -995,7 +1220,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(output.join("\n\n"), "info");
 			} else if (sub === "tell") {
 				const targetId = parts[1];
-				const message = parts.slice(2).join(" ");
+				const tellFlags = new Set(parts.filter((part) => part === "--visible" || part === "--no-wait"));
+				const message = parts.slice(2).filter((part) => !tellFlags.has(part)).join(" ");
 				if (!targetId || !message) { ctx.ui.notify("Usage: /mesh tell <sessionId> <message>", "warning"); return; }
 				let resolved: string;
 				try {
@@ -1004,8 +1230,37 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 					return;
 				}
-				mesh.tell(resolved, message);
-				ctx.ui.notify(`Sent to ${resolved}`, "info");
+				try {
+					if (tellFlags.has("--no-wait")) {
+						const { deliveryId } = mesh.tell(resolved, message);
+						ctx.ui.notify(`Sent to ${resolved} (${deliveryId})`, "info");
+					} else {
+						const phase: MeshTellReceiptPhase = tellFlags.has("--visible") ? "visible" : "delivered";
+						await mesh.tellAndWaitForReceipt(resolved, message, phase, 10_000);
+						ctx.ui.notify(`Delivered to ${resolved} (${phase})`, "info");
+					}
+				} catch (e) {
+					ctx.ui.notify(`Error: ${e}`, "warning");
+				}
+			} else if (sub === "ask") {
+				const targetId = parts[1];
+				const askFlags = new Set(parts.filter((part) => part === "--visible"));
+				const message = parts.slice(2).filter((part) => !askFlags.has(part)).join(" ");
+				if (!targetId || !message) { ctx.ui.notify("Usage: /mesh ask <sessionId> <message> [--visible]", "warning"); return; }
+				let resolved: string;
+				try {
+					resolved = resolveTargetSessionId(targetId);
+				} catch (e) {
+					ctx.ui.notify(`Error: ${e}`, "warning");
+					return;
+				}
+				try {
+					const result = await mesh.askWithReceipt(resolved, message, 30_000, askFlags.has("--visible") ? "visible" : "delivered");
+					const receiptText = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from}` : "";
+					ctx.ui.notify(`${JSON.stringify(result.reply)}${receiptText}`, "info");
+				} catch (e) {
+					ctx.ui.notify(`Error: ${e}`, "warning");
+				}
 			} else if (sub === "view") {
 				const targetId = parts[1];
 				if (!targetId) { ctx.ui.notify("Usage: /mesh view <sessionId> [start] [end]", "warning"); return; }

@@ -26,6 +26,33 @@ export interface MeshMessage {
 	timestamp: number;
 }
 
+export type MeshTellReceiptPhase = "delivered" | "visible";
+
+export interface MeshTellEnvelope {
+	kind: "mesh:tell";
+	deliveryId: string;
+	from: string;
+	ackRequested?: MeshTellReceiptPhase;
+	payload: unknown;
+	timestamp: number;
+}
+
+export interface MeshTellAckEnvelope {
+	kind: "mesh:tell:ack";
+	deliveryId: string;
+	from: string;
+	phase: MeshTellReceiptPhase;
+	timestamp: number;
+}
+
+export interface MeshAskReceiptEnvelope {
+	kind: "mesh:ask:receipt";
+	askId: string;
+	from: string;
+	phase: "delivered" | "visible";
+	timestamp: number;
+}
+
 export interface AnnouncePayload {
 	clientId: string;  // unique per connection — the routing identity
 	zid?: string;      // Zenoh peer ID — shared across clients on same machine, metadata only
@@ -42,6 +69,8 @@ export interface RequestEvent {
 	requestId: number;
 	from: PeerInfo;
 	payload: unknown;
+	askId?: string;
+	askReceiptRequested?: "delivered" | "visible";
 	/** Call reply() to send a response back to the caller. Can only be called once. */
 	reply: (response: unknown) => void;
 }
