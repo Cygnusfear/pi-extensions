@@ -71,6 +71,14 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			try { mesh.tell(coordinatorId, payload); } catch {}
 		}
 	};
+	const meshTellCritical = async (payload: unknown) => {
+		if (!mesh || !coordinatorId) return;
+		try {
+			await mesh.tellAndWaitForReceipt(coordinatorId, payload, "delivered", 5000);
+		} catch {
+			try { mesh.tell(coordinatorId, payload); } catch {}
+		}
+	};
 	const nextSeq = () => ++meshSeq;
 
 	let ticketClosed = false;
@@ -90,7 +98,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			: `QUIT: ${normalizedSummary}`;
 
 		writeHeartbeat("worker_terminal", { status, summary: normalizedSummary });
-		meshTell(
+		await meshTellCritical(
 			createWorkerFinishEnvelope({
 				teamId,
 				leaderEpoch,
