@@ -200,4 +200,21 @@ describe("TeamLeader state persistence", () => {
 
 		expect(leader.buildSpawnSessionMode()).toEqual({ kind: "fresh" });
 	});
+
+	test("v2 getters expose reduced lifecycle and current session mode", () => {
+		const { leader } = makeHarness();
+		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
+		leader.ctx.sessionManager.getLeafId = () => "leaf-1";
+		leader.ctx.sessionManager.createBranchedSession = () => "/tmp/forked.jsonl";
+		const worker = makeWorker({ workerInstanceId: "attempt-1" });
+		leader.workers.set("worker-1", worker);
+		leader.upsertV2WorkerFromHandle(worker);
+		leader.appendV2Fact("worker-1", { type: "spawn_started", at: 1, pid: worker.pid });
+		leader.appendV2Fact("worker-1", { type: "worker_hello", at: 2 });
+
+		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("running");
+		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({
+			kind: "fresh",
+		});
+	});
 });

@@ -106,7 +106,10 @@ async function runTeamsAction(
     }
     const lines = workers.map((w) => {
       const modelSuffix = w.model ? ` | model ${w.model}` : "";
-      const parts = [`${w.name}: ${w.status} | route ${w.routeState} | ticket #${w.ticketId} | pid ${w.pid}${modelSuffix}`];
+      const v2Lifecycle = leader.getV2WorkerLifecycle(w.name);
+      const sessionMode = leader.getV2CurrentSessionMode(w.name);
+      const sessionModeLabel = sessionMode ? (sessionMode.kind === "fork" ? `fork:${sessionMode.parentLeafId}` : sessionMode.kind) : "unknown";
+      const parts = [`${w.name}: ${w.status}${v2Lifecycle ? ` | v2 ${v2Lifecycle}` : ""} | route ${w.routeState} | session ${sessionModeLabel} | ticket #${w.ticketId} | pid ${w.pid}${modelSuffix}`];
       parts.push(
         `  activity: ${formatRuntimeSummary({
           hasActiveChildProcess: w.hasActiveChildProcess,

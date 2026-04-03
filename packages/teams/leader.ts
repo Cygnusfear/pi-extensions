@@ -1149,13 +1149,14 @@ export class TeamLeader {
       if (!child) return false;
 
       this.clearPendingAmbientChat(name);
-      worker.status = "running";
       worker.routeState = "pending";
       worker.meshClientId = undefined;
       worker.doneAt = undefined;
       worker.graceAt = undefined;
       worker.resumableUntilAt = undefined;
       worker.killedAt = undefined;
+      this.upsertV2WorkerFromHandle(worker);
+      this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
       this.childProcesses.set(name, child);
       child.on("exit", (code) => {
         worker.exitCode = code;
@@ -1326,7 +1327,6 @@ export class TeamLeader {
 				this.renderWidget();
 	      } else if (envelope.type === "worker.hello") {
         this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
-        worker.status = "running";
         worker.lastActivityAt = Date.now();
         this.linkWorkerRoute(worker, msg.from, peerNickname);
         this.renderWidget();
@@ -1481,11 +1481,6 @@ export class TeamLeader {
       worker.ticketStatus = ticket.status;
       worker.lastNote = ticket.notes.at(-1)?.text;
 
-      if (worker.status === "spawning") {
-        worker.status = "running";
-        this.persistStateIfHydrated();
-      }
-
       // Re-check after async gap — worker may have exited while we were reading the ticket
       if (["done", "warning", "failed", "killed"].includes(worker.status)) return;
 
@@ -1554,12 +1549,13 @@ export class TeamLeader {
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
         if (child) {
           worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
-          worker.status = "running";
           worker.routeState = "pending";
           worker.meshClientId = undefined;
           worker.lastActivityAt = Date.now();
           worker.lastProcessActivityAt = Date.now();
           worker.lastNote = `AUTO-RETRY: ${recovery.error.slice(0, 120)}`;
+          this.upsertV2WorkerFromHandle(worker);
+          this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
 
           await this.pi.exec(
             "mai",
@@ -1661,6 +1657,8 @@ export class TeamLeader {
           : `process exited during the startup window (<${(STARTUP_WINDOW_MS / 1000).toFixed(0)}s) before creating a session file`;
         worker.lastNote = `AUTO-RESPAWN: ${reason}, retrying once`;
         worker.spawnConfig = config;
+        this.upsertV2WorkerFromHandle(worker);
+        this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
 
         await this.pi.exec(
           "mai",
@@ -1877,10 +1875,6 @@ export class TeamLeader {
       return;
     }
 
-    if (worker.status === "spawning") {
-      worker.status = "running";
-    }
-
     worker.hasActiveChildProcess = snapshot.hasActiveChildProcess;
     worker.activeChildProcessCount = snapshot.activeChildProcessCount;
     worker.currentCommand = snapshot.currentCommand;
@@ -1955,6 +1949,20 @@ export class TeamLeader {
 
   getWorkers(): WorkerHandle[] {
     return [...this.workers.values()];
+  }
+
+  getV2TeamRecord(): TeamRecord | null {
+    return this.v2TeamRecord ? structuredClone(this.v2TeamRecord) : null;
+  }
+
+  getV2WorkerLifecycle(workerName: string): import("./v2/state.ts").WorkerLifecycleState | null {
+    return this.v2TeamRecord?.workers[workerName]?.lifecycle ?? null;
+  }
+
+  getV2CurrentSessionMode(workerName: string): import("./v2/protocol.ts").WorkerSessionMode | null {
+    const worker = this.v2TeamRecord?.workers[workerName];
+    if (!worker?.currentAttemptId) return null;
+    return worker.attempts.find((attempt) => attempt.attemptId === worker.currentAttemptId)?.sessionMode ?? null;
   }
 
   getWorker(name: string): WorkerHandle | undefined {
