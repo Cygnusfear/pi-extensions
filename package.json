@@ -33,6 +33,7 @@
       "./packages/powerline-footer/index.ts",
       "./packages/session-tab-title/extensions/session-tab-title.ts",
       "./packages/skills/extensions/skills.ts",
+      "./packages/nested-skills/extensions/nested-skills.ts",
       "./packages/teams/index.ts",
 
       "./packages/webfetch/extensions/webfetch.ts",

@@ -14,6 +14,7 @@ import {
   formatRuntimeSummary,
   sampleWorkerProcessSnapshotAsync,
 } from "./activity.js";
+import { LEASE_HEARTBEAT_INTERVAL_MS, buildLeaderLeasePath, writeLeaderLease } from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
 import { isProcessAlive, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
@@ -40,6 +41,28 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
 interface RealActivity {
   timestampMs: number;
   label: string;
+}
+
+interface WorkerLifecycleFacts {
+  sawAgentEnd: boolean;
+  sawForcedSessionShutdown: boolean;
+  sawSessionShutdownClose: boolean;
+  lastHeartbeatEvent?: string;
+  lastAgentEndSeq?: number;
+  lastForcedShutdownSeq?: number;
+  lastTerminalSeq?: number;
+  lastTerminalStatus?: "done" | "quit";
+  lastTerminalSummary?: string;
+}
+
+interface WorkerExitAssessment {
+  lifecycle: WorkerLifecycleFacts;
+  forcedExit: boolean;
+  cleanAgentEnd: boolean;
+  ticketClosed: boolean;
+  outputMeaningful: boolean;
+  classification: "success" | "warning" | "failure" | "turn_finished";
+  reason?: string;
 }
 
 interface PersistedWorkerState {
@@ -155,6 +178,149 @@ function readDiagnosticLog(sessionDir: string, fileName: string, label: string):
   } catch {
     return "";
   }
+}
+
+function readWorkerLifecycleFacts(sessionDir: string): WorkerLifecycleFacts {
+  let sessionFile: string | undefined;
+  try {
+    const files = fs.readdirSync(sessionDir)
+      .filter(f => f.endsWith(".jsonl"))
+      .map(f => path.join(sessionDir, f));
+    if (files.length === 0) return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
+    sessionFile = files.length === 1
+      ? files[0]
+      : files.map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)[0].f;
+  } catch {
+    return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
+  }
+
+  const TAIL_BYTES = 65536;
+  let tail = "";
+  try {
+    const stat = fs.statSync(sessionFile);
+    const size = stat.size;
+    if (size === 0) return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
+    const start = Math.max(0, size - TAIL_BYTES);
+    const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+    const fd = fs.openSync(sessionFile, "r");
+    try {
+      fs.readSync(fd, buf, 0, buf.length, start);
+    } finally {
+      fs.closeSync(fd);
+    }
+    tail = buf.toString("utf8");
+  } catch {
+    return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
+  }
+
+  let sawAgentEnd = false;
+  let sawSessionShutdownClose = false;
+  let lastHeartbeatEvent: string | undefined;
+  let lastAgentEndSeq: number | undefined;
+  let lastForcedShutdownSeq: number | undefined;
+  let lastTerminalSeq: number | undefined;
+  let lastTerminalStatus: "done" | "quit" | undefined;
+  let lastTerminalSummary: string | undefined;
+  let seq = 0;
+
+  for (const line of tail.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = safeJsonParse<Record<string, any>>(trimmed);
+      if (entry.type !== "custom" || entry.customType !== "teams-worker-heartbeat") continue;
+      const data = entry.data;
+      if (!data || typeof data !== "object") continue;
+      const event = typeof data.event === "string" ? data.event : undefined;
+      if (!event) continue;
+      seq += 1;
+      lastHeartbeatEvent = event;
+      if (event === "agent_end") {
+        sawAgentEnd = true;
+        lastAgentEndSeq = seq;
+      }
+      if (event === "session_shutdown_close") {
+        sawSessionShutdownClose = true;
+        if (data.isForced === true) lastForcedShutdownSeq = seq;
+      }
+      if (event === "worker_terminal") {
+        const status = data.status === "done" || data.status === "quit" ? data.status : undefined;
+        if (status) {
+          lastTerminalSeq = seq;
+          lastTerminalStatus = status;
+          if (typeof data.summary === "string") lastTerminalSummary = data.summary;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const sawForcedSessionShutdown =
+    lastForcedShutdownSeq !== undefined &&
+    (lastAgentEndSeq === undefined || lastForcedShutdownSeq > lastAgentEndSeq);
+
+  return {
+    sawAgentEnd,
+    sawForcedSessionShutdown,
+    sawSessionShutdownClose,
+    lastHeartbeatEvent,
+    lastAgentEndSeq,
+    lastForcedShutdownSeq,
+    lastTerminalSeq,
+    lastTerminalStatus,
+    lastTerminalSummary,
+  };
+}
+
+export function assessWorkerExit(
+  worker: Pick<WorkerHandle, "freeform" | "hasTools" | "sessionDir">,
+  exitCode: number | null,
+  ticketClosed: boolean,
+  lastNote: string,
+): WorkerExitAssessment {
+  const lifecycle = readWorkerLifecycleFacts(worker.sessionDir);
+  const outputCheck = workerProducedMeaningfulOutput(worker.sessionDir);
+  const outputMeaningful = outputCheck.meaningful;
+  const explicitTerminal = lifecycle.lastTerminalStatus;
+
+  const forcedExit = !explicitTerminal && (lifecycle.sawForcedSessionShutdown || lastNote.startsWith("EXITED:") || lastNote.startsWith("FAILED:"));
+  const cleanAgentEnd = lifecycle.sawAgentEnd && exitCode === 0 && !forcedExit;
+
+  let classification: WorkerExitAssessment["classification"];
+  let reason: string | undefined;
+
+  if (explicitTerminal === "done") {
+    classification = "success";
+  } else if (explicitTerminal === "quit") {
+    classification = "warning";
+    reason = lifecycle.lastTerminalSummary || lastNote || "worker quit";
+  } else if (worker.freeform && cleanAgentEnd) {
+    classification = "turn_finished";
+  } else if (!forcedExit && ticketClosed && (lastNote.startsWith("DONE:") || cleanAgentEnd)) {
+    // Legacy compatibility for workers that still closed the ticket directly.
+    classification = "success";
+  } else if (forcedExit) {
+    classification = "failed";
+    reason = lastNote;
+  } else if (!outputMeaningful) {
+    classification = "failed";
+    reason = outputCheck.reason;
+  } else {
+    classification = "warning";
+    reason = "worker exited without explicit team_finish";
+  }
+
+  return {
+    lifecycle,
+    forcedExit,
+    cleanAgentEnd,
+    ticketClosed,
+    outputMeaningful,
+    classification,
+    reason,
+  };
 }
 
 /**
@@ -300,15 +466,32 @@ export function getRecoverableToolRetry(diagnostics: string): { error: string; p
  * Build a structured crash report for a dead worker. This is the full picture
  * a coordinator needs to understand what happened without any manual inspection.
  */
+async function settleSessionFile(sessionDir: string, waitMs = 1500): Promise<boolean> {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    try {
+      const files = fs.readdirSync(sessionDir).filter(f => f.endsWith(".jsonl"));
+      if (files.length > 0) return true;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
 function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): string {
   const lines: string[] = [];
   const runtimeMs = Date.now() - worker.spawnedAt;
   const runtimeSec = (runtimeMs / 1000).toFixed(1);
+  const STARTUP_WINDOW_MS = 5000;
 
   lines.push("── worker crash report ──");
   lines.push(`worker: ${worker.name} | ticket: ${worker.ticketId} | pid: ${worker.pid}`);
   lines.push(`model: ${worker.model ?? "default"} | exit code: ${exitCode ?? "null (spawn error)"}`);
   lines.push(`runtime: ${runtimeSec}s | status: ${worker.status}`);
+  const lifecycle = readWorkerLifecycleFacts(worker.sessionDir);
+  if (lifecycle.lastHeartbeatEvent) {
+    lines.push(`worker lifecycle: last=${lifecycle.lastHeartbeatEvent} | agent_end=${lifecycle.sawAgentEnd} | forced_shutdown=${lifecycle.sawForcedSessionShutdown}`);
+  }
   if (worker.spawnError) lines.push(`spawn error: ${worker.spawnError}`);
 
   // Session file check
@@ -328,10 +511,10 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   } catch {}
 
   if (!hasSessionFile) {
-    lines.push("session: NO FILE CREATED — process died before pi initialized");
+    lines.push("session: NO FILE CREATED — process exited before pi initialized");
     lines.push("diagnosis: pi binary crashed on startup, or spawn() failed at OS level");
-    if (runtimeMs < 2000) {
-      lines.push("note: runtime < 2s — likely a module resolution error, missing dep, or env issue");
+    if (runtimeMs < STARTUP_WINDOW_MS) {
+      lines.push(`note: exited during the startup window (<${(STARTUP_WINDOW_MS / 1000).toFixed(0)}s) — likely a startup env, module resolution, deleted cwd, or provider init issue`);
     }
   } else {
     lines.push(`session: ${sessionEntryCount} entries`);
@@ -436,17 +619,20 @@ function workerProducedMeaningfulOutput(sessionDir: string): { meaningful: boole
     }
   }
 
-  // If the last assistant message was an error, the worker failed
+  // If there were tool calls, the worker did real work.
+  // A late provider error after substantial work should not erase that fact —
+  // success/failure is decided by assessWorkerExit(), not by this helper.
+  if (hasToolCall) return { meaningful: true };
+
+  // If there was substantive text output but no tool calls, still counts.
+  if (hasSubstantiveText) return { meaningful: true };
+
+  // If the last assistant message was an error AND there was no meaningful work,
+  // surface the provider error as the failure reason.
   if (lastAssistantStopReason === "error" || lastAssistantStopReason === "aborted") {
     const errorSnippet = lastAssistantError ? `: ${lastAssistantError.slice(0, 200)}` : "";
     return { meaningful: false, reason: `provider ${lastAssistantStopReason}${errorSnippet}` };
   }
-
-  // If there were tool calls, the worker did real work
-  if (hasToolCall) return { meaningful: true };
-
-  // If there was substantive text output but no tool calls, still counts
-  if (hasSubstantiveText) return { meaningful: true };
 
   return { meaningful: false, reason: "no tool calls or substantive output in session" };
 }
@@ -463,6 +649,7 @@ export class TeamLeader {
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
   private notifyDraining = false;
   private stateHydrated = false;
+  private lastSavedStateSignature: string | null = null;
   showComments = true;
 
   // Mesh — shared instance from pi-mesh extension, set via setMesh()
@@ -480,6 +667,10 @@ export class TeamLeader {
   private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
   private pendingAmbientChat = new Map<string, string[]>();
   private pendingAmbientTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private leaseFilePath: string | null = null;
+  private leaseTimer: ReturnType<typeof setInterval> | null = null;
+  private meshChannelHandler?: (payload: unknown) => void;
+  private meshMessageHandler?: (payload: unknown) => void;
 
   private static readonly STATE_ENTRY_TYPE = "teams-leader-state";
 
@@ -487,43 +678,92 @@ export class TeamLeader {
     this.pi = pi;
   }
 
+  private startLeaseHeartbeat() {
+    if (!this.ctx) return;
+    const leaderSessionFile = this.ctx.sessionManager.getSessionFile();
+    if (!leaderSessionFile) return;
+
+    const leaseFile = buildLeaderLeasePath(this.ctx.cwd, leaderSessionFile);
+    this.leaseFilePath = leaseFile;
+    writeLeaderLease(leaseFile, { leaderSessionFile, cwd: this.ctx.cwd });
+
+    if (this.leaseTimer) clearInterval(this.leaseTimer);
+    this.leaseTimer = setInterval(() => {
+      if (!this.leaseFilePath) return;
+      writeLeaderLease(this.leaseFilePath, { leaderSessionFile, cwd: this.ctx?.cwd });
+    }, LEASE_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopLeaseHeartbeat() {
+    if (this.leaseTimer) {
+      clearInterval(this.leaseTimer);
+      this.leaseTimer = null;
+    }
+  }
+
+  private buildPersistedWorkers(): Record<string, PersistedWorkerState> {
+    const workers: Record<string, PersistedWorkerState> = {};
+    for (const [name, w] of this.workers) {
+      // Persist only lifecycle state needed for reload recovery.
+      // Do NOT persist volatile poll/widget fields like lastActivityAt,
+      // lastOutputAt, ticketStatus, lastNote, or comment counters — those change
+      // constantly and were bloating sessions with near-duplicate snapshots.
+      workers[name] = {
+        workerInstanceId: w.workerInstanceId,
+        name: w.name,
+        pid: w.pid,
+        ticketId: w.ticketId,
+        sessionDir: w.sessionDir,
+        sessionFile: w.sessionFile,
+        worktreePath: w.worktreePath,
+        model: w.model,
+        hasTools: w.hasTools,
+        status: w.status,
+        spawnedAt: w.spawnedAt,
+        freeform: w.freeform,
+        nickname: w.nickname,
+        meshClientId: w.meshClientId,
+        routeState: w.routeState,
+        doneAt: w.doneAt,
+        graceAt: w.graceAt,
+        resumableUntilAt: w.resumableUntilAt,
+        killedAt: w.killedAt,
+      };
+    }
+    return workers;
+  }
+
+  private buildStateSignature(workers: Record<string, PersistedWorkerState>, cleared = false): string {
+    return JSON.stringify({
+      version: 3,
+      meshChannelId: this.meshChannelId,
+      cleared,
+      workers,
+    });
+  }
+
+  private persistStateIfHydrated(options?: { cleared?: boolean }) {
+    if (!this.stateHydrated) return;
+    this.saveState(options);
+  }
+
   /**
    * Snapshot current worker state to the session JSONL.
    * This is reload-recovery state only, not a general branch/fork state store.
    * Empty state is written only on explicit clears to avoid wiping good state during reload churn.
+   *
+   * Dedupe identical snapshots. This method may be called frequently from UI
+   * update paths, but we only persist when lifecycle state actually changed.
    */
   private saveState(options?: { cleared?: boolean }) {
     try {
-      const workers: Record<string, PersistedWorkerState> = {};
-      for (const [name, w] of this.workers) {
-        workers[name] = {
-          workerInstanceId: w.workerInstanceId,
-          name: w.name,
-          pid: w.pid,
-          ticketId: w.ticketId,
-          ticketStatus: w.ticketStatus,
-          lastNote: w.lastNote,
-          sessionDir: w.sessionDir,
-          sessionFile: w.sessionFile,
-          worktreePath: w.worktreePath,
-          model: w.model,
-          hasTools: w.hasTools,
-          status: w.status,
-          spawnedAt: w.spawnedAt,
-          freeform: w.freeform,
-          nickname: w.nickname,
-          meshClientId: w.meshClientId,
-          routeState: w.routeState,
-          lastActivityAt: w.lastActivityAt,
-          lastOutputAt: w.lastOutputAt,
-          lastSeenCommentCount: w.lastSeenCommentCount,
-          doneAt: w.doneAt,
-          graceAt: w.graceAt,
-          resumableUntilAt: w.resumableUntilAt,
-          killedAt: w.killedAt,
-        };
-      }
+      const workers = this.buildPersistedWorkers();
       if (Object.keys(workers).length === 0 && !options?.cleared) return;
+
+      const signature = this.buildStateSignature(workers, Boolean(options?.cleared));
+      if (signature === this.lastSavedStateSignature) return;
+      this.lastSavedStateSignature = signature;
+
       const snapshot: LeaderStateSnapshot = {
         version: 3,
         meshChannelId: this.meshChannelId,
@@ -562,7 +802,7 @@ export class TeamLeader {
     saved: PersistedWorkerState,
     status: WorkerHandle["status"],
   ): WorkerHandle["routeState"] {
-    if (status === "failed" || status === "killed") return "dead";
+    if (status === "warning" || status === "failed" || status === "killed") return "dead";
     if (saved.freeform && (status === "done" || status === "grace")) return "resumable";
     if ((status === "running" || status === "spawning") && saved.meshClientId) return "linked";
     if (status === "running" || status === "spawning") return "pending";
@@ -578,6 +818,7 @@ export class TeamLeader {
       if (!current || current.status !== "done") return;
       current.status = "grace";
       this.renderWidget();
+      this.persistStateIfHydrated();
     }, toGraceMs);
 
     const toExpireMs = Math.max(0, worker.resumableUntilAt - now);
@@ -585,12 +826,14 @@ export class TeamLeader {
       const current = this.workers.get(workerName);
       if (!current) return;
       if (current.freeform && current.resumableUntilAt && Date.now() >= current.resumableUntilAt) {
+        // Silent cleanup — coordinator already got turn_finished and can see
+        // the widget. A stale "completed" 2+ minutes later would just confuse it.
         this.workers.delete(workerName);
         this.meshDelivered.delete(workerName);
         this.childProcesses.delete(workerName);
         this.clearPendingAmbientChat(workerName);
         this.renderWidget();
-        if (this.stateHydrated) this.saveState({ cleared: this.workers.size === 0 });
+        this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
       }
     }, toExpireMs);
   }
@@ -611,6 +854,7 @@ export class TeamLeader {
         }
       }
       if (!lastState) {
+        this.lastSavedStateSignature = null;
         this.stateHydrated = true;
         this.renderWidget();
         return;
@@ -666,16 +910,27 @@ export class TeamLeader {
         if (status === "done" || status === "grace") this.rearmPersistentLifecycle(name, handle, now);
       }
 
+      this.lastSavedStateSignature = this.buildStateSignature(this.buildPersistedWorkers());
       this.stateHydrated = true;
       this.renderWidget();
     } catch {
+      this.lastSavedStateSignature = null;
       this.stateHydrated = true;
       this.renderWidget();
     }
   }
 
+  private unwireMeshChannelEvents() {
+    if (!this.mesh) return;
+    if (this.meshChannelHandler) this.mesh.off("channel", this.meshChannelHandler);
+    if (this.meshMessageHandler) this.mesh.off("message", this.meshMessageHandler);
+    this.meshChannelHandler = undefined;
+    this.meshMessageHandler = undefined;
+  }
+
   /** Set the shared mesh instance from the pi-mesh extension. */
   setMesh(mesh: typeof this.mesh): void {
+    if (this.mesh && this.mesh !== mesh) this.unwireMeshChannelEvents();
     this.mesh = mesh;
   }
 
@@ -766,6 +1021,7 @@ export class TeamLeader {
       });
       this.startActivityMonitor(name, worker);
       this.renderWidget();
+      this.persistStateIfHydrated();
       return true;
     }
 
@@ -806,6 +1062,7 @@ export class TeamLeader {
     if (worker.hasTools) env.PI_TEAMS_HAS_TOOLS = "1";
     else delete env.PI_TEAMS_HAS_TOOLS;
     if (this.meshChannelId) env.PI_TEAMS_CHANNEL_ID = this.meshChannelId;
+    if (this.leaseFilePath) env.PI_TEAMS_LEASE_FILE = this.leaseFilePath;
 
     const meshId = this.getMeshClientId();
     if (meshId) env.PI_TEAMS_COORDINATOR_ID = meshId;
@@ -853,6 +1110,7 @@ export class TeamLeader {
 
   setContext(ctx: ExtensionContext) {
     this.ctx = ctx;
+    this.startLeaseHeartbeat();
   }
 
   // Keep these for backward compat with tool.ts
@@ -861,19 +1119,23 @@ export class TeamLeader {
   stopPolling() {
     if (this.batchTimer) { clearInterval(this.batchTimer); this.batchTimer = null; }
     this.monitoredWorkers.clear();
-    if (this.mesh) { try { this.mesh.stop(); } catch {} this.mesh = null; }
+    this.stopLeaseHeartbeat();
+    this.unwireMeshChannelEvents();
   }
 
   private linkWorkerRoute(worker: WorkerHandle, meshClientId: string, nickname?: string) {
+    const changed = worker.meshClientId !== meshClientId || worker.routeState !== "linked" || (nickname !== undefined && worker.nickname !== nickname);
     worker.meshClientId = meshClientId;
     worker.routeState = "linked";
     if (nickname) worker.nickname = nickname;
+    if (changed) this.persistStateIfHydrated();
   }
 
   /** Wire mesh channel events into the existing notification pipeline. */
 	private _wireMeshChannelEvents() {
 		if (!this.mesh) return;
-		this.mesh.on("channel", (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
+		if (this.meshChannelHandler || this.meshMessageHandler) return;
+		this.meshChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
 			const p = msg.payload as Record<string, unknown> | undefined;
 			if (!p || typeof p !== "object") return;
 			const workerName = (p.workerName as string) ?? "unknown";
@@ -914,10 +1176,11 @@ export class TeamLeader {
         this.linkWorkerRoute(worker, msg.from, peerNickname);
         this.renderWidget();
       }
-    });
+    };
+		this.mesh.on("channel", this.meshChannelHandler);
 
     // Direct tells from workers (completion/failure) — these trigger a turn
-		this.mesh.on("message", (msg: { from: string; payload: unknown }) => {
+		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
 			const p = msg.payload as Record<string, unknown> | undefined;
 			if (!p || typeof p !== "object" || !String(p.kind ?? "").startsWith("teams:")) return;
 			const workerName = (p.workerName as string) ?? "unknown";
@@ -936,7 +1199,8 @@ export class TeamLeader {
         // But update the widget immediately.
         this.renderWidget();
       }
-    });
+    };
+		this.mesh.on("message", this.meshMessageHandler);
   }
 
   async delegate(
@@ -1025,12 +1289,13 @@ export class TeamLeader {
     this.startActivityMonitor(workerName, handle);
 
     this.renderWidget();
+    this.persistStateIfHydrated();
     return handle;
   }
 
   private async handleTicketChange(worker: WorkerHandle) {
     if (!this.ctx) return;
-    if (["done", "failed", "killed", "grace"].includes(worker.status)) return;
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) return;
 
     try {
       const maiResult = await this.pi.exec("mai", ["--json", "show", worker.ticketId], {
@@ -1044,10 +1309,11 @@ export class TeamLeader {
 
       if (worker.status === "spawning") {
         worker.status = "running";
+        this.persistStateIfHydrated();
       }
 
       // Re-check after async gap — worker may have exited while we were reading the ticket
-      if (["done", "failed", "killed"].includes(worker.status)) return;
+      if (["done", "warning", "failed", "killed"].includes(worker.status)) return;
 
       // Emit new comments (skip any already delivered via mesh)
       const newNotes = getNewNotes(ticket.notes, worker.lastSeenCommentCount);
@@ -1076,7 +1342,7 @@ export class TeamLeader {
 
   private async handleWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null) {
     if (!this.ctx) return;
-    if (["done", "failed", "killed", "grace"].includes(worker.status)) return;
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) return;
 
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);
@@ -1099,23 +1365,16 @@ export class TeamLeader {
       // mai read failed — proceed with what we have
     }
 
-    // Determine success: ticket state and exit code alone are not enough.
-    // A worker that hit a rate limit or died instantly may still have exit code 0
-    // and a closed ticket (via session_shutdown auto-close). Check for real output.
-    let isSuccess = worker.hasTools ? ticketClosed : ticketClosed || exitCode === 0;
-
-    if (isSuccess) {
-      const outputCheck = workerProducedMeaningfulOutput(worker.sessionDir);
-      if (!outputCheck.meaningful) {
-        isSuccess = false;
-        // Override lastNote with the actual failure reason
-        lastNote = outputCheck.reason ?? "worker produced no output";
-      }
+    const assessment = assessWorkerExit(worker, exitCode, ticketClosed, lastNote);
+    const classification = assessment.classification;
+    const isSuccess = classification === "success" || classification === "turn_finished";
+    if (assessment.reason) {
+      lastNote = assessment.reason;
     }
 
-    const diagnostics = isSuccess ? "" : readSessionDiagnostics(worker.sessionDir);
+    const diagnostics = classification === "failed" ? readSessionDiagnostics(worker.sessionDir) : "";
 
-    if (!isSuccess && (worker.recoveryAttempts ?? 0) < 1) {
+    if (classification === "failed" && (worker.recoveryAttempts ?? 0) < 1) {
       const recovery = getRecoverableToolRetry(diagnostics);
       if (recovery) {
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
@@ -1167,14 +1426,15 @@ export class TeamLeader {
     // ── No-session respawn ───────────────────────────────────────────
     // If the worker exited without ever creating a session file, it never
     // reached Pi's init. Two common causes:
-    //   1. Fast startup death (< 5s) — env/module/auth issue.
+    //   1. Startup death (within a 5s startup window) — env/module/auth issue.
     //   2. Session directory destroyed externally — another worker's cleanup
     //      or a manual worktree prune deleted the directory while the worker
     //      was still alive.
     // In both cases, resumeWorker can't work (no session to continue).
     // We respawn from the original SpawnConfig once.
-    if (!isSuccess && (worker.recoveryAttempts ?? 0) < 1) {
+    if (classification === "failed" && (worker.recoveryAttempts ?? 0) < 1) {
       const runtimeMs = Date.now() - worker.spawnedAt;
+      const STARTUP_WINDOW_MS = 5000;
 
       let sessionDirGone = false;
       let noSessionFile = false;
@@ -1187,8 +1447,19 @@ export class TeamLeader {
         noSessionFile = true;
       }
 
-      // Respawn if: no session file AND (fast death OR session dir was destroyed)
-      if (noSessionFile && worker.spawnConfig && (runtimeMs < 5000 || sessionDirGone)) {
+      // Session files can land slightly after the child exit/error is observed.
+      // Re-check briefly before declaring startup death and overwriting the worker
+      // handle with a fresh respawn, otherwise we lose the real diagnostics and can
+      // end up with false "NO FILE CREATED" crash reports.
+      if (noSessionFile && !sessionDirGone) {
+        const appeared = await settleSessionFile(worker.sessionDir, 1500);
+        if (appeared) {
+          noSessionFile = false;
+        }
+      }
+
+      // Respawn if: no session file AND (startup-window death OR session dir was destroyed)
+      if (noSessionFile && worker.spawnConfig && (runtimeMs < STARTUP_WINDOW_MS || sessionDirGone)) {
         // Fresh respawn with a new session dir
         const config = { ...worker.spawnConfig, workerInstanceId: crypto.randomUUID() };
         const { process: child, handle: newHandle } = spawnWorker(config);
@@ -1207,7 +1478,7 @@ export class TeamLeader {
         worker.lastProcessActivityAt = Date.now();
         const reason = sessionDirGone
           ? `session directory was destroyed externally after ${(runtimeMs / 1000).toFixed(1)}s`
-          : `process died in ${(runtimeMs / 1000).toFixed(1)}s before creating a session file`;
+          : `process exited during the startup window (<${(STARTUP_WINDOW_MS / 1000).toFixed(0)}s) before creating a session file`;
         worker.lastNote = `AUTO-RESPAWN: ${reason}, retrying once`;
         worker.spawnConfig = config;
 
@@ -1242,22 +1513,18 @@ export class TeamLeader {
       }
     }
 
-    worker.status = isSuccess ? "done" : "failed";
+    worker.status = classification === "success" || classification === "turn_finished"
+      ? "done"
+      : classification === "warning"
+        ? "warning"
+        : "failed";
     worker.ticketStatus = ticketClosed ? "closed" : worker.ticketStatus;
     worker.lastNote = lastNote;
     worker.lastActivityAt = Date.now();
 
-    // Terminal non-freeform worker: make sure the ticket gets closed even if the
-    // worker errored before its own auto-close path ran.
-    if (!ticketClosed && !worker.freeform) {
-      await this.pi
-        .exec("mai", ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 })
-        .catch(() => {});
-    }
-
-    // Persistent/freeform workers: done for a short window, then grace for a
-    // resumable window. Any resume resets the whole lifecycle from scratch.
-    if (worker.freeform && isSuccess) {
+    // Persistent/freeform workers: a plain turn end becomes resumable idle.
+    // Explicit team_finish still counts as terminal success/warning/failure.
+    if (worker.freeform && classification === "turn_finished") {
       const now = Date.now();
       worker.doneAt = now;
       worker.graceAt = now + DONE_GRACE_MS;
@@ -1265,22 +1532,23 @@ export class TeamLeader {
       worker.routeState = "resumable";
       worker.meshClientId = undefined;
       this.childProcesses.delete(name);
-      this.notifyLLM({ type: "completed", worker: { ...worker }, result: lastNote });
+      this.notifyLLM({ type: "turn_finished", worker: { ...worker }, result: lastNote });
       this.renderWidget();
+      this.persistStateIfHydrated();
       this.rearmPersistentLifecycle(name, worker, now);
       return;
     }
 
     // Build crash report BEFORE cleanup — cleanup deletes the session directory
-    const crashReport = isSuccess ? "" : buildWorkerCrashReport(worker, exitCode);
+    const crashReport = classification === "failed" ? buildWorkerCrashReport(worker, exitCode) : "";
     worker.routeState = "dead";
     worker.meshClientId = undefined;
 
     // Cleanup: auto-commit dirty files, remove worktree, rename branch to .done
-    const preserveBranch = isSuccess && worker.worktreePath !== null;
+    const preserveBranch = (classification === "success" || classification === "warning") && worker.worktreePath !== null;
     const cleanupResult = await cleanupWorker(this.ctx.cwd, worker, preserveBranch).catch(() => undefined);
 
-    if (isSuccess) {
+    if (classification === "success") {
       const branch = `teams/${worker.name}/${worker.ticketId}`;
       const doneBranch = `${branch}.done`;
       const hasBranch = cleanupResult?.branchPreserved;
@@ -1291,6 +1559,12 @@ export class TeamLeader {
         type: "completed",
         worker: { ...worker },
         result: `${lastNote}${mergeHint}`,
+      });
+    } else if (classification === "warning") {
+      this.notifyLLM({
+        type: "warning",
+        worker: { ...worker },
+        reason: lastNote,
       });
     } else {
       // If the worker left no ticket notes, put a short diagnostic in lastNote
@@ -1314,6 +1588,7 @@ export class TeamLeader {
     // newer worker that reused the same name.
     this.scheduleWorkerCleanup(name, worker.ticketId, worker.spawnedAt);
     this.renderWidget();
+    this.persistStateIfHydrated();
   }
 
   // ── Batched activity monitor ───────────────────────────────────────────
@@ -1402,7 +1677,7 @@ export class TeamLeader {
   }
 
   private async refreshWorkerActivity(name: string, worker: WorkerHandle) {
-    if (["done", "failed", "killed", "grace"].includes(worker.status)) {
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) {
       this.stopActivityMonitor(name);
       return;
     }
@@ -1463,7 +1738,7 @@ export class TeamLeader {
   }
 
   async waitForAllWorkersToFinish(pollMs = 250): Promise<void> {
-    while ([...this.workers.values()].some((w) => !["done", "failed", "killed", "grace"].includes(w.status))) {
+    while ([...this.workers.values()].some((w) => !["done", "warning", "failed", "killed", "grace"].includes(w.status))) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }
@@ -1485,7 +1760,7 @@ export class TeamLeader {
     this.meshDelivered.delete(workerName);
     this.clearPendingAmbientChat(workerName);
     this.renderWidget();
-    if (this.stateHydrated) this.saveState({ cleared: this.workers.size === 0 });
+    this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
   }
 
   async killAll(): Promise<void> {
@@ -1509,13 +1784,13 @@ export class TeamLeader {
       if (!w) return;
       if (w.ticketId !== expectedTicketId) return;
       if (w.spawnedAt !== expectedSpawnedAt) return;
-      if (["done", "failed", "killed"].includes(w.status)) {
+      if (["done", "warning", "failed", "killed"].includes(w.status)) {
         this.workers.delete(workerName);
         this.meshDelivered.delete(workerName);
         this.childProcesses.delete(workerName);
         this.clearPendingAmbientChat(workerName);
         this.renderWidget();
-        if (this.stateHydrated) this.saveState({ cleared: this.workers.size === 0 });
+        this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
       }
     }, 180_000);
   }
@@ -1584,17 +1859,25 @@ export class TeamLeader {
       return;
     }
     this.ctx.ui.setWidget("pi-teams", this.widgetFactory);
-    if (this.stateHydrated) this.saveState();
   }
 
   private notifyLLM(event: PollEvent) {
-    if (event.type === "completed" || event.type === "failed") {
+    if (event.type === "completed" || event.type === "warning" || event.type === "failed") {
       const key = `${event.worker.name}:terminal`;
       if (this.notifiedTerminal.has(key)) return;
       this.notifiedTerminal.add(key);
     }
 
-    if (event.type === "comment" && event.comment.startsWith("DONE:")) {
+    // turn_finished is informational — the worker finished a turn but is still
+    // resumable. Don't trigger a coordinator turn (it's not actionable yet).
+    if (event.type === "turn_finished") {
+      const msg = formatPollEvent(event);
+      this.notifyQueue.push({ msg, triggerTurn: false });
+      void this.drainNotifyQueue();
+      return;
+    }
+
+    if (event.type === "comment" && (event.comment.startsWith("DONE:") || event.comment.startsWith("QUIT:"))) {
       return;
     }
 
@@ -1667,6 +1950,10 @@ function formatPollEvent(event: PollEvent): string {
   switch (event.type) {
     case "completed":
       return `${ICONS.done} ${tag}:\n${event.result}`;
+    case "turn_finished":
+      return `${ICONS.alive} ${tag}:\nturn finished (still resumable) · ${event.result}`;
+    case "warning":
+      return `${ICONS.warn} ${tag}:\n${event.reason}`;
     case "failed":
       return `${ICONS.fail} ${tag}:\n${event.reason}`;
     case "stuck": {

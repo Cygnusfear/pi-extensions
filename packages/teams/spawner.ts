@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { buildLeaderLeasePath } from "./lease.js";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
 export function buildWorkerPrompt(ticketId: string, workerName: string, additionalPrompt?: string, freeform?: boolean, coordinatorMeshId?: string): string {
@@ -37,13 +38,13 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, addition
 			"Instructions:",
 			`1. Read your ticket: mai show ${ticketId}`,
 			"2. Do the work described in the ticket.",
-			`3. Comment on the ticket as you work: mai add-note ${ticketId} "your progress"`,
-			`4. When done, close the ticket with a result summary: mai add-note ${ticketId} "DONE: <summary>" && mai close ${ticketId}`,
-			`5. If you are blocked, comment: mai add-note ${ticketId} "BLOCKED: <reason>"`,
+			`3. Use team_comment to report progress while you work.`,
+			`4. When done, call team_finish with status=done and a concise summary.`,
+			`5. If you are quitting or blocked, call team_finish with status=quit and explain why.`,
 			"",
-			"GUARD PROTOCOL: AFTER WORK, UPDATE TICKET AND CLOSE",
-			`Before you stop, run: mai add-note ${ticketId} "DONE: <summary>" && mai close ${ticketId}`,
-			"Never finish with an open ticket.",
+			"GUARD PROTOCOL: YOU MUST DECLARE YOUR TERMINAL STATE VIA team_finish.",
+			"Do not end by only writing raw mai notes or closing the ticket manually.",
+			"team_finish is the authoritative terminal signal for the coordinator.",
 			"",
 			"Stay focused on the ticket. Do not ask for confirmation — just do the work.",
 		);
@@ -52,6 +53,7 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, addition
 }
 
 export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
+	const leaseFile = buildLeaderLeasePath(config.repoRoot, config.leaderSessionFile);
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
 		PI_TEAMS_WORKER: "1",
@@ -59,6 +61,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		PI_TEAMS_TICKET_ID: config.ticketId,
 		PI_TEAMS_LEADER_SESSION: config.leaderSessionFile,
 		PI_TEAMS_WORKER_NAME: config.workerName,
+		PI_TEAMS_LEASE_FILE: leaseFile,
 	};
 
 	// Mesh channel for instant worker→coordinator communication
@@ -95,7 +98,9 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		cwd: config.cwd,
 		env,
 		stdio: ["ignore", stdoutFd, stderrFd],
-		detached: false,
+		// Give each worker its own process group so kills can terminate the full
+		// tree (pi + any sidecars/children) even if the coordinator disappears.
+		detached: true,
 	});
 
 	// Close the fds in the parent — the child inherited them
@@ -126,6 +131,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		activeChildProcessCount: 0,
 		lastSeenCommentCount: 0,
 		routeState: "pending",
+		attempts: [{ workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now }],
 	};
 
 	return { process: child, handle };
@@ -166,7 +172,7 @@ export function resumeWorker(
 		cwd: handle.worktreePath ?? process.cwd(),
 		env,
 		stdio: ["ignore", stdoutFd, stderrFd],
-		detached: false,
+		detached: true,
 	});
 
 	fs.closeSync(stdoutFd);
@@ -190,16 +196,46 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 export function killWorker(pid: number): void {
-	try {
-		process.kill(pid, "SIGTERM");
-	} catch {
-		// already dead
-	}
-	setTimeout(() => {
+	// Workers run in their own process group (`detached: true`), so kill the
+	// whole group, not just the root pid. This catches sidecars like pi-mesh.
+	const killGroup = (signal: NodeJS.Signals) => {
 		try {
-			process.kill(pid, "SIGKILL");
+			process.kill(-pid, signal);
+			return true;
 		} catch {
-			// already dead
+			return false;
 		}
-	}, 5000);
+	};
+	const killPid = (signal: NodeJS.Signals) => {
+		try {
+			process.kill(pid, signal);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	killGroup("SIGTERM") || killPid("SIGTERM");
+
+	// Use an external detached helper for escalation. An in-process setTimeout
+	// dies with the coordinator on reload/crash, which leaves ghost workers.
+	try {
+		const helper = spawn(
+			"bash",
+			[
+				"-lc",
+				`sleep 5; kill -0 -- -${pid} 2>/dev/null && kill -KILL -- -${pid} 2>/dev/null || kill -0 ${pid} 2>/dev/null && kill -KILL ${pid} 2>/dev/null || true`,
+			],
+			{
+				stdio: "ignore",
+				detached: true,
+			},
+		);
+		helper.unref();
+	} catch {
+		// Best effort fallback if bash isn't available
+		setTimeout(() => {
+			killGroup("SIGKILL") || killPid("SIGKILL");
+		}, 5000);
+	}
 }

@@ -10,6 +10,7 @@ const STATUS_COLOR: Record<WorkerStatus, WidgetColor> = {
 	spawning: "warning",
 	running: "success",
 	done: "success",
+	warning: "warning",
 	failed: "error",
 	killed: "muted",
 	grace: "warning",
@@ -19,6 +20,7 @@ const STATUS_ICON: Record<WorkerStatus, string> = {
 	spawning: "◐",
 	running: "●",
 	done: "✓",
+	warning: "!",
 	failed: "✕",
 	killed: "○",
 	grace: "◉",
@@ -70,11 +72,12 @@ export function createTeamsWidget(getWorkers: () => WorkerHandle[]) {
 
 			const pending = workers.filter((w) => w.status === "spawning" || w.status === "running").length;
 			const done = workers.filter((w) => w.status === "done" || w.status === "grace").length;
+			const warnings = workers.filter((w) => w.status === "warning").length;
 			const failed = workers.filter((w) => w.status === "failed").length;
 			lines.push(truncateToWidth(" " + theme.fg("dim", "─".repeat(Math.max(0, width - 2))), width));
 			lines.push(
 				truncateToWidth(
-					` ${theme.bold("Total")} ${theme.fg("muted", `· ${pending} pending · ${done} done · ${failed} failed`)}`,
+					` ${theme.bold("Total")} ${theme.fg("muted", `· ${pending} pending · ${done} done · ${warnings} warning · ${failed} failed`)}`,
 					width,
 				),
 			);

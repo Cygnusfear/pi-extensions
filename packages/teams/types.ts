@@ -1,4 +1,14 @@
 
+export interface WorkerAttempt {
+	workerInstanceId: string;
+	pid: number;
+	sessionDir: string;
+	sessionFile: string;
+	spawnedAt: number;
+	exitCode?: number | null;
+	spawnError?: string;
+}
+
 export interface WorkerHandle {
 	workerInstanceId: string;
 	name: string;
@@ -26,6 +36,7 @@ export interface WorkerHandle {
 	lastStuckWarningAt?: number;
 	exitCode?: number | null;
 	spawnError?: string;
+	attempts?: WorkerAttempt[];
 	nickname?: string;
 	meshClientId?: string;
 	routeState: WorkerRouteState;
@@ -39,7 +50,7 @@ export interface WorkerHandle {
 	killedAt?: number;
 }
 
-export type WorkerStatus = "spawning" | "running" | "done" | "failed" | "killed" | "grace";
+export type WorkerStatus = "spawning" | "running" | "done" | "warning" | "failed" | "killed" | "grace";
 export type WorkerRouteState = "pending" | "linked" | "resumable" | "dead";
 
 /** Delay after a persistent worker exits before entering "grace" (resumable) state. */
@@ -71,6 +82,8 @@ export interface SpawnConfig {
 
 export type PollEvent =
 	| { type: "completed"; worker: WorkerHandle; result: string }
+	| { type: "turn_finished"; worker: WorkerHandle; result: string }
+	| { type: "warning"; worker: WorkerHandle; reason: string }
 	| { type: "failed"; worker: WorkerHandle; reason: string }
 	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number }
 	| { type: "comment"; worker: WorkerHandle; comment: string }

@@ -242,6 +242,13 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/nested-skills": {
+      "name": "@pi-extensions/nested-skills",
+      "version": "0.0.0",
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": "*",
+      },
+    },
     "packages/notify": {
       "name": "@pi-extensions/notify",
       "version": "0.0.0",
@@ -337,15 +344,6 @@
       },
       "peerDependencies": {
         "@mariozechner/pi-ai": "*",
-        "@mariozechner/pi-coding-agent": "*",
-        "@mariozechner/pi-tui": "*",
-        "@sinclair/typebox": "*",
-      },
-    },
-    "packages/todos-tk": {
-      "name": "@pi-extensions/todos-tk",
-      "version": "0.0.0",
-      "peerDependencies": {
         "@mariozechner/pi-coding-agent": "*",
         "@mariozechner/pi-tui": "*",
         "@sinclair/typebox": "*",
@@ -582,6 +580,8 @@
 
     "@pi-extensions/model-shortcuts": ["@pi-extensions/model-shortcuts@workspace:packages/model-shortcuts"],
 
+    "@pi-extensions/nested-skills": ["@pi-extensions/nested-skills@workspace:packages/nested-skills"],
+
     "@pi-extensions/notify": ["@pi-extensions/notify@workspace:packages/notify"],
 
     "@pi-extensions/pi-mesh": ["@pi-extensions/pi-mesh@workspace:packages/pi-mesh"],
@@ -599,8 +599,6 @@
     "@pi-extensions/teams": ["@pi-extensions/teams@workspace:packages/teams"],
 
     "@pi-extensions/tldr-code": ["@pi-extensions/tldr-code@workspace:packages/tldr-code"],
-
-    "@pi-extensions/todos-tk": ["@pi-extensions/todos-tk@workspace:packages/todos-tk"],
 
     "@pi-extensions/webfetch": ["@pi-extensions/webfetch@workspace:packages/webfetch"],
 

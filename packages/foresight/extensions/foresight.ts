@@ -335,7 +335,11 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event: any, _ctx: any) => {
-		await startup;
+		// Never block session creation on foresight startup — the health check +
+		// ensureBank + memories fetch can take 3-15s which delays session file
+		// creation and makes workers appear dead.  If memories are ready, inject
+		// them; otherwise skip and let the agent use memory tools later.
+		if (!startupDone) return;
 		let extra = "";
 		if (memoriesBlock) {
 			extra += memoriesBlock;

@@ -1,0 +1,1 @@
+Write an incredibly detailed handoff with everything that happened in this (and previously compacted sessions), what we need to do next, what you'd recommend / lessons / learnings / things to improve for future you. Include files, line numbers, all the important details to avoid fidelity loss.

@@ -3,7 +3,7 @@ import { Type } from "@sinclair/typebox";
 import { existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
-import { GRACE_PERIOD_MS } from "./types.js";
+import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
 
 function resolveWorkerMeshBinPath(): string | null {
 	const binName = process.platform === "win32" ? "pi-mesh.exe" : "pi-mesh";
@@ -23,6 +23,8 @@ type WorkerOptions = {
 	autoCloseOnSessionShutdown?: boolean;
 };
 
+type TerminalStatus = "done" | "quit";
+
 function resolveHeartbeatIntervalMs(): number {
 	const raw = Number(process.env.PI_TEAMS_WORKER_HEARTBEAT_MS ?? "5000");
 	if (!Number.isFinite(raw) || raw < 1000) return 5000;
@@ -38,6 +40,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	const channelId = process.env.PI_TEAMS_CHANNEL_ID;
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
+	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
 
 	if (!ticketId) {
 		console.error("[teams-worker] PI_TEAMS_TICKET_ID not set");
@@ -59,26 +62,26 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	let ticketClosed = false;
 	let lastStopReason: string | undefined;
+	let terminalStatus: TerminalStatus | null = null;
 
-	const closeTicket = async (cwd: string, event: string) => {
-		if (ticketClosed) return;
+	let agentEndFired = false;
+
+	const finalizeTask = async (cwd: string, status: TerminalStatus, summary: string) => {
+		if (terminalStatus) return;
+		terminalStatus = status;
 		ticketClosed = true;
 
-		// If the last assistant response was an error (rate limit, auth failure, etc.),
-		// do NOT close with "DONE" — mark the ticket as failed so the leader knows.
-		const isError = lastStopReason === "error" || lastStopReason === "aborted";
-		const note = isError
-			? "FAILED: Worker exited without completing work (provider error)"
-			: "DONE: Task completed.";
+		const normalizedSummary = summary.trim() || (status === "done" ? "Task completed." : "Worker quit.");
+		const note = status === "done"
+			? `DONE: ${normalizedSummary}`
+			: `QUIT: ${normalizedSummary}`;
+		const kind = status === "done" ? "teams:done" : "teams:failed";
 
-		writeHeartbeat(event, { isError });
-		// Notify coordinator instantly via mesh
-		meshTell({ kind: isError ? "teams:failed" : "teams:done", workerName, workerInstanceId, ticketId, event, isError });
+		writeHeartbeat("worker_terminal", { status, summary: normalizedSummary });
+		meshTell({ kind, workerName, workerInstanceId, ticketId, event: "worker_terminal", terminalStatus: status, summary: normalizedSummary });
 		try {
 			await pi.exec("mai", ["add-note", ticketId, note], { cwd, timeout: 5000 });
-			if (!isError) {
-				await pi.exec("mai", ["close", ticketId], { cwd, timeout: 5000 });
-			}
+			await pi.exec("mai", ["close", ticketId], { cwd, timeout: 5000 });
 		} catch {
 			// best effort
 		}
@@ -105,9 +108,26 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		writeHeartbeat("tick");
 	}, resolveHeartbeatIntervalMs());
 
+	let leaseWatchdog: ReturnType<typeof setInterval> | null = null;
 	const stopHeartbeat = () => {
 		clearInterval(heartbeatTimer);
+		if (leaseWatchdog) { clearInterval(leaseWatchdog); leaseWatchdog = null; }
 		if (mesh) { try { mesh.stop(); } catch {} mesh = null; }
+	};
+
+	const killOwnProcessGroup = () => {
+		try {
+			process.kill(-process.pid, "SIGTERM");
+		} catch {
+			try { process.kill(process.pid, "SIGTERM"); } catch {}
+		}
+		setTimeout(() => {
+			try {
+				process.kill(-process.pid, "SIGKILL");
+			} catch {
+				try { process.kill(process.pid, "SIGKILL"); } catch {}
+			}
+		}, 3000);
 	};
 
 	const announceInitWhenReady = (attempt = 0) => {
@@ -125,26 +145,36 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	pi.on("session_start", (_event, ctx) => {
 		try {
 			const binPath = resolveWorkerMeshBinPath();
-			if (!binPath) { console.warn("[teams-worker] mesh binary not found"); return; }
-			mesh = new PiMesh();
-			mesh.start(binPath, ctx.sessionManager.getSessionId(), ctx.cwd, { mode: "peer", scouting: true });
-			if (channelId) mesh.joinChannel(channelId);
-			announceInitWhenReady();
+			if (!binPath) { console.warn("[teams-worker] mesh binary not found"); }
+			else {
+				mesh = new PiMesh();
+				mesh.start(binPath, ctx.sessionManager.getSessionId(), ctx.cwd, { mode: "peer", scouting: true });
+				if (channelId) mesh.joinChannel(channelId);
+				announceInitWhenReady();
+			}
 		} catch (e) {
 			console.warn(`[teams-worker] mesh init failed: ${e}`);
 			mesh = null;
 		}
+
+		if (leaseFile) {
+			leaseWatchdog = setInterval(() => {
+				if (ticketClosed || terminalStatus) return;
+				if (!isLeaderLeaseStale(leaseFile, Date.now(), LEASE_STALE_AFTER_MS)) return;
+				writeHeartbeat("leader_lease_expired", { leaseFile });
+				try {
+					meshTell({ kind: "teams:failed", workerName, workerInstanceId, ticketId, event: "leader_lease_expired", isError: true });
+				} catch {}
+				stopHeartbeat();
+				killOwnProcessGroup();
+			}, 3000);
+		}
 	});
 
 	pi.on("session_shutdown", () => {
+		writeHeartbeat("session_shutdown", { terminalStatus });
 		stopHeartbeat();
 	});
-
-	if (autoCloseOnSessionShutdown) {
-		pi.on("session_shutdown", async (_event, ctx) => {
-			await closeTicket(ctx.cwd, "session_shutdown_close");
-		});
-	}
 
 	pi.on("agent_start", () => {
 		writeHeartbeat("agent_start");
@@ -179,6 +209,11 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		message: Type.String({ description: "Your comment" }),
 	});
 
+	const FinishParams = Type.Object({
+		status: Type.Union([Type.Literal("done"), Type.Literal("quit")]),
+		summary: Type.String({ description: "Short result summary" }),
+	});
+
 	pi.registerTool({
 		name: "team_comment",
 		label: "Team Comment",
@@ -195,33 +230,28 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					isError: true,
 				};
 			}
-			// Send progress instantly to coordinator via mesh channel
 			meshChat({ kind: "teams:comment", workerName, workerInstanceId, ticketId, message: params.message });
 			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }] };
 		},
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
-		writeHeartbeat("agent_end");
-		meshChat({ kind: "teams:agent_end", workerName, workerInstanceId, ticketId });
+	pi.registerTool({
+		name: "team_finish",
+		label: "Team Finish",
+		description: `Mark your assigned ticket (${ticketId}) as done or quit. This is the authoritative terminal signal for teams workers.`,
+		parameters: FinishParams,
+		async execute(_id, params: { status: TerminalStatus; summary: string }, _signal, _onUpdate, ctx) {
+			await finalizeTask(ctx.cwd, params.status, params.summary);
+			return { content: [{ type: "text" as const, text: `Marked ${ticketId} as ${params.status}` }] };
+		},
+	});
 
-		if (!autoCloseOnAgentEnd) {
-			// Persistent worker: process exits normally after this turn.
-			// The leader will re-spawn with `pi -p --session <file> "new input"`
-			// to continue the session when new mesh input arrives.
-			return;
-		}
-
-		// Grace period: wait before auto-closing so coordinator can follow up
-		const graceMs = GRACE_PERIOD_MS;
-		if (graceMs > 0) {
-			meshChat({ kind: "teams:grace", workerName, workerInstanceId, ticketId, graceMs });
-			await new Promise((r) => setTimeout(r, graceMs));
-			// If a new turn started during grace (coordinator sent input), don't close
-			// The agent_start event would have fired and we'd be mid-turn
-		}
-
+	pi.on("agent_end", async () => {
+		agentEndFired = true;
+		writeHeartbeat("agent_end", { terminalStatus });
+		meshChat({ kind: "teams:agent_end", workerName, workerInstanceId, ticketId, terminalStatus });
+		// Workers must use team_finish to declare terminal success/quit.
+		// agent_end only says the turn ended; it is not success by itself.
 		stopHeartbeat();
-		await closeTicket(ctx.cwd, "agent_end");
 	});
 }
