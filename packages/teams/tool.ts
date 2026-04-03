@@ -25,6 +25,7 @@ const TeamsParams = Type.Object({
       Type.Literal("tell"),
       Type.Literal("tell_all"),
       Type.Literal("view"),
+      Type.Literal("runtime"),
     ]),
   ),
   tasks: Type.Optional(
@@ -79,7 +80,7 @@ const TeamsParams = Type.Object({
 });
 
 type TeamsActionParams = {
-  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view";
+  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
   tasks?: Array<{ text: string; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean }>;
   name?: string;
   message?: string;
@@ -179,6 +180,13 @@ async function runTeamsAction(
         isError: true,
       };
     }
+  }
+
+  if (action === "runtime") {
+    const runtime = leader.getV2TeamRecord();
+    return {
+      content: [{ type: "text" as const, text: runtime ? JSON.stringify(runtime, null, 2) : "No v2 runtime state." }],
+    };
   }
 
   if (action === "delegate") {
