@@ -81,6 +81,7 @@ describe("TeamLeader state persistence", () => {
 		const snapshot = {
 			version: 3,
 			meshChannelId: null,
+			v2TeamId: "team-1",
 			workers: {
 				"worker-1": {
 					workerInstanceId: "w-1",
@@ -92,6 +93,7 @@ describe("TeamLeader state persistence", () => {
 					worktreePath: null,
 					status: "done",
 					spawnedAt: now,
+					sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
 					freeform: true,
 					routeState: "resumable",
 					doneAt: now,
@@ -111,6 +113,7 @@ describe("TeamLeader state persistence", () => {
 		const { leader, appended } = makeHarness(branch);
 		leader.restoreState(leader.ctx);
 		expect(appended).toHaveLength(0);
+		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
 	});
 
 	test("mesh handlers wire once and are removed on stopPolling", () => {

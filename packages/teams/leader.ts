@@ -83,6 +83,7 @@ interface PersistedWorkerState {
   hasTools?: boolean;
   status: WorkerHandle["status"] | "idle";
   spawnedAt: number;
+  sessionMode?: import("./v2/protocol.ts").WorkerSessionMode;
   freeform?: boolean;
   nickname?: string;
   meshClientId?: string;
@@ -770,6 +771,7 @@ export class TeamLeader {
         hasTools: w.hasTools,
         status: w.status,
         spawnedAt: w.spawnedAt,
+        sessionMode: w.attempts?.at(-1)?.sessionMode,
         freeform: w.freeform,
         nickname: w.nickname,
         meshClientId: w.meshClientId,
@@ -956,6 +958,14 @@ export class TeamLeader {
           lastSeenCommentCount: saved.lastSeenCommentCount ?? 0,
           hasActiveChildProcess: false,
           activeChildProcessCount: 0,
+          attempts: [{
+            workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
+            pid: saved.pid,
+            sessionDir: saved.sessionDir,
+            sessionFile: saved.sessionFile,
+            spawnedAt: saved.spawnedAt,
+            sessionMode: saved.sessionMode,
+          }],
           doneAt: saved.doneAt,
           graceAt: saved.graceAt,
           resumableUntilAt: saved.resumableUntilAt,
