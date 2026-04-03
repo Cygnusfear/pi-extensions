@@ -1,12 +1,14 @@
 {
-	"name": "@pi-ext/reload",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"pi": {
-		"extensions": ["./extensions/reload.ts"]
-	},
-	"dependencies": {
-		"@mariozechner/pi-coding-agent": "*"
-	}
+  "name": "@pi-ext/reload",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extensions/reload.ts"
+    ]
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.65.0"
+  }
 }

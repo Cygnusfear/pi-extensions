@@ -1,13 +1,19 @@
 {
   "name": "@pi-extensions/image-links",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./extensions/image-links.ts"]
+    "extensions": [
+      "./extensions/image-links.ts"
+    ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": ">=0.65.0"
   },
-  "files": ["extensions"]
+  "files": [
+    "extensions"
+  ]
 }

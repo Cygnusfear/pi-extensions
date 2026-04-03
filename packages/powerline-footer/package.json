@@ -1,6 +1,6 @@
 {
   "name": "@pi-extensions/powerline-footer",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "Powerline-style status bar extension for pi coding agent",
   "type": "module",
   "bin": {
@@ -32,7 +32,7 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-coding-agent": ">=0.65.0",
     "@mariozechner/pi-tui": "*",
     "@sinclair/typebox": "*",
     "@mariozechner/pi-ai": "*"

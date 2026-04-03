@@ -1,6 +1,6 @@
 {
   "name": "@pi-extensions/session-tab-title",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "keywords": [
     "pi-package"
