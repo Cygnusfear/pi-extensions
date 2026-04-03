@@ -1776,11 +1776,7 @@ export class TeamLeader {
       }
     }
 
-    worker.status = classification === "success" || classification === "turn_finished"
-      ? "done"
-      : classification === "warning"
-        ? "warning"
-        : "failed";
+    this.appendV2Fact(name, { type: "exit_assessed", at: Date.now(), outcome: classification === "failure" ? "failed" : classification, reason: lastNote });
     worker.ticketStatus = ticketClosed ? "closed" : worker.ticketStatus;
     worker.lastNote = lastNote;
     worker.lastActivityAt = Date.now();
@@ -1792,8 +1788,7 @@ export class TeamLeader {
       worker.doneAt = now;
       worker.graceAt = now + DONE_GRACE_MS;
       worker.resumableUntilAt = worker.graceAt + RESUMABLE_WINDOW_MS;
-      worker.routeState = "resumable";
-      worker.meshClientId = undefined;
+      this.projectV2WorkerRuntime(name);
       this.childProcesses.delete(name);
       this.notifyLLM({ type: "turn_finished", worker: { ...worker }, result: lastNote });
       this.renderWidget();
@@ -1804,6 +1799,7 @@ export class TeamLeader {
 
     // Build crash report BEFORE cleanup — cleanup deletes the session directory
     const crashReport = classification === "failed" ? buildWorkerCrashReport(worker, exitCode) : "";
+    this.projectV2WorkerRuntime(name);
     worker.routeState = "dead";
     worker.meshClientId = undefined;
 
@@ -2004,6 +2000,7 @@ export class TeamLeader {
   async kill(workerName: string): Promise<void> {
     const worker = this.workers.get(workerName);
     if (!worker) return;
+    this.appendV2Fact(workerName, { type: "worker_killed", at: Date.now() });
     worker.status = "killed";
     worker.routeState = "dead";
     worker.meshClientId = undefined;

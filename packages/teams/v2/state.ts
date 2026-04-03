@@ -23,6 +23,8 @@ export type WorkerFact =
 	| { type: "finish_done"; at: number; summary: string }
 	| { type: "finish_quit"; at: number; summary: string }
 	| { type: "process_exit"; at: number; exitCode: number | null }
+	| { type: "exit_assessed"; at: number; outcome: "success" | "warning" | "failed" | "turn_finished"; reason?: string }
+	| { type: "worker_killed"; at: number }
 	| { type: "lease_stale"; at: number }
 	| { type: "leader_shutdown"; at: number }
 	| { type: "resume_attached"; at: number };

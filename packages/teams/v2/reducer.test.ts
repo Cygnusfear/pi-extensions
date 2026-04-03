@@ -73,4 +73,18 @@ describe("teams v2 reducer", () => {
 		const reduced = reduceTeam(createTeam(worker));
 		expect(reduced.workers[worker.workerId]?.lifecycle).toBe("running");
 	});
+
+	test("exit_assessed warning overrides raw process_exit failure", () => {
+		let worker = appendWorkerFact(createWorker(), { type: "process_exit", at: 10, exitCode: 0 });
+		worker = appendWorkerFact(worker, { type: "exit_assessed", at: 11, outcome: "warning", reason: "ambiguous" });
+		const reduced = reduceTeam(createTeam(worker));
+		expect(reduced.workers[worker.workerId]?.lifecycle).toBe("warning");
+	});
+
+	test("exit_assessed turn_finished becomes resumable", () => {
+		let worker = appendWorkerFact(createWorker(), { type: "process_exit", at: 10, exitCode: 0 });
+		worker = appendWorkerFact(worker, { type: "exit_assessed", at: 11, outcome: "turn_finished", reason: "turn ended" });
+		const reduced = reduceTeam(createTeam(worker));
+		expect(reduced.workers[worker.workerId]?.lifecycle).toBe("resumable");
+	});
 });

@@ -4,6 +4,14 @@ function classifyLifecycle(attempt: WorkerAttemptRecord): WorkerLifecycleState {
 	const facts = attempt.facts;
 	if (facts.some((fact) => fact.type === "finish_done")) return "done";
 	if (facts.some((fact) => fact.type === "finish_quit")) return "warning";
+	const assessed = [...facts].reverse().find((fact) => fact.type === "exit_assessed");
+	if (assessed?.type === "exit_assessed") {
+		if (assessed.outcome === "success") return "done";
+		if (assessed.outcome === "warning") return "warning";
+		if (assessed.outcome === "turn_finished") return "resumable";
+		if (assessed.outcome === "failed") return "failed";
+	}
+	if (facts.some((fact) => fact.type === "worker_killed")) return "killed";
 	if (facts.some((fact) => fact.type === "lease_stale")) return "orphaned";
 	if (facts.some((fact) => fact.type === "process_exit")) return "failed";
 	if (facts.some((fact) => fact.type === "worker_hello")) return "running";
