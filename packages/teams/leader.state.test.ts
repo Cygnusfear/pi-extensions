@@ -82,6 +82,31 @@ describe("TeamLeader state persistence", () => {
 			version: 3,
 			meshChannelId: null,
 			v2TeamId: "team-1",
+			v2TeamRecord: {
+				teamId: "team-1",
+				leaderEpoch: "epoch-old",
+				createdAt: now,
+				workers: {
+					"worker-1": {
+						workerId: "worker-1",
+						name: "worker-1",
+						desiredState: "running",
+						currentAttemptId: "w-1",
+						lifecycle: "done",
+						attempts: [{
+							attemptId: "w-1",
+							workerId: "worker-1",
+							leaderEpoch: "epoch-old",
+							sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
+							sessionDir: "/tmp/session-dir",
+							sessionFile: "/tmp/session-dir/session.jsonl",
+							startedAt: now,
+							pid: 999999,
+							facts: [{ type: "spawn_started", at: now, pid: 999999 }, { type: "worker_hello", at: now }, { type: "finish_done", at: now, summary: "done" }],
+						}],
+					},
+				},
+			},
 			workers: {
 				"worker-1": {
 					workerInstanceId: "w-1",
@@ -121,6 +146,7 @@ describe("TeamLeader state persistence", () => {
 		const { leader, appended } = makeHarness(branch);
 		leader.restoreState(leader.ctx);
 		expect(appended).toHaveLength(0);
+		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("done");
 		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
 		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
 	});

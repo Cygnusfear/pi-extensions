@@ -102,6 +102,7 @@ interface LeaderStateSnapshot {
   version: number;
   meshChannelId: string | null;
   v2TeamId?: string | null;
+  v2TeamRecord?: TeamRecord | null;
   workers: Record<string, PersistedWorkerState>;
   savedAt: number;
   clearedAt?: number;
@@ -800,6 +801,7 @@ export class TeamLeader {
       version: 3,
       meshChannelId: this.meshChannelId,
       v2TeamId: this.v2TeamId,
+      v2TeamRecord: this.v2TeamRecord,
       cleared,
       workers,
     });
@@ -831,6 +833,7 @@ export class TeamLeader {
         version: 3,
         meshChannelId: this.meshChannelId,
         v2TeamId: this.v2TeamId,
+        v2TeamRecord: this.v2TeamRecord,
         workers,
         savedAt: Date.now(),
         ...(options?.cleared ? { clearedAt: Date.now() } : {}),
@@ -934,7 +937,9 @@ export class TeamLeader {
 			this.mesh.joinChannel(this.meshChannelId);
 			this._wireMeshChannelEvents();
 		}
-		if (this.v2TeamId) {
+		if (lastState.v2TeamRecord?.teamId === this.v2TeamId) {
+			this.v2TeamRecord = structuredClone(lastState.v2TeamRecord);
+		} else if (this.v2TeamId) {
 			this.v2TeamRecord = createTeamRecord(this.v2TeamId, this.leaderEpoch);
 		}
 
@@ -985,7 +990,12 @@ export class TeamLeader {
           killedAt: saved.killedAt,
         };
         this.workers.set(name, handle);
-        this.upsertV2WorkerFromHandle(handle);
+        if (!this.v2TeamRecord?.workers[name]) {
+          this.upsertV2WorkerFromHandle(handle);
+          this.seedV2FactsFromRestoredHandle(handle);
+        } else {
+          this.projectV2WorkerRuntime(name);
+        }
         if (status === "running" || status === "spawning") this.startActivityMonitor(name, handle);
         if (status === "done" || status === "grace") this.rearmPersistentLifecycle(name, handle, now);
       }
@@ -1037,6 +1047,47 @@ export class TeamLeader {
       startedAt: latestAttempt?.spawnedAt ?? worker.spawnedAt,
     });
     this.projectV2WorkerRuntime(worker.name);
+  }
+
+  private seedV2FactsFromRestoredHandle(worker: WorkerHandle): void {
+    const latestAttempt = worker.attempts?.at(-1);
+    const pid = latestAttempt?.pid ?? worker.pid;
+    const restoredStatus = worker.status;
+    this.appendV2Fact(worker.name, { type: "spawn_started", at: worker.spawnedAt, pid });
+
+    switch (restoredStatus) {
+      case "spawning":
+        return;
+      case "running":
+        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
+        return;
+      case "done":
+      case "grace":
+        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
+        this.appendV2Fact(worker.name, {
+          type: "finish_done",
+          at: worker.doneAt ?? Date.now(),
+          summary: worker.lastNote ?? "restored done worker",
+        });
+        return;
+      case "warning":
+        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
+        this.appendV2Fact(worker.name, {
+          type: "finish_quit",
+          at: worker.doneAt ?? Date.now(),
+          summary: worker.lastNote ?? "restored warning worker",
+        });
+        return;
+      case "failed":
+      case "killed":
+        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
+        this.appendV2Fact(worker.name, {
+          type: "process_exit",
+          at: worker.killedAt ?? Date.now(),
+          exitCode: worker.exitCode ?? 1,
+        });
+        return;
+    }
   }
 
   private buildSpawnSessionMode(): import("./v2/protocol.ts").WorkerSessionMode {
