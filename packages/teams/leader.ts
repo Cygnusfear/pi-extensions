@@ -71,6 +71,7 @@ interface WorkerExitAssessment {
 
 interface PersistedWorkerState {
   workerInstanceId: string;
+  attempts?: WorkerAttempt[];
   name: string;
   pid: number;
   ticketId: string;
@@ -693,7 +694,15 @@ export class TeamLeader {
 
   private pi: ExtensionAPI;
   private ctx: ExtensionContext | null = null;
-  private widgetFactory = createTeamsWidget(() => this.getWorkers());
+  private widgetFactory = createTeamsWidget(
+    () => this.getWorkers(),
+    (workerName) => this.getV2WorkerLifecycle(workerName),
+    (workerName) => {
+      const mode = this.getV2CurrentSessionMode(workerName);
+      if (!mode) return null;
+      return mode.kind === "fork" ? `fork:${mode.parentLeafId}` : mode.kind;
+    },
+  );
   private notifiedTerminal = new Set<string>();
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
   private notifyDraining = false;
@@ -761,6 +770,7 @@ export class TeamLeader {
       // constantly and were bloating sessions with near-duplicate snapshots.
       workers[name] = {
         workerInstanceId: w.workerInstanceId,
+        attempts: w.attempts,
         name: w.name,
         pid: w.pid,
         ticketId: w.ticketId,
@@ -933,6 +943,16 @@ export class TeamLeader {
         const status = this.deriveRestoredStatus(saved, now);
         if (!status) continue;
         const routeState = this.deriveRestoredRouteState(saved, status);
+        const restoredAttempts = saved.attempts?.length
+          ? saved.attempts
+          : [{
+              workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
+              pid: saved.pid,
+              sessionDir: saved.sessionDir,
+              sessionFile: saved.sessionFile,
+              spawnedAt: saved.spawnedAt,
+              sessionMode: saved.sessionMode,
+            }];
 
         const handle: WorkerHandle = {
           workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
@@ -958,14 +978,7 @@ export class TeamLeader {
           lastSeenCommentCount: saved.lastSeenCommentCount ?? 0,
           hasActiveChildProcess: false,
           activeChildProcessCount: 0,
-          attempts: [{
-            workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
-            pid: saved.pid,
-            sessionDir: saved.sessionDir,
-            sessionFile: saved.sessionFile,
-            spawnedAt: saved.spawnedAt,
-            sessionMode: saved.sessionMode,
-          }],
+          attempts: restoredAttempts,
           doneAt: saved.doneAt,
           graceAt: saved.graceAt,
           resumableUntilAt: saved.resumableUntilAt,

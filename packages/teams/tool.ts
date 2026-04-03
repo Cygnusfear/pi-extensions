@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import { formatRuntimeSummary } from "./activity.js";
 import type { TeamLeader } from "./leader.js";
 import { resolveTemplate, listTemplates } from "./templates.js";
+import { projectWidgetStatus } from "./widget.js";
 
 /**
  * Maps team template names to ticket creation semantics.
@@ -109,7 +110,8 @@ async function runTeamsAction(
       const v2Lifecycle = leader.getV2WorkerLifecycle(w.name);
       const sessionMode = leader.getV2CurrentSessionMode(w.name);
       const sessionModeLabel = sessionMode ? (sessionMode.kind === "fork" ? `fork:${sessionMode.parentLeafId}` : sessionMode.kind) : "unknown";
-      const parts = [`${w.name}: ${w.status}${v2Lifecycle ? ` | v2 ${v2Lifecycle}` : ""} | route ${w.routeState} | session ${sessionModeLabel} | ticket #${w.ticketId} | pid ${w.pid}${modelSuffix}`];
+      const projected = projectWidgetStatus(w, v2Lifecycle);
+      const parts = [`${w.name}: ${projected.status}${v2Lifecycle ? ` | v2 ${v2Lifecycle}` : ""} | route ${projected.routeLabel} | session ${sessionModeLabel} | ticket #${w.ticketId} | pid ${w.pid}${modelSuffix}`];
       parts.push(
         `  activity: ${formatRuntimeSummary({
           hasActiveChildProcess: w.hasActiveChildProcess,

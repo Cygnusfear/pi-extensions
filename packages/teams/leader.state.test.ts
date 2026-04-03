@@ -85,6 +85,14 @@ describe("TeamLeader state persistence", () => {
 			workers: {
 				"worker-1": {
 					workerInstanceId: "w-1",
+					attempts: [{
+						workerInstanceId: "w-1",
+						pid: 999999,
+						sessionDir: "/tmp/session-dir",
+						sessionFile: "/tmp/session-dir/session.jsonl",
+						spawnedAt: now,
+						sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
+					}],
 					name: "worker-1",
 					pid: 999999,
 					ticketId: "tk-1",
@@ -114,6 +122,7 @@ describe("TeamLeader state persistence", () => {
 		leader.restoreState(leader.ctx);
 		expect(appended).toHaveLength(0);
 		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
+		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
 	});
 
 	test("mesh handlers wire once and are removed on stopPolling", () => {

@@ -3,6 +3,7 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { Component, TUI } from "@mariozechner/pi-tui";
 import { formatRuntimeSummary } from "./activity.js";
 import type { WorkerHandle, WorkerStatus } from "./types.js";
+import type { WorkerLifecycleState } from "./v2/state.ts";
 
 type WidgetColor = "warning" | "success" | "error" | "muted";
 
@@ -31,7 +32,11 @@ function padRight(s: string, w: number): string {
 	return s + " ".repeat(n);
 }
 
-export function createTeamsWidget(getWorkers: () => WorkerHandle[]) {
+export function createTeamsWidget(
+	getWorkers: () => WorkerHandle[],
+	getV2Lifecycle?: (workerName: string) => WorkerLifecycleState | null,
+	getSessionModeLabel?: (workerName: string) => string | null,
+) {
 	return (_tui: TUI, theme: Theme): Component => ({
 		render(width: number): string[] {
 			const workers = getWorkers();
@@ -43,15 +48,20 @@ export function createTeamsWidget(getWorkers: () => WorkerHandle[]) {
 			const nameW = Math.max(...workers.map((w) => visibleWidth(w.name)));
 			const ticketW = Math.max(...workers.map((w) => visibleWidth(w.ticketId)));
 			for (const w of workers) {
-				const statusKey = (w.status in STATUS_COLOR ? w.status : "failed") as WorkerStatus;
+				const v2Lifecycle = getV2Lifecycle?.(w.name) ?? null;
+				const sessionModeLabel = getSessionModeLabel?.(w.name) ?? null;
+				const { status, routeLabel } = projectWidgetStatus(w, v2Lifecycle);
+				const statusKey = (status in STATUS_COLOR ? status : "failed") as WorkerStatus;
 				const icon = theme.fg(STATUS_COLOR[statusKey], STATUS_ICON[statusKey]);
 				const nick = w.nickname ? theme.fg("warning", w.nickname) + " · " : "";
 				const name = theme.bold(padRight(w.name, nameW));
-				const status = theme.fg(STATUS_COLOR[statusKey], padRight(String(w.status ?? "unknown"), 8));
-				const route = theme.fg(w.routeState === "linked" ? "success" : w.routeState === "resumable" ? "warning" : "muted", w.routeState);
+				const statusText = v2Lifecycle ? `${status}/${v2Lifecycle}` : String(status ?? "unknown");
+				const statusLabel = theme.fg(STATUS_COLOR[statusKey], padRight(statusText, 18));
+				const route = theme.fg(w.routeState === "linked" ? "success" : w.routeState === "resumable" ? "warning" : "muted", routeLabel);
 				const ticketStatus = w.ticketStatus ?? "unknown";
 				const modelTag = w.model ? ` · ${theme.fg("accent", w.model)}` : "";
-				const row = ` ${icon} ${nick}${name} ${status} · mesh ${route} · ticket ${padRight(w.ticketId, ticketW)} · ${theme.fg("muted", ticketStatus)} · pid ${w.pid}${modelTag}`;
+				const sessionTag = sessionModeLabel ? ` · session ${theme.fg("muted", sessionModeLabel)}` : "";
+				const row = ` ${icon} ${nick}${name} ${statusLabel} · mesh ${route}${sessionTag} · ticket ${padRight(w.ticketId, ticketW)} · ${theme.fg("muted", ticketStatus)} · pid ${w.pid}${modelTag}`;
 				lines.push(truncateToWidth(row, width));
 				const activity = formatRuntimeSummary({
 					hasActiveChildProcess: w.hasActiveChildProcess,
@@ -87,4 +97,13 @@ export function createTeamsWidget(getWorkers: () => WorkerHandle[]) {
 		},
 		invalidate() {},
 	});
+}
+
+export function projectWidgetStatus(
+	worker: WorkerHandle,
+	v2Lifecycle?: WorkerLifecycleState | null,
+): { status: WorkerStatus; routeLabel: string } {
+	const status = worker.status;
+	const routeLabel = v2Lifecycle ? `${worker.routeState} / v2:${v2Lifecycle}` : worker.routeState;
+	return { status, routeLabel };
 }
