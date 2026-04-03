@@ -80,10 +80,8 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		const note = status === "done"
 			? `DONE: ${normalizedSummary}`
 			: `QUIT: ${normalizedSummary}`;
-		const kind = status === "done" ? "teams:done" : "teams:failed";
 
 		writeHeartbeat("worker_terminal", { status, summary: normalizedSummary });
-		meshTell({ kind, workerName, workerInstanceId, ticketId, event: "worker_terminal", terminalStatus: status, summary: normalizedSummary });
 		meshTell(
 			createWorkerFinishEnvelope({
 				teamId,
@@ -154,7 +152,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			setTimeout(() => announceInitWhenReady(attempt + 1), 100);
 			return;
 		}
-		mesh.chat(channelId, { kind: "teams:init", workerName, workerInstanceId, ticketId });
 		mesh.chat(
 			channelId,
 			createWorkerHelloEnvelope({
@@ -199,9 +196,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				if (ticketClosed || terminalStatus) return;
 				if (!isLeaderLeaseStale(leaseFile, Date.now(), LEASE_STALE_AFTER_MS)) return;
 				writeHeartbeat("leader_lease_expired", { leaseFile });
-				try {
-					meshTell({ kind: "teams:failed", workerName, workerInstanceId, ticketId, event: "leader_lease_expired", isError: true });
-				} catch {}
 				stopHeartbeat();
 				killOwnProcessGroup();
 			}, 3000);
@@ -253,8 +247,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	pi.registerTool({
 		name: "team_comment",
-		label: "Team Comment",
-		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
+		label: "Team Comment",		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
 		parameters: CommentParams,
 		async execute(_id, params: { message: string }, _signal, _onUpdate, ctx) {
 			const result = await pi.exec("mai", ["add-note", ticketId, params.message], {
@@ -267,7 +260,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					isError: true,
 				};
 			}
-			meshChat({ kind: "teams:comment", workerName, workerInstanceId, ticketId, message: params.message });
 			meshChat(
 				createWorkerCommentEnvelope({
 					teamId,
@@ -296,7 +288,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	pi.on("agent_end", async () => {
 		agentEndFired = true;
 		writeHeartbeat("agent_end", { terminalStatus });
-		meshChat({ kind: "teams:agent_end", workerName, workerInstanceId, ticketId, terminalStatus });
 		// Workers must use team_finish to declare terminal success/quit.
 		// agent_end only says the turn ended; it is not success by itself.
 		stopHeartbeat();

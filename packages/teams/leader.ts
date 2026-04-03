@@ -247,8 +247,7 @@ function readWorkerLifecycleFacts(sessionDir: string): WorkerLifecycleFacts {
       }
       if (event === "worker_terminal") {
         const status = data.status === "done" || data.status === "quit" ? data.status : undefined;
-        if (status) {
-          lastTerminalSeq = seq;
+        if (status) {          lastTerminalSeq = seq;
           lastTerminalStatus = status;
           if (typeof data.summary === "string") lastTerminalSummary = data.summary;
         }
@@ -497,8 +496,7 @@ function scoreAttempt(attempt: WorkerAttempt): number {
   } catch {}
   if (attempt.spawnError) score += 25;
   if (attempt.exitCode && attempt.exitCode !== 0) score += 10;
-  return score;
-}
+  return score;}
 
 function getBestAttempt(worker: WorkerHandle): WorkerAttempt {
   const attempts = worker.attempts ?? [];
@@ -747,7 +745,6 @@ export class TeamLeader {
       this.leaseTimer = null;
     }
   }
-
   private buildPersistedWorkers(): Record<string, PersistedWorkerState> {
     const workers: Record<string, PersistedWorkerState> = {};
     for (const [name, w] of this.workers) {
@@ -997,8 +994,7 @@ export class TeamLeader {
         ? files[0]
         : files
           .map((f) => ({ f, mtime: fs.statSync(f).mtimeMs }))
-          .sort((a, b) => b.mtime - a.mtime)[0].f;
-      worker.sessionFile = picked;
+          .sort((a, b) => b.mtime - a.mtime)[0].f;      worker.sessionFile = picked;
       return picked;
     } catch {
       return null;
@@ -1187,11 +1183,12 @@ export class TeamLeader {
 		if (!this.mesh) return;
 		if (this.meshChannelHandler || this.meshMessageHandler) return;
 		this.meshChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
-			const envelope = isWorkerToLeaderEnvelope(msg.payload) ? msg.payload : undefined;
-			const p = envelope ? envelope.payload as Record<string, unknown> | undefined : msg.payload as Record<string, unknown> | undefined;
+			if (!isWorkerToLeaderEnvelope(msg.payload)) return;
+			const envelope = msg.payload;
+			const p = envelope.payload as Record<string, unknown> | undefined;
 			if (!p || typeof p !== "object") return;
-			const workerName = envelope?.workerId ?? (p.workerName as string) ?? "unknown";
-			const workerInstanceId = envelope?.attemptId ?? (typeof p.workerInstanceId === "string" ? p.workerInstanceId : "");
+			const workerName = envelope.workerId ?? "unknown";
+			const workerInstanceId = envelope.attemptId ?? "";
 			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
 			const worker = this.workers.get(workerName);
 			if (!worker) return;
@@ -1205,8 +1202,8 @@ export class TeamLeader {
 				if (peer?.nickname) peerNickname = peer.nickname;
       }
 
-			if ((envelope?.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") || (p.kind === "teams:comment" && typeof p.message === "string")) {
-				const commentText = envelope?.type === "worker.comment" ? (p as WorkerCommentPayload).text : p.message as string;
+			if (envelope.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") {
+				const commentText = (p as WorkerCommentPayload).text;
         // Any worker channel activity tells us its current direct mesh route.
         this.linkWorkerRoute(worker, msg.from, peerNickname);
         // Instant progress — feed into existing notification pipeline
@@ -1222,8 +1219,8 @@ export class TeamLeader {
         }
         this.notifyLLM({ type: "comment", worker: { ...worker }, comment: commentText });
         this.queueAmbientChatForResumableWorkers(workerName, commentText);
-        this.renderWidget();
-      } else if (envelope?.type === "worker.hello" || p.kind === "teams:init") {
+				this.renderWidget();
+	      } else if (envelope.type === "worker.hello") {
         worker.status = "running";
         worker.lastActivityAt = Date.now();
         this.linkWorkerRoute(worker, msg.from, peerNickname);
@@ -1234,26 +1231,25 @@ export class TeamLeader {
 
     // Direct tells from workers (completion/failure) — these trigger a turn
 		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
-			const envelope = isWorkerToLeaderEnvelope(msg.payload) ? msg.payload : undefined;
-			const p = envelope ? envelope.payload as Record<string, unknown> | undefined : msg.payload as Record<string, unknown> | undefined;
+			if (!isWorkerToLeaderEnvelope(msg.payload)) return;
+			const envelope = msg.payload;
+			const p = envelope.payload as Record<string, unknown> | undefined;
 			if (!p || typeof p !== "object") return;
-			if (!envelope && !String(p.kind ?? "").startsWith("teams:")) return;
-			const workerName = envelope?.workerId ?? (p.workerName as string) ?? "unknown";
-			const workerInstanceId = envelope?.attemptId ?? (typeof p.workerInstanceId === "string" ? p.workerInstanceId : "");
+			const workerName = envelope.workerId ?? "unknown";
+			const workerInstanceId = envelope.attemptId ?? "";
 			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
 			const worker = this.workers.get(workerName);
 			if (!worker) return;
 			if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
 			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
 
-			this.linkWorkerRoute(worker, msg.from);
-			if ((envelope?.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") || p.kind === "teams:done") {
+			this.linkWorkerRoute(worker, msg.from);			if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") {
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh done";
         // Don't emit completion here — process exit handler is authoritative.
         // But update the widget immediately.
         this.renderWidget();
-      } else if (envelope?.type === "worker.finish" && (p as WorkerFinishPayload).status === "quit") {
+      } else if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "quit") {
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh quit";
         this.renderWidget();
@@ -1496,8 +1492,7 @@ export class TeamLeader {
     // If the worker exited without ever creating a session file, it never
     // reached Pi's init. Two common causes:
     //   1. Startup death (within a 5s startup window) — env/module/auth issue.
-    //   2. Session directory destroyed externally — another worker's cleanup
-    //      or a manual worktree prune deleted the directory while the worker
+    //   2. Session directory destroyed externally — another worker's cleanup    //      or a manual worktree prune deleted the directory while the worker
     //      was still alive.
     // In both cases, resumeWorker can't work (no session to continue).
     // We respawn from the original SpawnConfig once.
@@ -1746,8 +1741,7 @@ export class TeamLeader {
           worker.lastOutputLabel = lastReal.label;
         }
       }
-    } catch {
-      // Session file may not exist yet.
+    } catch {      // Session file may not exist yet.
     }
   }
 
@@ -1996,8 +1990,7 @@ export class TeamLeader {
     } finally {
       this.notifyDraining = false;
     }
-  }
-}
+  }}
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
