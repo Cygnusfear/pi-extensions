@@ -1593,7 +1593,14 @@ export class TeamLeader {
 
   private async handleWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null) {
     if (!this.ctx) return;
+    if (!this.workers.has(name)) {
+      this.workers.set(name, worker);
+    }
     if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) return;
+
+    if (!this.v2TeamRecord?.workers[name]) {
+      this.upsertV2WorkerFromHandle(worker);
+    }
 
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);

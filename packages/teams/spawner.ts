@@ -93,12 +93,15 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	const stdoutFd = fs.openSync(stdoutLog, "w");
 	const stderrFd = fs.openSync(stderrLog, "w");
 
-	const args = ["--non-interactive"];
+	const sessionFile = path.join(sessionDir, "session.jsonl");
+	if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "", "utf-8");
+
+	const args: string[] = [];
 	if (config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume") {
 		const sessionFileArg = config.sessionMode.sessionFile;
 		args.push("--session", sessionFileArg);
 	} else {
-		args.push("--session-dir", sessionDir);
+		args.push("--session", sessionFile);
 	}
 	if (config.model) args.push("--model", config.model);
 	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.additionalPrompt, config.freeform, config.coordinatorMeshId));
@@ -115,8 +118,6 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	// Close the fds in the parent — the child inherited them
 	fs.closeSync(stdoutFd);
 	fs.closeSync(stderrFd);
-
-	const sessionFile = path.join(sessionDir, "session.jsonl");
 
 	const now = Date.now();
 	const handle: WorkerHandle = {
@@ -173,7 +174,7 @@ export function resumeWorker(
 	const stdoutFd = fs.openSync(stdoutLog, "a"); // append
 	const stderrFd = fs.openSync(stderrLog, "a");
 
-	const args = ["--non-interactive", "--session", sessionFile];
+	const args = ["--session", sessionFile];
 	if (handle.model) args.push("--model", handle.model);
 	args.push("-p", message);
 
