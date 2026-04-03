@@ -16,3 +16,4 @@ packages/brave-search/extensions/brave-search.config.json
 .forgejo/
 .sanitize-plan.md
 docs/
+.pi/teams/
