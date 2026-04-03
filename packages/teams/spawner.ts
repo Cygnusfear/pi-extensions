@@ -178,10 +178,13 @@ export function resumeWorker(
 	fs.closeSync(stdoutFd);
 	fs.closeSync(stderrFd);
 
+	const now = Date.now();
 	handle.pid = child.pid!;
 	handle.status = "running";
-	handle.lastActivityAt = Date.now();
-	handle.lastProcessActivityAt = Date.now();
+	handle.lastActivityAt = now;
+	handle.lastProcessActivityAt = now;
+	handle.attempts = handle.attempts ?? [];
+	handle.attempts.push({ workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now });
 
 	return child;
 }

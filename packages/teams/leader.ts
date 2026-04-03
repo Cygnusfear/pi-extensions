@@ -18,7 +18,7 @@ import { LEASE_HEARTBEAT_INTERVAL_MS, buildLeaderLeasePath, writeLeaderLease } f
 import { cleanupWorker } from "./cleanup.js";
 import { isProcessAlive, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
-import type { PollEvent, SpawnConfig, WorkerHandle } from "./types.js";
+import type { PollEvent, SpawnConfig, WorkerAttempt, WorkerHandle } from "./types.js";
 import {
   ACTIVITY_POLL_INTERVAL_MS,
   DONE_GRACE_MS,
@@ -478,32 +478,71 @@ async function settleSessionFile(sessionDir: string, waitMs = 1500): Promise<boo
   return false;
 }
 
+function getCurrentAttempt(worker: WorkerHandle): WorkerAttempt | null {
+  const attempts = worker.attempts ?? [];
+  if (attempts.length === 0) return null;
+  return attempts[attempts.length - 1] ?? null;
+}
+
+function scoreAttempt(attempt: WorkerAttempt): number {
+  let score = 0;
+  try {
+    const files = fs.readdirSync(attempt.sessionDir).filter(f => f.endsWith(".jsonl"));
+    if (files.length > 0) score += 100;
+  } catch {}
+  try {
+    const stderr = fs.readFileSync(path.join(attempt.sessionDir, "stderr.log"), "utf-8").trim();
+    if (stderr) score += 50;
+  } catch {}
+  if (attempt.spawnError) score += 25;
+  if (attempt.exitCode && attempt.exitCode !== 0) score += 10;
+  return score;
+}
+
+function getBestAttempt(worker: WorkerHandle): WorkerAttempt {
+  const attempts = worker.attempts ?? [];
+  if (attempts.length === 0) {
+    return {
+      workerInstanceId: worker.workerInstanceId,
+      pid: worker.pid,
+      sessionDir: worker.sessionDir,
+      sessionFile: worker.sessionFile,
+      spawnedAt: worker.spawnedAt,
+      exitCode: worker.exitCode,
+      spawnError: worker.spawnError,
+    };
+  }
+  return [...attempts].sort((a, b) => scoreAttempt(b) - scoreAttempt(a))[0];
+}
+
 function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): string {
   const lines: string[] = [];
-  const runtimeMs = Date.now() - worker.spawnedAt;
+  const attempt = getBestAttempt(worker);
+  const runtimeMs = Date.now() - attempt.spawnedAt;
   const runtimeSec = (runtimeMs / 1000).toFixed(1);
   const STARTUP_WINDOW_MS = 5000;
 
   lines.push("── worker crash report ──");
-  lines.push(`worker: ${worker.name} | ticket: ${worker.ticketId} | pid: ${worker.pid}`);
-  lines.push(`model: ${worker.model ?? "default"} | exit code: ${exitCode ?? "null (spawn error)"}`);
+  lines.push(`worker: ${worker.name} | ticket: ${worker.ticketId} | pid: ${attempt.pid}`);
+  lines.push(`model: ${worker.model ?? "default"} | exit code: ${(attempt.exitCode ?? exitCode) ?? "null (spawn error)"}`);
   lines.push(`runtime: ${runtimeSec}s | status: ${worker.status}`);
-  const lifecycle = readWorkerLifecycleFacts(worker.sessionDir);
+  if ((worker.attempts?.length ?? 0) > 1) lines.push(`attempts: ${worker.attempts?.length}`);
+  const lifecycle = readWorkerLifecycleFacts(attempt.sessionDir);
   if (lifecycle.lastHeartbeatEvent) {
     lines.push(`worker lifecycle: last=${lifecycle.lastHeartbeatEvent} | agent_end=${lifecycle.sawAgentEnd} | forced_shutdown=${lifecycle.sawForcedSessionShutdown}`);
   }
-  if (worker.spawnError) lines.push(`spawn error: ${worker.spawnError}`);
+  if (attempt.spawnError || worker.spawnError) lines.push(`spawn error: ${attempt.spawnError ?? worker.spawnError}`);
 
   // Session file check
   let hasSessionFile = false;
   let sessionEntryCount = 0;
   try {
-    const files = fs.readdirSync(worker.sessionDir).filter(f => f.endsWith(".jsonl"));
+    const files = fs.readdirSync(attempt.sessionDir).filter(f => f.endsWith(".jsonl"));
     hasSessionFile = files.length > 0;
     if (hasSessionFile) {
       const sf = files.length === 1
-        ? path.join(worker.sessionDir, files[0])
-        : files.map(f => ({ f: path.join(worker.sessionDir, f), mtime: fs.statSync(path.join(worker.sessionDir, f)).mtimeMs }))
+        ? path.join(attempt.sessionDir, files[0])
+        : files.map(f => ({ f: path.join(attempt.sessionDir, f), mtime: fs.statSync(path.join(attempt.sessionDir, f)).mtimeMs }))
           .sort((a, b) => b.mtime - a.mtime)[0].f;
       const content = fs.readFileSync(sf, "utf-8");
       sessionEntryCount = content.split("\n").filter(l => l.trim()).length;
@@ -521,7 +560,7 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   }
 
   // stderr — this is where provider errors and node crashes land
-  const stderr = readDiagnosticLog(worker.sessionDir, "stderr.log", "").trim();
+  const stderr = readDiagnosticLog(attempt.sessionDir, "stderr.log", "").trim();
   if (stderr) {
     // Strip the label prefix that readDiagnosticLog adds
     lines.push(`stderr: ${stderr.replace(/^\n/, "").slice(0, 500)}`);
@@ -530,7 +569,7 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   }
 
   // stdout
-  const stdout = readDiagnosticLog(worker.sessionDir, "stdout.log", "").trim();
+  const stdout = readDiagnosticLog(attempt.sessionDir, "stdout.log", "").trim();
   if (stdout) {
     lines.push(`stdout: ${stdout.replace(/^\n/, "").slice(0, 300)}`);
   } else {
@@ -539,12 +578,12 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
 
   // Session-level diagnostics (last assistant error, last failing tool)
   if (hasSessionFile) {
-    const sessionDiag = readSessionDiagnostics(worker.sessionDir).trim();
+    const sessionDiag = readSessionDiagnostics(attempt.sessionDir).trim();
     if (sessionDiag) lines.push(sessionDiag);
   }
 
   // Meaningful output check result
-  const outputCheck = workerProducedMeaningfulOutput(worker.sessionDir);
+  const outputCheck = workerProducedMeaningfulOutput(attempt.sessionDir);
   if (!outputCheck.meaningful) {
     lines.push(`output check: FAILED — ${outputCheck.reason}`);
   }
@@ -1012,11 +1051,15 @@ export class TeamLeader {
       this.childProcesses.set(name, child);
       child.on("exit", (code) => {
         worker.exitCode = code;
+        const attempt = getCurrentAttempt(worker);
+        if (attempt) attempt.exitCode = code;
         void this.handleWorkerExit(name, worker, code);
       });
       child.on("error", (err) => {
         worker.exitCode = null;
         worker.spawnError = err.message;
+        const attempt = getCurrentAttempt(worker);
+        if (attempt) attempt.spawnError = err.message;
         void this.handleWorkerExit(name, worker, null);
       });
       this.startActivityMonitor(name, worker);
@@ -1274,6 +1317,8 @@ export class TeamLeader {
     // Process exit — the definitive completion signal
     child.on("exit", (code) => {
       handle.exitCode = code;
+      const attempt = getCurrentAttempt(handle);
+      if (attempt) attempt.exitCode = code;
       void this.handleWorkerExit(workerName, handle, code);
     });
 
@@ -1282,6 +1327,8 @@ export class TeamLeader {
     child.on("error", (err) => {
       handle.exitCode = null;
       handle.spawnError = err.message;
+      const attempt = getCurrentAttempt(handle);
+      if (attempt) attempt.spawnError = err.message;
       void this.handleWorkerExit(workerName, handle, null);
     });
 
@@ -1400,11 +1447,15 @@ export class TeamLeader {
           this.childProcesses.set(name, child);
           child.on("exit", (code) => {
             worker.exitCode = code;
+            const attempt = getCurrentAttempt(worker);
+            if (attempt) attempt.exitCode = code;
             void this.handleWorkerExit(name, worker, code);
           });
           child.on("error", (err) => {
             worker.exitCode = null;
             worker.spawnError = err.message;
+            const attempt = getCurrentAttempt(worker);
+            if (attempt) attempt.spawnError = err.message;
             void this.handleWorkerExit(name, worker, null);
           });
 
@@ -1470,6 +1521,8 @@ export class TeamLeader {
         worker.pid = newHandle.pid;
         worker.sessionDir = newHandle.sessionDir;
         worker.sessionFile = newHandle.sessionFile;
+        worker.attempts = worker.attempts ?? [];
+        if (newHandle.attempts?.[0]) worker.attempts.push(newHandle.attempts[0]);
         worker.status = "spawning";
         worker.routeState = "pending";
         worker.meshClientId = undefined;
@@ -1491,11 +1544,15 @@ export class TeamLeader {
         this.childProcesses.set(name, child);
         child.on("exit", (code) => {
           worker.exitCode = code;
+          const attempt = getCurrentAttempt(worker);
+          if (attempt) attempt.exitCode = code;
           void this.handleWorkerExit(name, worker, code);
         });
         child.on("error", (err) => {
           worker.exitCode = null;
           worker.spawnError = err.message;
+          const attempt = getCurrentAttempt(worker);
+          if (attempt) attempt.spawnError = err.message;
           void this.handleWorkerExit(name, worker, null);
         });
 
