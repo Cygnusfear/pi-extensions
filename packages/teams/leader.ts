@@ -604,6 +604,15 @@ function isWorkerToLeaderEnvelope(payload: unknown): payload is TeamEnvelope<unk
 	return p.version === 1 && p.from === "worker" && p.to === "leader" && typeof p.type === "string";
 }
 
+function isTerminalV2Lifecycle(lifecycle: import("./v2/state.ts").WorkerLifecycleState | null): boolean {
+	return lifecycle === "done"
+		|| lifecycle === "warning"
+		|| lifecycle === "failed"
+		|| lifecycle === "killed"
+		|| lifecycle === "resumable"
+		|| lifecycle === "orphaned";
+}
+
 /**
  * Check if a worker actually did meaningful work by inspecting its session file.
  * Returns false if:
@@ -1543,7 +1552,7 @@ export class TeamLeader {
 
   private async handleTicketChange(worker: WorkerHandle) {
     if (!this.ctx) return;
-    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) return;
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(worker.name))) return;
 
     try {
       const maiResult = await this.pi.exec("mai", ["--json", "show", worker.ticketId], {
@@ -1556,7 +1565,7 @@ export class TeamLeader {
       worker.lastNote = ticket.notes.at(-1)?.text;
 
       // Re-check after async gap — worker may have exited while we were reading the ticket
-      if (["done", "warning", "failed", "killed"].includes(worker.status)) return;
+      if (["done", "warning", "failed", "killed"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(worker.name))) return;
 
       // Emit new comments (skip any already delivered via mesh)
       const newNotes = getNewNotes(ticket.notes, worker.lastSeenCommentCount);
@@ -1584,7 +1593,7 @@ export class TeamLeader {
 
   private async handleWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null) {
     if (!this.ctx) return;
-    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) return;
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) return;
 
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);
@@ -1930,7 +1939,7 @@ export class TeamLeader {
   }
 
   private async refreshWorkerActivity(name: string, worker: WorkerHandle) {
-    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status)) {
+    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) {
       this.stopActivityMonitor(name);
       return;
     }
@@ -1941,7 +1950,7 @@ export class TeamLeader {
 
     const snapshot = await sampleWorkerProcessSnapshotAsync(worker.pid);
     if (!snapshot.rootAlive) {
-      if (worker.status === "running" || worker.status === "spawning") {
+      if ((worker.status === "running" || worker.status === "spawning") && !isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) {
         void this.handleWorkerExit(name, worker, worker.exitCode ?? 0);
       }
       return;
@@ -1987,7 +1996,7 @@ export class TeamLeader {
   }
 
   async waitForAllWorkersToFinish(pollMs = 250): Promise<void> {
-    while ([...this.workers.values()].some((w) => !["done", "warning", "failed", "killed", "grace"].includes(w.status))) {
+    while ([...this.workers.values()].some((w) => !["done", "warning", "failed", "killed", "grace"].includes(w.status) && !isTerminalV2Lifecycle(this.getV2WorkerLifecycle(w.name)))) {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
   }
