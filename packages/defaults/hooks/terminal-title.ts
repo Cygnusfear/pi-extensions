@@ -92,10 +92,6 @@ export function setupTerminalTitleHook(pi: ExtensionAPI) {
     emitTitle(pi, `π: ${getContextName(ctx.cwd)}`);
   });
 
-  pi.on("session_switch", async (_event, ctx) => {
-    emitTitle(pi, `π: ${getContextName(ctx.cwd)}`);
-  });
-
   pi.on("agent_start", async (_event, ctx) => {
     emitTitle(pi, `π: ${getContextName(ctx.cwd)} (thinking...)`);
   });

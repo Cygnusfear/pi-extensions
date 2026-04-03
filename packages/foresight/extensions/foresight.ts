@@ -358,8 +358,9 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	let turnCount = 0;
 	const turnContent: string[] = [];
 
-	pi.on("session_switch", async (event: any, _ctx: any) => {
+	pi.on("session_start", async (event: any, _ctx: any) => {
 		if (!available) return;
+		if (!event.previousSessionFile) return;
 		ingestSessionFile(event.previousSessionFile);
 	});
 

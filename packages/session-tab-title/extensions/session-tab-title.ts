@@ -50,7 +50,8 @@ function updateTitle(ctx: any): void {
 
 export default function sessionTabTitle(pi: ExtensionAPI) {
 	// Update title after resuming a session
-	pi.on("session_switch", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
+		if (event.reason !== "resume" && event.reason !== "fork") return;
 		updateTitle(ctx);
 	});
 

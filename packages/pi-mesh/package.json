@@ -1,6 +1,6 @@
 {
   "name": "@pi-extensions/pi-mesh",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "exports": {
     ".": "./extension/pi-mesh.ts",
@@ -11,6 +11,9 @@
     "extensions": ["./extension/pi-mesh.ts"]
   },
   "files": ["extension", "native/libpi_mesh_native.*"],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.65.0"
+  },
   "dependencies": {
     "@pi-extensions/shared": "workspace:*",
     "@sinclair/typebox": "*"

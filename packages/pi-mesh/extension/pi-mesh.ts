@@ -816,7 +816,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
 				const shouldAppendNow = agentBusy || ackRequested === "visible";
 				const deliveryOptions = shouldAppendNow
-					? ({ deliverAs: "appendNow" } as { deliverAs: "steer" | "followUp" | "nextTurn" })
+					? { deliverAs: "appendNow" as const }
 					: { deliverAs: "followUp" as const, triggerTurn: true };
 				pi.sendMessage(
 					{
@@ -882,7 +882,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const payloadText = extractPayloadText(req.payload);
 				const shouldAppendNow = agentBusy || req.askReceiptRequested === "visible";
 				const deliveryOptions = shouldAppendNow
-					? ({ deliverAs: "appendNow" } as { deliverAs: "steer" | "followUp" | "nextTurn" })
+					? { deliverAs: "appendNow" as const }
 					: { deliverAs: "followUp" as const, triggerTurn: true };
 				pi.sendMessage(
 					{
