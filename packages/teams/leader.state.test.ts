@@ -178,4 +178,26 @@ describe("TeamLeader state persistence", () => {
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toMatchObject({ type: "comment", comment: "hello from v2" });
 	});
+
+	test("buildSpawnSessionMode prefers a real forked session when branching is available", () => {
+		const { leader } = makeHarness();
+		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
+		leader.ctx.sessionManager.getLeafId = () => "leaf-1";
+		leader.ctx.sessionManager.createBranchedSession = () => "/tmp/forked.jsonl";
+
+		expect(leader.buildSpawnSessionMode()).toEqual({
+			kind: "fork",
+			parentSessionFile: "/tmp/leader.jsonl",
+			parentLeafId: "leaf-1",
+			sessionFile: "/tmp/forked.jsonl",
+		});
+	});
+
+	test("buildSpawnSessionMode falls back to fresh when branching is unavailable", () => {
+		const { leader } = makeHarness();
+		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
+		leader.ctx.sessionManager.getLeafId = () => null;
+
+		expect(leader.buildSpawnSessionMode()).toEqual({ kind: "fresh" });
+	});
 });

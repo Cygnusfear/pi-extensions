@@ -1013,11 +1013,72 @@ export class TeamLeader {
       pid: latestAttempt?.pid ?? worker.pid,
       startedAt: latestAttempt?.spawnedAt ?? worker.spawnedAt,
     });
+    this.projectV2WorkerRuntime(worker.name);
+  }
+
+  private buildSpawnSessionMode(): import("./v2/protocol.ts").WorkerSessionMode {
+    const sessionManager = this.ctx?.sessionManager as unknown as {
+      getSessionFile?: () => string | undefined;
+      getLeafId?: () => string | null;
+      createBranchedSession?: (leafId: string) => string | undefined;
+    } | undefined;
+    const parentSessionFile = sessionManager?.getSessionFile?.();
+    const leafId = sessionManager?.getLeafId?.();
+    const sessionFile = leafId ? sessionManager?.createBranchedSession?.(leafId) : undefined;
+    if (parentSessionFile && leafId && sessionFile) {
+      return {
+        kind: "fork",
+        parentSessionFile,
+        parentLeafId: leafId,
+        sessionFile,
+      };
+    }
+    return { kind: "fresh" };
   }
 
   private appendV2Fact(workerName: string, fact: import("./v2/state.ts").WorkerFact): void {
     if (!this.v2TeamRecord) return;
     this.v2TeamRecord = applyV2Fact(this.v2TeamRecord, workerName, fact);
+    this.projectV2WorkerRuntime(workerName);
+  }
+
+  private projectV2WorkerRuntime(workerName: string): void {
+    const v2Worker = this.v2TeamRecord?.workers[workerName];
+    const worker = this.workers.get(workerName);
+    if (!v2Worker || !worker) return;
+
+    switch (v2Worker.lifecycle) {
+      case "created":
+      case "spawning":
+        worker.status = "spawning";
+        if (worker.routeState === "dead") worker.routeState = "pending";
+        break;
+      case "running":
+        worker.status = "running";
+        if (worker.routeState === "dead") worker.routeState = worker.meshClientId ? "linked" : "pending";
+        break;
+      case "done":
+        worker.status = "done";
+        break;
+      case "warning":
+        worker.status = "warning";
+        break;
+      case "failed":
+        worker.status = "failed";
+        worker.routeState = "dead";
+        break;
+      case "orphaned":
+        worker.status = worker.status === "failed" ? "failed" : "warning";
+        worker.routeState = "dead";
+        break;
+      case "resumable":
+        worker.status = "grace";
+        worker.routeState = "resumable";
+        break;
+      case "finishing":
+      case "killed":
+        break;
+    }
   }
 
   /** Get the mesh client ID (for passing to workers as coordinator ID). */
@@ -1182,7 +1243,6 @@ export class TeamLeader {
         if (!current || batch.length === 0) return;
         if (!current.freeform) return;
         if (current.routeState !== "resumable") return;
-
         const blob = [
           "Ambient team chat arrived while you were idle.",
           "This is background team context, not necessarily a direct request.",
@@ -1244,6 +1304,7 @@ export class TeamLeader {
 				const peer = this.mesh.peers().find((pr) => pr.id === msg.from || pr.sessionId === msg.from);
 				if (peer?.nickname) peerNickname = peer.nickname;
       }
+
 			if (envelope.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") {
 				const commentText = (p as WorkerCommentPayload).text;
         this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
@@ -1368,6 +1429,7 @@ export class TeamLeader {
       leaderEpoch: this.leaderEpoch,
       coordinatorMeshId: this.getMeshClientId() || undefined,
       freeform,
+      sessionMode: this.buildSpawnSessionMode(),
     };
 
     const { process: child, handle } = spawnWorker(config);
@@ -1430,8 +1492,7 @@ export class TeamLeader {
       // Emit new comments (skip any already delivered via mesh)
       const newNotes = getNewNotes(ticket.notes, worker.lastSeenCommentCount);
       const meshSeen = this.meshDelivered.get(worker.name);
-      for (const note of newNotes) {
-        if (meshSeen?.has(note.text)) continue; // already delivered via mesh
+      for (const note of newNotes) {        if (meshSeen?.has(note.text)) continue; // already delivered via mesh
         this.notifyLLM({
           type: "comment",
           worker: { ...worker },
@@ -1492,7 +1553,8 @@ export class TeamLeader {
       if (recovery) {
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
         if (child) {
-          worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;          worker.status = "running";
+          worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
+          worker.status = "running";
           worker.routeState = "pending";
           worker.meshClientId = undefined;
           worker.lastActivityAt = Date.now();
@@ -1679,8 +1741,7 @@ export class TeamLeader {
         : "";
       this.notifyLLM({
         type: "completed",
-        worker: { ...worker },
-        result: `${lastNote}${mergeHint}`,
+        worker: { ...worker },        result: `${lastNote}${mergeHint}`,
       });
     } else if (classification === "warning") {
       this.notifyLLM({
@@ -1741,7 +1802,8 @@ export class TeamLeader {
   }
 
   private async runActivityBatch() {
-    for (const name of this.monitoredWorkers) {      const worker = this.workers.get(name);
+    for (const name of this.monitoredWorkers) {
+      const worker = this.workers.get(name);
       if (!worker) { this.monitoredWorkers.delete(name); continue; }
       await this.refreshWorkerActivity(name, worker);
     }
@@ -1928,7 +1990,6 @@ export class TeamLeader {
    */
   private resolveWorkerModel(requested?: string): string | undefined {
     if (!requested || !this.ctx) return requested;
-
     const available = this.ctx.modelRegistry.getAvailable();
     const needle = requested.toLowerCase();
     const found = available.some(m =>
@@ -1989,9 +2050,9 @@ export class TeamLeader {
       this.notifiedTerminal.add(key);
     }
 
-		// turn_finished is informational — the worker finished a turn but is still
-		// resumable. Don't trigger a coordinator turn (it's not actionable yet).
-		if (event.type === "turn_finished") {
+    // turn_finished is informational — the worker finished a turn but is still
+    // resumable. Don't trigger a coordinator turn (it's not actionable yet).
+    if (event.type === "turn_finished") {
       const msg = formatPollEvent(event);
       this.notifyQueue.push({ msg, triggerTurn: false });
       void this.drainNotifyQueue();

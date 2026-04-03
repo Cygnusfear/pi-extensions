@@ -5,6 +5,7 @@ import { dirname, resolve, join } from "node:path";
 import { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
 import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
 import { createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
+import type { WorkerSessionMode } from "./v2/protocol.ts";
 
 function resolveWorkerMeshBinPath(): string | null {
 	const binName = process.platform === "win32" ? "pi-mesh.exe" : "pi-mesh";
@@ -42,6 +43,13 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	const channelId = process.env.PI_TEAMS_CHANNEL_ID;
 	const teamId = process.env.PI_TEAMS_TEAM_ID ?? ticketId;
 	const leaderEpoch = process.env.PI_TEAMS_LEADER_EPOCH ?? "legacy";
+	const sessionMode = (() => {
+		try {
+			return process.env.PI_TEAMS_SESSION_MODE ? JSON.parse(process.env.PI_TEAMS_SESSION_MODE) as WorkerSessionMode : { kind: "fresh" as const };
+		} catch {
+			return { kind: "fresh" as const };
+		}
+	})();
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
 	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
 	let meshSeq = 0;
@@ -169,7 +177,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					coordinatorSessionId: coordinatorId ?? "",
 					channelId,
 					leasePath: leaseFile ?? "",
-					sessionMode: { kind: "fresh" },
+					sessionMode,
 				},
 			}),
 		);
@@ -239,7 +247,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	const CommentParams = Type.Object({
 		message: Type.String({ description: "Your comment" }),
 	});
-
 	const FinishParams = Type.Object({
 		status: Type.Union([Type.Literal("done"), Type.Literal("quit")]),
 		summary: Type.String({ description: "Short result summary" }),
@@ -247,7 +254,8 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	pi.registerTool({
 		name: "team_comment",
-		label: "Team Comment",		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
+		label: "Team Comment",
+		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
 		parameters: CommentParams,
 		async execute(_id, params: { message: string }, _signal, _onUpdate, ctx) {
 			const result = await pi.exec("mai", ["add-note", ticketId, params.message], {

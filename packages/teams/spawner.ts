@@ -70,6 +70,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
 	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
 	if (config.freeform) env.PI_TEAMS_FREEFORM = "1";
+	if (config.sessionMode) env.PI_TEAMS_SESSION_MODE = JSON.stringify(config.sessionMode);
 
 	if (config.hasTools) {
 		env.PI_TEAMS_HAS_TOOLS = "1";
@@ -92,7 +93,13 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	const stdoutFd = fs.openSync(stdoutLog, "w");
 	const stderrFd = fs.openSync(stderrLog, "w");
 
-	const args = ["--non-interactive", "--session-dir", sessionDir];
+	const args = ["--non-interactive"];
+	if (config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume") {
+		const sessionFileArg = config.sessionMode.sessionFile;
+		args.push("--session", sessionFileArg);
+	} else {
+		args.push("--session-dir", sessionDir);
+	}
 	if (config.model) args.push("--model", config.model);
 	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.additionalPrompt, config.freeform, config.coordinatorMeshId));
 
@@ -133,7 +140,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		activeChildProcessCount: 0,
 		lastSeenCommentCount: 0,
 		routeState: "pending",
-		attempts: [{ workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now }],
+		attempts: [{ workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
 	};
 
 	return { process: child, handle };
@@ -186,7 +193,7 @@ export function resumeWorker(
 	handle.lastActivityAt = now;
 	handle.lastProcessActivityAt = now;
 	handle.attempts = handle.attempts ?? [];
-	handle.attempts.push({ workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now });
+	handle.attempts.push({ workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now, sessionMode: { kind: "resume", sessionFile } });
 
 	return child;
 }
@@ -240,7 +247,6 @@ export function killWorker(pid: number): void {
 	} catch {
 		// Best effort fallback if bash isn't available
 		setTimeout(() => {
-			killGroup("SIGKILL") || killPid("SIGKILL");
-		}, 5000);
+			killGroup("SIGKILL") || killPid("SIGKILL");		}, 5000);
 	}
 }

@@ -1,10 +1,13 @@
 
+import type { WorkerSessionMode } from "./v2/protocol.ts";
+
 export interface WorkerAttempt {
 	workerInstanceId: string;
 	pid: number;
 	sessionDir: string;
 	sessionFile: string;
 	spawnedAt: number;
+	sessionMode?: WorkerSessionMode;
 	exitCode?: number | null;
 	spawnError?: string;
 }
@@ -80,6 +83,7 @@ export interface SpawnConfig {
 	leaderEpoch?: string;
 	coordinatorMeshId?: string;
 	freeform?: boolean;
+	sessionMode?: WorkerSessionMode;
 }
 
 export type PollEvent =

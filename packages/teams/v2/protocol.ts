@@ -8,7 +8,7 @@ export type MeshReceiptPhase = "sent" | "delivered" | "visible" | "handled";
 
 export type WorkerSessionMode =
 	| { kind: "fresh" }
-	| { kind: "fork"; parentSessionFile: string; parentLeafId: string }
+	| { kind: "fork"; parentSessionFile: string; parentLeafId: string; sessionFile: string }
 	| { kind: "resume"; sessionFile: string };
 
 export interface WorkerRuntimeEnvelope {

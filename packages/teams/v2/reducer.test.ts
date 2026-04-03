@@ -7,7 +7,7 @@ function createAttempt(overrides: Partial<WorkerAttemptRecord> = {}): WorkerAtte
 		attemptId: overrides.attemptId ?? "attempt-1",
 		workerId: overrides.workerId ?? "worker-1",
 		leaderEpoch: overrides.leaderEpoch ?? "epoch-1",
-		sessionMode: overrides.sessionMode ?? { kind: "fork", parentSessionFile: "/tmp/parent.jsonl", parentLeafId: "leaf-1" },
+		sessionMode: overrides.sessionMode ?? { kind: "fork", parentSessionFile: "/tmp/parent.jsonl", parentLeafId: "leaf-1", sessionFile: "/tmp/forked.jsonl" },
 		sessionDir: overrides.sessionDir ?? "/tmp/worker-1",
 		startedAt: overrides.startedAt ?? 1,
 		facts: overrides.facts ?? [],

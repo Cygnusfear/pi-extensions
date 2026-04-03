@@ -1,162 +1,235 @@
-# Worker Lifecycle: From Spawn to Completion
+# Teams v2 worker lifecycle
 
-This document describes the full lifecycle of a worker agent in the pi teams extension, covering all state transitions and ticket interactions.
+This document describes the target lifecycle model in the `teams-v2-cutover` branch.
 
-## Overview
+The critical change from Teams v1 is this:
 
-A **worker** is a headless pi agent process spawned by the **leader** (the interactive pi session). Each worker is assigned a ticket, works autonomously in its own worktree, and communicates progress through ticket notes. The leader polls workers and reacts to state changes.
+- workers do not speak ad-hoc mesh payloads anymore
+- workers emit typed v2 envelopes
+- the leader ingests worker facts into a reducer-first runtime store
+- lifecycle truth comes from worker attempts plus reduced facts, not from ticket heuristics or widget state
 
-## Lifecycle Phases
+---
 
-### 1. Delegation (Leader Side)
+## Core identities
 
-When the leader's `teams` tool receives a `delegate` action:
+Every worker run is identified by four layers:
 
-1. **Create ticket** — `mai ticket <task> -d <task> -l team -a <workerName>`
-2. **Start ticket** — `mai start <ticketId>` (moves ticket to `in_progress`)
-3. **Resolve repo root** — `git rev-parse --git-common-dir` to find the real repo toplevel (prevents nested worktrees when the coordinator is itself in a worktree)
-4. **Create worktree** (if `useWorktree: true`) — `git worktree add <toplevel>/.worktrees/teams/<workerName> -b teams/<workerName>/<ticketId> <baseRef>` where `baseRef` defaults to `HEAD` but can be set explicitly by the coordinator to a branch name, SHA, or tag
-5. **Spawn process** — `pi --non-interactive --session-dir <sessionDir> -p <prompt>`
+- `teamId` — stable logical delegation batch
+- `leaderEpoch` — current leader ownership instance; changes on reload / restart
+- `workerId` — stable logical worker name
+- `attemptId` — one concrete process attempt
 
-> **Why `baseRef` matters:** When the coordinator is working in a worktree (e.g., `.worktrees/cleanroom` on branch `cleanroom`), `ctx.cwd` still points to wherever `pi` was launched — typically the repo root on `main`. Without an explicit `baseRef`, workers branch from `main` instead of the coordinator's working branch. Their changes then can't be merged back. Always pass `baseRef` when coordinating from inside a worktree.
+This lets the system distinguish:
+- same worker, new process attempt
+- same team, new leader after reload
+- stale events from an older attempt
 
-The worker process receives its assignment via environment variables:
-- `PI_TEAMS_WORKER=1` — identifies the process as a worker
-- `PI_TEAMS_TICKET_ID=<ticketId>` — the assigned ticket
-- `PI_TEAMS_WORKER_NAME=<name>` — the worker's name
-- `PI_TEAMS_LEADER_SESSION=<path>` — path to leader's session file
-- `PI_TEAMS_HAS_TOOLS=1` — (optional) gives the worker the teams tool for sub-delegation
+---
 
-### 2. Worker Initialization
+## Runtime envelope
 
-On startup (`index.ts`), the extension detects `PI_TEAMS_WORKER=1` and calls `runWorker()` instead of the leader setup. This:
+Workers are spawned with an explicit runtime envelope, including:
 
-1. Registers a **`team_comment`** tool so the LLM can post notes to its ticket via `mai add-note <ticketId> <message>`
-2. Registers worker lifecycle hooks (`agent_start`, `turn_start`, `tool_call`, `tool_result`, `turn_end`, `agent_end`) that append **heartbeat entries** to the worker session file
-3. Starts a periodic heartbeat tick (default 5s, env `PI_TEAMS_WORKER_HEARTBEAT_MS`) to keep liveness explicit even during long model waits
-4. Registers an **`agent_end`** hook that auto-closes the ticket for normal workers: `mai add-note <ticketId> "DONE: Task completed."` then `mai close <ticketId>`
-5. For worker-leaders (`hasTools: true`), ticket close is deferred until `session_shutdown` so the process stays alive until sub-workers finish
+- `teamId`
+- `leaderEpoch`
+- `workerId`
+- `attemptId`
+- coordinator session id
+- channel id
+- lease path
+- session mode
 
-#### Worker-Leaders (hasTools)
+Session mode is explicit:
 
-If the worker was spawned with `hasTools: true` (env `PI_TEAMS_HAS_TOOLS=1`), it also registers as a leader after the normal worker setup. This means it gets:
+- `fresh`
+- `fork`
+- `resume`
 
-- The `teams` tool for delegating sub-workers
-- Its own `TeamLeader` instance for managing sub-workers
-- `session_start`/`session_shutdown` hooks for sub-worker lifecycle
+In the cutover branch, normal delegated workers prefer a real `fork` session when the leader session manager can create one. Otherwise they fall back to `fresh`.
 
-**Constraints for worker-leaders:**
-- Sub-workers always share the parent's working directory (`useWorktree` is forced to `false`). Nested worktrees off a worktree cause git confusion.
-- Worker-leaders wait for all sub-workers to finish before the session is allowed to shut down.
-- Cleanup cascades: once a worker-leader is actually shutting down, its `session_shutdown` fires `leader.killAll()`, killing any still-running sub-workers.
-- Worker-leaders do NOT get the `/team` command (they're non-interactive).
+---
 
-### 3. Worker Execution
+## State model
 
-The worker receives a system prompt instructing it to:
-1. Read its ticket (`mai show <ticketId>`)
-2. Do the work described
-3. Comment progress (`mai add-note <ticketId> "progress..."`)
-4. Close on completion (`mai add-note <ticketId> "DONE: <summary>"` + `mai close <ticketId>`)
-5. Report blockers (`mai add-note <ticketId> "BLOCKED: <reason>"`)
+### Worker attempt
+A worker attempt is one concrete spawned process.
 
-### 4. Leader Monitoring
+It owns:
+- pid
+- session dir / session file
+- session mode
+- started / ended timestamps
+- process exit data
+- reduced lifecycle facts
 
-The leader uses the **activity monitor loop** (default 5s, env `PI_TEAMS_ACTIVITY_POLL_MS`) to sample worker process trees, poll `mai --json show`, and read session-file heartbeat/output timestamps.
+### Worker record
+A worker record owns:
+- logical worker identity
+- current attempt id
+- all attempts for that worker
+- reduced lifecycle state
 
-For each non-terminal worker, the activity loop:
+### Team record
+A team record owns:
+- `teamId`
+- `leaderEpoch`
+- all worker records
 
-1. Polls `mai --json show <ticketId>` to read durable ticket status and new notes
-2. Samples process tree activity (`ps`) to detect active child commands (e.g., `cargo`, `rustc`, `npm test`)
-3. Tracks latest worker heartbeat/output timestamp from the worker session file (heartbeat entries + normal session output)
-4. Evaluates stuck state using a dual condition:
-   - no worker heartbeat/output activity for `PI_TEAMS_STUCK_THRESHOLD_MS`
-   - and no active child process activity for the same window
-5. Emits `stuck` warnings with cooldown `PI_TEAMS_STUCK_WARNING_COOLDOWN_MS`
+The leader keeps this in the v2 runtime store.
 
-### 5. State Transitions
+---
 
-Workers have the following statuses:
+## Fact model
 
-```
-spawning → running → done
-                  → failed
-                  → killed
-```
+Workers do not directly set lifecycle state.
 
-| Current    | Condition                          | Next      |
-|------------|-------------------------------------|-----------|
-| `spawning` | Process alive, ticket open          | `running` |
-| `running`  | Ticket closed/done                  | `done`    |
-| `running`  | Process dead + exit code 0 and ticket closed | `done`    |
-| `running`  | Process dead + non-zero exit        | `failed`  |
-| `running`  | `kill` action from leader           | `killed`  |
-| `running`  | No heartbeat **and** no child-process activity for configured timeout | emits `stuck` event (stays `running`) |
+The leader appends facts such as:
+- `spawn_requested`
+- `spawn_started`
+- `worker_hello`
+- `comment_posted`
+- `finish_done`
+- `finish_quit`
+- `process_exit`
+- `lease_stale`
 
-Terminal states (`done`, `failed`, `killed`) are absorbing — no further transitions occur.
+The reducer maps those facts to lifecycle states.
 
-**Special case: process exits but ticket still open.** The leader closes the ticket on the worker's behalf, then marks the worker `done` (exit code 0) or `failed` (non-zero).
+---
 
-### 6. Poll Events
+## Lifecycle states
 
-Each monitoring cycle can emit these events:
+Current reducer lifecycle states:
 
-| Event       | Trigger                                  | Leader Action                        |
-|-------------|------------------------------------------|--------------------------------------|
-| `completed` | Ticket transitions to closed/done        | Notifies LLM, cleans up worker       |
-| `failed`    | Process dies unexpectedly                | Notifies LLM, cleans up worker       |
-| `comment`   | New ticket notes since last seen         | Forwards to LLM (if `showComments`)  |
-| `stuck`     | No note/session heartbeat **and** no active child process for > `STUCK_THRESHOLD_MS` | Warns LLM (display-only, no auto turn trigger) |
-| `alive`     | Worker is healthy                        | (informational only)                 |
+- `created`
+- `spawning`
+- `running`
+- `finishing`
+- `done`
+- `warning`
+- `failed`
+- `killed`
+- `orphaned`
+- `resumable`
 
-On `completed` or `failed`, the leader also sends a `sendUserMessage` follow-up to reactivate the agent for orchestration.
+Current reduced meaning:
 
-### 7. Cleanup
+| Reduced state | Meaning |
+|---|---|
+| `created` | worker record exists but no spawn fact yet |
+| `spawning` | spawn started but worker has not said hello yet |
+| `running` | worker has sent `worker.hello` |
+| `done` | explicit `finish_done` fact |
+| `warning` | explicit `finish_quit` fact |
+| `failed` | process exited without a terminal success/quit fact |
+| `orphaned` | lease went stale |
 
-When a worker reaches a terminal state, `cleanupWorker()` runs:
+---
 
-1. **Kill process** — SIGTERM, then SIGKILL after 5s if still alive
-2. **Remove worktree** — `git worktree remove <path> --force` + `git branch -D <branch>`
-3. **Remove session directory** — unless `PI_TEAMS_KEEP_WORKER_SESSIONS=1`
+## Worker protocol
 
-### 8. Session Shutdown
+Workers currently emit typed v2 envelopes.
 
-On `session_shutdown`, the leader stops activity monitors and kills all remaining workers (`killAll`), triggering full cleanup for each.
+### Channel traffic
+Over the team channel, workers emit:
+- `worker.hello`
+- `worker.comment`
 
-## Ticket Interaction Summary
+### Direct leader traffic
+Directly to the coordinator, workers emit:
+- `worker.finish`
 
-| Actor   | Operation                             | When                          |
-|---------|---------------------------------------|-------------------------------|
-| Leader  | `mai ticket ... --type <type> -l team[,role-tags] -a <name>` | Delegation (type based on template: review/oracle/investigate → artifact, others → task) |
-| Leader  | `mai start <id>`                       | Delegation                    |
-| Worker  | `mai show <id>`                        | On startup (reads assignment) |
-| Worker  | `mai add-note <id> "progress"`         | During execution              |
-| Worker  | `mai add-note <id> "DONE: ..."`        | On completion                 |
-| Worker  | `mai close <id>`                       | On completion                 |
-| Leader  | `mai --json show <id>`                 | On ticket change and worker exit reconciliation |
-| Leader  | `mai close <id>`                       | If worker dies without closing |
+That means the old free-form payloads like `teams:init`, `teams:comment`, `teams:done` are no longer the primary runtime contract in the cutover branch.
 
-## Sequence Diagram
+---
 
-```
-Leader                          Worker Process              Ticket System
-  │                                                              │
-  ├─ mai ticket + mai start ───────────────────────────────────►│ status: in_progress
-  ├─ spawn pi --non-interactive ──►│                             │
-  │                                │                             │
-  │                                ├─ mai show ─────────────────►│ (read assignment)
-  │                                ├─ (does work)                │
-  │                                ├─ mai add-note "progress" ──►│ (note added)
-  │                                │                             │
-  ├─ ticket watch: mai --json show ──────────────────────────►│ (reads notes)
-  ├─ (emits comment event to LLM) │                             │
-  │                                │                             │
-  │                                ├─ mai add-note "DONE:..." ──►│ (note added)
-  │                                ├─ mai close ────────────────►│ status: closed
-  │                                ├─ (process exits)            │
-  │                                                              │
-  ├─ worker exit: mai --json show ────────────────────────────►│ (sees closed)
-  ├─ (emits completed event)       │                             │
-  ├─ cleanup (worktree, session)   │                             │
-  │                                                              │
-```
+## Session strategy
+
+### Normal delegated worker
+Preferred mode:
+- `fork`
+
+This uses a real branched session file when possible, preserving:
+- the real parent branch point
+- prior conversation context
+- actual session lineage
+
+### Fallback
+If the current context cannot create a branched session:
+- `fresh`
+
+### Resume path
+When a worker is resumed from an existing session:
+- `resume`
+
+---
+
+## Leader responsibilities
+
+The leader is responsible for:
+- assigning `teamId` and `leaderEpoch`
+- spawning workers with explicit session mode
+- ingesting v2 envelopes into the runtime store
+- appending attempt facts
+- reducing the team state
+- projecting reduced lifecycle into the current worker handle / widget layer
+
+The leader is **not** supposed to treat mesh payloads as lifecycle truth directly.
+
+---
+
+## Ticket semantics
+
+Tickets are still workflow artifacts, not lifecycle truth.
+
+Important rules remain:
+- `team_finish(done)` is authoritative success
+- `team_finish(quit)` is authoritative warning-style terminal exit
+- `session_shutdown` never mutates ticket outcome
+- process exit alone is not success
+
+---
+
+## Reload / restore
+
+On restore, the leader:
+1. reloads persisted worker snapshot state
+2. restores `v2TeamId` if present
+3. rebuilds an in-memory v2 team record
+4. seeds worker attempts from restored handles
+5. continues ingesting new v2 facts from live mesh events and process exits
+
+This is still in progress in the cutover branch, but the architecture direction is fixed.
+
+---
+
+## Current cutover status
+
+As of the current branch state:
+
+Implemented:
+- typed v2 protocol
+- reducer-first runtime store
+- team channel id builder
+- worker emits v2 hello/comment/finish
+- leader ingests those envelopes
+- leader records spawn / hello / comment / finish / exit facts
+- leader persists `v2TeamId`
+- spawn session mode is explicit and prefers real fork sessions
+
+Still being migrated:
+- remaining ad-hoc worker-handle lifecycle mutations
+- full projection of widget/tool surfaces from v2 store only
+- complete removal of legacy compatibility assumptions outside the cutover branch
+
+---
+
+## Practical rule of thumb
+
+If you are changing lifecycle behavior in Teams v2:
+
+1. add / emit a fact
+2. reduce lifecycle from facts
+3. project UI from reduced state
+4. do not invent another side channel of truth
