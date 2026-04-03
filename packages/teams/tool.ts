@@ -105,6 +105,7 @@ async function runTeamsAction(
     if (workers.length === 0) {
       return { content: [{ type: "text" as const, text: "No active workers." }] };
     }
+    const v2Team = leader.getV2TeamRecord();
     const lines = workers.map((w) => {
       const modelSuffix = w.model ? ` | model ${w.model}` : "";
       const v2Lifecycle = leader.getV2WorkerLifecycle(w.name);
@@ -126,7 +127,8 @@ async function runTeamsAction(
       if (w.lastNote) parts.push(`  last note: ${w.lastNote.slice(0, 120)}`);
       return parts.join("\n");
     });
-    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    const header = v2Team ? `v2 team ${v2Team.teamId} · leaderEpoch ${v2Team.leaderEpoch}` : "v2 team unavailable";
+    return { content: [{ type: "text" as const, text: `${header}\n\n${lines.join("\n")}` }] };
   }
 
   if (action === "kill") {
@@ -165,8 +167,11 @@ async function runTeamsAction(
     }
     try {
       const viewed = await leader.viewWorker(params.name, params.start ?? -20, params.end ?? 0);
+      const v2Lifecycle = leader.getV2WorkerLifecycle(params.name);
+      const sessionMode = leader.getV2CurrentSessionMode(params.name);
+      const sessionLabel = sessionMode ? (sessionMode.kind === "fork" ? `fork:${sessionMode.parentLeafId}` : sessionMode.kind) : "unknown";
       return {
-        content: [{ type: "text" as const, text: `[source: ${viewed.source} · route: ${viewed.routeState}]\n\n${viewed.text}` }],
+        content: [{ type: "text" as const, text: `[source: ${viewed.source} · route: ${viewed.routeState} · v2: ${v2Lifecycle ?? "unknown"} · session: ${sessionLabel}]\n\n${viewed.text}` }],
       };
     } catch (error) {
       return {
