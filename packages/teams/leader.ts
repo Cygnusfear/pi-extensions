@@ -28,7 +28,10 @@ import {
   STUCK_WARNING_COOLDOWN_MS,
 } from "./types.js";
 import { createTeamsWidget } from "./widget.js";
-import type { TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload, WorkerHelloPayload } from "./v2/protocol.ts";
+import { buildTeamChannelId } from "./v2/mesh-adapter.ts";
+import type { TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload } from "./v2/protocol.ts";
+import type { TeamRecord } from "./v2/state.ts";
+import { appendFact as applyV2Fact, createTeamRecord, upsertWorker as upsertV2Worker } from "./v2/runtime-store.ts";
 import { createWorktree, resolveGitToplevel, workerWorktreePath } from "./worktree.js";
 
 /** Entry types that represent real agent work (talking, tool use). */
@@ -96,6 +99,7 @@ interface PersistedWorkerState {
 interface LeaderStateSnapshot {
   version: number;
   meshChannelId: string | null;
+  v2TeamId?: string | null;
   workers: Record<string, PersistedWorkerState>;
   savedAt: number;
   clearedAt?: number;
@@ -243,11 +247,11 @@ function readWorkerLifecycleFacts(sessionDir: string): WorkerLifecycleFacts {
       }
       if (event === "session_shutdown_close") {
         sawSessionShutdownClose = true;
-        if (data.isForced === true) lastForcedShutdownSeq = seq;
-      }
+        if (data.isForced === true) lastForcedShutdownSeq = seq;      }
       if (event === "worker_terminal") {
         const status = data.status === "done" || data.status === "quit" ? data.status : undefined;
-        if (status) {          lastTerminalSeq = seq;
+        if (status) {
+          lastTerminalSeq = seq;
           lastTerminalStatus = status;
           if (typeof data.summary === "string") lastTerminalSummary = data.summary;
         }
@@ -492,11 +496,11 @@ function scoreAttempt(attempt: WorkerAttempt): number {
   } catch {}
   try {
     const stderr = fs.readFileSync(path.join(attempt.sessionDir, "stderr.log"), "utf-8").trim();
-    if (stderr) score += 50;
-  } catch {}
+    if (stderr) score += 50;  } catch {}
   if (attempt.spawnError) score += 25;
   if (attempt.exitCode && attempt.exitCode !== 0) score += 10;
-  return score;}
+  return score;
+}
 
 function getBestAttempt(worker: WorkerHandle): WorkerAttempt {
   const attempts = worker.attempts ?? [];
@@ -708,6 +712,8 @@ export class TeamLeader {
     self: () => { id: string };
   } | null = null;
   private meshChannelId: string | null = null;
+  private v2TeamId: string | null = null;
+  private v2TeamRecord: TeamRecord | null = null;
   private readonly leaderEpoch = crypto.randomUUID();
   private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
   private pendingAmbientChat = new Map<string, string[]>();
@@ -739,12 +745,12 @@ export class TeamLeader {
     }, LEASE_HEARTBEAT_INTERVAL_MS);
   }
 
-  private stopLeaseHeartbeat() {
-    if (this.leaseTimer) {
+  private stopLeaseHeartbeat() {    if (this.leaseTimer) {
       clearInterval(this.leaseTimer);
       this.leaseTimer = null;
     }
   }
+
   private buildPersistedWorkers(): Record<string, PersistedWorkerState> {
     const workers: Record<string, PersistedWorkerState> = {};
     for (const [name, w] of this.workers) {
@@ -781,6 +787,7 @@ export class TeamLeader {
     return JSON.stringify({
       version: 3,
       meshChannelId: this.meshChannelId,
+      v2TeamId: this.v2TeamId,
       cleared,
       workers,
     });
@@ -811,6 +818,7 @@ export class TeamLeader {
       const snapshot: LeaderStateSnapshot = {
         version: 3,
         meshChannelId: this.meshChannelId,
+        v2TeamId: this.v2TeamId,
         workers,
         savedAt: Date.now(),
         ...(options?.cleared ? { clearedAt: Date.now() } : {}),
@@ -904,17 +912,21 @@ export class TeamLeader {
         return;
       }
 
-      this.workers.clear();
-      this.childProcesses.clear();
-      this.meshDelivered.clear();
+		this.workers.clear();
+		this.childProcesses.clear();
+		this.meshDelivered.clear();
+		this.v2TeamId = lastState.v2TeamId ?? this.v2TeamId;
 
-      if (lastState.meshChannelId && this.mesh) {
-        this.meshChannelId = lastState.meshChannelId;
-        this.mesh.joinChannel(this.meshChannelId);
-        this._wireMeshChannelEvents();
-      }
+		if (lastState.meshChannelId && this.mesh) {
+			this.meshChannelId = lastState.meshChannelId;
+			this.mesh.joinChannel(this.meshChannelId);
+			this._wireMeshChannelEvents();
+		}
+		if (this.v2TeamId) {
+			this.v2TeamRecord = createTeamRecord(this.v2TeamId, this.leaderEpoch);
+		}
 
-      const now = Date.now();
+		const now = Date.now();
       for (const [name, saved] of Object.entries(lastState.workers ?? {})) {
         const status = this.deriveRestoredStatus(saved, now);
         if (!status) continue;
@@ -950,6 +962,7 @@ export class TeamLeader {
           killedAt: saved.killedAt,
         };
         this.workers.set(name, handle);
+        this.upsertV2WorkerFromHandle(handle);
         if (status === "running" || status === "spawning") this.startActivityMonitor(name, handle);
         if (status === "done" || status === "grace") this.rearmPersistentLifecycle(name, handle, now);
       }
@@ -978,6 +991,35 @@ export class TeamLeader {
     this.mesh = mesh;
   }
 
+  private ensureV2Team(): TeamRecord {
+    if (!this.v2TeamId) {
+      this.v2TeamId = `team-${crypto.randomUUID().slice(0, 8)}`;
+    }    if (!this.v2TeamRecord || this.v2TeamRecord.teamId !== this.v2TeamId || this.v2TeamRecord.leaderEpoch !== this.leaderEpoch) {
+      this.v2TeamRecord = createTeamRecord(this.v2TeamId, this.leaderEpoch);
+    }
+    return this.v2TeamRecord;
+  }
+
+  private upsertV2WorkerFromHandle(worker: WorkerHandle): void {
+    const team = this.ensureV2Team();
+    const latestAttempt = worker.attempts?.at(-1);
+    this.v2TeamRecord = upsertV2Worker(team, {
+      workerId: worker.name,
+      name: worker.name,
+      attemptId: latestAttempt?.workerInstanceId ?? worker.workerInstanceId,
+      sessionMode: latestAttempt?.sessionFile ? { kind: "resume", sessionFile: latestAttempt.sessionFile } : { kind: "fresh" },
+      sessionDir: latestAttempt?.sessionDir ?? worker.sessionDir,
+      sessionFile: latestAttempt?.sessionFile ?? worker.sessionFile,
+      pid: latestAttempt?.pid ?? worker.pid,
+      startedAt: latestAttempt?.spawnedAt ?? worker.spawnedAt,
+    });
+  }
+
+  private appendV2Fact(workerName: string, fact: import("./v2/state.ts").WorkerFact): void {
+    if (!this.v2TeamRecord) return;
+    this.v2TeamRecord = applyV2Fact(this.v2TeamRecord, workerName, fact);
+  }
+
   /** Get the mesh client ID (for passing to workers as coordinator ID). */
   getMeshClientId(): string {
     return this.mesh?.self()?.id ?? "";
@@ -994,7 +1036,8 @@ export class TeamLeader {
         ? files[0]
         : files
           .map((f) => ({ f, mtime: fs.statSync(f).mtimeMs }))
-          .sort((a, b) => b.mtime - a.mtime)[0].f;      worker.sessionFile = picked;
+          .sort((a, b) => b.mtime - a.mtime)[0].f;
+      worker.sessionFile = picked;
       return picked;
     } catch {
       return null;
@@ -1201,9 +1244,9 @@ export class TeamLeader {
 				const peer = this.mesh.peers().find((pr) => pr.id === msg.from || pr.sessionId === msg.from);
 				if (peer?.nickname) peerNickname = peer.nickname;
       }
-
 			if (envelope.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") {
 				const commentText = (p as WorkerCommentPayload).text;
+        this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
         // Any worker channel activity tells us its current direct mesh route.
         this.linkWorkerRoute(worker, msg.from, peerNickname);
         // Instant progress — feed into existing notification pipeline
@@ -1221,6 +1264,7 @@ export class TeamLeader {
         this.queueAmbientChatForResumableWorkers(workerName, commentText);
 				this.renderWidget();
 	      } else if (envelope.type === "worker.hello") {
+        this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
         worker.status = "running";
         worker.lastActivityAt = Date.now();
         this.linkWorkerRoute(worker, msg.from, peerNickname);
@@ -1243,13 +1287,16 @@ export class TeamLeader {
 			if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
 			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
 
-			this.linkWorkerRoute(worker, msg.from);			if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") {
+			this.linkWorkerRoute(worker, msg.from);
+			if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") {
+        this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: (p as WorkerFinishPayload).summary });
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh done";
         // Don't emit completion here — process exit handler is authoritative.
         // But update the widget immediately.
         this.renderWidget();
       } else if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "quit") {
+        this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: (p as WorkerFinishPayload).summary });
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh quit";
         this.renderWidget();
@@ -1299,7 +1346,8 @@ export class TeamLeader {
 
     // Ensure a mesh channel exists for this delegation batch
     if (!this.meshChannelId && this.mesh) {
-      this.meshChannelId = `teams-${crypto.randomUUID().slice(0, 8)}`;
+      if (!this.v2TeamId) this.v2TeamId = `team-${crypto.randomUUID().slice(0, 8)}`;
+      this.meshChannelId = buildTeamChannelId(this.v2TeamId);
       this.mesh.joinChannel(this.meshChannelId);
       this._wireMeshChannelEvents();
     }
@@ -1316,13 +1364,16 @@ export class TeamLeader {
       hasTools,
       additionalPrompt,
       channelId: this.meshChannelId ?? undefined,
-      teamId: this.meshChannelId ?? ticketId,
+      teamId: this.v2TeamId ?? ticketId,
       leaderEpoch: this.leaderEpoch,
       coordinatorMeshId: this.getMeshClientId() || undefined,
       freeform,
     };
 
     const { process: child, handle } = spawnWorker(config);
+    this.upsertV2WorkerFromHandle(handle);
+    this.appendV2Fact(workerName, { type: "spawn_requested", at: Date.now() });
+    this.appendV2Fact(workerName, { type: "spawn_started", at: Date.now(), pid: handle.pid });
     if (freeform) handle.freeform = true;
     handle.spawnConfig = config;
     this.workers.set(workerName, handle);
@@ -1410,6 +1461,7 @@ export class TeamLeader {
 
     // Mark as exiting immediately so in-flight handleTicketChange calls bail out
     worker.status = exitCode === 0 ? "done" : "failed";
+    this.appendV2Fact(name, { type: "process_exit", at: Date.now(), exitCode });
 
     // Read ticket to get final state
     let lastNote = "(no notes left by worker)";
@@ -1440,8 +1492,7 @@ export class TeamLeader {
       if (recovery) {
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
         if (child) {
-          worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
-          worker.status = "running";
+          worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;          worker.status = "running";
           worker.routeState = "pending";
           worker.meshClientId = undefined;
           worker.lastActivityAt = Date.now();
@@ -1492,7 +1543,8 @@ export class TeamLeader {
     // If the worker exited without ever creating a session file, it never
     // reached Pi's init. Two common causes:
     //   1. Startup death (within a 5s startup window) — env/module/auth issue.
-    //   2. Session directory destroyed externally — another worker's cleanup    //      or a manual worktree prune deleted the directory while the worker
+    //   2. Session directory destroyed externally — another worker's cleanup
+    //      or a manual worktree prune deleted the directory while the worker
     //      was still alive.
     // In both cases, resumeWorker can't work (no session to continue).
     // We respawn from the original SpawnConfig once.
@@ -1689,8 +1741,7 @@ export class TeamLeader {
   }
 
   private async runActivityBatch() {
-    for (const name of this.monitoredWorkers) {
-      const worker = this.workers.get(name);
+    for (const name of this.monitoredWorkers) {      const worker = this.workers.get(name);
       if (!worker) { this.monitoredWorkers.delete(name); continue; }
       await this.refreshWorkerActivity(name, worker);
     }
@@ -1741,7 +1792,8 @@ export class TeamLeader {
           worker.lastOutputLabel = lastReal.label;
         }
       }
-    } catch {      // Session file may not exist yet.
+    } catch {
+      // Session file may not exist yet.
     }
   }
 
@@ -1937,9 +1989,9 @@ export class TeamLeader {
       this.notifiedTerminal.add(key);
     }
 
-    // turn_finished is informational — the worker finished a turn but is still
-    // resumable. Don't trigger a coordinator turn (it's not actionable yet).
-    if (event.type === "turn_finished") {
+		// turn_finished is informational — the worker finished a turn but is still
+		// resumable. Don't trigger a coordinator turn (it's not actionable yet).
+		if (event.type === "turn_finished") {
       const msg = formatPollEvent(event);
       this.notifyQueue.push({ msg, triggerTurn: false });
       void this.drainNotifyQueue();
@@ -1990,7 +2042,8 @@ export class TeamLeader {
     } finally {
       this.notifyDraining = false;
     }
-  }}
+  }
+}
 
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
