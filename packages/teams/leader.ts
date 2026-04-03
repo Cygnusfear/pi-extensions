@@ -1538,8 +1538,6 @@ export class TeamLeader {
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);
 
-    // Mark as exiting immediately so in-flight handleTicketChange calls bail out
-    worker.status = exitCode === 0 ? "done" : "failed";
     this.appendV2Fact(name, { type: "process_exit", at: Date.now(), exitCode });
 
     // Read ticket to get final state
