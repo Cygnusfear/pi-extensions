@@ -66,6 +66,8 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 
 	// Mesh channel for instant worker→coordinator communication
 	if (config.channelId) env.PI_TEAMS_CHANNEL_ID = config.channelId;
+	if (config.teamId) env.PI_TEAMS_TEAM_ID = config.teamId;
+	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
 	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
 	if (config.freeform) env.PI_TEAMS_FREEFORM = "1";
 

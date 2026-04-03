@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TeamLeader } from "./leader.ts";
 import type { WorkerHandle } from "./types.js";
+import { createWorkerCommentEnvelope } from "./v2/mesh-adapter.ts";
 
 function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 	const now = Date.now();
@@ -137,5 +138,44 @@ describe("TeamLeader state persistence", () => {
 		leader.stopPolling();
 		expect(listeners.channel.size).toBe(0);
 		expect(listeners.message.size).toBe(0);
+	});
+
+	test("mesh channel handler accepts v2 worker comment envelopes", () => {
+		const { leader } = makeHarness();
+		const notified: Array<{ type: string; comment?: string }> = [];
+		leader.notifyLLM = (event: { type: string; comment?: string }) => notified.push(event);
+		leader.queueAmbientChatForResumableWorkers = () => {};
+		leader.renderWidget = () => {};
+		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
+		const mesh = {
+			on: () => {},
+			off: () => {},
+			stop: () => {},
+			joinChannel: () => {},
+			peers: () => [],
+			self: () => ({ id: "mesh-self" }),
+			tell: () => {},
+			ask: async () => ({}),
+			chat: () => {},
+		};
+		leader.setMesh(mesh as any);
+		leader._wireMeshChannelEvents();
+
+		leader.meshChannelHandler({
+			from: "mesh-worker-1",
+			channel: "teams-v2-team-1",
+			payload: createWorkerCommentEnvelope({
+				teamId: "team-1",
+				leaderEpoch: "epoch-1",
+				workerId: "worker-1",
+				attemptId: "attempt-1",
+				seq: 1,
+				text: "hello from v2",
+			}),
+			timestamp: Date.now(),
+		});
+
+		expect(notified).toHaveLength(1);
+		expect(notified[0]).toMatchObject({ type: "comment", comment: "hello from v2" });
 	});
 });

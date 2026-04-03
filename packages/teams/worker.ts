@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
 import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
+import { createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
 
 function resolveWorkerMeshBinPath(): string | null {
 	const binName = process.platform === "win32" ? "pi-mesh.exe" : "pi-mesh";
@@ -39,8 +40,11 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	const autoCloseOnSessionShutdown = options.autoCloseOnSessionShutdown === true;
 
 	const channelId = process.env.PI_TEAMS_CHANNEL_ID;
+	const teamId = process.env.PI_TEAMS_TEAM_ID ?? ticketId;
+	const leaderEpoch = process.env.PI_TEAMS_LEADER_EPOCH ?? "legacy";
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
 	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
+	let meshSeq = 0;
 
 	if (!ticketId) {
 		console.error("[teams-worker] PI_TEAMS_TICKET_ID not set");
@@ -59,6 +63,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			try { mesh.tell(coordinatorId, payload); } catch {}
 		}
 	};
+	const nextSeq = () => ++meshSeq;
 
 	let ticketClosed = false;
 	let lastStopReason: string | undefined;
@@ -79,6 +84,17 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 		writeHeartbeat("worker_terminal", { status, summary: normalizedSummary });
 		meshTell({ kind, workerName, workerInstanceId, ticketId, event: "worker_terminal", terminalStatus: status, summary: normalizedSummary });
+		meshTell(
+			createWorkerFinishEnvelope({
+				teamId,
+				leaderEpoch,
+				workerId: workerName,
+				attemptId: workerInstanceId,
+				seq: nextSeq(),
+				status,
+				summary: normalizedSummary,
+			}),
+		);
 		try {
 			await pi.exec("mai", ["add-note", ticketId, note], { cwd, timeout: 5000 });
 			await pi.exec("mai", ["close", ticketId], { cwd, timeout: 5000 });
@@ -139,6 +155,27 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			return;
 		}
 		mesh.chat(channelId, { kind: "teams:init", workerName, workerInstanceId, ticketId });
+		mesh.chat(
+			channelId,
+			createWorkerHelloEnvelope({
+				teamId,
+				leaderEpoch,
+				workerId: workerName,
+				attemptId: workerInstanceId,
+				seq: nextSeq(),
+				runtime: {
+					protocolVersion: 1,
+					teamId,
+					leaderEpoch,
+					workerId: workerName,
+					attemptId: workerInstanceId,
+					coordinatorSessionId: coordinatorId ?? "",
+					channelId,
+					leasePath: leaseFile ?? "",
+					sessionMode: { kind: "fresh" },
+				},
+			}),
+		);
 	};
 
 	// Start mesh connection (non-blocking — if sidecar isn't available, mesh stays null)
@@ -231,6 +268,16 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				};
 			}
 			meshChat({ kind: "teams:comment", workerName, workerInstanceId, ticketId, message: params.message });
+			meshChat(
+				createWorkerCommentEnvelope({
+					teamId,
+					leaderEpoch,
+					workerId: workerName,
+					attemptId: workerInstanceId,
+					seq: nextSeq(),
+					text: params.message,
+				}),
+			);
 			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }] };
 		},
 	});

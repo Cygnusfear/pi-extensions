@@ -76,6 +76,8 @@ export interface SpawnConfig {
 	hasTools?: boolean;
 	additionalPrompt?: string;
 	channelId?: string;
+	teamId?: string;
+	leaderEpoch?: string;
 	coordinatorMeshId?: string;
 	freeform?: boolean;
 }

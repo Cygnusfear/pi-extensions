@@ -28,6 +28,7 @@ import {
   STUCK_WARNING_COOLDOWN_MS,
 } from "./types.js";
 import { createTeamsWidget } from "./widget.js";
+import type { TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload, WorkerHelloPayload } from "./v2/protocol.ts";
 import { createWorktree, resolveGitToplevel, workerWorktreePath } from "./worktree.js";
 
 /** Entry types that represent real agent work (talking, tool use). */
@@ -592,6 +593,12 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   return lines.join("\n");
 }
 
+function isWorkerToLeaderEnvelope(payload: unknown): payload is TeamEnvelope<unknown> {
+	if (!payload || typeof payload !== "object") return false;
+	const p = payload as Record<string, unknown>;
+	return p.version === 1 && p.from === "worker" && p.to === "leader" && typeof p.type === "string";
+}
+
 /**
  * Check if a worker actually did meaningful work by inspecting its session file.
  * Returns false if:
@@ -703,6 +710,7 @@ export class TeamLeader {
     self: () => { id: string };
   } | null = null;
   private meshChannelId: string | null = null;
+  private readonly leaderEpoch = crypto.randomUUID();
   private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
   private pendingAmbientChat = new Map<string, string[]>();
   private pendingAmbientTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1179,10 +1187,11 @@ export class TeamLeader {
 		if (!this.mesh) return;
 		if (this.meshChannelHandler || this.meshMessageHandler) return;
 		this.meshChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
-			const p = msg.payload as Record<string, unknown> | undefined;
+			const envelope = isWorkerToLeaderEnvelope(msg.payload) ? msg.payload : undefined;
+			const p = envelope ? envelope.payload as Record<string, unknown> | undefined : msg.payload as Record<string, unknown> | undefined;
 			if (!p || typeof p !== "object") return;
-			const workerName = (p.workerName as string) ?? "unknown";
-			const workerInstanceId = typeof p.workerInstanceId === "string" ? p.workerInstanceId : "";
+			const workerName = envelope?.workerId ?? (p.workerName as string) ?? "unknown";
+			const workerInstanceId = envelope?.attemptId ?? (typeof p.workerInstanceId === "string" ? p.workerInstanceId : "");
 			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
 			const worker = this.workers.get(workerName);
 			if (!worker) return;
@@ -1196,7 +1205,8 @@ export class TeamLeader {
 				if (peer?.nickname) peerNickname = peer.nickname;
       }
 
-      if (p.kind === "teams:comment" && typeof p.message === "string") {
+			if ((envelope?.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") || (p.kind === "teams:comment" && typeof p.message === "string")) {
+				const commentText = envelope?.type === "worker.comment" ? (p as WorkerCommentPayload).text : p.message as string;
         // Any worker channel activity tells us its current direct mesh route.
         this.linkWorkerRoute(worker, msg.from, peerNickname);
         // Instant progress — feed into existing notification pipeline
@@ -1205,15 +1215,15 @@ export class TeamLeader {
         // Track for dedup against polling (capped to last 50 per worker)
         if (!this.meshDelivered.has(workerName)) this.meshDelivered.set(workerName, new Set());
         const seen = this.meshDelivered.get(workerName)!;
-        seen.add(p.message);
+        seen.add(commentText);
         if (seen.size > 50) {
           const first = seen.values().next().value;
           if (first !== undefined) seen.delete(first);
         }
-        this.notifyLLM({ type: "comment", worker: { ...worker }, comment: p.message });
-        this.queueAmbientChatForResumableWorkers(workerName, p.message);
+        this.notifyLLM({ type: "comment", worker: { ...worker }, comment: commentText });
+        this.queueAmbientChatForResumableWorkers(workerName, commentText);
         this.renderWidget();
-      } else if (p.kind === "teams:init") {
+      } else if (envelope?.type === "worker.hello" || p.kind === "teams:init") {
         worker.status = "running";
         worker.lastActivityAt = Date.now();
         this.linkWorkerRoute(worker, msg.from, peerNickname);
@@ -1224,10 +1234,12 @@ export class TeamLeader {
 
     // Direct tells from workers (completion/failure) — these trigger a turn
 		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
-			const p = msg.payload as Record<string, unknown> | undefined;
-			if (!p || typeof p !== "object" || !String(p.kind ?? "").startsWith("teams:")) return;
-			const workerName = (p.workerName as string) ?? "unknown";
-			const workerInstanceId = typeof p.workerInstanceId === "string" ? p.workerInstanceId : "";
+			const envelope = isWorkerToLeaderEnvelope(msg.payload) ? msg.payload : undefined;
+			const p = envelope ? envelope.payload as Record<string, unknown> | undefined : msg.payload as Record<string, unknown> | undefined;
+			if (!p || typeof p !== "object") return;
+			if (!envelope && !String(p.kind ?? "").startsWith("teams:")) return;
+			const workerName = envelope?.workerId ?? (p.workerName as string) ?? "unknown";
+			const workerInstanceId = envelope?.attemptId ?? (typeof p.workerInstanceId === "string" ? p.workerInstanceId : "");
 			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
 			const worker = this.workers.get(workerName);
 			if (!worker) return;
@@ -1235,11 +1247,15 @@ export class TeamLeader {
 			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
 
 			this.linkWorkerRoute(worker, msg.from);
-			if (p.kind === "teams:done") {
+			if ((envelope?.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") || p.kind === "teams:done") {
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh done";
         // Don't emit completion here — process exit handler is authoritative.
         // But update the widget immediately.
+        this.renderWidget();
+      } else if (envelope?.type === "worker.finish" && (p as WorkerFinishPayload).status === "quit") {
+        worker.lastOutputAt = Date.now();
+        worker.lastOutputLabel = "mesh quit";
         this.renderWidget();
       }
     };
@@ -1304,6 +1320,8 @@ export class TeamLeader {
       hasTools,
       additionalPrompt,
       channelId: this.meshChannelId ?? undefined,
+      teamId: this.meshChannelId ?? ticketId,
+      leaderEpoch: this.leaderEpoch,
       coordinatorMeshId: this.getMeshClientId() || undefined,
       freeform,
     };
