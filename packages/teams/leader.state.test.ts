@@ -255,4 +255,26 @@ describe("TeamLeader state persistence", () => {
 			kind: "fresh",
 		});
 	});
+
+	test("upsertV2WorkerFromHandle preserves explicit attempt session mode", () => {
+		const { leader } = makeHarness();
+		const worker = makeWorker({
+			attempts: [{
+				workerInstanceId: "attempt-1",
+				pid: 12345,
+				sessionDir: "/tmp/session-dir",
+				sessionFile: "/tmp/session-dir/session.jsonl",
+				spawnedAt: Date.now(),
+				sessionMode: { kind: "fork", parentSessionFile: "/tmp/leader.jsonl", parentLeafId: "leaf-1", sessionFile: "/tmp/forked.jsonl" },
+			}],
+		});
+		leader.workers.set("worker-1", worker);
+		leader.upsertV2WorkerFromHandle(worker);
+		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({
+			kind: "fork",
+			parentSessionFile: "/tmp/leader.jsonl",
+			parentLeafId: "leaf-1",
+			sessionFile: "/tmp/forked.jsonl",
+		});
+	});
 });

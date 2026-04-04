@@ -1049,7 +1049,7 @@ export class TeamLeader {
       workerId: worker.name,
       name: worker.name,
       attemptId: latestAttempt?.workerInstanceId ?? worker.workerInstanceId,
-      sessionMode: latestAttempt?.sessionFile ? { kind: "resume", sessionFile: latestAttempt.sessionFile } : { kind: "fresh" },
+      sessionMode: latestAttempt?.sessionMode ?? (latestAttempt?.sessionFile ? { kind: "resume", sessionFile: latestAttempt.sessionFile } : { kind: "fresh" }),
       sessionDir: latestAttempt?.sessionDir ?? worker.sessionDir,
       sessionFile: latestAttempt?.sessionFile ?? worker.sessionFile,
       pid: latestAttempt?.pid ?? worker.pid,

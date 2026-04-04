@@ -654,7 +654,11 @@ function extractPayloadText(payload: unknown): string {
  *  teams:comment is allowed through — it's the only user-facing content. */
 function isTeamsLifecyclePayload(payload: unknown): boolean {
 	if (!payload || typeof payload !== "object") return false;
-	const kind = (payload as Record<string, unknown>).kind;
+	const p = payload as Record<string, unknown>;
+	if (p.version === 1 && typeof p.teamId === "string" && typeof p.type === "string" && (p.from === "worker" || p.from === "leader")) {
+		return true;
+	}
+	const kind = p.kind;
 	if (typeof kind !== "string" || !kind.startsWith("teams:")) return false;
 	return kind !== "teams:comment"; // comments are user content — show them
 }
@@ -812,6 +816,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			// Wire inbound tells into the conversation
 			mesh.on<MeshMessage>("message", (rawMsg) => {
 				const { message: msg, deliveryId, ackRequested, originalFrom } = unwrapInboundTell(rawMsg);
+				if (isTeamsLifecyclePayload(msg.payload)) return;
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
 				const shouldAppendNow = agentBusy || ackRequested === "visible";
