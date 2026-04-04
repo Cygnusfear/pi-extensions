@@ -1109,6 +1109,17 @@ export class TeamLeader {
     const leafId = sessionManager?.getLeafId?.();
     const sessionFile = leafId ? sessionManager?.createBranchedSession?.(leafId) : undefined;
     if (parentSessionFile && leafId && sessionFile) {
+      try {
+        const firstLine = fs.readFileSync(sessionFile, "utf-8").split("\n").find((line) => line.trim());
+        if (firstLine) {
+          const parsed = JSON.parse(firstLine) as { cwd?: unknown };
+          if (typeof parsed.cwd === "string" && parsed.cwd.length > 0 && !fs.existsSync(parsed.cwd)) {
+            return { kind: "fresh" };
+          }
+        }
+      } catch {
+        return { kind: "fresh" };
+      }
       return {
         kind: "fork",
         parentSessionFile,

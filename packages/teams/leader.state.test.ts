@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import path from "node:path";
 import { TeamLeader } from "./leader.ts";
 import type { WorkerHandle } from "./types.js";
 import { createWorkerCommentEnvelope } from "./v2/mesh-adapter.ts";
@@ -219,16 +221,19 @@ describe("TeamLeader state persistence", () => {
 
 	test("buildSpawnSessionMode prefers a real forked session when branching is available", () => {
 		const { leader } = makeHarness();
+		const forked = path.join(process.cwd(), `.tmp-fork-${Date.now()}.jsonl`);
+		fs.writeFileSync(forked, JSON.stringify({ type: "session", version: 3, id: "forked", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
 		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
 		leader.ctx.sessionManager.getLeafId = () => "leaf-1";
-		leader.ctx.sessionManager.createBranchedSession = () => "/tmp/forked.jsonl";
+		leader.ctx.sessionManager.createBranchedSession = () => forked;
 
 		expect(leader.buildSpawnSessionMode()).toEqual({
 			kind: "fork",
 			parentSessionFile: "/tmp/leader.jsonl",
 			parentLeafId: "leaf-1",
-			sessionFile: "/tmp/forked.jsonl",
+			sessionFile: forked,
 		});
+		fs.rmSync(forked, { force: true });
 	});
 
 	test("buildSpawnSessionMode falls back to fresh when branching is unavailable", () => {
