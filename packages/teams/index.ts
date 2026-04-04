@@ -38,12 +38,12 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("team", {
-		description: "Team control: /team list | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking",
+		description: "Team control: /team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking",
 		handler: async (args, ctx) => {
 			const input = (args ?? "").trim();
 			const show = (text: string, type: "info" | "warning" | "error" = "info") => ctx.ui.notify(text, type);
 			if (!input || input === "help") {
-				show("/team list | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking");
+				show("/team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking");
 				return;
 			}
 
@@ -56,6 +56,40 @@ export default function (pi: ExtensionAPI) {
 			if (input.startsWith("kill ")) {
 				const name = input.slice(5).trim();
 				const res = await runTeamsAction(pi, leader, { action: "kill", name }, ctx);
+				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
+				return;
+			}
+
+			if (input === "runtime") {
+				const res = await runTeamsAction(pi, leader, { action: "runtime" }, ctx);
+				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
+				return;
+			}
+
+			if (input.startsWith("view ")) {
+				const name = input.slice(5).trim();
+				const res = await runTeamsAction(pi, leader, { action: "view", name }, ctx);
+				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
+				return;
+			}
+
+			if (input.startsWith("tell_all ")) {
+				const message = input.slice(9).trim();
+				const res = await runTeamsAction(pi, leader, { action: "tell_all", message }, ctx);
+				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
+				return;
+			}
+
+			if (input.startsWith("tell ")) {
+				const rest = input.slice(5).trim();
+				const space = rest.indexOf(" ");
+				if (space <= 0) {
+					show("Usage: /team tell <name> <message>", "warning");
+					return;
+				}
+				const name = rest.slice(0, space).trim();
+				const message = rest.slice(space + 1).trim();
+				const res = await runTeamsAction(pi, leader, { action: "tell", name, message }, ctx);
 				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
 				return;
 			}

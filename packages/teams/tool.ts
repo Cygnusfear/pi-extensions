@@ -5,6 +5,10 @@ import type { TeamLeader } from "./leader.js";
 import { resolveTemplate, listTemplates } from "./templates.js";
 import { projectWidgetStatus } from "./widget.js";
 
+function formatActionError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Maps team template names to ticket creation semantics.
  * Templates not listed here default to normal actionable tickets.
@@ -176,7 +180,7 @@ async function runTeamsAction(
       };
     } catch (error) {
       return {
-        content: [{ type: "text" as const, text: `Error: ${error}` }],
+        content: [{ type: "text" as const, text: `Error: ${formatActionError(error)}` }],
         isError: true,
       };
     }
