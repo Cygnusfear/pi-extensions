@@ -82,6 +82,8 @@ export interface SpawnConfig {
 	teamId?: string;
 	leaderEpoch?: string;
 	coordinatorMeshId?: string;
+	ticketCwd?: string;
+	ticketText?: string;
 	freeform?: boolean;
 	sessionMode?: WorkerSessionMode;
 }

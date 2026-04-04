@@ -51,6 +51,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		}
 	})();
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
+	const ticketCwd = process.env.PI_TEAMS_TICKET_CWD;
 	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
 	let meshSeq = 0;
 
@@ -87,6 +88,8 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	let agentEndFired = false;
 
+	const getTicketCwd = (cwd: string) => ticketCwd ?? cwd;
+
 	const finalizeTask = async (cwd: string, status: TerminalStatus, summary: string) => {
 		if (terminalStatus) return;
 		terminalStatus = status;
@@ -110,8 +113,9 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 			}),
 		);
 		try {
-			await pi.exec("mai", ["add-note", ticketId, note], { cwd, timeout: 5000 });
-			await pi.exec("mai", ["close", ticketId], { cwd, timeout: 5000 });
+			const effectiveCwd = getTicketCwd(cwd);
+			await pi.exec("mai", ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
+			await pi.exec("mai", ["close", ticketId], { cwd: effectiveCwd, timeout: 5000 });
 		} catch {
 			// best effort
 		}
@@ -267,7 +271,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		parameters: CommentParams,
 		async execute(_id, params: { message: string }, _signal, _onUpdate, ctx) {
 			const result = await pi.exec("mai", ["add-note", ticketId, params.message], {
-				cwd: ctx.cwd,
+				cwd: getTicketCwd(ctx.cwd),
 				timeout: 5000,
 			});
 			if (result.code !== 0) {

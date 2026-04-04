@@ -5,7 +5,7 @@ import path from "node:path";
 import { buildLeaderLeasePath } from "./lease.js";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
-export function buildWorkerPrompt(ticketId: string, workerName: string, additionalPrompt?: string, freeform?: boolean, coordinatorMeshId?: string): string {
+export function buildWorkerPrompt(ticketId: string, workerName: string, ticketText?: string, additionalPrompt?: string, freeform?: boolean, coordinatorMeshId?: string, ticketCwd?: string): string {
 	const lines = [
 		`You are worker "${workerName}". You have been assigned ticket ${ticketId}.`,
 		"",
@@ -22,12 +22,18 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, addition
 		lines.push("Role:", additionalPrompt, "");
 	}
 
+	const ticketReadHint = ticketCwd
+		? `Read ticket metadata from the coordinator ticket cwd: (cd ${ticketCwd} && mai show ${ticketId})`
+		: `Read ticket metadata: mai show ${ticketId}`;
+	if (ticketText?.trim()) {
+		lines.push("Ticket body:", ticketText.trim(), "");
+	}
 	if (freeform) {
 		lines.push(
 			"Instructions:",
-			`1. Read your ticket: mai show ${ticketId}`,
-			"2. Do the work described in the ticket.",
-			`3. Comment on the ticket as you work: mai add-note ${ticketId} "your progress"`,
+			ticketReadHint,
+			"Do the work described in the ticket body above.",
+			"Comment on the ticket as you work using team_comment.",
 			"",
 			"This is a freeform/interactive session. The coordinator will send you messages — respond to them.",
 			"Use team_comment to communicate. Do NOT close the ticket yourself — the coordinator will end the session.",
@@ -36,11 +42,11 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, addition
 	} else {
 		lines.push(
 			"Instructions:",
-			`1. Read your ticket: mai show ${ticketId}`,
-			"2. Do the work described in the ticket.",
-			`3. Use team_comment to report progress while you work.`,
-			`4. When done, call team_finish with status=done and a concise summary.`,
-			`5. If you are quitting or blocked, call team_finish with status=quit and explain why.`,
+			ticketReadHint,
+			"Do the work described in the ticket body above.",
+			`Use team_comment to report progress while you work.`,
+			`When done, call team_finish with status=done and a concise summary.`,
+			`If you are quitting or blocked, call team_finish with status=quit and explain why.`,
 			"",
 			"GUARD PROTOCOL: YOU MUST DECLARE YOUR TERMINAL STATE VIA team_finish.",
 			"Do not end by only writing raw mai notes or closing the ticket manually.",
@@ -69,6 +75,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	if (config.teamId) env.PI_TEAMS_TEAM_ID = config.teamId;
 	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
 	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
+	if (config.ticketCwd) env.PI_TEAMS_TICKET_CWD = config.ticketCwd;
 	if (config.freeform) env.PI_TEAMS_FREEFORM = "1";
 	if (config.sessionMode) env.PI_TEAMS_SESSION_MODE = JSON.stringify(config.sessionMode);
 
@@ -104,7 +111,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		args.push("--session", sessionFile);
 	}
 	if (config.model) args.push("--model", config.model);
-	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.additionalPrompt, config.freeform, config.coordinatorMeshId));
+	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.ticketText, config.additionalPrompt, config.freeform, config.coordinatorMeshId, config.ticketCwd));
 
 	const child = spawn("pi", args, {
 		cwd: config.cwd,

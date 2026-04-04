@@ -66,6 +66,7 @@ const TeamsParams = Type.Object({
     ),
   ),
   name: Type.Optional(Type.String({ description: "Worker name for kill/tell action" })),
+  names: Type.Optional(Type.Array(Type.String({ description: "Worker names for bulk kill action" }))),
   message: Type.Optional(Type.String({ description: "Message to send to worker(s) for tell/tell_all action" })),
   start: Type.Optional(Type.Number({ description: "View window start offset. Defaults to -20." })),
   end: Type.Optional(Type.Number({ description: "View window end offset. Defaults to 0 (newest entry)." })),
@@ -87,6 +88,7 @@ type TeamsActionParams = {
   action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
   tasks?: Array<{ text: string; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean }>;
   name?: string;
+  names?: string[];
   message?: string;
   start?: number;
   end?: number;
@@ -137,10 +139,11 @@ async function runTeamsAction(
   }
 
   if (action === "kill") {
-    if (!params.name)
-      return { content: [{ type: "text" as const, text: "Provide worker name." }], isError: true };
-    await leader.kill(params.name);
-    return { content: [{ type: "text" as const, text: `Killed worker "${params.name}"` }] };
+    const names = params.names?.length ? params.names : (params.name ? [params.name] : []);
+    if (names.length === 0)
+      return { content: [{ type: "text" as const, text: "Provide worker name(s)." }], isError: true };
+    for (const name of names) await leader.kill(name);
+    return { content: [{ type: "text" as const, text: names.length === 1 ? `Killed worker "${names[0]}"` : `Killed ${names.length} workers` }] };
   }
 
   if (action === "kill_all") {
@@ -249,7 +252,7 @@ async function runTeamsAction(
       await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
 
       try {
-        const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef);
+        const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef, task.text);
         const modelInfo = effectiveModel ? ` [${effectiveModel}]` : "";
         const toolsInfo = task.hasTools ? " [has-tools]" : "";
         const tmplInfo = task.template ? ` (template: ${task.template})` : "";

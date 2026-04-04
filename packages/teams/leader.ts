@@ -1482,6 +1482,7 @@ export class TeamLeader {
     additionalPrompt?: string,
     freeform?: boolean,
     baseRef?: string,
+    ticketText?: string,
   ): Promise<WorkerHandle> {
     if (!this.ctx) throw new Error("Leader context not set");
 
@@ -1540,6 +1541,8 @@ export class TeamLeader {
       teamId: this.v2TeamId ?? ticketId,
       leaderEpoch: this.leaderEpoch,
       coordinatorMeshId: this.getMeshClientId() || undefined,
+      ticketCwd: this.ctx.cwd,
+      ticketText,
       freeform,
       sessionMode: this.buildSpawnSessionMode(),
     };
