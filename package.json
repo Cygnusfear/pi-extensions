@@ -23,6 +23,7 @@
       "./packages/code-review-guard/extensions/code-review-guard.ts",
       "./packages/context/extensions/context.ts",
       "./packages/context7/extensions/context7.ts",
+      "./packages/cwd/extensions/cwd.ts",
       "./packages/core-edit-ui/extensions/core-edit-ui.ts",
       "./packages/core-read-ui/extensions/core-read-ui.ts",
       "./packages/default-prompt/extensions/default-prompt.ts",
