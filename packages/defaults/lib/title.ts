@@ -101,8 +101,8 @@ export async function generateTitle(
     );
   }
 
-  const apiKey = await ctx.modelRegistry.getApiKey(model);
-  if (!apiKey) {
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) {
     throw new Error(`No API key for provider: ${TITLE_MODEL.provider}`);
   }
 
@@ -141,7 +141,7 @@ export async function generateTitle(
   const response = await completeSimple(
     model,
     { systemPrompt: TITLE_PROMPT, messages },
-    { apiKey },
+    { apiKey: auth.apiKey, headers: auth.headers },
   );
 
   const raw = response.content

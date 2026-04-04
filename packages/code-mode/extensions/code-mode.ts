@@ -1936,7 +1936,7 @@ export default function (pi: ExtensionAPI) {
 			const styled = preview.map((l: string) => theme.fg("toolOutput", l)).join("\n");
 
 			if (remaining > 0) {
-				const hint = theme.fg("muted", `... (${remaining} more lines,`) + ` ${keyHint("expandTools", "to expand")})`;
+				const hint = theme.fg("muted", `... (${remaining} more lines,`) + ` ${keyHint("app.tools.expand", "to expand")})`;
 				return new Text(`${header}\n\n${styled}\n${hint}`, 0, 0);
 			}
 

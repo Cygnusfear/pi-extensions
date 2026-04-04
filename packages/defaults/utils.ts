@@ -8,7 +8,9 @@ export function getPiVersion(): string {
       import.meta.dirname,
       "../../package.json",
     );
-    const packageJson = safeJsonParse(fs.readFileSync(packageJsonPath, "utf8"));
+    const packageJson = safeJsonParse<{
+      devDependencies?: Record<string, string>;
+    }>(fs.readFileSync(packageJsonPath, "utf8"));
     return (
       packageJson.devDependencies?.["@mariozechner/pi-coding-agent"] ||
       "unknown"

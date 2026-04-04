@@ -42,12 +42,12 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("team", {
-		description: "Team control: /team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking",
+		description: "Team control: /team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name...> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking",
 		handler: async (args, ctx) => {
 			const input = (args ?? "").trim();
 			const show = (text: string, type: "info" | "warning" | "error" = "info") => ctx.ui.notify(text, type);
 			if (!input || input === "help") {
-				show("/team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking");
+				show("/team list | /team runtime | /team view <name> | /team tell <name> <msg> | /team tell_all <msg> | /team kill <name...> | /team kill_all | /team delegate <worker[@model]>:<task> | /team thinking");
 				return;
 			}
 
@@ -58,8 +58,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (input.startsWith("kill ")) {
-				const name = input.slice(5).trim();
-				const res = await runTeamsAction(pi, leader, { action: "kill", name }, ctx);
+				const names = input.slice(5).trim().split(/\s+/).filter(Boolean);
+				const res = await runTeamsAction(pi, leader, { action: "kill", names }, ctx);
 				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
 				return;
 			}

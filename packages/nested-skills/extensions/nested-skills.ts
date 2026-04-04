@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { homedir } from "os";
 import { basename, dirname, join, resolve } from "path";
 
 /**
@@ -10,7 +11,8 @@ import { basename, dirname, join, resolve } from "path";
  * discovered — all children are invisible.
  *
  * This extension rescans skill directories for nested SKILL.md files that
- * pi missed, and injects them into the system prompt's <available_skills>.
+ * pi missed, and contributes them back through resources_discover so pi
+ * loads them as real skills instead of prompt-only ghosts.
  */
 
 interface NestedSkill {
@@ -19,12 +21,15 @@ interface NestedSkill {
   filePath: string;
 }
 
+interface PiSettings {
+  skills?: string[];
+  packages?: string[];
+}
+
 const SKIP_DIRS = new Set([
   "node_modules", ".git", "bin", "scripts", "assets",
   "references", "workflows", "templates",
 ]);
-
-const STATUS_KEY = "nested-skills";
 
 function escapeXml(str: string): string {
   return str
@@ -51,6 +56,24 @@ function parseFrontmatter(content: string): Record<string, string> {
     }
   }
   return result;
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const raw = readFileSync(filePath, "utf-8").replace(/,(\s*[}\]])/g, "$1");
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function resolveSettingPath(baseDir: string, value: string): string | null {
+  if (!value || /^\w+:/.test(value)) return null;
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  return resolve(baseDir, value);
 }
 
 /** Try to load a SKILL.md and return a NestedSkill, or null if invalid. */
@@ -113,18 +136,69 @@ function findNestedSkills(rootDir: string): NestedSkill[] {
 /**
  * Read pi.skills paths from the project's package.json.
  */
-function getSkillPaths(cwd: string): string[] {
-  const pkgPath = join(cwd, "package.json");
-  if (!existsSync(pkgPath)) return [];
+function getPackageSkillPaths(packageDir: string): string[] {
+  const paths: string[] = [];
+  const pkg = readJsonFile<{ pi?: { skills?: string[] } }>(join(packageDir, "package.json"));
 
-  try {
-    const raw = readFileSync(pkgPath, "utf-8").replace(/,(\s*[}\]])/g, "$1");
-    const pkg = JSON.parse(raw);
-    const paths: string[] = pkg?.pi?.skills ?? [];
-    return paths.map((p: string) => resolve(cwd, p));
-  } catch {
-    return [];
+  for (const skillPath of pkg?.pi?.skills ?? []) {
+    paths.push(resolve(packageDir, skillPath));
   }
+
+  const conventionalSkillsDir = join(packageDir, "skills");
+  if (existsSync(conventionalSkillsDir)) paths.push(conventionalSkillsDir);
+
+  return paths;
+}
+
+function getAncestorSkillPaths(cwd: string): string[] {
+  const paths: string[] = [];
+  let current = resolve(cwd);
+
+  while (true) {
+    paths.push(join(current, ".pi", "skills"));
+    paths.push(join(current, ".agents", "skills"));
+
+    if (existsSync(join(current, ".git"))) break;
+
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return paths;
+}
+
+function getSettingsSkillPaths(settingsPath: string): string[] {
+  const settingsDir = dirname(settingsPath);
+  const settings = readJsonFile<PiSettings>(settingsPath);
+  const paths: string[] = [];
+
+  for (const skillPath of settings?.skills ?? []) {
+    const resolved = resolveSettingPath(settingsDir, skillPath);
+    if (resolved) paths.push(resolved);
+  }
+
+  for (const packagePath of settings?.packages ?? []) {
+    const packageDir = resolveSettingPath(settingsDir, packagePath);
+    if (!packageDir) continue;
+
+    paths.push(...getPackageSkillPaths(packageDir));
+  }
+
+  return paths;
+}
+
+function getSkillPaths(cwd: string): string[] {
+  const resolvedPaths = [
+    ...getPackageSkillPaths(cwd),
+    ...getAncestorSkillPaths(cwd),
+    ...getSettingsSkillPaths(join(homedir(), ".pi", "agent", "settings.json")),
+    ...getSettingsSkillPaths(join(cwd, ".pi", "settings.json")),
+    join(homedir(), ".pi", "agent", "skills"),
+    join(homedir(), ".agents", "skills"),
+  ];
+
+  return [...new Set(resolvedPaths.filter((skillPath) => existsSync(skillPath)))];
 }
 
 /**
@@ -190,20 +264,29 @@ function deduplicateByName(skills: NestedSkill[]): NestedSkill[] {
 export default function nestedSkillsExtension(pi: ExtensionAPI) {
   let cachedSkillsXml: string | null = null;
   let cachedCount = 0;
+  let cachedSkillPaths: string[] = [];
 
   function scan(cwd: string, notify: (msg: string, level: "info") => void) {
     const nested = discoverNestedSkills(cwd);
     if (nested.length === 0) {
       cachedSkillsXml = null;
       cachedCount = 0;
+      cachedSkillPaths = [];
       return;
     }
 
     const unique = deduplicateByName(nested);
     cachedSkillsXml = formatSkillsXml(unique);
     cachedCount = unique.length;
+    cachedSkillPaths = unique.map((skill) => dirname(skill.filePath));
     notify(`+${cachedCount} nested skills discovered`, "info");
   }
+
+  pi.on("resources_discover", (event) => {
+    scan(event.cwd, () => {});
+    if (cachedSkillPaths.length === 0) return;
+    return { skillPaths: cachedSkillPaths };
+  });
 
   // Scan on session start and on reload (session_start fires for both)
   pi.on("session_start", (_event, ctx) => {
@@ -211,24 +294,5 @@ export default function nestedSkillsExtension(pi: ExtensionAPI) {
       // Delay so our message appears after pi's own "Loaded X skills..." output
       setTimeout(() => ctx.ui.notify(msg, level), 100);
     });
-  });
-
-  // Inject cached nested skills into the system prompt
-  pi.on("before_agent_start", (event) => {
-    if (!cachedSkillsXml) return;
-
-    const marker = "</available_skills>";
-    const prompt = event.systemPrompt;
-
-    if (prompt.includes(marker)) {
-      return {
-        systemPrompt: prompt.replace(marker, `${cachedSkillsXml}\n${marker}`),
-      };
-    }
-
-    return {
-      systemPrompt:
-        prompt + `\n\n<available_skills>\n${cachedSkillsXml}\n</available_skills>`,
-    };
   });
 }

@@ -203,8 +203,8 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     currentCtx = ctx;
     
     // Store thinking level getter if available
-    if (typeof ctx.getThinkingLevel === 'function') {
-      getThinkingLevelFn = () => ctx.getThinkingLevel();
+    if (typeof pi.getThinkingLevel === 'function') {
+	  getThinkingLevelFn = () => pi.getThinkingLevel();
     }
     
     if (enabled && ctx.hasUI) {

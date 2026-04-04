@@ -1,1 +1,1 @@
-I notice you've been piecemealing. What I need for you is to do all these tasks as a SINGLE Unit of Work. Do not tell me 'now I'm going to do X' and then 'now I'm going to do Y'. You complete the WHOLE UOW. Then you come to me and say this is completed.
+GUARD PROTOCOL - All remaining phases / slices / steps are now one single UOW- don't talk to me or report inbetween, just continue autonomously, go

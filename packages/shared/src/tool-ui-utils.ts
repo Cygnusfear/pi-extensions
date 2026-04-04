@@ -37,7 +37,7 @@ const textFromToolContent = (content: any): string => {
 };
 
 export const renderToolResult = (result: any, expanded: boolean, theme: any): Text => {
-	const hint = keyHint("expandTools", "ctrl+o to expand");
+	const hint = keyHint("app.tools.expand", "ctrl+o to expand");
 	const timing: Timing | undefined = result?.details?.timing;
 
 	const header = timing
@@ -81,7 +81,7 @@ export const attachTiming = <TDetails extends Record<string, any>>(
  * slop above it. The diff IS the result.
  */
 export const renderDiffResult = (result: any, expanded: boolean, theme: any): Text => {
-	const hint = keyHint("expandTools", "ctrl+o to expand");
+	const hint = keyHint("app.tools.expand", "ctrl+o to expand");
 	const timing: Timing | undefined = result?.details?.timing;
 
 	// Try to render a beautiful diff

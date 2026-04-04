@@ -179,9 +179,12 @@ export default function (pi: ExtensionAPI) {
 		description: HASHLINE_TOOL_DESCRIPTION,
 		parameters: HashReadParams,
 		renderResult(result, options, theme) {
-			const filePath: string | undefined = result?.details?.path;
-			const rawLines: string[] | undefined = result?.details?.rawLines;
-			const startLine: number = result?.details?.startLine ?? 1;
+			const details = result?.details as
+				| { path?: string; rawLines?: string[]; startLine?: number }
+				| undefined;
+			const filePath = details?.path;
+			const rawLines = details?.rawLines;
+			const startLine = details?.startLine ?? 1;
 
 			if (filePath && rawLines?.length) {
 				try {
@@ -201,7 +204,7 @@ export default function (pi: ExtensionAPI) {
 						.join("\n");
 					const out = `${header}\n${body}`;
 					const lines = out.split("\n");
-					const hint = keyHint("expandTools", "ctrl+o to expand");
+					const hint = keyHint("app.tools.expand", "ctrl+o to expand");
 					if (!options.expanded && lines.length > 42) {
 						const shown = lines.slice(0, 42).join("\n");
 						const remaining = lines.length - 42;

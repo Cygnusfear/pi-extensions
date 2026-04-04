@@ -170,7 +170,10 @@ export async function refreshActivitySummary(
   const recentConversation = summarizeRecentMessages(ctx.sessionManager.getBranch());
   if (!recentConversation) return previous;
 
-  const apiKey = await ctx.modelRegistry.getApiKey(model);
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) {
+    throw new Error(auth.error);
+  }
   const prompt = buildPrompt(pi.getSessionName(), previous, recentConversation);
   const userMessage: UserMessage = {
     role: "user",
@@ -185,7 +188,7 @@ export async function refreshActivitySummary(
         "You summarize what an active coding session is doing. Reply with JSON only. Keep it short, concrete, and human-readable.",
       messages: [userMessage as Message],
     },
-    { apiKey },
+    { apiKey: auth.apiKey, headers: auth.headers },
   );
 
   if (response.stopReason === "aborted") {

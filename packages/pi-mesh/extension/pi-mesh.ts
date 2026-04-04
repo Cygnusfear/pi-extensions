@@ -254,7 +254,7 @@ export class PiMesh {
 		});
 	}
 
-	sendTellReceipt(sessionId: string, ack: MeshTellAckEnvelope): void {
+	sendTellReceipt(sessionId: string, ack: MeshTellAckEnvelope | MeshAskReceiptEnvelope): void {
 		const envelope: MeshMessage = {
 			from: this.myClientId,
 			topic: `session/${sessionId}`,
@@ -683,6 +683,19 @@ function isMeshViewRequest(payload: unknown): payload is { kind: "mesh:view"; st
 	return !!payload && typeof payload === "object" && (payload as Record<string, unknown>).kind === "mesh:view";
 }
 
+function getInboundDeliveryOptions(
+	agentBusy: boolean,
+	requestVisible: boolean,
+): { triggerTurn?: boolean; deliverAs?: "followUp" | "steer" | "nextTurn" } {
+	if (agentBusy) {
+		return { deliverAs: "followUp", triggerTurn: false };
+	}
+	if (requestVisible) {
+		return {};
+	}
+	return { deliverAs: "followUp", triggerTurn: true };
+}
+
 // ── Extension entry point ─────────────────────────────────────────────────────
 
 export default function piMeshExtension(pi: ExtensionAPI) {
@@ -819,10 +832,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				if (isTeamsLifecyclePayload(msg.payload)) return;
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
-				const shouldAppendNow = agentBusy || ackRequested === "visible";
-				const deliveryOptions = shouldAppendNow
-					? { deliverAs: "appendNow" as const }
-					: { deliverAs: "followUp" as const, triggerTurn: true };
+				const requestVisible = ackRequested === "visible";
+				const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound",
@@ -833,7 +844,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					deliveryOptions,
 				);
 				if (deliveryId && originalFrom && ackRequested) {
-					const phase: MeshTellReceiptPhase = shouldAppendNow ? "visible" : "delivered";
+					const phase: MeshTellReceiptPhase = !agentBusy && requestVisible ? "visible" : "delivered";
 					mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, phase));
 				}
 			});
@@ -885,10 +896,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const senderLabel = req.from.id !== "unknown" ? getPeerLabel(req.from) : "unknown";
 				const ts = new Date().toLocaleTimeString();
 				const payloadText = extractPayloadText(req.payload);
-				const shouldAppendNow = agentBusy || req.askReceiptRequested === "visible";
-				const deliveryOptions = shouldAppendNow
-					? { deliverAs: "appendNow" as const }
-					: { deliverAs: "followUp" as const, triggerTurn: true };
+				const requestVisible = req.askReceiptRequested === "visible";
+				const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound-ask",
@@ -897,7 +906,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					},
 					deliveryOptions,
 				);
-				if (req.askId && req.askReceiptRequested === "visible" && req.from.id !== "unknown") {
+				if (req.askId && !agentBusy && requestVisible && req.from.id !== "unknown") {
 					mesh.sendTellReceipt(req.from.id, buildMeshAskReceipt(req.askId, mesh.self().id, "visible"));
 				}
 			});

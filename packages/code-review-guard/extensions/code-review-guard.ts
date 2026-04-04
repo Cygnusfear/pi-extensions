@@ -5,7 +5,7 @@
  * tool result. Sits right after the code the LLM just saw.
  */
 
-import type { ExtensionAPI, ToolResultEvent, ToolResultEventResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolResultEvent } from "@mariozechner/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 
@@ -23,7 +23,7 @@ export default function (pi: ExtensionAPI) {
   const promptPath = join(dirname(__dirname), "prompts", "codehealth.md");
   const guard = "\n---\n" + readFileSync(promptPath, "utf-8").trim();
 
-  pi.on("tool_result", (event: ToolResultEvent): ToolResultEventResult | void => {
+  pi.on("tool_result", (event: ToolResultEvent) => {
     if (event.isError) return;
     if (!CODE_READ_TOOLS.has(event.toolName)) return;
 

@@ -340,7 +340,7 @@ export default function (pi: ExtensionAPI) {
 				for (const line of details.summaryLines) {
 					text += `\n  ${theme.fg("dim", line)}`;
 				}
-				text += `\n  ${theme.fg("dim", `(${keyHint("expandTools", "to expand")})`)}`;
+				text += `\n  ${theme.fg("dim", `(${keyHint("app.tools.expand", "to expand")})`)}`;
 			}
 
 			return new Text(text, 0, 0);
@@ -425,7 +425,7 @@ export default function (pi: ExtensionAPI) {
 				for (const line of details.summaryLines) {
 					text += `\n  ${theme.fg("dim", line)}`;
 				}
-				text += `\n  ${theme.fg("dim", `(${keyHint("expandTools", "to expand")})`)}`;
+				text += `\n  ${theme.fg("dim", `(${keyHint("app.tools.expand", "to expand")})`)}`;
 			}
 
 			return new Text(text, 0, 0);

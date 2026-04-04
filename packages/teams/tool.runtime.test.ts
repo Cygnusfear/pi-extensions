@@ -40,4 +40,15 @@ describe("teams tool runtime action", () => {
 		const result = await runTeamsAction(pi, leader, { action: 'delegate', tasks: [{ text: 'x', assignee: 'dup' }], useWorktree: true }, { cwd: '/tmp' } as any);
 		expect(result.content[0]?.text).toContain('already active');
 	});
+
+	test("kill action accepts an array of worker names", async () => {
+		const killed: string[] = [];
+		const leader = {
+			setContext: () => {},
+			kill: async (name: string) => { killed.push(name); },
+		} as any;
+		const result = await runTeamsAction({} as any, leader, { action: 'kill', names: ['a', 'b'] }, { cwd: '/tmp' } as any);
+		expect(killed).toEqual(['a', 'b']);
+		expect(result.content[0]?.text).toContain('Killed 2 workers');
+	});
 });

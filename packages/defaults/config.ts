@@ -29,5 +29,4 @@ export const configLoader = new ConfigLoader<
   DefaultsConfig,
   ResolvedDefaultsConfig
 >("defaults", DEFAULT_CONFIG, {
-  scopes: ["global"],
 });

@@ -53,7 +53,7 @@ const MIDMORTEM_PROMPT = `You are writing a mid-mortem — a checkpoint document
 You will receive a conversation transcript. Your job:
 
 1. Read it carefully.
-2. Create a tk ticket that captures the session state as a mid-mortem.
+2. Create a mai ticket that captures the session state as a mid-mortem.
 
 The ticket should contain:
 - **What was being worked on** — the goal and current task
@@ -63,12 +63,12 @@ The ticket should contain:
 - **Gotchas & learnings** — bugs hit, surprising findings, things a future agent should know
 
 Run this command to create the ticket:
-tk create "Mid-mortem: <brief topic>" -d "<one-line summary>" -t task --tags mid-mortem,compaction -p 3
+mai ticket "Mid-mortem: <brief topic>" task -d "<one-line summary>" --tags mid-mortem,compaction -p 3
 
 Then write the full mid-mortem content to the ticket file using the write tool.
 
 Be concise but complete. This is for a future agent picking up the work.
-After creating and writing the ticket, close it immediately (tk close <id>).
+After creating and writing the ticket, close it immediately (mai close <id>).
 Then exit.`;
 
 export default function (pi: ExtensionAPI) {
