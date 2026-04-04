@@ -3,6 +3,10 @@ import { TeamLeader } from "./leader.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
 
+function normalizeUiError(text: string): string {
+	return text.replace(/^Error:\s*/i, "");
+}
+
 const IS_WORKER = process.env.PI_TEAMS_WORKER === "1";
 const HAS_TOOLS = process.env.PI_TEAMS_HAS_TOOLS === "1";
 const IS_FREEFORM = process.env.PI_TEAMS_FREEFORM === "1";
@@ -69,7 +73,7 @@ export default function (pi: ExtensionAPI) {
 			if (input.startsWith("view ")) {
 				const name = input.slice(5).trim();
 				const res = await runTeamsAction(pi, leader, { action: "view", name }, ctx);
-				show(res.content[0]?.text ?? "", res.isError ? "error" : "info");
+				show(res.isError ? normalizeUiError(res.content[0]?.text ?? "") : (res.content[0]?.text ?? ""), res.isError ? "error" : "info");
 				return;
 			}
 
