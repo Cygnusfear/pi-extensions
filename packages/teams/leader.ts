@@ -744,6 +744,7 @@ export class TeamLeader {
   private meshMessageHandler?: (payload: unknown) => void;
 
   private static readonly STATE_ENTRY_TYPE = "teams-leader-state";
+  private static readonly STALE_RESTORE_PRUNE_MS = 60_000;
 
   constructor(pi: ExtensionAPI) {
     this.pi = pi;
@@ -1475,6 +1476,11 @@ export class TeamLeader {
   ): Promise<WorkerHandle> {
     if (!this.ctx) throw new Error("Leader context not set");
 
+    const existing = this.workers.get(workerName);
+    if (existing && !["done", "warning", "failed", "killed", "grace"].includes(existing.status)) {
+      throw new Error(`Worker name \"${workerName}\" is already active on ticket #${existing.ticketId}`);
+    }
+
     const isNestedWorker = process.env.PI_TEAMS_WORKER === "1";
 
     // Worker-leaders must not create worktrees — sub-workers share the parent's working directory.
@@ -2047,6 +2053,7 @@ export class TeamLeader {
   }
 
   getWorkers(): WorkerHandle[] {
+    this.pruneStaleRecoveredWorkers();
     return [...this.workers.values()];
   }
 
@@ -2065,7 +2072,31 @@ export class TeamLeader {
   }
 
   getWorker(name: string): WorkerHandle | undefined {
+    this.pruneStaleRecoveredWorkers();
     return this.workers.get(name);
+  }
+
+  private pruneStaleRecoveredWorkers() {
+    const now = Date.now();
+    for (const [name, worker] of this.workers) {
+      if (worker.status !== "spawning" && worker.status !== "running") continue;
+      if (isProcessAlive(worker.pid)) continue;
+      if (now - worker.spawnedAt < TeamLeader.STALE_RESTORE_PRUNE_MS) continue;
+
+      let hasMeaningfulSession = false;
+      try {
+        const sessionFile = this.resolveWorkerSessionFile(worker);
+        if (sessionFile && fs.existsSync(sessionFile) && fs.statSync(sessionFile).size > 0) {
+          hasMeaningfulSession = true;
+        }
+      } catch {}
+      if (hasMeaningfulSession) continue;
+
+      worker.status = "failed";
+      worker.routeState = "dead";
+      worker.meshClientId = undefined;
+      worker.lastNote = worker.lastNote ?? "stale recovered worker pruned after reload";
+    }
   }
 
   private scheduleWorkerCleanup(workerName: string, expectedTicketId: string, expectedSpawnedAt: number) {

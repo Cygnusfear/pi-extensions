@@ -22,4 +22,22 @@ describe("teams tool runtime action", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content[0]?.text).toBe('Error: Unknown worker "nope"');
 	});
+
+	test("delegate surfaces duplicate active worker name errors", async () => {
+		const leader = {
+			setContext: () => {},
+			delegate: async () => {
+				throw new Error('Worker name "dup" is already active on ticket #pe-old');
+			},
+			startPolling: () => {},
+		} as any;
+		const pi = {
+			exec: async (cmd: string, args: string[]) => {
+				if (cmd === 'mai' && args[0] === 'ticket') return { stdout: 'pe-new\n', code: 0 };
+				return { stdout: '', code: 0 };
+			},
+		} as any;
+		const result = await runTeamsAction(pi, leader, { action: 'delegate', tasks: [{ text: 'x', assignee: 'dup' }], useWorktree: true }, { cwd: '/tmp' } as any);
+		expect(result.content[0]?.text).toContain('already active');
+	});
 });
