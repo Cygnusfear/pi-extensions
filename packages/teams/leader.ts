@@ -1100,6 +1100,9 @@ export class TeamLeader {
   }
 
   private buildSpawnSessionMode(): import("./v2/protocol.ts").WorkerSessionMode {
+    const preferFork = process.env.PI_TEAMS_PREFER_FORK === "1";
+    if (!preferFork) return { kind: "fresh" };
+
     const sessionManager = this.ctx?.sessionManager as unknown as {
       getSessionFile?: () => string | undefined;
       getLeafId?: () => string | null;

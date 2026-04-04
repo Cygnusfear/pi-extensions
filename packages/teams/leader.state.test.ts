@@ -219,8 +219,22 @@ describe("TeamLeader state persistence", () => {
 		expect(notified[0]).toMatchObject({ type: "comment", comment: "hello from v2" });
 	});
 
-	test("buildSpawnSessionMode prefers a real forked session when branching is available", () => {
+	test("buildSpawnSessionMode defaults to fresh even when branching is available", () => {
 		const { leader } = makeHarness();
+		const forked = path.join(process.cwd(), `.tmp-fork-${Date.now()}.jsonl`);
+		fs.writeFileSync(forked, JSON.stringify({ type: "session", version: 3, id: "forked", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
+		leader.ctx.sessionManager.getLeafId = () => "leaf-1";
+		leader.ctx.sessionManager.createBranchedSession = () => forked;
+
+		expect(leader.buildSpawnSessionMode()).toEqual({ kind: "fresh" });
+		fs.rmSync(forked, { force: true });
+	});
+
+	test("buildSpawnSessionMode can opt into fork mode via env", () => {
+		const { leader } = makeHarness();
+		const previous = process.env.PI_TEAMS_PREFER_FORK;
+		process.env.PI_TEAMS_PREFER_FORK = "1";
 		const forked = path.join(process.cwd(), `.tmp-fork-${Date.now()}.jsonl`);
 		fs.writeFileSync(forked, JSON.stringify({ type: "session", version: 3, id: "forked", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
 		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
@@ -234,6 +248,8 @@ describe("TeamLeader state persistence", () => {
 			sessionFile: forked,
 		});
 		fs.rmSync(forked, { force: true });
+		if (previous === undefined) delete process.env.PI_TEAMS_PREFER_FORK;
+		else process.env.PI_TEAMS_PREFER_FORK = previous;
 	});
 
 	test("buildSpawnSessionMode falls back to fresh when branching is unavailable", () => {
