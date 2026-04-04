@@ -857,6 +857,15 @@ export class TeamLeader {
   private deriveRestoredStatus(saved: PersistedWorkerState, now: number): WorkerHandle["status"] | null {
     if (saved.killedAt) return null;
 
+    const lifecycle = readWorkerLifecycleFacts(saved.sessionDir);
+    if (lifecycle.lastTerminalStatus === "done") {
+      return saved.freeform
+        ? (saved.graceAt && now >= saved.graceAt ? "grace" : "done")
+        : "done";
+    }
+    if (lifecycle.lastTerminalStatus === "quit") return "warning";
+    if (lifecycle.sawForcedSessionShutdown) return "failed";
+
     const legacyStatus = saved.status === "idle" ? "grace" : saved.status;
 
     if (saved.freeform) {
@@ -974,7 +983,7 @@ export class TeamLeader {
           name: saved.name,
           pid: saved.pid,
           ticketId: saved.ticketId,
-          ticketStatus: saved.ticketStatus ?? "unknown",
+          ticketStatus: saved.ticketStatus ?? (status === "done" || status === "grace" || status === "warning" || status === "failed" ? "closed" : "unknown"),
           lastNote: saved.lastNote,
           sessionDir: saved.sessionDir,
           sessionFile: saved.sessionFile,

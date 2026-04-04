@@ -148,6 +148,8 @@ describe("TeamLeader state persistence", () => {
 		const { leader, appended } = makeHarness(branch);
 		leader.restoreState(leader.ctx);
 		expect(appended).toHaveLength(0);
+		expect(leader.getWorker("worker-1")?.status).toBe("done");
+		expect(leader.getWorker("worker-1")?.ticketStatus).toBe("closed");
 		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("done");
 		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
 		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
@@ -297,5 +299,22 @@ describe("TeamLeader state persistence", () => {
 			parentLeafId: "leaf-1",
 			sessionFile: "/tmp/forked.jsonl",
 		});
+	});
+
+	test("getWorkers prunes stale recovered spawning workers with dead pids and empty sessions", () => {
+		const { leader } = makeHarness();
+		leader.workers.set("ghost", makeWorker({
+			name: "ghost",
+			pid: 999999,
+			status: "spawning",
+			spawnedAt: Date.now() - 120_000,
+			sessionDir: "/tmp/no-such-session-dir",
+			sessionFile: "/tmp/no-such-session-dir/session.jsonl",
+			routeState: "pending",
+		}));
+
+		const workers = leader.getWorkers();
+		expect(workers[0]?.status).toBe("failed");
+		expect(workers[0]?.routeState).toBe("dead");
 	});
 });
