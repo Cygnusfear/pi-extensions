@@ -595,6 +595,7 @@ export class PiMesh {
 			cwd: ann.cwd,
 			lastSeen: Date.now(),
 			claimedAt: ann.claimedAt,
+			meshId: ann.meshId,
 		};
 		this.peerMap.set(key, peer);
 		if (!existing) this._emit("peer-join", peer);
@@ -721,43 +722,29 @@ function resolveAndSetIdentity(
 ): void {
 	const existing = resolveIdentityFromSession(ctx);
 
-	switch (reason) {
-		case "reload": {
-			if (existing) {
-				// Reuse identity from session file
+	// reload / resume / startup with existing identity → reuse (tentatively)
+	if ((reason === "reload" || reason === "resume" || reason === "startup") && existing) {
+		if (reason !== "reload") {
+			// For resume/startup: check if this id is already live on the mesh (double-resume detection)
+			const idAlreadyLive = mesh.peers().some(
+				p => p.id === existing.id || p.meshId === existing.id,
+			);
+			if (idAlreadyLive) {
+				// DOUBLE-RESUME: session is already live in another pi process
+				pi.sendMessage({
+					customType: "mesh-identity-fork",
+					content: "[pi-mesh] Session already open in another pi. Generating new identity for this instance.",
+					display: true,
+				});
+				// NOTE: ctx in session_start is ExtensionContext (read-only sessionManager),
+				// not ExtensionCommandContext. We cannot call ctx.newSession() here.
+				// Fall through to generate new identity below.
+			} else {
+				// Safe — reuse identity. Verify nickname against current peers.
 				mesh.setIdentity(existing);
 				setStableId(existing.id);
-				return;
-			}
-			// No identity yet (first session after feature ships) — fall through to new
-			break;
-		}
-		case "resume": {
-			if (existing) {
-				// Check if this id is already live on the mesh (double-resume detection)
-				const idAlreadyLive = mesh.peers().some(
-					p => p.id === existing.id || (p as any).meshId === existing.id,
-				);
-				if (idAlreadyLive) {
-					// DOUBLE-RESUME: session is already live in another pi process
-					pi.sendMessage({
-						customType: "mesh-identity-fork",
-						content: "[pi-mesh] Session already open in another pi. Generating new identity for this instance.",
-						display: true,
-					});
-					// NOTE: ctx in session_start is ExtensionContext (read-only sessionManager),
-					// not ExtensionCommandContext. We cannot call ctx.newSession() here.
-					// Generate fresh identity instead — the session file stays the same but
-					// we get a unique mesh identity to avoid routing conflicts.
-					break; // fall through to generate new identity
-				}
-				// Safe — previous pi is gone. Reuse identity.
-				mesh.setIdentity(existing);
-				setStableId(existing.id);
-				// Verify nickname against current mesh peers
 				const liveNicknames = new Set(mesh.peers().map(p => p.nickname).filter(Boolean) as string[]);
 				if (liveNicknames.has(existing.nickname)) {
-					// Nickname taken by someone else — re-claim
 					const newNickname = claimNickname(existing.id, liveNicknames);
 					const updated: MeshIdentity = { ...existing, nickname: newNickname };
 					mesh.setIdentity(updated);
@@ -765,26 +752,19 @@ function resolveAndSetIdentity(
 				}
 				return;
 			}
-			// No identity entry — treat as new (first session after feature ships)
-			break;
+		} else {
+			// reload: always reuse identity from session file (no double-resume check needed)
+			mesh.setIdentity(existing);
+			setStableId(existing.id);
+			return;
 		}
-		case "startup": {
-			// Delegates to resume/new based on whether mesh_identity entry exists
-			if (existing) {
-				// Act like resume
-				resolveAndSetIdentity("resume", ctx, mesh, pi);
-				return;
-			}
-			// No existing identity — fall through to generate new
-			break;
-		}
-		case "fork":
-		case "new":
-			// Always generate fresh identity
-			break;
-		default:
-			break;
+	} else if (reason !== "fork" && reason !== "new" && existing) {
+		// Unknown reason with existing identity — reuse
+		mesh.setIdentity(existing);
+		setStableId(existing.id);
+		return;
 	}
+	// fork, new, missing identity, or double-resume → generate fresh identity below
 
 	// Generate fresh identity
 	const id = randomUUID();
@@ -1000,9 +980,47 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			const name = pi.getSessionName?.() ?? undefined;
 			mesh.start(binPath, sessionId, ctx.cwd, { mode: "peer", scouting: true }, name);
 
-			// Resolve identity once sidecar is ready
+			// Resolve identity once sidecar is ready (tentatively — peer list may be empty)
 			mesh.on("ready", () => {
 				resolveAndSetIdentity(reason, ctx, mesh, pi);
+			});
+
+			// Re-check on first peer-join: if the joining peer carries our mesh id,
+			// that means double-resume was missed at ready time (empty peer list).
+			let peerJoinReChecked = false;
+			mesh.on<PeerInfo>("peer-join", (joinedPeer) => {
+				if (peerJoinReChecked) return;
+				const identity = mesh.getIdentity();
+				if (!identity) return;
+				// Only re-check for resume/startup (reload never needs double-resume detection)
+				if (reason !== "resume" && reason !== "startup") return;
+				// Check if the joining peer has our mesh id → double-resume
+				if (joinedPeer.meshId === identity.id || joinedPeer.id === identity.id) {
+					peerJoinReChecked = true; // only trigger once
+					// DOUBLE-RESUME detected via peer-join: another pi has this session open
+					pi.sendMessage({
+						customType: "mesh-identity-fork",
+						content: "[pi-mesh] Session already open in another pi (detected on peer join). Generating new identity.",
+						display: true,
+					});
+					// Generate fresh identity
+					const newId = randomUUID();
+					const liveNicknames = new Set(mesh.peers().map(p => p.nickname).filter(Boolean) as string[]);
+					const nickname = claimNickname(newId, liveNicknames);
+					const newIdentity: MeshIdentity = {
+						id: newId,
+						nickname,
+						claimedAt: Date.now(),
+						host: hostname(),
+					};
+					mesh.setIdentity(newIdentity);
+					setStableId(newIdentity.id);
+					try {
+						pi.appendEntry(MESH_IDENTITY_TYPE, newIdentity);
+					} catch (e) {
+						console.warn("[pi-mesh] Failed to persist identity after peer-join re-check:", e);
+					}
+				}
 			});
 
 			// Persist identity updates on nickname conflicts

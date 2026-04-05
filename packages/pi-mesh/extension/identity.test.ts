@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
+import { claimNickname, deriveTripleName } from "@pi-extensions/shared/session-nickname";
 import type { AnnouncePayload, PeerInfo } from "./types.ts";
 
 // ── Test helpers: simulate resolveIdentityFromSession ────────────────────────
@@ -196,6 +197,96 @@ describe("conflict tie-break", () => {
 	});
 });
 
+// ── Peer-join re-check (late double-resume detection) ────────────────────────
+
+describe("peer-join re-check for double-resume", () => {
+	test("detects double-resume when joining peer carries our mesh id", () => {
+		const myIdentity: MeshIdentity = {
+			id: "session-uuid-abc",
+			nickname: "Carl Ufo Hawkins",
+			claimedAt: 1700000000000,
+			host: "my-machine",
+		};
+
+		// Simulate: at ready time, peer list was empty (no conflict detected).
+		// Then a peer joins carrying our meshId → double-resume.
+		const joinedPeer: PeerInfo = {
+			id: "client-xyz",
+			lastSeen: Date.now(),
+			meshId: "session-uuid-abc", // same as our identity!
+			nickname: "Carl Ufo Hawkins",
+		};
+
+		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
+		expect(isDoubleResume).toBe(true);
+	});
+
+	test("no double-resume when joining peer has different mesh id", () => {
+		const myIdentity: MeshIdentity = {
+			id: "session-uuid-abc",
+			nickname: "Carl Ufo Hawkins",
+			claimedAt: 1700000000000,
+			host: "my-machine",
+		};
+
+		const joinedPeer: PeerInfo = {
+			id: "client-xyz",
+			lastSeen: Date.now(),
+			meshId: "different-uuid",
+			nickname: "Vera Supernova Sagan",
+		};
+
+		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
+		expect(isDoubleResume).toBe(false);
+	});
+
+	test("detects double-resume when peer id matches our identity id directly", () => {
+		const myIdentity: MeshIdentity = {
+			id: "session-uuid-abc",
+			nickname: "Carl Ufo Hawkins",
+			claimedAt: 1700000000000,
+			host: "my-machine",
+		};
+
+		// Edge case: peer.id matches our meshId (not via meshId field)
+		const joinedPeer: PeerInfo = {
+			id: "session-uuid-abc",
+			lastSeen: Date.now(),
+		};
+
+		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
+		expect(isDoubleResume).toBe(true);
+	});
+
+	test("re-check triggers fresh identity generation on double-resume", () => {
+		const myIdentity: MeshIdentity = {
+			id: "session-uuid-abc",
+			nickname: "Carl Ufo Hawkins",
+			claimedAt: 1700000000000,
+			host: "my-machine",
+		};
+
+		// Simulate the re-check finding double-resume → generate new identity
+		const joinedPeer: PeerInfo = {
+			id: "client-xyz",
+			lastSeen: Date.now(),
+			meshId: "session-uuid-abc",
+			nickname: "Carl Ufo Hawkins",
+		};
+
+		const isDoubleResume = joinedPeer.meshId === myIdentity.id;
+		expect(isDoubleResume).toBe(true);
+
+		// New identity would be generated
+		const newId = crypto.randomUUID();
+		expect(newId).not.toBe(myIdentity.id);
+		const liveNicknames = new Set([joinedPeer.nickname!]);
+		const newNickname = claimNickname(newId, liveNicknames);
+		// New nickname should avoid collision with the peer's name
+		expect(newNickname).not.toBe(myIdentity.nickname);
+	});
+});
+
 // ── Fork case ────────────────────────────────────────────────────────────────
 
 describe("fork case", () => {
@@ -213,8 +304,7 @@ describe("fork case", () => {
 		const newId = crypto.randomUUID();
 		expect(newId).not.toBe(parentIdentity.id);
 
-		// The new nickname should be independently derived
-		const { claimNickname, deriveTripleName } = require("@pi-extensions/shared/session-nickname");
+		// The new nickname should be independently derived (using static import)
 		const newNickname = claimNickname(newId, new Set([parentIdentity.nickname]));
 		// Fork gets different name since parent's name is live
 		expect(newNickname).not.toBe(parentIdentity.nickname);

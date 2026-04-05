@@ -11,6 +11,7 @@ export interface PeerInfo {
 	cwd?: string;
 	lastSeen: number; // unix ms
 	claimedAt?: number; // unix ms — distributed tie-breaker for nickname conflicts
+	meshId?: string; // stable mesh identity (decoupled from sidecar clientId)
 }
 
 export interface MeshConfig {

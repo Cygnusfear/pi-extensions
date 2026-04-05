@@ -206,7 +206,6 @@ const REAL_ASTRONOMERS: readonly string[] = [
 
 /** First-name tokens extracted from REAL_ASTRONOMERS. */
 export const FIRST_NAMES: readonly string[] = [
-	"A.",
 	"Adam",
 	"Alan",
 	"Alessandra",
@@ -756,8 +755,10 @@ export function onStableIdChange(listener: () => void): () => void {
 	return () => g.__piMeshStableIdListeners?.delete(listener);
 }
 
-/** Get the stable nickname for this process. Falls back to sessionId if mesh isn't running. */
+/** Get the stable nickname for this process. Uses triple-name derivation for consistent style. */
 export function getStableNickname(sessionIdFallback?: string | null): string | null {
 	const stableId = (globalThis as any)[STABLE_ID_KEY] as string | undefined;
-	return getSessionNicknameText(stableId ?? sessionIdFallback);
+	const id = stableId ?? sessionIdFallback?.trim();
+	if (!id) return null;
+	return deriveTripleName(id);
 }
