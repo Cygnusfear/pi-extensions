@@ -1269,11 +1269,7 @@ export class TeamLeader {
         worker.exitCode = code;
         const attempt = getCurrentAttempt(worker);
         if (attempt) attempt.exitCode = code;
-        // Debounce: if exit fires suspiciously early (< 5s), the process may
-        // still be alive (Bun premature exit bug). Wait before assessing.
-        const age = Date.now() - (worker.spawnedAt ?? Date.now());
-        const delay = age < 5000 ? 5000 - age : 0;
-        setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
+        void this.handleWorkerExit(name, worker, code);
       });
       child.on("error", (err) => {
         worker.exitCode = null;
@@ -1565,11 +1561,7 @@ export class TeamLeader {
       handle.exitCode = code;
       const attempt = getCurrentAttempt(handle);
       if (attempt) attempt.exitCode = code;
-      // Debounce premature exit: Bun fires exit ~2ms after spawn for workers
-      // 2+ in rapid batches. Delay assessment to let the real process finish.
-      const age = Date.now() - (handle.spawnedAt ?? Date.now());
-      const delay = age < 5000 ? 5000 - age : 0;
-      setTimeout(() => void this.handleWorkerExit(workerName, handle, code), delay);
+      void this.handleWorkerExit(workerName, handle, code);
     });
 
     // Spawn failure — if the OS can't create the process at all (EMFILE, EAGAIN, etc.)
@@ -1638,6 +1630,14 @@ export class TeamLeader {
     }
     if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) return;
 
+    // Bun bug: fires child.on("exit") prematurely for workers 2+ in rapid spawns.
+    // The process is actually still alive and running. If we detect it's alive,
+    // bail out — the REAL exit event will fire when the process truly exits.
+    if (isProcessAlive(worker.pid)) {
+      // Schedule a re-check — when the real exit fires, process will be dead
+      return;
+    }
+
     if (!this.v2TeamRecord?.workers[name]) {
       this.upsertV2WorkerFromHandle(worker);
     }
@@ -1700,9 +1700,7 @@ export class TeamLeader {
             worker.exitCode = code;
             const attempt = getCurrentAttempt(worker);
             if (attempt) attempt.exitCode = code;
-            const age = Date.now() - (worker.spawnedAt ?? Date.now());
-            const delay = age < 5000 ? 5000 - age : 0;
-            setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
+            void this.handleWorkerExit(name, worker, code);
           });
           child.on("error", (err) => {
             worker.exitCode = null;
@@ -1801,9 +1799,7 @@ export class TeamLeader {
           worker.exitCode = code;
           const attempt = getCurrentAttempt(worker);
           if (attempt) attempt.exitCode = code;
-          const age = Date.now() - (worker.spawnedAt ?? Date.now());
-          const delay = age < 5000 ? 5000 - age : 0;
-          setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
+          void this.handleWorkerExit(name, worker, code);
         });
         child.on("error", (err) => {
           worker.exitCode = null;
