@@ -74,7 +74,7 @@ const MI = {
 	ask:       _nerd ? "\uF059" : "?",   // nf-fa-question_circle
 	reply:     _nerd ? "\uF112" : "\u21a9",  // nf-fa-reply
 	broadcast: _nerd ? "\uF1D8" : "*",   // nf-fa-paper_plane
-	sep:       "\u00b7",                       // middle dot separator
+	sep:       " \u00b7 ",                     // middle dot separator (padded)
 };
 // ── Path resolution ──────────────────────────────────────────────────────────
 
