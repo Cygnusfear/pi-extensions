@@ -1433,7 +1433,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		description: "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing.",
 		parameters: Type.Object({
 			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
-			message: Type.Unknown({ description: "Message payload (any JSON value)" }),
+			message: Type.Unknown({ description: "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering." }),
 			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for: 'none', 'delivered', or 'visible'. Default: 'delivered'" })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms when waiting for receipt (default: 10000)", minimum: 100 })),
 		}),
@@ -1578,7 +1578,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		description: "Broadcast a message to all peers on a topic.",
 		parameters: Type.Object({
 			topic: Type.String({ description: "Broadcast topic (e.g. 'status', 'shutdown')" }),
-			message: Type.Unknown({ description: "Message payload (any JSON value)" }),
+			message: Type.Unknown({ description: "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering." }),
 		}),
 		async execute(_toolCallId, params) {
 			const { topic, message } = params as { topic: string; message: unknown };
@@ -1656,7 +1656,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		description: "Post a message to a mesh channel. Receivers see it immediately. Busy sessions do not get interrupted; idle sessions batch ambient chat and wake once with a single blob. Use mesh_tell for direct urgent messages.",
 		parameters: Type.Object({
 			channelId: Type.String({ description: "Channel ID to post to" }),
-			message: Type.Unknown({ description: "Message payload (string or any JSON value)" }),
+			message: Type.Unknown({ description: "Plain text preferred. For structured messages use {subject: '...', body: '...'} — these render as a bold headline + body. Raw JSON objects without a body/text field render as a code block." }),
 		}),
 		async execute(_toolCallId, params) {
 			const { channelId, message } = params as { channelId: string; message: unknown };
