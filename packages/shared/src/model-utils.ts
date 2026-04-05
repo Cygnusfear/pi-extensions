@@ -26,6 +26,12 @@ export const FAMILY_PATTERNS: [RegExp, string][] = [
 	[/^o[1-9]/, "o-series"],
 	[/^gemini-2/, "gemini-2"],
 	[/^gemini-1/, "gemini-1"],
+	[/^glm-5v/, "glm-5v"],
+	[/^glm-5-turbo/, "glm-5-turbo"],
+	[/^glm-5$/, "glm-5"],
+	[/^glm-4.7-flashx/, "glm-4.7-flashx"],
+	[/^glm-4.7-flash/, "glm-4.7-flash"],
+	[/^glm-4.7$/, "glm-4.7"],
 ];
 
 /** Get the family label for a model ID, or null if unrecognized. */

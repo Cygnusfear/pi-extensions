@@ -21,9 +21,15 @@ export async function cleanupWorker(
   worker: WorkerHandle,
   preserveBranch = true,
 ): Promise<CleanupResult> {
-  if (isProcessAlive(worker.pid)) {
-    killWorker(worker.pid);
-  }
+  // Only kill if the caller explicitly requested it (e.g. user /team kill).
+  // Do NOT auto-kill here on normal exit assessment — Bun has a bug where
+  // child.on("exit") fires prematurely for workers 2+ in rapid spawns.
+  // The process is actually STILL ALIVE and running pi. Killing it here
+  // destroys workers that would otherwise succeed.
+  // The explicit kill path in leader.kill() handles user-initiated kills.
+  // if (isProcessAlive(worker.pid)) {
+  //   killWorker(worker.pid);
+  // }
 
   let branchPreserved = false;
 
