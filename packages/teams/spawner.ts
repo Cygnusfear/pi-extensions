@@ -59,7 +59,6 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 }
 
 export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
-	try { fs.appendFileSync("/tmp/spawner-v2-active.log", `${Date.now()} spawnWorker called for ${config.workerName} SH_WRAPPER=true\n`); } catch {}
 	const leaseFile = buildLeaderLeasePath(config.repoRoot, config.leaderSessionFile);
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
@@ -120,13 +119,8 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	// Route through `sh -c "exec pi ..."` so the shell handles stdout/stderr
 	// redirection via its own open() calls, avoiding the coordinator's fd race.
 	// `exec` replaces sh with pi in the same pid so killWorker() targets pi.
-	const piCmd = ["pi", ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(" ");
-	const shellCmd = [
-		`echo "[sh] $$ before-pi ${config.workerName}" >> /tmp/teams-sh-diag.log`,
-		`${piCmd} > ${JSON.stringify(stdoutLog)} 2> ${JSON.stringify(stderrLog)}`,
-		`EC=$?`,
-		`echo "[sh] $$ after-pi ${config.workerName} exit=$EC stderr=$(wc -c < ${JSON.stringify(stderrLog)} 2>/dev/null)" >> /tmp/teams-sh-diag.log`,
-	].join(" ; ");
+	const shellCmd = ["exec", "pi", ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(" ") +
+		` > ${JSON.stringify(stdoutLog)} 2> ${JSON.stringify(stderrLog)}`;
 	const child = spawn("sh", ["-c", shellCmd], {
 		cwd: config.cwd,
 		env,
