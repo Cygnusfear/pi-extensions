@@ -12,7 +12,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -259,16 +259,37 @@ function buildAgentV1Payload(params: {
 // ── Checkpoint runner ──
 
 async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
-	try {
-		await execFileAsync(gitAiBin, ["checkpoint", "agent-v1", "--hook-input", "stdin"], {
-			input: payload,
-			timeout: 5000,
+	return new Promise<void>((resolve) => {
+		const child = spawn(gitAiBin, ["checkpoint", "agent-v1", "--hook-input", "stdin"], {
+			stdio: ["pipe", "pipe", "pipe"],
 			windowsHide: true,
 		});
-	} catch (error: unknown) {
-		const msg = error instanceof Error ? error.message : String(error);
-		console.error(`[git-ai] checkpoint failed: ${msg}`);
-	}
+
+		let stderr = "";
+		child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+
+		child.on("close", (code) => {
+			if (code === 0) {
+				console.log(`[git-ai] checkpoint OK`);
+			} else {
+				console.error(`[git-ai] checkpoint failed (exit ${code}): ${stderr.trim()}`);
+			}
+			resolve();
+		});
+
+		child.on("error", (err) => {
+			console.error(`[git-ai] checkpoint error: ${err.message}`);
+			resolve();
+		});
+
+		child.stdin.write(payload);
+		child.stdin.end();
+
+		setTimeout(() => {
+			child.kill();
+			resolve();
+		}, 5000);
+	});
 }
 
 // ── Extension ──
