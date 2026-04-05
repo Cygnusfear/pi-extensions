@@ -1269,7 +1269,11 @@ export class TeamLeader {
         worker.exitCode = code;
         const attempt = getCurrentAttempt(worker);
         if (attempt) attempt.exitCode = code;
-        void this.handleWorkerExit(name, worker, code);
+        // Debounce: if exit fires suspiciously early (< 5s), the process may
+        // still be alive (Bun premature exit bug). Wait before assessing.
+        const age = Date.now() - (worker.spawnedAt ?? Date.now());
+        const delay = age < 5000 ? 5000 - age : 0;
+        setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
       });
       child.on("error", (err) => {
         worker.exitCode = null;
@@ -1561,7 +1565,11 @@ export class TeamLeader {
       handle.exitCode = code;
       const attempt = getCurrentAttempt(handle);
       if (attempt) attempt.exitCode = code;
-      void this.handleWorkerExit(workerName, handle, code);
+      // Debounce premature exit: Bun fires exit ~2ms after spawn for workers
+      // 2+ in rapid batches. Delay assessment to let the real process finish.
+      const age = Date.now() - (handle.spawnedAt ?? Date.now());
+      const delay = age < 5000 ? 5000 - age : 0;
+      setTimeout(() => void this.handleWorkerExit(workerName, handle, code), delay);
     });
 
     // Spawn failure — if the OS can't create the process at all (EMFILE, EAGAIN, etc.)
@@ -1692,7 +1700,9 @@ export class TeamLeader {
             worker.exitCode = code;
             const attempt = getCurrentAttempt(worker);
             if (attempt) attempt.exitCode = code;
-            void this.handleWorkerExit(name, worker, code);
+            const age = Date.now() - (worker.spawnedAt ?? Date.now());
+            const delay = age < 5000 ? 5000 - age : 0;
+            setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
           });
           child.on("error", (err) => {
             worker.exitCode = null;
@@ -1791,7 +1801,9 @@ export class TeamLeader {
           worker.exitCode = code;
           const attempt = getCurrentAttempt(worker);
           if (attempt) attempt.exitCode = code;
-          void this.handleWorkerExit(name, worker, code);
+          const age = Date.now() - (worker.spawnedAt ?? Date.now());
+          const delay = age < 5000 ? 5000 - age : 0;
+          setTimeout(() => void this.handleWorkerExit(name, worker, code), delay);
         });
         child.on("error", (err) => {
           worker.exitCode = null;
