@@ -1399,10 +1399,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			}
 
 			const receiptMode = waitFor ?? "delivered";
+			const rendered = formatPayloadForDisplay(message);
+			const peerLabel = (() => {
+				const peer = mesh.peers().find((p) => p.id === resolved);
+				return peer ? getPeerLabel(peer) : resolved.slice(0, 8);
+			})();
 			if (receiptMode === "none") {
 				const { deliveryId } = mesh.tell(resolved, message);
 				return {
-					content: [{ type: "text", text: `Message sent to session ${resolved} (${deliveryId})` }],
+					content: [{ type: "text", text: `Sent to ${peerLabel} (${deliveryId}):\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none" },
 				};
 			}
@@ -1410,7 +1415,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			try {
 				const ack = await mesh.tellAndWaitForReceipt(resolved, message, receiptMode, timeoutMs ?? 10_000);
 				return {
-					content: [{ type: "text", text: `Message delivered to session ${resolved} (${ack.phase}, deliveryId=${ack.deliveryId})` }],
+					content: [{ type: "text", text: `Delivered to ${peerLabel} (${ack.phase}):\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode },
 				};
 			} catch (e) {
@@ -1683,14 +1688,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 					return;
 				}
+				const tellPeer = mesh.peers().find((p) => p.id === resolved);
+				const tellLabel = tellPeer ? getPeerLabel(tellPeer) : resolved.slice(0, 8);
 				try {
 					if (tellFlags.has("--no-wait")) {
 						const { deliveryId } = mesh.tell(resolved, message);
-						ctx.ui.notify(`Sent to ${resolved} (${deliveryId})`, "info");
+						ctx.ui.notify(`Sent to ${tellLabel} (${deliveryId}):\n${message}`, "info");
 					} else {
 						const phase: MeshTellReceiptPhase = tellFlags.has("--visible") ? "visible" : "delivered";
 						await mesh.tellAndWaitForReceipt(resolved, message, phase, 10_000);
-						ctx.ui.notify(`Delivered to ${resolved} (${phase})`, "info");
+						ctx.ui.notify(`Delivered to ${tellLabel} (${phase}):\n${message}`, "info");
 					}
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
