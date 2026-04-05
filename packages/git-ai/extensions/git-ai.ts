@@ -1,7 +1,8 @@
 /**
  * git-ai Extension for pi
  *
- * Tracks AI-authored code via git-ai's agent-v1 protocol. Uses mesh nickname as agent name.
+ * Tracks AI-authored code via git-ai's agent-v1 protocol.
+ * Uses mesh nickname as agent name. Silent — no TUI pollution.
  * On every edit tool call, sends PreToolUse/PostToolUse checkpoints
  * to git-ai so lines are attributed to the correct agent, model, and session.
  *
@@ -265,20 +266,12 @@ async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
 			windowsHide: true,
 		});
 
-		let stderr = "";
-		child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
 
 		child.on("close", (code) => {
-			if (code === 0) {
-				console.log(`[git-ai] checkpoint OK`);
-			} else {
-				console.error(`[git-ai] checkpoint failed (exit ${code}): ${stderr.trim()}`);
-			}
 			resolve();
 		});
 
-		child.on("error", (err) => {
-			console.error(`[git-ai] checkpoint error: ${err.message}`);
+		child.on("error", () => {
 			resolve();
 		});
 
@@ -332,7 +325,7 @@ export default function (pi: ExtensionAPI) {
 			filePaths,
 		});
 
-		runCheckpoint(gitAiBin, payload).catch(() => {});
+		runCheckpoint(gitAiBin, payload);
 	});
 
 	// ── PostToolUse: mark AI-authored edits ──
@@ -360,7 +353,7 @@ export default function (pi: ExtensionAPI) {
 			filePaths,
 		});
 
-		runCheckpoint(gitAiBin, payload).catch(() => {});
+		runCheckpoint(gitAiBin, payload);
 	});
 
 	// ── git-ai custom tool ──
