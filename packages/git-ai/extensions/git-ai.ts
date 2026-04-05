@@ -317,7 +317,8 @@ export default function (pi: ExtensionAPI) {
 			filePaths,
 		});
 
-		runCheckpoint(gitAiBin, payload);
+		// Await — checkpoint must complete before the edit tool executes
+		await runCheckpoint(gitAiBin, payload);
 	});
 
 	// ── PostToolUse: mark AI-authored edits ──
@@ -345,7 +346,8 @@ export default function (pi: ExtensionAPI) {
 			filePaths,
 		});
 
-		runCheckpoint(gitAiBin, payload);
+		// Await — checkpoint must complete to record attribution
+		await runCheckpoint(gitAiBin, payload);
 	});
 
 	// ── git-ai custom tool ──
