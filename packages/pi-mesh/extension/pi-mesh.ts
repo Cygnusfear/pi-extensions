@@ -396,6 +396,22 @@ export class PiMesh {
 		};
 	}
 
+	/**
+	 * Returns true if `id` refers to this session.
+	 *
+	 * Outbound envelopes stamp `from: this.myClientId` (the routing identity),
+	 * but `self().id` prefers `this.myIdentity.id` (the stable identity) once
+	 * resolved. Any echo guard that compares a wire `from` field against this
+	 * session MUST use this helper — comparing against `self().id` alone misses
+	 * the routing-identity case and lets self-messages through.
+	 */
+	isSelf(id: string | undefined | null): boolean {
+		if (!id) return false;
+		if (id === this.myClientId) return true;
+		if (this.myIdentity && id === this.myIdentity.id) return true;
+		return false;
+	}
+
 	/** Set the stable mesh identity (called by the identity resolution logic). */
 	setIdentity(identity: MeshIdentity): void {
 		this.myIdentity = identity;
@@ -690,6 +706,7 @@ export class PiMesh {
 // ── Identity resolution ──────────────────────────────────────────────────────
 
 const MESH_IDENTITY_TYPE = "mesh_identity";
+const MESH_CHANNELS_TYPE = "mesh_channels";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -702,6 +719,30 @@ function resolveIdentityFromSession(
 	for (const entry of ctx.sessionManager.getEntries()) {
 		if (entry.type === "custom" && entry.customType === MESH_IDENTITY_TYPE && entry.data) {
 			latest = entry.data as MeshIdentity;
+		}
+	}
+	return latest;
+}
+
+/**
+ * Scan session entries for the most recent mesh_channels custom entry.
+ * Returns the persisted channel ID list, or an empty array if none found.
+ *
+ * Channel subscriptions live on the PiMesh instance, which gets recreated
+ * on every /reload. Without persistence, users would silently drop out of
+ * every channel they joined after a reload. We persist the current channel
+ * set on every join/leave and rejoin them on session_start.
+ */
+function resolveChannelsFromSession(
+	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
+): string[] {
+	let latest: string[] = [];
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === MESH_CHANNELS_TYPE && entry.data) {
+			const data = entry.data as { channels?: unknown };
+			if (Array.isArray(data.channels)) {
+				latest = data.channels.filter((c): c is string => typeof c === "string");
+			}
 		}
 	}
 	return latest;
@@ -800,6 +841,59 @@ function extractPayloadText(payload: unknown): string {
 	return JSON.stringify(payload);
 }
 
+/** Pretty-print a structured object/array as a fenced JSON code block. */
+function prettyPrintJsonValue(value: unknown): string {
+	return "```json\n" + JSON.stringify(value, null, 2) + "\n```";
+}
+
+/** Try to parse a string as a JSON object or array. Returns undefined on any other shape. */
+function tryParseJsonStructured(s: string): unknown | undefined {
+	const trimmed = s.trim();
+	if (trimmed.length < 2) return undefined;
+	const first = trimmed[0];
+	if (first !== "{" && first !== "[") return undefined;
+	try {
+		const parsed = JSON.parse(trimmed);
+		if (parsed && typeof parsed === "object") return parsed;
+	} catch { /* not JSON — fall through */ }
+	return undefined;
+}
+
+/**
+ * Format a message payload for human display.
+ *
+ * Strings pass through unless they contain a JSON object/array — those are
+ * pretty-printed in a ```json fence (LLM tool calls commonly stringify nested
+ * objects). Simple text wrappers (`{text: "..."}`, etc. with a single field)
+ * are unwrapped. Structured objects are pretty-printed inside a ```json fence
+ * so the TUI markdown renderer formats them as scannable code blocks instead
+ * of a single wrapped line.
+ */
+function formatPayloadForDisplay(payload: unknown): string {
+	if (typeof payload === "string") {
+		const parsed = tryParseJsonStructured(payload);
+		if (parsed !== undefined) return prettyPrintJsonValue(parsed);
+		return payload;
+	}
+	if (payload === null || payload === undefined) return String(payload);
+	if (typeof payload !== "object") return String(payload);
+
+	const obj = payload as Record<string, unknown>;
+	const keys = Object.keys(obj);
+
+	// Unwrap single-field text carriers so `{text: "hi"}` still renders as "hi".
+	// If the carried text itself happens to be JSON, recurse to pretty-print it.
+	if (keys.length === 1) {
+		const k = keys[0];
+		const v = obj[k];
+		if ((k === "text" || k === "message" || k === "content" || k === "question") && typeof v === "string") {
+			return formatPayloadForDisplay(v);
+		}
+	}
+
+	return prettyPrintJsonValue(obj);
+}
+
 /** Returns true for teams lifecycle events that should NOT show as generic chat.
  *  teams:comment is allowed through — it's the only user-facing content. */
 function isTeamsLifecyclePayload(payload: unknown): boolean {
@@ -883,6 +977,27 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	let muted = false;
 	let ambientChatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 	const pendingAmbientChat: Array<{ channelId: string; senderLabel: string; text: string }> = [];
+	// User-initiated channel subscriptions. Mirrored into session entries so a
+	// /reload or session resume can rejoin them — the PiMesh instance itself is
+	// recreated on every reload and its channelSubs set starts empty.
+	const subscribedChannels = new Set<string>();
+	const persistChannels = (): void => {
+		try { pi.appendEntry(MESH_CHANNELS_TYPE, { channels: [...subscribedChannels] }); } catch {}
+	};
+	const joinAndPersist = (channelId: string): void => {
+		mesh.joinChannel(channelId);
+		if (!subscribedChannels.has(channelId)) {
+			subscribedChannels.add(channelId);
+			persistChannels();
+		}
+	};
+	const leaveAndPersist = (channelId: string): void => {
+		mesh.leaveChannel(channelId);
+		if (subscribedChannels.has(channelId)) {
+			subscribedChannels.delete(channelId);
+			persistChannels();
+		}
+	};
 	const pendingTells: Array<{
 		senderLabel: string;
 		fromId: string;
@@ -1023,6 +1138,14 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		const sessionId = ctx.sessionManager.getSessionId();
 		const reason = (event as { reason?: string }).reason ?? "startup";
 
+		// Load persisted channel subscriptions from the session and rejoin them.
+		// Without this, /reload silently drops every channel the user joined.
+		const persistedChannels = resolveChannelsFromSession(ctx);
+		for (const ch of persistedChannels) {
+			subscribedChannels.add(ch);
+			mesh.joinChannel(ch);
+		}
+
 		if (started) {
 			// Already running — handle identity for reload/resume/fork/new transitions
 			mesh.updateSessionId(sessionId);
@@ -1094,7 +1217,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				if (isTeamsLifecyclePayload(msg.payload)) return;
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
-				const payloadText = typeof msg.payload === "string" ? msg.payload : JSON.stringify(msg.payload);
+				const payloadText = formatPayloadForDisplay(msg.payload);
 
 				if (deafened) {
 					// Drop the message silently — still send delivered ack so the sender
@@ -1142,13 +1265,13 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			// Wire inbound channel messages — ambient context, visible immediately.
 			// If the session is idle, batch them and wake the agent once with a hidden blob.
 			mesh.on<ChannelMessage>("channel", (msg) => {
-				if (msg.from === mesh.self().id) return; // don't echo own messages
+				if (mesh.isSelf(msg.from)) return; // don't echo own messages (checks both routing + stable identity)
 				if (isTeamsLifecyclePayload(msg.payload)) return; // teams lifecycle events rendered by teams extension
 				if (deafened) return; // /mesh deafen — drop channel chatter silently
 
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from || p.sessionId === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
-				const text = extractPayloadText(msg.payload);
+				const text = formatPayloadForDisplay(msg.payload);
 				pi.sendMessage({
 					customType: "mesh-chat",
 					content: `👥 [#${msg.channel}] ${senderLabel}:\n${text}`,
@@ -1331,8 +1454,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			try {
 				const result = await mesh.askWithReceipt(resolved, message, timeoutMs ?? 30_000, waitFor ?? "delivered");
 				const receiptLine = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from} (${result.receipt.askId})` : "\nreceipt: none";
+				const replyText = formatPayloadForDisplay(result.reply);
 				return {
-					content: [{ type: "text", text: `${JSON.stringify(result.reply)}${receiptLine}` }],
+					content: [{ type: "text", text: `${replyText}${receiptLine}` }],
 					details: { sessionId, resolvedSessionId: resolved, reply: result.reply, receipt: result.receipt, waitFor: waitFor ?? "delivered" },
 				};
 			} catch (e) {
@@ -1371,8 +1495,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			try {
 				const reply = await mesh.ask(resolved, { kind: "mesh:view", start, end }, timeoutMs ?? 10_000) as Record<string, unknown>;
 				if (reply?.error) throw new Error(String(reply.error));
+				const replyText = typeof reply?.text === "string" ? reply.text : formatPayloadForDisplay(reply);
 				return {
-					content: [{ type: "text", text: typeof reply?.text === "string" ? reply.text : JSON.stringify(reply) }],
+					content: [{ type: "text", text: replyText }],
 					details: { sessionId, resolvedSessionId: resolved, reply },
 				};
 			} catch (e) {
@@ -1438,7 +1563,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params) {
 			const { channelId } = params as { channelId: string };
-			mesh.joinChannel(channelId);
+			joinAndPersist(channelId);
 			return {
 				content: [{ type: "text", text: `Joined channel #${channelId}` }],
 				details: { channelId },
@@ -1455,7 +1580,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params) {
 			const { channelId } = params as { channelId: string };
-			mesh.leaveChannel(channelId);
+			leaveAndPersist(channelId);
 			return {
 				content: [{ type: "text", text: `Left channel #${channelId}` }],
 				details: { channelId },
@@ -1474,8 +1599,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params) {
 			const { channelId, message } = params as { channelId: string; message: unknown };
 			mesh.chat(channelId, message);
+			const rendered = formatPayloadForDisplay(message);
 			return {
-				content: [{ type: "text", text: `Posted to #${channelId}` }],
+				content: [{ type: "text", text: `Posted to #${channelId}:\n${rendered}` }],
 				details: { channelId, sent: true },
 			};
 		},
@@ -1514,12 +1640,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			} else if (sub === "join") {
 				const channelId = parts[1];
 				if (!channelId) { ctx.ui.notify("Usage: /mesh join <channel>", "warning"); return; }
-				mesh.joinChannel(channelId);
+				joinAndPersist(channelId);
 				ctx.ui.notify(`Joined #${channelId}`, "info");
 			} else if (sub === "leave") {
 				const channelId = parts[1];
 				if (!channelId) { ctx.ui.notify("Usage: /mesh leave <channel>", "warning"); return; }
-				mesh.leaveChannel(channelId);
+				leaveAndPersist(channelId);
 				ctx.ui.notify(`Left #${channelId}`, "info");
 			} else if (sub === "chat") {
 				const channelId = parts[1];
@@ -1527,7 +1653,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				if (!channelId || !message) { ctx.ui.notify("Usage: /mesh chat <channel> <message>", "warning"); return; }
 				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				mesh.chat(channelId, message);
-				ctx.ui.notify(`→ #${channelId}`, "info");
+				const rendered = formatPayloadForDisplay(message);
+				ctx.ui.notify(`→ #${channelId}:\n${rendered}`, "info");
 			} else if (sub === "list" || sub === "peers" || sub === "" || sub === "me" || sub === "status") {
 				const me = mesh.self();
 				const peerList = mesh.peers();
@@ -1584,7 +1711,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				try {
 					const result = await mesh.askWithReceipt(resolved, message, 30_000, askFlags.has("--visible") ? "visible" : "delivered");
 					const receiptText = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from}` : "";
-					ctx.ui.notify(`${JSON.stringify(result.reply)}${receiptText}`, "info");
+					const replyText = formatPayloadForDisplay(result.reply);
+					ctx.ui.notify(`${replyText}${receiptText}`, "info");
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 				}
@@ -1603,7 +1731,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				try {
 					const reply = await mesh.ask(resolved, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
 					if (reply?.error) throw new Error(String(reply.error));
-					ctx.ui.notify(typeof reply?.text === "string" ? reply.text : JSON.stringify(reply), "info");
+					const viewText = typeof reply?.text === "string" ? reply.text : formatPayloadForDisplay(reply);
+					ctx.ui.notify(viewText, "info");
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 				}
