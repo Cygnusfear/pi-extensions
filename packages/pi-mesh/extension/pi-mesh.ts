@@ -54,6 +54,28 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
 	? Math.floor(ambientChatBatchMsRaw)
 	: 750;
 
+
+// ── Mesh icons ────────────────────────────────────────────────────────────────
+
+function _hasNerdFonts(): boolean {
+	if (process.env.POWERLINE_NERD_FONTS === "1") return true;
+	if (process.env.POWERLINE_NERD_FONTS === "0") return false;
+	if (process.env.GHOSTTY_RESOURCES_DIR) return true;
+	const term = (process.env.TERM_PROGRAM || "").toLowerCase();
+	return ["iterm", "wezterm", "kitty", "ghostty", "alacritty"].some((t) => term.includes(t));
+}
+
+const _nerd = _hasNerdFonts();
+
+/** Nerd-font icons with unicode fallbacks for mesh message styling. */
+const MI = {
+	chat:      _nerd ? "\uF086" : "#",   // nf-fa-comments
+	tell:      _nerd ? "\uF0E0" : ">",   // nf-fa-envelope
+	ask:       _nerd ? "\uF059" : "?",   // nf-fa-question_circle
+	reply:     _nerd ? "\uF112" : "\u21a9",  // nf-fa-reply
+	broadcast: _nerd ? "\uF1D8" : "*",   // nf-fa-paper_plane
+	sep:       "\u00b7",                       // middle dot separator
+};
 // ── Path resolution ──────────────────────────────────────────────────────────
 
 function resolveBinPath(): string | null {
@@ -860,29 +882,59 @@ function tryParseJsonStructured(s: string): unknown | undefined {
 }
 
 /**
+ * Try to render a structured object as readable prose.
+ *
+ * Agents commonly send payloads like `{from, type, subject, body}` or
+ * `{from, topic, text}`. When we detect these shapes, render them as
+ * a human-readable message instead of a raw JSON block.
+ *
+ * Returns undefined if the object doesn't match a known prose pattern.
+ */
+function tryRenderAsMessage(obj: Record<string, unknown>): string | undefined {
+	// Resolve the main body text from common field names.
+	const body = (typeof obj.body === "string" ? obj.body
+		: typeof obj.text === "string" ? obj.text
+		: typeof obj.message === "string" ? obj.message
+		: typeof obj.content === "string" ? obj.content
+		: undefined);
+	if (!body) return undefined;
+
+	const parts: string[] = [];
+
+	// Header: subject or topic line (bold via markdown)
+	const headline = typeof obj.subject === "string" ? obj.subject : typeof obj.topic === "string" ? obj.topic : undefined;
+	if (headline) parts.push(`**${headline}**`);
+
+	// Body text — unescape literal \n that LLMs bake into JSON string values.
+	parts.push(body.replace(/\\n/g, "\n"));
+
+	return parts.join("\n");
+}
+
+/**
  * Format a message payload for human display.
  *
- * Strings pass through unless they contain a JSON object/array — those are
- * pretty-printed in a ```json fence (LLM tool calls commonly stringify nested
- * objects). Simple text wrappers (`{text: "..."}`, etc. with a single field)
- * are unwrapped. Structured objects are pretty-printed inside a ```json fence
- * so the TUI markdown renderer formats them as scannable code blocks instead
- * of a single wrapped line.
+ * 1. Strings pass through unless they contain a JSON object/array — those are
+ *    parsed and re-formatted.
+ * 2. Objects with a recognisable message shape (subject/body, topic/text, etc.)
+ *    render as readable prose with a bold headline.
+ * 3. Single-field text wrappers (`{text: "hi"}`) unwrap cleanly.
+ * 4. Everything else pretty-prints as a ```json fenced code block.
  */
 function formatPayloadForDisplay(payload: unknown): string {
 	if (typeof payload === "string") {
 		const parsed = tryParseJsonStructured(payload);
-		if (parsed !== undefined) return prettyPrintJsonValue(parsed);
+		if (parsed !== undefined) return formatPayloadForDisplay(parsed);
 		return payload;
 	}
 	if (payload === null || payload === undefined) return String(payload);
 	if (typeof payload !== "object") return String(payload);
+	if (Array.isArray(payload)) return prettyPrintJsonValue(payload);
 
 	const obj = payload as Record<string, unknown>;
 	const keys = Object.keys(obj);
 
 	// Unwrap single-field text carriers so `{text: "hi"}` still renders as "hi".
-	// If the carried text itself happens to be JSON, recurse to pretty-print it.
 	if (keys.length === 1) {
 		const k = keys[0];
 		const v = obj[k];
@@ -891,6 +943,11 @@ function formatPayloadForDisplay(payload: unknown): string {
 		}
 	}
 
+	// Try to render as human-readable prose (subject/body, topic/text, etc.).
+	const prose = tryRenderAsMessage(obj);
+	if (prose) return prose;
+
+	// Fallback: fenced JSON block.
 	return prettyPrintJsonValue(obj);
 }
 
@@ -1063,7 +1120,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			"This is background context, not necessarily a direct request.",
 			"Read it and decide whether to act, reply, or ignore it.",
 			"",
-			...batch.map(({ channelId, senderLabel, text }, idx) => `${idx + 1}. [#${channelId}] ${senderLabel}: ${text}`),
+			...batch.map(({ channelId, senderLabel, text }, idx) => `${idx + 1}. ${MI.chat} #${channelId} ${MI.sep} ${senderLabel}: ${text}`),
 		].join("\n");
 		pi.sendMessage(
 			{
@@ -1091,7 +1148,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			header,
 			"These are direct messages targeted at this session — read, decide, act.",
 			"",
-			...batch.map(({ senderLabel, payloadText }, idx) => `${idx + 1}. From ${senderLabel}:\n${payloadText}`),
+			...batch.map(({ senderLabel, payloadText }, idx) => `${idx + 1}. ${MI.tell} ${senderLabel}:\n${payloadText}`),
 		].join("\n");
 		pi.sendMessage(
 			{
@@ -1250,7 +1307,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound",
-						content: `[mesh-tell] From ${senderLabel}:\n\n${payloadText}`,
+						content: `${MI.tell} ${senderLabel}\n${payloadText}`,
 						display: true,
 						details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
 					},
@@ -1274,7 +1331,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const text = formatPayloadForDisplay(msg.payload);
 				pi.sendMessage({
 					customType: "mesh-chat",
-					content: `👥 [#${msg.channel}] ${senderLabel}:\n${text}`,
+					content: `${MI.chat} #${msg.channel} ${MI.sep} ${senderLabel}\n${text}`,
 					display: true,
 				});
 				pendingAmbientChat.push({ channelId: msg.channel, senderLabel, text });
@@ -1315,7 +1372,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound-ask",
-						content: `[${reqId}] ${ts} ${senderLabel} asks: ${payloadText}\n\nUse mesh_reply(requestId: ${reqId}, response: your answer) to respond.`,
+						content: `${MI.ask} ${senderLabel} asks\n${payloadText}\n\n${MI.reply} mesh_reply(requestId: ${reqId}, response: ...)`,
 						display: true,
 					},
 					deliveryOptions,
@@ -1364,7 +1421,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			sender(response);
 			pendingReplies.delete(requestId);
 			return {
-				content: [{ type: "text", text: `Replied to request ${requestId}` }],
+				content: [{ type: "text", text: `${MI.reply} Replied to #${requestId}\n${formatPayloadForDisplay(response)}` }],
 				details: { requestId },
 			};
 		},
@@ -1407,7 +1464,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			if (receiptMode === "none") {
 				const { deliveryId } = mesh.tell(resolved, message);
 				return {
-					content: [{ type: "text", text: `Sent to ${peerLabel} (${deliveryId}):\n${rendered}` }],
+					content: [{ type: "text", text: `${MI.tell} ${peerLabel}\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none" },
 				};
 			}
@@ -1415,7 +1472,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			try {
 				const ack = await mesh.tellAndWaitForReceipt(resolved, message, receiptMode, timeoutMs ?? 10_000);
 				return {
-					content: [{ type: "text", text: `Delivered to ${peerLabel} (${ack.phase}):\n${rendered}` }],
+					content: [{ type: "text", text: `${MI.tell} ${peerLabel} (${ack.phase})\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode },
 				};
 			} catch (e) {
@@ -1461,7 +1518,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const receiptLine = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from} (${result.receipt.askId})` : "\nreceipt: none";
 				const replyText = formatPayloadForDisplay(result.reply);
 				return {
-					content: [{ type: "text", text: `${replyText}${receiptLine}` }],
+					content: [{ type: "text", text: `${MI.ask} ${peerLabel} replied\n${replyText}` }],
 					details: { sessionId, resolvedSessionId: resolved, reply: result.reply, receipt: result.receipt, waitFor: waitFor ?? "delivered" },
 				};
 			} catch (e) {
@@ -1527,7 +1584,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			const { topic, message } = params as { topic: string; message: unknown };
 			mesh.broadcast(topic, message);
 			return {
-				content: [{ type: "text", text: `Broadcast sent on topic '${topic}'` }],
+				content: [{ type: "text", text: `${MI.broadcast} ${topic}\n${formatPayloadForDisplay(message)}` }],
 				details: { topic, sent: true },
 			};
 		},
@@ -1606,7 +1663,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			mesh.chat(channelId, message);
 			const rendered = formatPayloadForDisplay(message);
 			return {
-				content: [{ type: "text", text: `Posted to #${channelId}:\n${rendered}` }],
+				content: [{ type: "text", text: `${MI.chat} #${channelId}\n${rendered}` }],
 				details: { channelId, sent: true },
 			};
 		},
@@ -1659,7 +1716,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				mesh.chat(channelId, message);
 				const rendered = formatPayloadForDisplay(message);
-				ctx.ui.notify(`→ #${channelId}:\n${rendered}`, "info");
+				ctx.ui.notify(`${MI.chat} #${channelId}\n${rendered}`, "info");
 			} else if (sub === "list" || sub === "peers" || sub === "" || sub === "me" || sub === "status") {
 				const me = mesh.self();
 				const peerList = mesh.peers();
@@ -1693,11 +1750,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				try {
 					if (tellFlags.has("--no-wait")) {
 						const { deliveryId } = mesh.tell(resolved, message);
-						ctx.ui.notify(`Sent to ${tellLabel} (${deliveryId}):\n${message}`, "info");
+						ctx.ui.notify(`${MI.tell} ${tellLabel}\n${message}`, "info");
 					} else {
 						const phase: MeshTellReceiptPhase = tellFlags.has("--visible") ? "visible" : "delivered";
 						await mesh.tellAndWaitForReceipt(resolved, message, phase, 10_000);
-						ctx.ui.notify(`Delivered to ${tellLabel} (${phase}):\n${message}`, "info");
+						ctx.ui.notify(`${MI.tell} ${tellLabel} (${phase})\n${message}`, "info");
 					}
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
@@ -1719,7 +1776,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					const result = await mesh.askWithReceipt(resolved, message, 30_000, askFlags.has("--visible") ? "visible" : "delivered");
 					const receiptText = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from}` : "";
 					const replyText = formatPayloadForDisplay(result.reply);
-					ctx.ui.notify(`${replyText}${receiptText}`, "info");
+					const askPeer = mesh.peers().find((p) => p.id === resolved);
+					const askLabel = askPeer ? getPeerLabel(askPeer) : resolved.slice(0, 8);
+					ctx.ui.notify(`${MI.ask} ${askLabel} replied\n${replyText}`, "info");
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 				}
