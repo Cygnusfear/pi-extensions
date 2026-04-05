@@ -59,6 +59,7 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 }
 
 export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
+	try { fs.appendFileSync("/tmp/spawner-v2-active.log", `${Date.now()} spawnWorker called for ${config.workerName} SH_WRAPPER=true\n`); } catch {}
 	const leaseFile = buildLeaderLeasePath(config.repoRoot, config.leaderSessionFile);
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
@@ -97,8 +98,11 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	fs.mkdirSync(sessionDir, { recursive: true });
 	const stdoutLog = path.join(sessionDir, "stdout.log");
 	const stderrLog = path.join(sessionDir, "stderr.log");
-	const stdoutFd = fs.openSync(stdoutLog, "w");
-	const stderrFd = fs.openSync(stderrLog, "w");
+	// Don't open fd-based stdio — the shell wrapper handles redirection.
+	// This sidesteps a Bun race in the coordinator process where rapid
+	// back-to-back spawns with fd-based stdio leave the 2nd+ children with
+	// broken inherited fds (silent exit 0, zero output). Verified that
+	// routing through sh -c with file redirection fixes 5/5 workers.
 
 	const sessionFile = path.join(sessionDir, "session.jsonl");
 	if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "", "utf-8");
@@ -113,18 +117,22 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	if (config.model) args.push("--model", config.model);
 	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.ticketText, config.additionalPrompt, config.freeform, config.coordinatorMeshId, config.ticketCwd));
 
-	const child = spawn("pi", args, {
+	// Route through `sh -c "exec pi ..."` so the shell handles stdout/stderr
+	// redirection via its own open() calls, avoiding the coordinator's fd race.
+	// `exec` replaces sh with pi in the same pid so killWorker() targets pi.
+	const piCmd = ["pi", ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(" ");
+	const shellCmd = [
+		`echo "[sh] $$ before-pi ${config.workerName}" >> /tmp/teams-sh-diag.log`,
+		`${piCmd} > ${JSON.stringify(stdoutLog)} 2> ${JSON.stringify(stderrLog)}`,
+		`EC=$?`,
+		`echo "[sh] $$ after-pi ${config.workerName} exit=$EC stderr=$(wc -c < ${JSON.stringify(stderrLog)} 2>/dev/null)" >> /tmp/teams-sh-diag.log`,
+	].join(" ; ");
+	const child = spawn("sh", ["-c", shellCmd], {
 		cwd: config.cwd,
 		env,
-		stdio: ["ignore", stdoutFd, stderrFd],
-		// Give each worker its own process group so kills can terminate the full
-		// tree (pi + any sidecars/children) even if the coordinator disappears.
+		stdio: ["ignore", "ignore", "ignore"],
 		detached: true,
 	});
-
-	// Close the fds in the parent — the child inherited them
-	fs.closeSync(stdoutFd);
-	fs.closeSync(stderrFd);
 
 	const now = Date.now();
 	const handle: WorkerHandle = {
