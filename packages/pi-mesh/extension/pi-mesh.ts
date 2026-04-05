@@ -1120,7 +1120,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			"This is background context, not necessarily a direct request.",
 			"Read it and decide whether to act, reply, or ignore it.",
 			"",
-			...batch.map(({ channelId, senderLabel, text }, idx) => `${idx + 1}. ${MI.chat} #${channelId} ${MI.sep} ${senderLabel}: ${text}`),
+			...batch.map(({ channelId, senderLabel, text }, idx) => `${idx + 1}. ${MI.chat} ${MI.sep} #${channelId} ${MI.sep} ${senderLabel}: ${text}`),
 		].join("\n");
 		pi.sendMessage(
 			{
@@ -1148,7 +1148,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			header,
 			"These are direct messages targeted at this session — read, decide, act.",
 			"",
-			...batch.map(({ senderLabel, payloadText }, idx) => `${idx + 1}. ${MI.tell} ${senderLabel}:\n${payloadText}`),
+			...batch.map(({ senderLabel, payloadText }, idx) => `${idx + 1}. ${MI.tell} ${MI.sep} ${senderLabel}:\n${payloadText}`),
 		].join("\n");
 		pi.sendMessage(
 			{
@@ -1307,7 +1307,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound",
-						content: `${MI.tell} ${senderLabel}\n${payloadText}`,
+						content: `${MI.tell} ${MI.sep} ${senderLabel}\n${payloadText}`,
 						display: true,
 						details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
 					},
@@ -1331,7 +1331,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const text = formatPayloadForDisplay(msg.payload);
 				pi.sendMessage({
 					customType: "mesh-chat",
-					content: `${MI.chat} #${msg.channel} ${MI.sep} ${senderLabel}\n${text}`,
+					content: `${MI.chat} ${MI.sep} #${msg.channel} ${MI.sep} ${senderLabel}\n${text}`,
 					display: true,
 				});
 				pendingAmbientChat.push({ channelId: msg.channel, senderLabel, text });
@@ -1372,7 +1372,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound-ask",
-						content: `${MI.ask} ${senderLabel} asks\n${payloadText}\n\n${MI.reply} mesh_reply(requestId: ${reqId}, response: ...)`,
+						content: `${MI.ask} ${MI.sep} ${senderLabel} asks\n${payloadText}\n\n${MI.reply} ${MI.sep} mesh_reply(requestId: ${reqId}, response: ...)`,
 						display: true,
 					},
 					deliveryOptions,
@@ -1421,7 +1421,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			sender(response);
 			pendingReplies.delete(requestId);
 			return {
-				content: [{ type: "text", text: `${MI.reply} Replied to #${requestId}\n${formatPayloadForDisplay(response)}` }],
+				content: [{ type: "text", text: `${MI.reply} ${MI.sep} #${requestId}\n${formatPayloadForDisplay(response)}` }],
 				details: { requestId },
 			};
 		},
@@ -1464,7 +1464,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			if (receiptMode === "none") {
 				const { deliveryId } = mesh.tell(resolved, message);
 				return {
-					content: [{ type: "text", text: `${MI.tell} ${peerLabel}\n${rendered}` }],
+					content: [{ type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel}\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none" },
 				};
 			}
@@ -1472,7 +1472,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			try {
 				const ack = await mesh.tellAndWaitForReceipt(resolved, message, receiptMode, timeoutMs ?? 10_000);
 				return {
-					content: [{ type: "text", text: `${MI.tell} ${peerLabel} (${ack.phase})\n${rendered}` }],
+					content: [{ type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel} (${ack.phase})\n${rendered}` }],
 					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode },
 				};
 			} catch (e) {
@@ -1518,7 +1518,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const receiptLine = result.receipt ? `\nreceipt: ${result.receipt.phase} by ${result.receipt.from} (${result.receipt.askId})` : "\nreceipt: none";
 				const replyText = formatPayloadForDisplay(result.reply);
 				return {
-					content: [{ type: "text", text: `${MI.ask} ${peerLabel} replied\n${replyText}` }],
+					content: [{ type: "text", text: `${MI.ask} ${MI.sep} ${peerLabel} replied\n${replyText}` }],
 					details: { sessionId, resolvedSessionId: resolved, reply: result.reply, receipt: result.receipt, waitFor: waitFor ?? "delivered" },
 				};
 			} catch (e) {
@@ -1584,7 +1584,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			const { topic, message } = params as { topic: string; message: unknown };
 			mesh.broadcast(topic, message);
 			return {
-				content: [{ type: "text", text: `${MI.broadcast} ${topic}\n${formatPayloadForDisplay(message)}` }],
+				content: [{ type: "text", text: `${MI.broadcast} ${MI.sep} ${topic}\n${formatPayloadForDisplay(message)}` }],
 				details: { topic, sent: true },
 			};
 		},
@@ -1663,7 +1663,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			mesh.chat(channelId, message);
 			const rendered = formatPayloadForDisplay(message);
 			return {
-				content: [{ type: "text", text: `${MI.chat} #${channelId}\n${rendered}` }],
+				content: [{ type: "text", text: `${MI.chat} ${MI.sep} #${channelId}\n${rendered}` }],
 				details: { channelId, sent: true },
 			};
 		},
@@ -1716,7 +1716,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				mesh.chat(channelId, message);
 				const rendered = formatPayloadForDisplay(message);
-				ctx.ui.notify(`${MI.chat} #${channelId}\n${rendered}`, "info");
+				ctx.ui.notify(`${MI.chat} ${MI.sep} #${channelId}\n${rendered}`, "info");
 			} else if (sub === "list" || sub === "peers" || sub === "" || sub === "me" || sub === "status") {
 				const me = mesh.self();
 				const peerList = mesh.peers();
@@ -1750,11 +1750,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				try {
 					if (tellFlags.has("--no-wait")) {
 						const { deliveryId } = mesh.tell(resolved, message);
-						ctx.ui.notify(`${MI.tell} ${tellLabel}\n${message}`, "info");
+						ctx.ui.notify(`${MI.tell} ${MI.sep} ${tellLabel}\n${message}`, "info");
 					} else {
 						const phase: MeshTellReceiptPhase = tellFlags.has("--visible") ? "visible" : "delivered";
 						await mesh.tellAndWaitForReceipt(resolved, message, phase, 10_000);
-						ctx.ui.notify(`${MI.tell} ${tellLabel} (${phase})\n${message}`, "info");
+						ctx.ui.notify(`${MI.tell} ${MI.sep} ${tellLabel} (${phase})\n${message}`, "info");
 					}
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
@@ -1778,7 +1778,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					const replyText = formatPayloadForDisplay(result.reply);
 					const askPeer = mesh.peers().find((p) => p.id === resolved);
 					const askLabel = askPeer ? getPeerLabel(askPeer) : resolved.slice(0, 8);
-					ctx.ui.notify(`${MI.ask} ${askLabel} replied\n${replyText}`, "info");
+					ctx.ui.notify(`${MI.ask} ${MI.sep} ${askLabel} replied\n${replyText}`, "info");
 				} catch (e) {
 					ctx.ui.notify(`Error: ${e}`, "warning");
 				}
