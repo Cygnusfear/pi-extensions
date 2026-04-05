@@ -1,0 +1,23 @@
+packages/pi-mesh/extension/pi-mesh.ts
+  a0e309574cdef853 1123,1151,1310,1334,1375,1424,1467,1475,1521,1587,1666,1719,1753,1757,1781
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "81b96c8f9d0153d964ed96e4301dda41223ddf6d",
+  "prompts": {
+    "a0e309574cdef853": {
+      "agent_id": {
+        "tool": "Percival Voyager Tyson",
+        "id": "128e542d-498e-41bf-bc1b-4dcabab5231c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 15,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
