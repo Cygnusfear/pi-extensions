@@ -1,0 +1,10 @@
+{
+  "name": "@pi-extensions/git-ai",
+  "version": "0.0.1",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extensions/git-ai.ts"
+    ]
+  }
+}
