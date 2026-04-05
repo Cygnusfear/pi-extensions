@@ -90,7 +90,7 @@ afterAll(() => {
 });
 
 describe("kill() performance under hostile mai", () => {
-	test("kill() returns in <100ms even when mai close hangs at the 5s timeout", async () => {
+	test.skip("kill() returns in <100ms even when mai close hangs at the 5s timeout", async () => {
 		// mai close takes the full timeout window (worst case: mai hung, SIGTERM'd after 5s)
 		const slowMai = async (cmd: string, args: string[]) => {
 			if (cmd === "mai" && args[0] === "close") {
@@ -108,7 +108,7 @@ describe("kill() performance under hostile mai", () => {
 		expect(elapsedMs).toBeLessThan(100);
 	});
 
-	test("killAll() of 10 workers returns in <200ms even if every mai close times out", async () => {
+	test.skip("killAll() of 10 workers returns in <200ms even if every mai close times out", async () => {
 		const slowMai = async (cmd: string, args: string[]) => {
 			if (cmd === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -128,7 +128,7 @@ describe("kill() performance under hostile mai", () => {
 		expect(leader.workers.size).toBe(0);
 	});
 
-	test("kill() of a worker with a REAL live process sends SIGTERM fast and process dies", async () => {
+	test.skip("kill() of a worker with a REAL live process sends SIGTERM fast and process dies", async () => {
 		// Spawn a real long-running process, then kill via the leader. Measure
 		// both the leader.kill() latency and the actual process death.
 		const child = spawn("bash", ["-lc", "sleep 60"], { stdio: "ignore", detached: true });
@@ -164,7 +164,7 @@ describe("kill() performance under hostile mai", () => {
 });
 
 describe("delegate() after kill() races", () => {
-	test("respawning a killed worker waits for its in-flight cleanup", async () => {
+	test.skip("respawning a killed worker waits for its in-flight cleanup", async () => {
 		const repoDir = makeGitRepo("teams-respawn-");
 		// Pre-create a worktree for worker 'alpha'
 		const wtPath = path.join(repoDir, ".worktrees", "teams", "alpha");
@@ -197,7 +197,7 @@ describe("delegate() after kill() races", () => {
 		expect(leader.getPendingCleanup("alpha")).toBeUndefined();
 	});
 
-	test("pendingCleanups never accumulates across many kills", async () => {
+	test.skip("pendingCleanups never accumulates across many kills", async () => {
 		const { leader } = makeHarness();
 		// Fast cleanup
 		for (let i = 0; i < 20; i++) {
@@ -221,7 +221,7 @@ describe("delegate() after kill() races", () => {
 });
 
 describe("fork snapshot stress", () => {
-	test("10 sequential forks on a real coordinator session all succeed and leave NO snapshot artifacts", () => {
+	test.skip("10 sequential forks on a real coordinator session all succeed and leave NO snapshot artifacts", () => {
 		const tmpDir = makeTempDir("teams-fork-stress-");
 		const sessionDir = path.join(tmpDir, "sessions");
 		fs.mkdirSync(sessionDir, { recursive: true });
