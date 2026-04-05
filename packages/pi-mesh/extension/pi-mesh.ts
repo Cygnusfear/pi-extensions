@@ -32,7 +32,9 @@ import type {
 	PeerInfo,
 	RequestEvent,
 } from "./types.js";
-import { getSessionNicknameText, setStableId } from "@pi-extensions/shared/session-nickname";
+import { getSessionNicknameText, setStableId, claimNickname, deriveTripleName } from "@pi-extensions/shared/session-nickname";
+import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
+import { randomUUID } from "node:crypto";
 import {
 	buildTellReceiptAck,
 	createDeliveryId,
@@ -79,6 +81,7 @@ export class PiMesh {
 	private myClientId = "";    // unique per connection — the routing identity
 	private mySessionId = "";   // pi session ID — metadata, can change on resume
 	private myName: string | undefined;
+	private myIdentity: MeshIdentity | null = null; // stable mesh identity (persisted in session file)
 	private announceIntervalMs = 30_000;
 	private lineBuf = "";
 	private pendingGets: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }> = new Map();
@@ -379,17 +382,28 @@ export class PiMesh {
 		this._send({ cmd: "publish", topic: `pi/mesh/channel/${channelId}`, payload: JSON.stringify(envelope) });
 	}
 
-	/** Info about this session. */
+	/** Info about this session, using stable mesh identity when available. */
 	self(): PeerInfo {
 		return {
-			id: this.myClientId,
+			id: this.myIdentity?.id ?? this.myClientId,
 			sessionId: this.mySessionId,
 			name: this.myName,
-			nickname: getLiveNickname(this.myClientId) ?? getLiveNickname(this.mySessionId),
+			nickname: this.myIdentity?.nickname ?? getLiveNickname(this.myClientId) ?? getLiveNickname(this.mySessionId),
 			hostname: hostname(),
 			cwd: process.cwd(),
 			lastSeen: Date.now(),
+			claimedAt: this.myIdentity?.claimedAt,
 		};
+	}
+
+	/** Set the stable mesh identity (called by the identity resolution logic). */
+	setIdentity(identity: MeshIdentity): void {
+		this.myIdentity = identity;
+	}
+
+	/** Get the current stable mesh identity (if resolved). */
+	getIdentity(): MeshIdentity | null {
+		return this.myIdentity;
 	}
 
 	peers(): PeerInfo[] {
@@ -438,11 +452,12 @@ export class PiMesh {
 	private _handleEvent(ev: Record<string, unknown>): void {
 		switch (ev.ev) {
 			case "ready":
-				// Sidecar ready — extract unique client identity
+				// Sidecar ready — extract unique client identity (routing only, NOT identity)
 				this.myZid = (ev.zid as string) ?? "";
 				this.myClientId = (ev.client_id as string) ?? "";
 				this.isSocketReady = true;
-				setStableId(this.myClientId);
+				// NOTE: setStableId is now called from identity resolution, not from sidecar ready.
+				// The sidecar's client_id stays as routing address only.
 				if (!this.myClientId) {
 					console.warn("[pi-mesh] sidecar reported empty client_id — subscriptions deferred");
 					break;
@@ -579,9 +594,43 @@ export class PiMesh {
 			nickname: ann.nickname,
 			cwd: ann.cwd,
 			lastSeen: Date.now(),
+			claimedAt: ann.claimedAt,
 		};
 		this.peerMap.set(key, peer);
 		if (!existing) this._emit("peer-join", peer);
+
+		// ── Nickname conflict detection ──────────────────────────────────────
+		if (this.myIdentity && ann.nickname && ann.nickname === this.myIdentity.nickname) {
+			const peerMeshId = ann.meshId ?? ann.clientId;
+			if (peerMeshId !== this.myIdentity.id) {
+				// Same nickname, different identity → collision. Deterministic tie-break.
+				const peerClaimedAt = ann.claimedAt ?? Date.now();
+				const iLose =
+					peerClaimedAt < this.myIdentity.claimedAt ||
+					(peerClaimedAt === this.myIdentity.claimedAt && peerMeshId < this.myIdentity.id);
+				if (iLose) {
+					// We yield — re-claim nickname and notify via _onNicknameConflict callback
+					const liveNicknames = new Set(this.peers().map(p => p.nickname).filter(Boolean) as string[]);
+					liveNicknames.add(ann.nickname); // peer keeps it
+					const newNickname = claimNickname(this.myIdentity.id, liveNicknames);
+					this.myIdentity = { ...this.myIdentity, nickname: newNickname };
+					setStableId(this.myIdentity.id); // re-trigger listeners
+					// Re-announce with updated nickname
+					this._announce(this.myClientId, process.cwd());
+					// Emit conflict event so the extension can persist the updated identity
+					this._emit("peer-join", this.self()); // trigger listeners for self-update
+					if (this._onNicknameConflict) this._onNicknameConflict(this.myIdentity);
+				}
+				// else: they lose — they'll handle it on their side
+			}
+		}
+	}
+
+	/** Callback invoked when this peer yields on a nickname conflict. Set by the extension. */
+	private _onNicknameConflict: ((updatedIdentity: MeshIdentity) => void) | null = null;
+
+	onNicknameConflict(cb: (updatedIdentity: MeshIdentity) => void): void {
+		this._onNicknameConflict = cb;
 	}
 
 	private _setupSubscriptions(clientId: string, _cwd: string): void {
@@ -604,10 +653,12 @@ export class PiMesh {
 			zid: this.myZid,
 			sessionId: this.mySessionId,
 			name: this.myName,
-			nickname: getLiveNickname(clientId) ?? getLiveNickname(this.mySessionId),
+			nickname: this.myIdentity?.nickname ?? getLiveNickname(clientId) ?? getLiveNickname(this.mySessionId),
 			hostname: hostname(),
 			pid: process.pid,
 			cwd,
+			claimedAt: this.myIdentity?.claimedAt,
+			meshId: this.myIdentity?.id,
 		};
 		this._send({ cmd: "publish", topic: `pi/mesh/announce/${clientId}`, payload: JSON.stringify(ann) });
 	}
@@ -632,6 +683,125 @@ export class PiMesh {
 				}
 			}
 		}, 30_000);
+	}
+}
+
+// ── Identity resolution ──────────────────────────────────────────────────────
+
+const MESH_IDENTITY_TYPE = "mesh_identity";
+
+/**
+ * Scan session entries for the most recent mesh_identity custom entry.
+ * Returns the identity data, or null if none found.
+ */
+function resolveIdentityFromSession(
+	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
+): MeshIdentity | null {
+	let latest: MeshIdentity | null = null;
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === MESH_IDENTITY_TYPE && entry.data) {
+			latest = entry.data as MeshIdentity;
+		}
+	}
+	return latest;
+}
+
+/**
+ * Resolve and set the mesh identity based on session_start reason.
+ * - reload: reuse existing identity from session file
+ * - resume: reuse if id not live on mesh; fork if id already live (double-resume)
+ * - new/fork: generate fresh identity
+ * - startup: delegates to resume/new based on whether mesh_identity entry exists
+ */
+function resolveAndSetIdentity(
+	reason: string,
+	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }>; getSessionId: () => string } },
+	mesh: PiMesh,
+	pi: ExtensionAPI,
+): void {
+	const existing = resolveIdentityFromSession(ctx);
+
+	switch (reason) {
+		case "reload": {
+			if (existing) {
+				// Reuse identity from session file
+				mesh.setIdentity(existing);
+				setStableId(existing.id);
+				return;
+			}
+			// No identity yet (first session after feature ships) — fall through to new
+			break;
+		}
+		case "resume": {
+			if (existing) {
+				// Check if this id is already live on the mesh (double-resume detection)
+				const idAlreadyLive = mesh.peers().some(
+					p => p.id === existing.id || (p as any).meshId === existing.id,
+				);
+				if (idAlreadyLive) {
+					// DOUBLE-RESUME: session is already live in another pi process
+					pi.sendMessage({
+						customType: "mesh-identity-fork",
+						content: "[pi-mesh] Session already open in another pi. Generating new identity for this instance.",
+						display: true,
+					});
+					// NOTE: ctx in session_start is ExtensionContext (read-only sessionManager),
+					// not ExtensionCommandContext. We cannot call ctx.newSession() here.
+					// Generate fresh identity instead — the session file stays the same but
+					// we get a unique mesh identity to avoid routing conflicts.
+					break; // fall through to generate new identity
+				}
+				// Safe — previous pi is gone. Reuse identity.
+				mesh.setIdentity(existing);
+				setStableId(existing.id);
+				// Verify nickname against current mesh peers
+				const liveNicknames = new Set(mesh.peers().map(p => p.nickname).filter(Boolean) as string[]);
+				if (liveNicknames.has(existing.nickname)) {
+					// Nickname taken by someone else — re-claim
+					const newNickname = claimNickname(existing.id, liveNicknames);
+					const updated: MeshIdentity = { ...existing, nickname: newNickname };
+					mesh.setIdentity(updated);
+					pi.appendEntry(MESH_IDENTITY_TYPE, updated);
+				}
+				return;
+			}
+			// No identity entry — treat as new (first session after feature ships)
+			break;
+		}
+		case "startup": {
+			// Delegates to resume/new based on whether mesh_identity entry exists
+			if (existing) {
+				// Act like resume
+				resolveAndSetIdentity("resume", ctx, mesh, pi);
+				return;
+			}
+			// No existing identity — fall through to generate new
+			break;
+		}
+		case "fork":
+		case "new":
+			// Always generate fresh identity
+			break;
+		default:
+			break;
+	}
+
+	// Generate fresh identity
+	const id = randomUUID();
+	const liveNicknames = new Set(mesh.peers().map(p => p.nickname).filter(Boolean) as string[]);
+	const nickname = claimNickname(id, liveNicknames);
+	const identity: MeshIdentity = {
+		id,
+		nickname,
+		claimedAt: Date.now(),
+		host: hostname(),
+	};
+	mesh.setIdentity(identity);
+	setStableId(identity.id);
+	try {
+		pi.appendEntry(MESH_IDENTITY_TYPE, identity);
+	} catch (e) {
+		console.warn("[pi-mesh] Failed to persist mesh identity:", e);
 	}
 }
 
@@ -814,17 +984,35 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		scheduleAmbientChatFlush();
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		currentCtx = ctx;
 		const sessionId = ctx.sessionManager.getSessionId();
+		const reason = (event as { reason?: string }).reason ?? "startup";
+
 		if (started) {
+			// Already running — handle identity for reload/resume/fork/new transitions
 			mesh.updateSessionId(sessionId);
+			resolveAndSetIdentity(reason, ctx, mesh, pi);
 			return;
 		}
 		started = true;
 		try {
 			const name = pi.getSessionName?.() ?? undefined;
 			mesh.start(binPath, sessionId, ctx.cwd, { mode: "peer", scouting: true }, name);
+
+			// Resolve identity once sidecar is ready
+			mesh.on("ready", () => {
+				resolveAndSetIdentity(reason, ctx, mesh, pi);
+			});
+
+			// Persist identity updates on nickname conflicts
+			mesh.onNicknameConflict((updatedIdentity) => {
+				try {
+					pi.appendEntry("mesh_identity", updatedIdentity);
+				} catch (e) {
+					console.warn("[pi-mesh] Failed to persist identity update after conflict:", e);
+				}
+			});
 
 			// Wire inbound tells into the conversation
 			mesh.on<MeshMessage>("message", (rawMsg) => {

@@ -10,6 +10,7 @@ export interface PeerInfo {
 	nickname?: string;
 	cwd?: string;
 	lastSeen: number; // unix ms
+	claimedAt?: number; // unix ms — distributed tie-breaker for nickname conflicts
 }
 
 export interface MeshConfig {
@@ -62,6 +63,8 @@ export interface AnnouncePayload {
 	pid: number;
 	cwd: string;
 	nickname?: string;
+	claimedAt?: number; // unix ms — tie-breaker for nickname conflicts
+	meshId?: string;    // stable mesh identity (decoupled from sidecar clientId)
 }
 
 /** Emitted on the "request" event when another session calls ask() on this session. */
