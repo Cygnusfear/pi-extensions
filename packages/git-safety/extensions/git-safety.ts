@@ -15,7 +15,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { isGitUnsafeBash, isGitPath } from "@pi-extensions/shared/git-guards";
+import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
 
 const REBASE_CONTINUE_RE = /\bgit\s+rebase\s+--continue\b/;
 const HAS_GIT_EDITOR_RE = /\bGIT_EDITOR\s*=/;
@@ -70,6 +70,20 @@ export default function (pi: ExtensionAPI) {
 				return {
 					block: true,
 					reason: "🚫 sed is blocked — it behaves differently on macOS and Linux. Use edit, apply_patch, ast-grep (TypeScript), or rs-hack (Rust) instead.",
+				};
+			}
+		}
+
+		// ── block process-kill broadcast (always, regardless of mode) ──
+		// No setting can disable this. Broadcasting SIGKILL to the user's session
+		// has no legitimate agent workflow — only bugs produce these commands.
+		if (event.toolName === "bash" || event.toolName === "bash_bg_start") {
+			const cmd: string = (event.input as any)?.command ?? "";
+			const killHit = isProcessKillBroadcast(cmd);
+			if (killHit) {
+				return {
+					block: true,
+					reason: `🛡️ HARD-BLOCKED (process kill guard): ${killHit.reason}. This guard cannot be disabled.`,
 				};
 			}
 		}

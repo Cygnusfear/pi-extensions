@@ -875,8 +875,23 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	let started = false;
 	let currentCtx: { sessionManager: { getBranch: () => unknown[]; getSessionId: () => string } } | null = null;
 	let agentBusy = false;
+	// Deafen silences incoming mesh messages (both direct tells and channel chat)
+	// so the TUI stays quiet while you're focused. Toggled via /mesh deafen.
+	// Mute blocks outbound mesh tell/chat/ask from your session so accidental
+	// slash commands don't broadcast anything. Toggled via /mesh mute.
+	let deafened = false;
+	let muted = false;
 	let ambientChatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 	const pendingAmbientChat: Array<{ channelId: string; senderLabel: string; text: string }> = [];
+	const pendingTells: Array<{
+		senderLabel: string;
+		fromId: string;
+		topic: string | undefined;
+		payloadText: string;
+		deliveryId: string | undefined;
+		originalFrom: string | undefined;
+		ackRequested: MeshTellReceiptPhase | undefined;
+	}> = [];
 
 	// Expose mesh instance for other extensions (e.g. teams) — avoids duplicate connections
 	(globalThis as any).__piMesh = mesh;
@@ -951,6 +966,44 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		ambientChatFlushTimer = setTimeout(flushAmbientChat, AMBIENT_CHAT_BATCH_MS);
 	};
 
+	const flushPendingTells = () => {
+		if (agentBusy || pendingTells.length === 0) return;
+		const batch = pendingTells.splice(0, pendingTells.length);
+		const header = batch.length === 1
+			? "1 direct mesh-tell arrived while you were busy."
+			: `${batch.length} direct mesh-tells arrived while you were busy.`;
+		const blob = [
+			header,
+			"These are direct messages targeted at this session — read, decide, act.",
+			"",
+			...batch.map(({ senderLabel, payloadText }, idx) => `${idx + 1}. From ${senderLabel}:\n${payloadText}`),
+		].join("\n");
+		pi.sendMessage(
+			{
+				customType: "mesh-inbound-batch",
+				content: blob,
+				display: true,
+				details: {
+					count: batch.length,
+					tells: batch.map((t) => ({
+						from: t.fromId,
+						senderLabel: t.senderLabel,
+						topic: t.topic,
+						deliveryId: t.deliveryId,
+						ackRequested: t.ackRequested,
+					})),
+				},
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+		// Send 'visible' acks for queued tells that requested them — the agent is now seeing them.
+		for (const t of batch) {
+			if (t.deliveryId && t.originalFrom && t.ackRequested === "visible") {
+				mesh.sendTellReceipt(t.originalFrom, buildTellReceiptAck(t.deliveryId, mesh.self().id, "visible"));
+			}
+		}
+	};
+
 	pi.on("agent_start", () => {
 		agentBusy = true;
 		if (ambientChatFlushTimer) {
@@ -961,6 +1014,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 	pi.on("agent_end", () => {
 		agentBusy = false;
+		flushPendingTells();
 		scheduleAmbientChatFlush();
 	});
 
@@ -1032,25 +1086,55 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				}
 			});
 
-			// Wire inbound tells into the conversation
+			// Wire inbound tells into the conversation.
+			// Busy → queue and flush on agent_end so the agent actually wakes up to see it.
+			// Idle → deliver immediately.
 			mesh.on<MeshMessage>("message", (rawMsg) => {
 				const { message: msg, deliveryId, ackRequested, originalFrom } = unwrapInboundTell(rawMsg);
 				if (isTeamsLifecyclePayload(msg.payload)) return;
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
+				const payloadText = typeof msg.payload === "string" ? msg.payload : JSON.stringify(msg.payload);
+
+				if (deafened) {
+					// Drop the message silently — still send delivered ack so the sender
+					// knows it arrived at the process, but never surface it to the agent.
+					if (deliveryId && originalFrom && ackRequested) {
+						mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"));
+					}
+					return;
+				}
+
+				if (agentBusy) {
+					pendingTells.push({
+						senderLabel,
+						fromId: msg.from ?? "unknown",
+						topic: msg.topic,
+						payloadText,
+						deliveryId,
+						originalFrom,
+						ackRequested,
+					});
+					// We have the message — ack 'delivered' now. 'visible' ack fires on flush.
+					if (deliveryId && originalFrom && ackRequested) {
+						mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"));
+					}
+					return;
+				}
+
 				const requestVisible = ackRequested === "visible";
 				const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
 				pi.sendMessage(
 					{
 						customType: "mesh-inbound",
-						content: `[mesh-tell] From ${senderLabel}:\n\n${typeof msg.payload === "string" ? msg.payload : JSON.stringify(msg.payload)}`,
+						content: `[mesh-tell] From ${senderLabel}:\n\n${payloadText}`,
 						display: true,
 						details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
 					},
 					deliveryOptions,
 				);
 				if (deliveryId && originalFrom && ackRequested) {
-					const phase: MeshTellReceiptPhase = !agentBusy && requestVisible ? "visible" : "delivered";
+					const phase: MeshTellReceiptPhase = requestVisible ? "visible" : "delivered";
 					mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, phase));
 				}
 			});
@@ -1060,6 +1144,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			mesh.on<ChannelMessage>("channel", (msg) => {
 				if (msg.from === mesh.self().id) return; // don't echo own messages
 				if (isTeamsLifecyclePayload(msg.payload)) return; // teams lifecycle events rendered by teams extension
+				if (deafened) return; // /mesh deafen — drop channel chatter silently
 
 				const senderPeer = mesh.peers().find((p) => p.id === msg.from || p.sessionId === msg.from);
 				const senderLabel = senderPeer ? getPeerLabel(senderPeer) : msg.from?.slice(0, 8) ?? "unknown";
@@ -1128,6 +1213,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			ambientChatFlushTimer = null;
 		}
 		pendingAmbientChat.length = 0;
+		pendingTells.length = 0;
 		if (!started) return;
 		try { mesh.stop(); } catch {}
 	});
@@ -1403,11 +1489,29 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 	pi.registerCommand("mesh", {
 		description:
-			"Mesh. Usage: /mesh [list] | /mesh tell <peer-id-or-nickname> <msg> [--visible|--no-wait] | /mesh ask <peer-id-or-nickname> <msg> [--visible] | /mesh view <peer-id-or-nickname> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg>",
+			"Mesh. Usage: /mesh [list] | /mesh tell <peer> <msg> [--visible|--no-wait] | /mesh ask <peer> <msg> [--visible] | /mesh view <peer> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg> | /mesh mute [on|off] | /mesh deafen [on|off] | /mesh status",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0] ?? "list";
-			if (sub === "join") {
+			const parseToggle = (current: boolean, arg: string | undefined): boolean => {
+				if (!arg) return !current;
+				const v = arg.toLowerCase();
+				if (v === "on" || v === "true" || v === "1" || v === "yes") return true;
+				if (v === "off" || v === "false" || v === "0" || v === "no") return false;
+				return !current;
+			};
+			if (sub === "mute") {
+				muted = parseToggle(muted, parts[1]);
+				ctx.ui.notify(`mesh mute: ${muted ? "ON (outbound blocked)" : "off"}`, "info");
+				return;
+			} else if (sub === "deafen" || sub === "deafened") {
+				deafened = parseToggle(deafened, parts[1]);
+				ctx.ui.notify(`mesh deafen: ${deafened ? "ON (inbound chat/tells silenced)" : "off"}`, "info");
+				return;
+			} else if (sub === "status") {
+				ctx.ui.notify(`mute=${muted ? "ON" : "off"} | deafen=${deafened ? "ON" : "off"}`, "info");
+				return;
+			} else if (sub === "join") {
 				const channelId = parts[1];
 				if (!channelId) { ctx.ui.notify("Usage: /mesh join <channel>", "warning"); return; }
 				mesh.joinChannel(channelId);
@@ -1421,6 +1525,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const channelId = parts[1];
 				const message = parts.slice(2).join(" ");
 				if (!channelId || !message) { ctx.ui.notify("Usage: /mesh chat <channel> <message>", "warning"); return; }
+				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				mesh.chat(channelId, message);
 				ctx.ui.notify(`→ #${channelId}`, "info");
 			} else if (sub === "list" || sub === "peers" || sub === "" || sub === "me" || sub === "status") {
@@ -1443,6 +1548,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const tellFlags = new Set(parts.filter((part) => part === "--visible" || part === "--no-wait"));
 				const message = parts.slice(2).filter((part) => !tellFlags.has(part)).join(" ");
 				if (!targetId || !message) { ctx.ui.notify("Usage: /mesh tell <sessionId> <message>", "warning"); return; }
+				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				let resolved: string;
 				try {
 					resolved = resolveTargetSessionId(targetId);
@@ -1467,6 +1573,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const askFlags = new Set(parts.filter((part) => part === "--visible"));
 				const message = parts.slice(2).filter((part) => !askFlags.has(part)).join(" ");
 				if (!targetId || !message) { ctx.ui.notify("Usage: /mesh ask <sessionId> <message> [--visible]", "warning"); return; }
+				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				let resolved: string;
 				try {
 					resolved = resolveTargetSessionId(targetId);

@@ -30,6 +30,50 @@ const [writing, comms] = await Promise.all([
  console.log("Comms skill loaded:", comms.length, "chars");
 ```
 
+Replying:
+
+```
+QUESTION: can we red/green tdd this?
+WRONG:
+ Not by default.
+
+ Because you already set the rule:
+ - TDD is banned unless you explicitly approve with [USE TDD]
+
+ So I will not do red/green TDD unless you give that approval.
+
+ Also, even aside from that:
+
+ This is not a simple local behavior bug.
+ This is a substrate contract / compile-time architecture problem.
+
+ That means the strongest shape is probably:
+
+ - contract tests
+ - compile-fail tests
+ - integration proofs
+ - runtime transport tests
+
+ rather than ordinary “small unit red/green” TDD.
+
+ So the correct answer is:
+
+ - Yes, it can be test-driven
+ - but I need [USE TDD] from you before doing that
+ - and the right test set would include:
+     1. compile-fail tests for unsupported boundary configurations
+     2. reducer-runtime boundary parity tests
+     3. live service request/response tests
+     4. continuation/resume tests if that is the required implementation path
+
+ If you want that, reply with:
+ - [USE TDD]
+
+ and I’ll structure it as a proper red/green contract-driven effort.
+RIGHT:
+ Yes, it can be test-driven, but I need [USE TDD] from you before doing that
+```
+
 YOU MUST HAVE READ THESE SKILLS IN A SESSION, ALWAYS VERIFY YOU HAVE.
 
 ## 00.00 Johnny Lookup (CRITICAL)

@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import TurndownService from "turndown";
-import { isGitUnsafeBash, isGitPath } from "@pi-extensions/shared/git-guards";
+import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
 import { safeJsonParse, safeResponseJson } from "@pi-extensions/shared/safe-json";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import { fffFindAPI, fffGrepAPI, fffMultiGrepAPI } from "@pi-extensions/fff/api";
@@ -42,6 +42,10 @@ function isGitLockActive(): boolean {
 
 function gitGuardError(reason: string): string {
 	return `🛡️ GIT SAFETY BLOCK: ${reason}. GUARD PROTOCOL: ASK FOR HOOMAN TO CONFIRM THIS ACTION FIRST WITH [OK]`;
+}
+
+function processKillGuardError(reason: string): string {
+	return `🛡️ HARD-BLOCKED (process kill guard): ${reason}. This guard cannot be disabled.`;
 }
 
 /**
@@ -1034,6 +1038,10 @@ function createToolBindings(cwd: string) {
 
 	return {
 		Bash: async ({ command, cwd: explicitCwd, timeout }: { command: string; cwd?: string; timeout?: number }) => {
+			// Process-kill broadcast guard — ALWAYS active, not gated by git-lock mode.
+			const killResult = isProcessKillBroadcast(command);
+			if (killResult) throw new Error(processKillGuardError(killResult.reason));
+
 			if (isGitLockActive()) {
 				const gitResult = isGitUnsafeBash(command);
 				if (gitResult) throw new Error(gitGuardError(gitResult.reason));

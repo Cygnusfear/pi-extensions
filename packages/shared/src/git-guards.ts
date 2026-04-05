@@ -7,7 +7,13 @@
  *
  * Everything else passes through. Regular git operations (add, commit, diff, log, push,
  * branch, checkout, merge, rebase, etc.) are never blocked.
+ *
+ * Also re-exports isProcessKillBroadcast from process-guards so extensions can import
+ * both guards through a single subpath without requiring a pi restart when new
+ * guards are added to the shared package.
  */
+
+export { isProcessKillBroadcast } from "./process-guards.ts";
 
 // Shell escape patterns that encode "." (0x2e / 056 octal)
 const DOT_ESCAPES = /(\$'\\x2e'|\$'\\056'|\$"\\x2e"|\$"\\056"|\\x2e|\\056)/;

@@ -5,6 +5,7 @@
   "exports": {
     "./foresight-env": "./src/foresight-env.ts",
     "./git-guards": "./src/git-guards.ts",
+    "./process-guards": "./src/process-guards.ts",
     "./model-utils": "./src/model-utils.ts",
     "./safe-json": "./src/safe-json.ts",
     "./session-activity-summary": "./src/session-activity-summary.ts",
