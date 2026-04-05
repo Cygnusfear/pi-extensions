@@ -1,0 +1,23 @@
+packages/git-ai/test-tracking2.ts
+  b7a84f98ec139bab 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "7e3cb9b15fc3178eeb4b71ce2a1ab3882f0d164b",
+  "prompts": {
+    "b7a84f98ec139bab": {
+      "agent_id": {
+        "tool": "Adam Cosmonaut Fischer",
+        "id": "ec3af2af-dace-47fc-8940-c1fa935bb83e",
+        "model": "zai/glm-5-turbo"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 0,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
