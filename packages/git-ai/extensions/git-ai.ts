@@ -1,7 +1,7 @@
 /**
  * git-ai Extension for pi
  *
- * Tracks AI-authored code via git-ai's agent-v1 protocol.
+ * Tracks AI-authored code via git-ai's agent-v1 protocol. Uses mesh nickname as agent name.
  * On every edit tool call, sends PreToolUse/PostToolUse checkpoints
  * to git-ai so lines are attributed to the correct agent, model, and session.
  *
@@ -110,6 +110,7 @@ interface TranscriptMessage {
 function parseSessionTranscript(sessionFile: string): {
 	transcript: TranscriptMessage[];
 	model: string | null;
+	meshNickname: string | null;
 } {
 	if (!existsSync(sessionFile)) {
 		return { transcript: [], model: null };
@@ -118,6 +119,7 @@ function parseSessionTranscript(sessionFile: string): {
 	const lines = readFileSync(sessionFile, "utf-8").split("\n").filter(Boolean);
 	const transcript: TranscriptMessage[] = [];
 	let model: string | null = null;
+	let meshNickname: string | null = null;
 
 	for (const line of lines) {
 		let obj: Record<string, unknown>;
@@ -128,6 +130,15 @@ function parseSessionTranscript(sessionFile: string): {
 		}
 
 		const type = obj.type as string;
+
+		// Extract mesh identity
+		if (type === "custom" && obj.customType === "mesh_identity") {
+			const data = obj.data as Record<string, unknown> | undefined;
+			if (data && typeof data.nickname === "string") {
+				meshNickname = data.nickname;
+			}
+			continue;
+		}
 
 		if (type === "model_change") {
 			const provider = obj.provider as string | undefined;
@@ -190,7 +201,7 @@ function parseSessionTranscript(sessionFile: string): {
 		}
 	}
 
-	return { transcript, model };
+	return { transcript, model, meshNickname };
 }
 
 // ── Build agent-v1 JSON payload ──
@@ -216,8 +227,9 @@ function buildAgentV1Payload(params: {
 	}
 
 	// PostToolUse — build full transcript
-	const { transcript, model: transcriptModel } = parseSessionTranscript(sessionFile ?? "");
+	const { transcript, model: transcriptModel, meshNickname } = parseSessionTranscript(sessionFile ?? "");
 	const effectiveModel = model ?? transcriptModel ?? "unknown";
+	const agentName = meshNickname ?? "pi";
 
 	const messages = transcript.map((m) => {
 		const ts = m.timestamp ?? undefined;
@@ -235,7 +247,7 @@ function buildAgentV1Payload(params: {
 
 	return JSON.stringify({
 		type: "ai_agent",
-		agent_name: "pi",
+		agent_name: agentName,
 		model: effectiveModel,
 		conversation_id: sessionId,
 		repo_working_dir: repoDir,
