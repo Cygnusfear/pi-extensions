@@ -2,7 +2,7 @@
  * git-ai Extension for pi
  *
  * Tracks AI-authored code via git-ai's agent-v1 protocol.
- * Uses mesh nickname as agent name. Silent — no TUI pollution.
+ * Uses mesh nickname as agent name.
  * On every edit tool call, sends PreToolUse/PostToolUse checkpoints
  * to git-ai so lines are attributed to the correct agent, model, and session.
  *
@@ -266,22 +266,14 @@ async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
 			windowsHide: true,
 		});
 
+		child.on("close", () => { resolve(); });
+		child.on("error", () => { resolve(); });
 
-		child.on("close", (code) => {
-			resolve();
-		});
+		// Ensure stdin is flushed before closing
+		child.stdin.on("error", () => { /* ignore write-after-close if process exits fast */ });
+		child.stdin.write(payload, () => { child.stdin.end(); });
 
-		child.on("error", () => {
-			resolve();
-		});
-
-		child.stdin.write(payload);
-		child.stdin.end();
-
-		setTimeout(() => {
-			child.kill();
-			resolve();
-		}, 5000);
+		setTimeout(() => { child.kill(); resolve(); }, 5000);
 	});
 }
 
