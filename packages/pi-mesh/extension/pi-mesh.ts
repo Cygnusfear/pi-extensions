@@ -1429,7 +1429,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh Tell",
 		description: "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. 'Galileo Accretion Rubin' or '7e9bb362'" }),
 			message: Type.Unknown({ description: "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering." }),
 			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for: 'none', 'delivered', or 'visible'. Default: 'delivered'" })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms when waiting for receipt (default: 10000)", minimum: 100 })),
@@ -1487,7 +1487,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh Ask",
 		description: "Send a request to another pi session and wait for a reply. Includes delivery receipt tracking so timeouts distinguish 'not delivered' from 'delivered but no reply'.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. 'Galileo Accretion Rubin' or '7e9bb362'" }),
 			message: Type.Unknown({ description: "Request payload (any JSON value)" }),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms (default: 30000)", minimum: 100 })),
 			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for before timing out diagnostics: 'delivered' or 'visible'. Default: 'delivered'" })),
@@ -1533,7 +1533,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh View",
 		description: "Read recent meaningful entries from another live pi session. Offsets are relative to the end by default: 0 is newest, -1 is one before that.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. 'Galileo Accretion Rubin' or '7e9bb362'" }),
 			start: Type.Optional(Type.Number({ description: "Window start offset. Defaults to -20." })),
 			end: Type.Optional(Type.Number({ description: "Window end offset. Defaults to 0 (newest entry)." })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms (default: 10000)", minimum: 100 })),
