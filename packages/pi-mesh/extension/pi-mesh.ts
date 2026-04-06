@@ -1071,44 +1071,41 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 	const resolveTargetSessionId = (rawSessionId: string): string => {
 		const needle = rawSessionId.trim();
+		const needleLower = needle.toLowerCase();
 		const peers = mesh.peers();
+
+		// 1. Exact ID / sessionId match
 		const byExactMatch = peers.find((peer) => peer.id === needle || peer.sessionId === needle);
 		if (byExactMatch) return byExactMatch.id;
 
+		// 2. Case-insensitive exact name/nickname match
 		const byExactLabel = peers.filter((peer) => {
-			const nickname = peer.nickname?.trim();
-			const name = peer.name?.trim();
-			return nickname === needle || name === needle;
+			const nickname = peer.nickname?.trim().toLowerCase();
+			const name = peer.name?.trim().toLowerCase();
+			return nickname === needleLower || name === needleLower;
 		});
 		if (byExactLabel.length === 1) return byExactLabel[0].id;
 		if (byExactLabel.length > 1) {
 			const matched = byExactLabel.map((peer) => `${getPeerLabel(peer)} (${peer.id.slice(0, 8)})`).join(", ");
-			throw new Error(`Peer label '${needle}' is ambiguous: ${matched}`);
+			throw new Error(`Peer name '${needle}' is ambiguous: ${matched}`);
 		}
 
-		if (needle.length === 8) {
+		// 3. ID prefix match
+		if (needle.length >= 6) {
 			const byPrefix = peers.filter((peer) => {
 				const peerId = peer.id ?? "";
 				const peerSessionId = peer.sessionId ?? "";
 				return peerId.startsWith(needle) || peerSessionId.startsWith(needle);
 			});
-			if (byPrefix.length === 0) {
-				const hint = /^([a-z]+-)?[a-z0-9]{3,5}$/i.test(needle)
-					? ` '${needle}' looks like a ticket or local label, not a mesh peer id. Use mesh_peers and pass the short id in parentheses or an exact nickname.`
-					: " Is the peer online?";
-				throw new Error(`Unknown session id '${needle}'.${hint}`);
+			if (byPrefix.length === 1) return byPrefix[0].id;
+			if (byPrefix.length > 1) {
+				const matched = byPrefix.map((peer) => `${getPeerLabel(peer)} (${peer.id.slice(0, 8)})`).join(", ");
+				throw new Error(`Session id '${needle}' is ambiguous: ${matched}`);
 			}
-			if (byPrefix.length === 1) {
-				return byPrefix[0].id;
-			}
-			const matched = byPrefix.map((peer) => peer.id.slice(0, 8)).join(", ");
-			throw new Error(`Session id '${needle}' is ambiguous: ${matched}`);
 		}
 
-		const hint = /^([a-z]+-)?[a-z0-9]{3,5}$/i.test(needle)
-			? ` '${needle}' looks like a ticket or local label, not a mesh peer id. Use mesh_peers and pass the short id in parentheses or an exact nickname.`
-			: " Is the peer online?";
-		throw new Error(`Unknown session id '${needle}'.${hint}`);
+		const available = peers.map((p) => `${getPeerLabel(p)} (${p.id.slice(0, 8)})`).join(", ");
+		throw new Error(`No peer matching '${needle}'. Online: ${available || "none"}`);
 	};
 
 	const flushAmbientChat = () => {
@@ -1432,7 +1429,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh Tell",
 		description: "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
 			message: Type.Unknown({ description: "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering." }),
 			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for: 'none', 'delivered', or 'visible'. Default: 'delivered'" })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms when waiting for receipt (default: 10000)", minimum: 100 })),
@@ -1490,7 +1487,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh Ask",
 		description: "Send a request to another pi session and wait for a reply. Includes delivery receipt tracking so timeouts distinguish 'not delivered' from 'delivered but no reply'.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
 			message: Type.Unknown({ description: "Request payload (any JSON value)" }),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms (default: 30000)", minimum: 100 })),
 			waitFor: Type.Optional(Type.String({ description: "Receipt to wait for before timing out diagnostics: 'delivered' or 'visible'. Default: 'delivered'" })),
@@ -1536,7 +1533,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		label: "Mesh View",
 		description: "Read recent meaningful entries from another live pi session. Offsets are relative to the end by default: 0 is newest, -1 is one before that.",
 		parameters: Type.Object({
-			sessionId: Type.String({ description: "Target mesh peer ID or exact nickname" }),
+			sessionId: Type.String({ description: "Peer ID, short ID prefix, or full name (case-insensitive). e.g. "Galileo Accretion Rubin" or "7e9bb362"" }),
 			start: Type.Optional(Type.Number({ description: "Window start offset. Defaults to -20." })),
 			end: Type.Optional(Type.Number({ description: "Window end offset. Defaults to 0 (newest entry)." })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Timeout in ms (default: 10000)", minimum: 100 })),
