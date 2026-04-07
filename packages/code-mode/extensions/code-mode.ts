@@ -680,18 +680,21 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Register highlander sandbox fn — calls pi tool if available
-  registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
-    try {
-      const mod = await import("../../highlander/extensions/highlander.ts");
-      let executeFn: any = null;
-      mod.default({ tool: (def: any) => { executeFn = def.execute; } } as any);
-      if (!executeFn) return "Highlander: no execute fn";
-      const result = await executeFn(params);
-      return typeof result === "string" ? result : JSON.stringify(result ?? "no result");
-    } catch (e: any) {
-      return "Highlander error: " + e.message;
-    }
-  });
+  {
+    let _hlExecute: ((args: any) => Promise<string>) | null = null;
+    registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
+      try {
+        if (!_hlExecute) {
+          const mod = await import("../../highlander/extensions/highlander.ts");
+          mod.default({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
+        }
+        if (!_hlExecute) return "Highlander: init failed";
+        return (await _hlExecute(params)) ?? "";
+      } catch (e: any) {
+        return "Highlander error: " + e.message;
+      }
+    });
+  }
 
   // Context window management — filter messages before LLM call
   pi.on("context", (event) => {
