@@ -23,7 +23,9 @@ const HASHLINE_TOOL_DESCRIPTION = `Hashline tools provide stable, verifiable anc
 
 If the file changed since last read (hash mismatch), the edit is rejected.
 
-Important: tool arguments are JSON. When edit text needs literal backslashes (for example source code containing \\x1b, \\n, regex escapes, or Windows paths), escape the backslashes for JSON. Raw \\x inside a JSON string is invalid and will fail before hash_edit runs.`;
+Important: tool arguments are JSON. When edit text needs literal backslashes (for example source code containing \\x1b, \\n, regex escapes, or Windows paths), escape the backslashes for JSON. Raw \\x inside a JSON string is invalid and will fail before hash_edit runs.
+
+If the lines being replaced contain escaped backticks (\\\`), a warning is emitted when the replacement text has unescaped backticks. This commonly happens when editing inside template literals.`;
 
 const HashReadParams = Type.Object({
 	path: Type.String({ description: "Path to the file to read (relative to the current working directory)." }),
@@ -121,7 +123,21 @@ function assertAnchorMatches(fileLines: string[], ref: { line: number; hash: str
 	}
 }
 
-function applyEditsToText(original: string, edits: HashlineEdit[]): { updated: string; appliedEdits: number } {
+
+function checkEscapingMismatch(originalLines: string[], newText: string): string | null {
+	const escaped = String.fromCharCode(92, 96); // \`
+	const plain = String.fromCharCode(96); // `
+	const hasEscapedBacktick = originalLines.some((l) => l.includes(escaped));
+	if (!hasEscapedBacktick) return null;
+	const hasPlainBacktick = newText.includes(plain) && !newText.includes(escaped);
+	if (!hasPlainBacktick) return null;
+	return (
+		"\n⚠️ ESCAPING WARNING: Replaced lines contained escaped backticks (" + escaped + ") " +
+		"suggesting a template literal, but new text has unescaped backticks (" + plain + "). " +
+		"This will likely break the file. Escape backticks as " + escaped + "."
+	);
+}
+function applyEditsToText(original: string, edits: HashlineEdit[]): { updated: string; appliedEdits: number; warnings: string[] } {
 	// Preserve trailing newline if present in original.
 	const hasTrailingNewline = original.endsWith("\n");
 	let lines = original.split("\n");
@@ -129,11 +145,14 @@ function applyEditsToText(original: string, edits: HashlineEdit[]): { updated: s
 	// Hashlines in can's implementation treat that as an empty final line.
 
 	let applied = 0;
+	const warnings: string[] = [];
 	for (const edit of edits) {
 		if ("set_line" in edit) {
 			const { line, hash } = parseAnchor(edit.set_line.anchor);
 			assertAnchorMatches(lines, { line, hash }, "set_line");
 			const replacement = edit.set_line.new_text;
+			const warning = checkEscapingMismatch([lines[line - 1] ?? ""], replacement);
+			if (warning) warnings.push(warning);
 			const replacementLines = replacement.split("\n");
 			// Replace exactly that one line with replacement (may be multiple lines).
 			lines.splice(line - 1, 1, ...replacementLines);
@@ -150,6 +169,9 @@ function applyEditsToText(original: string, edits: HashlineEdit[]): { updated: s
 			assertAnchorMatches(lines, start, "replace_lines(start)");
 			assertAnchorMatches(lines, end, "replace_lines(end)");
 			const replacementLines = edit.replace_lines.new_text.split("\n");
+			const origLines = lines.slice(start.line - 1, end.line);
+			const warning = checkEscapingMismatch(origLines, edit.replace_lines.new_text);
+			if (warning) warnings.push(warning);
 			lines.splice(start.line - 1, end.line - start.line + 1, ...replacementLines);
 			applied += 1;
 			continue;
@@ -169,7 +191,7 @@ function applyEditsToText(original: string, edits: HashlineEdit[]): { updated: s
 	// Preserve original trailing newline semantics as best-effort.
 	if (hasTrailingNewline && !updated.endsWith("\n")) updated += "\n";
 	if (!hasTrailingNewline && updated.endsWith("\n")) updated = updated.slice(0, -1);
-	return { updated, appliedEdits: applied };
+	return { updated, appliedEdits: applied, warnings };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -244,7 +266,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params: HashEditParamsType, _signal, _onUpdate, ctx) {
 			const fullPath = path.resolve(ctx.cwd, params.path);
 			const before = await fs.readFile(fullPath, "utf-8");
-			const { updated, appliedEdits } = applyEditsToText(before, params.edits as unknown as HashlineEdit[]);
+			const { updated, appliedEdits, warnings } = applyEditsToText(before, params.edits as unknown as HashlineEdit[]);
 			const changed = updated !== before;
 			let diffText = "";
 			if (changed) {
@@ -270,7 +292,8 @@ export default function (pi: ExtensionAPI) {
 				await fs.writeFile(fullPath, updated, "utf-8");
 			}
 
-			const summary = `Applied ${appliedEdits} edit(s) to ${params.path}.`;
+			const warningText = warnings.length > 0 ? "\n\n" + warnings.join("\n") : "";
+			const summary = `Applied ${appliedEdits} edit(s) to ${params.path}.${warningText}`;
 			return {
 				content: [
 					{
@@ -278,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 						text: diffText ? `${summary}\n\n${diffText}` : summary,
 					},
 				],
-				details: { path: fullPath, appliedEdits, changed, diffText },
+				details: { path: fullPath, appliedEdits, changed, diffText, warnings },
 			};
 		},
 	});
