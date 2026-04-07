@@ -6,14 +6,18 @@ package-lock.json
 .DS_Store
 .env
 .env.local
-.pi/
-packages/brave-search/extensions/brave-search.config.json
-.tickets/
 .worktrees/
-.maitake/
 
-# Private infrastructure
+# Tool state dirs
+.pi/
+.mai/
+.maitake/
+.tickets/
+.tldr/
+.claude/
+.collaborator/
 .forgejo/
 .sanitize-plan.md
-docs/
-.pi/teams/
+
+# Config overrides
+packages/brave-search/extensions/brave-search.config.json
