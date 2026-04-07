@@ -1,7 +1,10 @@
 # pi-extensions
 
-Flat monorepo of extension packages for [pi](https://github.com/mariozechner/pi-coding-agent). 32 extensions, one package per concern.
+<p align="center">
+  <img src="docs/screenshot.png" alt="pi-extensions in action" width="900">
+</p>
 
+Flat monorepo of extension packages for [pi](https://github.com/mariozechner/pi-coding-agent). 32 extensions, one package per concern.
 ## Layout
 
 ```
