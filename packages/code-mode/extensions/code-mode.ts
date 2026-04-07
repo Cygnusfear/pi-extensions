@@ -1281,8 +1281,8 @@ function createToolBindings(cwd: string, images: Array<{ data: string; mimeType:
 // Persistent Store ($) with TTL
 // =============================================================================
 
-const DEFAULT_STORE_TTL = 10; // turns before untouched variable expires
-const TTL_WARNING_THRESHOLD = 3; // warn when this many turns remain
+const DEFAULT_STORE_TTL = 20; // turns before untouched variable expires
+const TTL_WARNING_THRESHOLD = 5; // warn when this many turns remain
 
 interface StoreEntry {
 	value: unknown;

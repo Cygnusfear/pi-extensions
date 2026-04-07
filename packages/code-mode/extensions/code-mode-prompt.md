@@ -62,6 +62,30 @@ Use `$` for any data you need across multiple code blocks:
 Use `console.log()` for final output you want the user to see. You can do both in one line:
 `$.data = await Read({...}); console.log($.data);` — store AND display.
 
+**Don't** do this (re-reads every call, loses state on errors):
+```
+// Call 1
+const files = await Glob({ pattern: '**/*.ts' });
+const content = await Read({ path: files[0] });
+console.log(content);  // gone after this call
+
+// Call 2
+const content2 = await Read({ path: files[0] });  // re-reading!
+console.log(content2);
+```
+
+**Do** this instead (stores once, survives errors):
+```
+// Call 1
+$.files = await Glob({ pattern: '**/*.ts' });
+$.content = await Read({ path: $.files[0] });
+console.log($.content);
+
+// Call 2 — $.files and $.content still here, no re-reading
+$.content2 = await Read({ path: $.files[1] });
+console.log($.content, $.content2);
+```
+
 ### Example
 ```javascript
 // Find all TypeScript files with TODO comments
