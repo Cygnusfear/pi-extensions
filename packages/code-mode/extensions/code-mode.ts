@@ -156,6 +156,7 @@ let session: PersistentSession | null = null;
 let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
+let pendingSquash: { result: any; preparation: any } | null = null;
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -331,8 +332,14 @@ async function executeCode(
           if (!toolCtx?.compact) {
             return "Error: compaction not available in this context";
           }
+          if (pendingSquash) {
+            // Phase 2: apply the cached compaction
+            toolCtx.compact();
+            return "Squash applied — compaction in progress, session will reload.";
+          }
+          // Phase 1: trigger compaction (session_before_compact hook will intercept, cancel, and stash)
           toolCtx.compact();
-          return "Squash triggered — old messages will be summarized, recent messages kept intact. Session will reload.";
+          return "Squash phase 1 — compaction summary is being generated. Review $.preCompact on the next turn, extract anything important to $, then call session.squash() again to apply.";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
@@ -682,14 +689,109 @@ export default function (pi: ExtensionAPI) {
   // Register highlander sandbox fn — calls pi tool if available
   {
     let _hlExecute: ((args: any) => Promise<string>) | null = null;
+    async function hlInit() {
+      if (!_hlExecute) {
+        const mod = await import("../../highlander/extensions/highlander.ts");
+        mod.default({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
+      }
+      return _hlExecute;
+    }
+
     registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
       try {
-        if (!_hlExecute) {
-          const mod = await import("../../highlander/extensions/highlander.ts");
-          mod.default({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
+        const exec = await hlInit();
+        if (!exec) return "Highlander: init failed";
+        const action = params.action as string;
+
+        // For grep/self/search — return rich objects with .expand()
+        if (action === "grep" || action === "self" || action === "search") {
+          const raw = (await exec(params)) ?? "";
+          // Parse the text output into structured hits
+          const hits: any[] = [];
+          const entryPattern = /\[#(\d+)\]\s*(\S+)?\s*(.*)/g;
+          const sessionPattern = /━━━.*?([a-f0-9]{8})\s*━━━/g;
+          const sessionId = (params.session as string) || "self";
+
+          // For grep/self — parse entry-level results
+          if (action === "grep" || action === "self") {
+            const lines = raw.split("\n");
+            let currentEntry: any = null;
+            for (const line of lines) {
+              const match = line.match(/^\[#(\d+)\]\s*(.+)/);
+              if (match) {
+                if (currentEntry) hits.push(currentEntry);
+                currentEntry = {
+                  index: parseInt(match[1]),
+                  label: match[2].trim(),
+                  text: "",
+                  session: sessionId,
+                  expand: null as any,
+                };
+              } else if (currentEntry && line.startsWith("  ") && !line.includes("→ highlander")) {
+                currentEntry.text += (currentEntry.text ? " " : "") + line.trim();
+              }
+            }
+            if (currentEntry) hits.push(currentEntry);
+
+            // Add .expand() to each hit
+            for (const hit of hits) {
+              hit.expand = async (opts?: { context?: number }) => {
+                const ctx = opts?.context ?? 5;
+                const viewExec = await hlInit();
+                if (!viewExec) return "Highlander not available";
+                return viewExec({ action: "view", session: hit.session, start: hit.index - ctx, end: hit.index + ctx });
+              };
+              hit.toString = () => `[#${hit.index}] ${hit.label}\n  ${hit.text.slice(0, 200)}`;
+            }
+          }
+
+          // For search — parse session-level results
+          if (action === "search") {
+            const blocks = raw.split("━━━").filter(Boolean);
+            for (let i = 0; i < blocks.length - 1; i += 2) {
+              const header = blocks[i + 1];
+              const idMatch = header.match(/([a-f0-9]{8})\s/);
+              const scoreMatch = blocks[i].match(/\[([\d.]+)\]/);
+              const nameMatch = header.match(/^\s*(.+?)\s*·/);
+              if (idMatch) {
+                const entry: any = {
+                  session: idMatch[1],
+                  score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
+                  name: nameMatch?.[1]?.trim() ?? "",
+                  text: header.trim(),
+                  expand: null as any,
+                };
+                entry.expand = async (opts?: { context?: number }) => {
+                  const ctx = opts?.context ?? 10;
+                  const viewExec = await hlInit();
+                  if (!viewExec) return "Highlander not available";
+                  return viewExec({ action: "view", session: entry.session, start: -ctx, end: 0 });
+                };
+                entry.grep = async (query: string, limit?: number) => {
+                  const gExec = await hlInit();
+                  if (!gExec) return "Highlander not available";
+                  return gExec({ action: "grep", session: entry.session, query, limit: limit ?? 10 });
+                };
+                entry.toString = () => `[${entry.score.toFixed(2)}] ${entry.name} · ${entry.session}`;
+                hits.push(entry);
+              }
+            }
+          }
+
+          // If we got structured hits, return them as an array with a nice toString
+          if (hits.length > 0) {
+            const result = hits as any;
+            result.toString = () => raw;
+            // Make console.log show the formatted string
+            result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
+            return result;
+          }
+          // Fallback: return raw string
+          return raw;
         }
-        if (!_hlExecute) return "Highlander: init failed";
-        return (await _hlExecute(params)) ?? "";
+
+        // For view/list — return raw string
+        return (await exec(params)) ?? "";
       } catch (e: any) {
         return "Highlander error: " + e.message;
       }
@@ -992,6 +1094,88 @@ export default function (pi: ExtensionAPI) {
 
       return new Text(`${header}\n\n${styled}`, 0, 0);
     },
+  });
+
+  // Two-phase squash: intercept compaction to let agent review before applying
+  pi.on("session_before_compact", async (event, ctx) => {
+    if (pendingSquash) {
+      // Phase 2: apply the cached compaction result (no re-summarization)
+      const result = pendingSquash;
+      pendingSquash = null;
+      return {
+        compaction: {
+          summary: result.result.summary,
+          firstKeptEntryId: result.result.firstKeptEntryId,
+          tokensBefore: result.result.tokensBefore,
+          details: result.result.details,
+        },
+      };
+    }
+
+    // Phase 1: generate summary, stash for review, cancel the compaction
+    const { preparation, signal } = event;
+    try {
+      const { compact, serializeConversation, convertToLlm } = await import("@mariozechner/pi-coding-agent");
+      const model = (ctx as any).model;
+      const modelRegistry = (ctx as any).modelRegistry;
+      const apiKey = model ? modelRegistry?.resolveApiKey?.(model) ?? "" : "";
+      const headers = model?.headers;
+
+      // Generate the summary
+      const result = await compact(preparation, model, apiKey, headers, undefined, signal);
+
+      // Serialize messages for the outline
+      const outline: string[] = [];
+      for (const msg of preparation.messagesToSummarize) {
+        if (typeof msg.content === "string") {
+          outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+        } else if (Array.isArray(msg.content)) {
+          const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+          const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+          if (text || tools.length) {
+            outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+          }
+        }
+      }
+
+      // Stash into $ for agent review
+      const sess = getSession();
+      sess.store.proxy.preCompact = {
+        summary: result.summary,
+        messageCount: preparation.messagesToSummarize.length,
+        outline: outline.join("\n"),
+        firstKeptEntryId: result.firstKeptEntryId,
+        tokensBefore: result.tokensBefore,
+      };
+
+      // Cache the result for phase 2
+      pendingSquash = { result, preparation };
+
+      // Cancel the compaction — agent reviews first
+      return { cancel: true };
+    } catch (e) {
+      // If summary generation fails, just let normal compaction proceed
+      return undefined;
+    }
+  });
+
+  // Deferred context checkout — navigate after the current turn completes
+  pi.on("turn_end", async (_event, ctx) => {
+    if (!pendingCheckout) return;
+    ctx.abort();
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    if (pendingCheckout) {
+      const checkout = pendingCheckout;
+      pendingCheckout = null;
+      try {
+        const cmdCtx = ctx as any;
+        if (cmdCtx.navigateTree) {
+          await cmdCtx.navigateTree(checkout.targetId, { summarize: false });
+        }
+      } catch {}
+    }
   });
 
   // Inject code-mode declarations and instructions into system prompt
