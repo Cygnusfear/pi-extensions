@@ -527,7 +527,15 @@ export default function (pi: ExtensionAPI) {
 
   // Register highlander sandbox fn — calls pi tool if available
   registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
-    return pi.callTool("highlander", params);
+    try {
+      const mod = await import("../../highlander/extensions/highlander.ts");
+      let tool: any = null;
+      mod.default({ tool: (def: any) => { tool = def; }, callTool: () => {}, getAllTools: () => [] });
+      if (tool) return await tool.execute(params);
+      return "Highlander: tool not registered";
+    } catch (e: any) {
+      return "Highlander error: " + e.message;
+    }
   });
 
   // Context window management — filter messages before LLM call
