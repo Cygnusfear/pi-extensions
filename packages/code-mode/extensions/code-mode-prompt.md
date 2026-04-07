@@ -144,68 +144,48 @@ const ctx = session.load("ctx");       // restore after reload
 
 `$` is fast runtime memory (survives compaction). `session.save()` is durable storage (survives reload).
 
-### Context Hygiene — The RLM Pattern
+### Context Management
 
-Your conversation context is finite. When it fills up, model quality degrades ("context rot"). But your `$` store and `session.save()` have no context limit. You are an RLM (Recursive Language Model): your "environment" is `$` + `session.save()`, and your "context window" is what you choose to keep.
+Your conversation context is finite. When it fills up, model quality degrades ("context rot"). You have tools to manage this:
 
-**The cycle: Distill → Store → Trim → Continue**
-
+**1. Tag your work** — `contextTag` creates bookmarks at stable points:
 ```javascript
-// 1. READ your conversation history
-const entries = session.entries();
-const msgs = session.messages();
-const usage = session.tokens();  // { tokens, contextWindow }
+contextTag({ name: "auth-jwt-start" });
+// ... do work ...
+contextTag({ name: "auth-jwt-done" });
+```
 
-// 2. DISTILL important state into $ vars (survives trimming)
-$.goal = "implement auth middleware";
-$.filesDone = ["src/auth.ts", "src/middleware.ts"];
-$.filesRemaining = ["src/routes.ts"];
-$.decisions = { strategy: "JWT + refresh tokens", store: "httpOnly cookie" };
-$.keyLearnings = "express middleware runs sequentially, use next()";
+**2. View your history** — `contextLog` shows the session graph with usage stats:
+```javascript
+contextLog({ limit: 30 });
+```
 
-// 3. PERSIST critical state (survives reload/session switch)
-session.save("tpv", {
-  goal: $.goal,
-  progress: "2/3 files done",
-  decisions: $.decisions,
-  nextSteps: "wire up routes.ts",
-  fileContents: { /* any extracted data */ }
+**3. Squash old context** — `session.squash()` triggers native compaction:
+Summarizes old messages, keeps recent ones intact. Like /compact but you call it.
+Use when you see the 🚨 context warnings (≥70%).
+
+**4. Checkout / branch** — `contextCheckout` navigates to a tag with a summary:
+```javascript
+// Research done — squash the exploration into a summary
+contextTag({ name: "timeout-research-start" });
+// ... read 5 log files, find root cause ...
+contextCheckout({
+  target: "timeout-research-start",
+  message: "Root cause: DB connection pool exhaustion. Fix: increase pool size to 50. Next: implement fix.",
+  backupTag: "timeout-research-raw"  // save raw history just in case
 });
-
-// 4. TRIM — remove old messages, keep your state
-session.setContextSize(6);  // keep last 6 messages only
-
-// 5. CONTINUE — read from $ on demand instead of re-reading files
-// Your $ store and session saves are intact. You just shed the old conversation.
 ```
 
-**When to do this:**
-- When you see the 🚨 context warning in your output (≥ 40% context used)
-- Before starting a new phase of work (investigation → implementation → testing)
-- After reading many files — store the extracted info, don't keep the raw reads in context
+**When to act:**
+- See 📊 (≥30%): tag your current position, start being mindful
+- See 🙈 (≥40%): distill important state into `$` vars and `session.save()`
+- See 🚨 (≥70%): call `session.squash()` to compact, or `contextCheckout` to squash a segment
+- See 💀 (≥90%): `session.squash()` NOW or you will lose context
 
-**What to distill:**
-- Current goal and progress (TPV — Total Perspective Vortex)
-- Key files and their locations, what you've learned about them
-- Decisions made and why (so you don't re-litigate)
-- Extracted data: function signatures, error messages, config values
-- Remaining work / next steps
-
-**What NOT to distill:**
-- Raw file contents (read them again from `$` cache or disk)
-- Full conversation history (that's what you're trimming)
-- console.log outputs you've already processed
-
-**Reading back distilled state:**
-```javascript
-// After trimming, recall your state
-const tpv = session.load("tpv");
-console.log("Goal:", tpv.goal);
-console.log("Remaining:", tpv.nextSteps);
-
-// Or from $ (faster, survives compaction)
-console.log($.filesRemaining);
-```
+**What to preserve in `$` before squashing:**
+- Current goal, progress, remaining tasks
+- Key file locations, extracted data, error states
+- Decisions made and why
 
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
 
