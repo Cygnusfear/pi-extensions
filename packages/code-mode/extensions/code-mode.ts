@@ -1756,14 +1756,29 @@ rebuildCachedReference();
 
 
 /** Format a full manual page for man() */
+function stripForMatch(s: string): string {
+	return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
 function formatManPage(name: string): string {
 	const key = name.toLowerCase();
 	// camelCase fallback: applyPatch → apply_patch, meshPeers → mesh_peers
 	const snakeCase = name.replace(/([A-Z])/g, "_$1").toLowerCase();
-	const ref = toolRefMap.get(key) || toolRefMap.get(name) || toolRefMap.get(snakeCase);
+	// Strip-based fallback: gitAi → gitai matches git-ai
+	const stripped = stripForMatch(name);
+	let ref = toolRefMap.get(key) || toolRefMap.get(name) || toolRefMap.get(snakeCase);
 	if (!ref) {
-		const available = [...new Set([...toolRefMap.keys()].filter(k => !SANDBOX_TO_TOOL_NAME[k]))].join(", ");
-		return "No manual entry for '" + name + "'. Available: " + available;
+		// Fuzzy match: strip non-alnum from both sides
+		for (const [toolName, toolRef] of toolRefMap) {
+			if (stripForMatch(toolName) === stripped) {
+				ref = toolRef;
+				break;
+			}
+		}
+	}
+	if (!ref) {
+		const available = [...new Set([...toolRefMap.keys()].filter(k => !SANDBOX_TO_TOOL_NAME[k]))];
+		return "No manual entry for '" + name + "'. Available: " + available.join(", ");
 	}
 
 	const lineArr: string[] = [];
