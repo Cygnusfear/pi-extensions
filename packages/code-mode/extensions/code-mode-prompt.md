@@ -30,20 +30,19 @@ for (const f of remaining) {
 }
 ```
 
-Regular `const`/`let` variables are local to each code block. Only `$` persists.
+Regular `const`/`let` variables are local to each code block. Only `$` persists — with no time limit, only a 50MB memory cap.
 
-### `$` TTL (Time-To-Live)
+### Memory Management
 
-Variables in `$` expire after ~10 turns of not being accessed. You'll see warnings:
+`$` variables persist indefinitely until total memory exceeds 50MB. When the cap is hit, least-recently-used unpinned variables are evicted first. You'll see:
 ```
-⏳ $.files expires in 2 turns (50 items, 3KB). Use $.__pin('files') or access it to keep.
-⏳ $.oldData EXPIRED and was dropped (was 45KB)
+⏳ $.bigData EVICTED to free memory (was 12.5MB, last used 30 turns ago). Use $.__pin('bigData') to protect.
 ```
 
-- **Reading or writing `$.x` resets its TTL** — active variables don't expire
-- **`$.__pin('name')`** — never expire this variable
-- **`$.__unpin('name')`** — restore normal TTL behavior
-- **`$.__status()`** — show all variables, sizes, and TTL remaining
+- **Variables don't expire from time** — only from memory pressure
+- **`$.__pin('name')`** — protect from eviction (pinned vars survive even at 50MB)
+- **`$.__unpin('name')`** — make subject to memory eviction again
+- **`$.__status()`** — show all variables, sizes, and total memory used
 - **`$.__reset()`** — clear all persistent state
 - **`$.__keys()`** — list all variable names
 

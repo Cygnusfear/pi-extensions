@@ -492,17 +492,17 @@ declare function readImage(input: {
 /**
  * Persistent store that survives across execute_code calls within a session.
  * Variables expire after ~10 turns of not being accessed.
- * Use $.__pin('name') to prevent expiry, $.__status() to inspect.
+ * Use $.__pin('name') to protect from memory eviction, $.__status() to inspect.
  */
 declare const $: {
   [key: string]: unknown;
   /** Clear all persistent state */
   __reset(): string;
-  /** Show all variables, sizes, and TTL remaining */
+  /** Show all variables, sizes, and total memory used */
   __status(): string;
-  /** Pin a variable so it never expires */
+  /** Pin a variable so it survives memory eviction */
   __pin(name: string): string;
-  /** Restore normal TTL behavior for a pinned variable */
+  /** Make a pinned variable subject to memory eviction again */
   __unpin(name: string): string;
   /** List all variable names */
   __keys(): string[];
