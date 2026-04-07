@@ -1,0 +1,23 @@
+packages/teams/tool.ts
+  a0e309574cdef853 2-4,243-246,249,255,259-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "00cc0d48df034b332e4091c8f46b9d70ca854b0f",
+  "prompts": {
+    "a0e309574cdef853": {
+      "agent_id": {
+        "tool": "Percival Voyager Tyson",
+        "id": "128e542d-498e-41bf-bc1b-4dcabab5231c",
+        "model": "anthropic/claude-sonnet-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 20,
+      "total_deletions": 2,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}
