@@ -2042,6 +2042,7 @@ export default function (pi: ExtensionAPI) {
 				? Math.min(params.timeout * 1000, MAX_EXECUTION_TIMEOUT_MS)
 				: DEFAULT_EXECUTION_TIMEOUT_MS;
 // Check escape mode toggle after execution
+			const sess = getSession();
 			const escapeEntry = sess.store.get("__escaped");
 			const wantEscape = escapeEntry?.value === true;
 			if (wantEscape !== escaped) {
