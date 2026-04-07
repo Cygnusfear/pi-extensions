@@ -274,17 +274,6 @@ async function executeCode(
   }
 }
 
-function buildOutput(warnings: string[], logs: string[]): string {
-  const parts: string[] = [];
-  if (warnings.length > 0) {
-    parts.push(warnings.join("\n"));
-    if (logs.length > 0) parts.push("---");
-  }
-  if (logs.length > 0) {
-    parts.push(logs.join("\n"));
-  }
-  return parts.join("\n");
-}
 
 // =============================================================================
 // Tool Exclusivity — tools that remain as direct LLM tools
