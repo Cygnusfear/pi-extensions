@@ -2,46 +2,58 @@
 
 **There can be only one.** 🔪
 
-Search and read past session JSONL logs — `mesh_view` for dead sessions.
+BM25 search across all pi session history. `mesh_view` for dead sessions.
 
-## Why
+## What it does
 
-Agents lose context across sessions and compactions. Foresight captures curated memories, but misses the raw conversation — the arguments, debug trails, and "why did we do X" discussions that never became a memory node.
+Agents forget everything between sessions. Foresight saves curated memories — but not the raw conversation: the debug trails, the rejected alternatives, the "why did we do X" that never made it into a memory node.
 
-Highlander lets you search across all your dead session logs with BM25 ranking, grep within sessions for exact entry numbers, and read entries from any past session.
+Highlander searches that raw history. BM25-ranked, across every session, every project.
 
-## Usage
+## Actions
 
-### Search across sessions
+### search — find sessions by content
+```javascript
+highlander({ action: "search", query: "teams ghost worker", limit: 5 })
 ```
-highlander({ action: "search", query: "highlander" })
-```
-Returns ranked sessions with snippet context showing WHERE the query matched.
+BM25 across all sessions. Returns ranked hits with snippet context and drill-down hints.
 
-### Find entries within a session
+### self — search the current live session
+```javascript
+highlander({ action: "self", query: "highlander skull context" })
 ```
+Grep the session you're in right now. No session ID needed.
+
+### grep — find entries in a specific session
+```javascript
 highlander({ action: "grep", session: "0fe1623e", query: "context window" })
 ```
-Find exact entry numbers matching a query within a specific session.
+Returns matching entry numbers for targeted `view` calls.
 
-### Read a past session
+Also accepts ad-hoc entries for BM25 over arbitrary text:
+```javascript
+const msgs = session.messages();
+highlander({ action: "grep", entries: msgs, query: "worker lifecycle" })
 ```
-highlander({ action: "view", session: "0fe1623e", start: -20, end: 0 })
-```
-Like `mesh_view` but the session doesn't need to be alive. Entries are numbered for drill-down.
 
-### List sessions
+### view — read entries from any session
+```javascript
+highlander({ action: "view", session: "0fe1623e", start: 720, end: 730 })
 ```
-highlander({ action: "list", project: "trek", limit: 10 })
+Like `mesh_view` but the session doesn't need to be alive.
+
+### list — browse sessions
+```javascript
+highlander({ action: "list", project: "trek", since: "2026-04-01", limit: 10 })
 ```
-Browse sessions by project, recency, etc.
 
 ## How it works
 
-1. Reads session indexes from `~/.pi/agent/sessions/`
-2. Builds an in-memory BM25 index over `allMessagesText`, `name`, `firstMessage`
-3. Field weights: name 3x, firstMessage 2x, allMessagesText 1x
-4. Index caches for 30 seconds
-5. Entry reading reuses `shared/session-view` for projection
+1. Reads `~/.pi/agent/sessions/*/.session-index.json` — already contains `allMessagesText`
+2. Builds in-memory BM25 index (name 3×, firstMessage 2×, allMessagesText 1×)
+3. Index caches for 30s
+4. Entry reading reuses `shared/session-view` projection
 
-No database, no embeddings, no external deps. Pure TypeScript + BM25.
+No database. No embeddings. No external deps. Pure TypeScript + BM25.
+
+Uses the same BM25 engine as [maitake](https://github.com/maitake)'s ticket search — ported to TypeScript in `shared/src/bm25.ts`.
