@@ -1,4 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { formatRuntimeSummary } from "./activity.js";
 import type { TeamLeader } from "./leader.js";
@@ -237,16 +240,31 @@ async function runTeamsAction(
       const ticketType = overrides?.type ?? "task";
       const ticketTags = ["team", ...(overrides?.tags ?? [])].join(",");
 
+      // Truncate to first line, max 120 chars — shell arg limits blow up on long task descriptions.
+      const taskTitle = task.text.split("\n")[0].slice(0, 120);
+      const needsBody = task.text.length > taskTitle.length;
+
       const createResult = await pi.exec(
         "mai",
-        ["ticket", task.text, ticketType, "-d", task.text, "-l", ticketTags, "-a", workerName],
+        ["ticket", taskTitle, ticketType, "-l", ticketTags, "-a", workerName],
         { cwd: ctx.cwd, timeout: 5000 },
       );
 
       const ticketId = (createResult.stdout ?? "").trim().split(/\s+/)[0];
       if (!ticketId || createResult.code !== 0) {
-        results.push(`Failed to create ticket for "${task.text}": ${createResult.stderr}`);
+        results.push(`Failed to create ticket for "${taskTitle}": ${createResult.stderr}`);
         continue;
+      }
+
+      // Write full task text as a note body — avoids arg length limits.
+      if (needsBody) {
+        const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
+        try {
+          await writeFile(tmp, task.text, "utf8");
+          await pi.exec("mai", ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
+        } finally {
+          await unlink(tmp).catch(() => {});
+        }
       }
 
       await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
