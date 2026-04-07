@@ -97,24 +97,18 @@ function buildContextFooter(ctx: {
     const usage = getUsage();
     if (!usage || usage.percent === null || usage.percent < 30) return null;
 
-    // Aggregate total session cost from assistant message entries
-    let totalCost = 0;
-    const sm = ctx.sessionManager;
-    if (sm) {
-      for (const entry of sm.getEntries()) {
-        if (entry.type === "message" && entry.message?.role === "assistant") {
-          totalCost += entry.message.usage?.cost?.total ?? 0;
-        }
-      }
-    }
-
     const pct = usage.percent.toFixed(1);
-    const cost = `$${totalCost.toFixed(3)}`;
+    const usedK = Math.round((usage.used ?? 0) / 1024);
+    const maxK = Math.round((usage.limit ?? 0) / 1024);
+    const context = `${usedK}k/${maxK}k CONTEXT`;
 
-    if (usage.percent >= 40) {
-      return `🚨 ${pct}% / ${cost} — distill important state into $ vars + session.save(), then session.setContextSize(N) to trim old messages`;
+    if (usage.percent >= 90) {
+      return `🚨 ${pct}% (${context}) URGENT — distill into $ + session.save(), then session.setContextSize(N) NOW`;
     }
-    return `📊 ${pct}% / ${cost}`;
+    if (usage.percent >= 40) {
+      return `🚨 ${pct}% (${context}) — distill important state into $ vars + session.save(), then session.setContextSize(N) to trim old messages`;
+    }
+    return `📊 ${pct}% (${context})`;
   } catch {
     return null;
   }
