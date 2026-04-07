@@ -1967,6 +1967,30 @@ export default function (pi: ExtensionAPI) {
 		rebuildCachedReference();
 	});
 
+	// /escape_code_mode — user-facing escape hatch
+	pi.registerCommand("escape_code_mode", {
+		description: "Restore all tools for this session (disable sandbox restriction).",
+		handler: async (_args, ctx) => {
+			escaped = true;
+			pi.setActiveTools(pi.getAllTools().map(t => t.name));
+			ctx.ui.notify("Escape mode: all tools restored. Use /code_mode to re-enable sandbox.", "info");
+		},
+	});
+
+	// /code_mode — re-enable sandbox
+	pi.registerCommand("code_mode", {
+		description: "Re-enable code-mode sandbox (restrict tools to execute_code).",
+		handler: async (_args, ctx) => {
+			escaped = false;
+			const allowed = pi.getAllTools()
+				.filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
+				.map((t) => t.name);
+			pi.setActiveTools(allowed);
+			ctx.ui.notify("Sandbox mode: tools restricted to execute_code.", "info");
+		},
+	});
+
+
 	// Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
 	pi.on("tool_call", async (event) => {
 		if (!escaped && CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
