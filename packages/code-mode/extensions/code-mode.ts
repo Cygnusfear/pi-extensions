@@ -1382,7 +1382,7 @@ function createPersistentStore() {
 		return lines.join("\n");
 	}
 
-	const RESERVED = new Set(["__reset", "__status", "__pin", "__unpin", "__keys", "__turn"]);
+	const RESERVED = new Set(["__reset", "__status", "__pin", "__unpin", "__keys", "__turn", "__escaped", "__sandbox", "__escape"]);
 
 	const proxy = new Proxy({} as Record<string, unknown>, {
 		set(_target, prop: string, value) {
@@ -1420,6 +1420,18 @@ function createPersistentStore() {
 					return () => [...store.keys()];
 				case "__turn":
 					return () => currentTurn;
+			case "__escape":
+				return () => {
+					store.set("__escaped", { value: true, lastAccessTurn: currentTurn, pinned: true });
+					return "Escape mode: raw tools will be available on your next call";
+				};
+			case "__sandbox":
+				return () => {
+					store.set("__escaped", { value: false, lastAccessTurn: currentTurn, pinned: true });
+					return "Sandbox mode: tools restricted to execute_code";
+				};
+			case "__escaped":
+				return () => !!escaped;
 				case Symbol.toPrimitive:
 			case Symbol.toStringTag:
 					return undefined;
@@ -1506,6 +1518,7 @@ function createSession(): PersistentSession {
 }
 
 let session: PersistentSession | null = null;
+let escaped = false;
 
 function getSession(): PersistentSession {
 	if (!session) session = createSession();
@@ -1956,7 +1969,7 @@ export default function (pi: ExtensionAPI) {
 
 	// Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
 	pi.on("tool_call", async (event) => {
-		if (CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
+		if (!escaped && CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
 			return {
 				block: true,
 				reason: `Tool '${event.toolName}' is only available inside execute_code. Use execute_code to call ${event.toolName}().`,
@@ -2004,6 +2017,20 @@ export default function (pi: ExtensionAPI) {
 			const timeoutMs = params.timeout
 				? Math.min(params.timeout * 1000, MAX_EXECUTION_TIMEOUT_MS)
 				: DEFAULT_EXECUTION_TIMEOUT_MS;
+// Check escape mode toggle after execution
+			const escapeEntry = sess.store.get("__escaped");
+			const wantEscape = escapeEntry?.value === true;
+			if (wantEscape !== escaped) {
+				escaped = wantEscape;
+				if (escaped) {
+					pi.setActiveTools(pi.getAllTools().map(t => t.name));
+				} else {
+					const allowed = pi.getAllTools()
+						.filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
+						.map((t) => t.name);
+					pi.setActiveTools(allowed);
+				}
+			}
 			const { output, error, duration } = await executeCode(params.code, ctx.cwd, signal, timeoutMs);
 
 			let text = output || "";
