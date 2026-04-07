@@ -98,9 +98,11 @@ function buildContextFooter(ctx: {
     if (!usage || usage.percent === null || usage.percent < 30) return null;
 
     const pct = usage.percent.toFixed(1);
-    const usedK = Math.round((usage.used ?? 0) / 1024);
-    const maxK = Math.round((usage.limit ?? 0) / 1024);
-    const context = `${usedK}k/${maxK}k CONTEXT`;
+    const totalTokens = usage.tokens ?? usage.used ?? 0;
+    const maxTokens = usage.contextWindow ?? usage.limit ?? 0;
+    const usedK = totalTokens > 0 ? Math.round(totalTokens / 1024) : 0;
+    const maxK = maxTokens > 0 ? Math.round(maxTokens / 1024) : 0;
+    const context = maxK > 0 ? `${usedK}k/${maxK}k CONTEXT` : `${pct}% CONTEXT`;
 
     if (usage.percent >= 90) {
       return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.setContextSize(N) or you WILL lose context`;
