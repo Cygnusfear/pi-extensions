@@ -2501,8 +2501,15 @@ export default function (pi: ExtensionAPI) {
 				highlighted = preview;
 			}
 
+			// Replace full reset (\x1b[0m) with FG-only reset (\x1b[39;22;23;24m)
+			// so Shiki tokens don't kill the tool container's background
+			const FG_RST = "\x1b[39;22;23;24m";
+			const safeLines = highlighted.map((l: string) =>
+				l.replace(/\x1b\[0m/g, FG_RST),
+			);
+
 			let text = theme.fg("toolTitle", theme.bold("execute_code"));
-			text += "\n\n" + highlighted.join("\n");
+			text += "\n\n" + safeLines.join("\n");
 			if (remaining > 0) {
 				text += theme.fg("muted", `\n... (${remaining} more lines)`);
 			}
