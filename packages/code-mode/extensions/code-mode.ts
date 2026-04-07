@@ -167,11 +167,14 @@ async function executeCode(
 
       // Match: const/let/var name = (not for...of/in)
       const m = trimmed.match(/^(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/);
-      if (!m) continue;
-      if (trimmed.includes(" of ") || trimmed.includes(" in ")) continue;
+      // Match: function name(...) or async function name(...)
+      const fm = !m ? trimmed.match(/^(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/) : null;
+      const name = m?.[1] ?? fm?.[1];
+      if (!name) continue;
+      if (m && (trimmed.includes(" of ") || trimmed.includes(" in "))) continue;
 
 
-      names.push(m[1]);
+      names.push(name);
     }
 
     return [...new Set(names)];
