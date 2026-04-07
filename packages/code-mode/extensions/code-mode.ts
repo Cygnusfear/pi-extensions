@@ -30,8 +30,8 @@ import path from "node:path";
 import os from "node:os";
 import TurndownService from "turndown";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
-// Eagerly start Shiki loading on import (same singleton as core-edit-ui)
-import "@pi-extensions/shared/tui-diff-renderer";
+// Eagerly start Shiki loading via relative path (must match require() in renderCall)
+require("../../shared/src/tui-diff-renderer.ts");
 import { safeJsonParse, safeResponseJson } from "@pi-extensions/shared/safe-json";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import { fffFindAPI, fffGrepAPI, fffMultiGrepAPI } from "@pi-extensions/fff/api";
@@ -2497,10 +2497,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const { highlightCode: hl } = require("../../shared/src/tui-diff-renderer.ts");
 				highlighted = hl(preview.join("\n"), "code-mode.js");
-				const hasAnsi = highlighted.some((l: string) => /\x1b\[/.test(l));
-				process.stderr.write("[code-mode] Shiki highlight: " + highlighted.length + " lines, hasAnsi=" + hasAnsi + "\n");
-			} catch (e: any) {
-				process.stderr.write("[code-mode] Shiki failed: " + (e?.message || e) + "\n");
+			} catch {
 				highlighted = preview;
 			}
 
