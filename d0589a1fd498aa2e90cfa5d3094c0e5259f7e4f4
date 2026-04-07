@@ -1,0 +1,27 @@
+packages/git-ai/extensions/git-ai.ts
+  984fa3c6e2f16489 403
+packages/code-mode/extensions/code-mode.ts
+  984fa3c6e2f16489 26
+packages/pi-mesh/extension/pi-mesh.ts
+  984fa3c6e2f16489 1671
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "d0589a1fd498aa2e90cfa5d3094c0e5259f7e4f4",
+  "prompts": {
+    "984fa3c6e2f16489": {
+      "agent_id": {
+        "tool": "Adam Comet Jenniskens",
+        "id": "0449c56b-87c2-4807-803f-d8575f727ff5",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
