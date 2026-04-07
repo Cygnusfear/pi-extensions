@@ -245,7 +245,7 @@ async function executeCode(
   // --- Layer 2: Execute with fault tolerance ---
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
-  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn });
+  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg) });
   Object.assign(sess.context, bindings);
 
   // Inject session introspection API if ctx available

@@ -6,6 +6,10 @@
 export interface SandboxContext {
   cwd: string;
   images: Array<{ data: string; mimeType: string }>;
+  /** Optional UI confirm dialog — when available, git-safety shows interactive prompt */
+  confirmFn?: (title: string, body: string) => Promise<boolean>;
+  /** Optional log function — writes to sandbox console output */
+  logFn?: (msg: string) => void;
 }
 
 /**

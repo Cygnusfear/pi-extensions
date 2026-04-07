@@ -24,7 +24,7 @@ export function isGitLockActive(): boolean {
 }
 
 export function gitGuardError(reason: string): string {
-  return `🛡️ GIT SAFETY BLOCK: ${reason}. GUARD PROTOCOL: ASK FOR HOOMAN TO CONFIRM THIS ACTION FIRST WITH [OK]`;
+  return `❌ BLOCKED: ${reason} 🛡️ GUARD PROTOCOL: HOOMAN MUST CONFIRM WITH [OK]`;
 }
 
 export function processKillGuardError(reason: string): string {
