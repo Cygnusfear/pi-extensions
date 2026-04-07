@@ -122,7 +122,7 @@ declare function Bash(input: {
   cwd?: string;
   /** Timeout in seconds (default: 30) */
   timeout?: number;
-}): Promise<{ stdout: string; stderr: string; exitCode: number }>;
+}): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
 
 /**
  * Read the contents of a file.
@@ -1115,12 +1115,23 @@ function createToolBindings(cwd: string) {
 				timeout: timeoutMs,
 			});
 			if (result.error) {
+				const isTimeout = result.error.message.includes("Timed out");
+				if (isTimeout) {
+					// Non-fatal: return timeout info instead of killing the whole script
+					return {
+						stdout: result.stdout || "",
+						stderr: (result.stderr || "") + (result.stderr ? "\n" : "") + `[TIMEOUT] ${result.error.message}`,
+						exitCode: -1,
+						timedOut: true,
+					};
+				}
 				throw new Error(`Bash error: ${result.error.message}`);
 			}
 			return {
 				stdout: result.stdout || "",
 				stderr: result.stderr || "",
-				exitCode: result.status ?? 1,
+				exitCode: result.status ?? 0,
+				timedOut: false,
 			};
 		},
 
@@ -2021,13 +2032,33 @@ async function executeCode(
 	// Clear logs for this execution
 	sess.logs.length = 0;
 
+	// --- Layer 1: Syntax pre-validation ---
+	// Catch parse errors (Unexpected EOF, etc.) without touching the store
+	const wrapped = `(async () => {\n${code}\n})()`;
+	const start = Date.now();
+	try {
+		new vm.Script(wrapped, { filename: "code-mode.js" });
+	} catch (parseErr) {
+		const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+		const storeInfo = sess.store.getStatus();
+		return {
+			output: buildOutput(warnings, [
+				`\u26a0\ufe0f Syntax error: ${parseMsg}`,
+				"",
+				"Your $ store was NOT affected. Fix the syntax and retry.",
+				"",
+				storeInfo,
+			]),
+			error: parseMsg,
+			duration: Date.now() - start,
+		};
+	}
+
+	// --- Layer 2: Execute with fault tolerance ---
 	// Refresh tool bindings (cwd may have changed)
 	const bindings = createToolBindings(cwd);
 	Object.assign(sess.context, bindings);
 
-	const wrapped = `(async () => {\n${code}\n})()`;
-
-	const start = Date.now();
 	try {
 		const promise = vm.runInContext(wrapped, sess.context, {
 			filename: "code-mode.js",
@@ -2068,8 +2099,18 @@ async function executeCode(
 			duration: Date.now() - start,
 		};
 	} catch (err) {
+		// --- Layer 3: Graceful error with recovery context ---
 		const error = err instanceof Error ? err.message : String(err);
-		const output = buildOutput(warnings, sess.logs);
+		const partialOutput = buildOutput(warnings, sess.logs);
+		const storeInfo = sess.store.getStatus();
+		const recoveryHint = storeInfo !== "$ is empty"
+			? `Your $ store survived. Use $.<var> to continue from where you left off.\n${storeInfo}`
+			: "$ store is empty — nothing to recover.";
+
+		const output = partialOutput
+			? `${partialOutput}\n\n\u274c ${error}\n\n${recoveryHint}`
+			: `\u274c ${error}\n\n${recoveryHint}`;
+
 		return {
 			output,
 			error,
