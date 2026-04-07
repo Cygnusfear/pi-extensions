@@ -782,7 +782,11 @@ export default function (pi: ExtensionAPI) {
           if (hits.length > 0) {
             const result = hits as any;
             result.toString = () => raw;
-            // Make console.log show the formatted string
+            result.text = () => raw;
+            result.json = () => hits.map((h: any) => {
+              const { expand, grep, toString, ...rest } = h;
+              return rest;
+            });
             result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
             return result;
           }
@@ -981,6 +985,9 @@ export default function (pi: ExtensionAPI) {
           confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
             | ((title: string, body: string) => Promise<boolean>)
             | undefined,
+          compact: (ctx as any).compact?.bind(ctx),
+          setLabel: (id: string, label: string | undefined) => pi.setLabel(id, label),
+          abort: () => ctx.abort(),
         },
       );
 

@@ -548,9 +548,13 @@ declare const session: {
    */
   setContextSize(n?: number): string;
   /**
-   * Trigger native compaction — summarizes old messages into a summary,
-   * keeps recent messages intact. Like /compact but agent-initiated.
-   * Use when context warnings appear (≥70%) to reclaim space without losing track.
+   * Two-phase compaction. First call generates a summary and stashes it in
+   * $.preCompact for review (compaction is NOT applied). Second call applies
+   * the cached compaction. This lets you review what's being lost and extract
+   * critical details to $ before the old messages are replaced by the summary.
+   *
+   * Phase 1: session.squash() → $.preCompact = { summary, outline, messageCount }
+   * Phase 2: review $.preCompact, save important stuff to $, then session.squash() again
    */
   squash(): string;
 };

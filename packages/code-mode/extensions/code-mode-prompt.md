@@ -160,9 +160,30 @@ contextTag({ name: "auth-jwt-done" });
 contextLog({ limit: 30 });
 ```
 
-**3. Squash old context** — `session.squash()` triggers native compaction:
-Summarizes old messages, keeps recent ones intact. Like /compact but you call it.
-Use when you see the 🚨 context warnings (≥70%).
+**3. Squash old context** — `session.squash()` is a two-phase compaction:
+
+**Phase 1** — Call `session.squash()`. The system generates a summary of old messages
+and stashes it in `$.preCompact` (with summary, outline, and message count).
+The compaction is NOT applied yet — you get to review first.
+
+**Phase 2** — Review `$.preCompact.summary`, extract anything the summary missed
+into `$` vars (gotchas, specific line numbers, error details, decisions).
+Then call `session.squash()` again to apply the compaction.
+
+```javascript
+// Phase 1 — generate summary, stash for review
+session.squash();
+
+// ... next turn: review what's about to be lost ...
+console.log($.preCompact.summary);    // the draft summary
+console.log($.preCompact.outline);    // condensed message list
+// extract anything the summary missed:
+$.gotchas = "token must be invalidated BEFORE reissue — race condition at line 45";
+$.fileNotes = { "src/auth.ts": "refreshToken() has the fix, pool size=50" };
+
+// Phase 2 — apply compaction (uses cached summary, no re-summarization)
+session.squash();
+```
 
 **4. Checkout / branch** — `contextCheckout` navigates to a tag with a summary:
 ```javascript
