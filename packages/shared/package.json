@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./sandbox-registry": "./src/sandbox-registry.ts",
     "./foresight-env": "./src/foresight-env.ts",
     "./git-guards": "./src/git-guards.ts",
     "./process-guards": "./src/process-guards.ts",

@@ -397,4 +397,29 @@ export default function (pi: ExtensionAPI) {
 			}
 		},
 	});
+
+	// Register sandbox-callable function for code-mode
+	try {
+		const { registerSandboxFn } = require("@pi-extensions/shared/sandbox-registry");
+		registerSandboxFn("gitAi", async (params: { command: string; args?: string[] }) => {
+			const validCommands = ["blame", "stats", "search"];
+			if (!validCommands.includes(params.command)) {
+				return "Unknown command: " + params.command + ". Valid: " + validCommands.join(", ");
+			}
+			const { execFile } = require("node:child_process");
+			const { promisify } = require("node:util");
+			const execFileAsync = promisify(execFile);
+			try {
+				const result = await execFileAsync(gitAiBin, [params.command, ...(params.args || [])], {
+					timeout: 15000,
+					windowsHide: true,
+				});
+				return result.stdout || result.stderr || "(no output)";
+			} catch (e: any) {
+				return "Error: " + (e.message || String(e));
+			}
+		});
+	} catch {
+		// code-mode/shared not available — skip
+	}
 }

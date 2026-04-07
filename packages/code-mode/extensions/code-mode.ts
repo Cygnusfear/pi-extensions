@@ -23,6 +23,7 @@ import vm from "node:vm";
 // Eagerly start Shiki loading via relative path (must match require() in renderCall)
 require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
+import { getSandboxFns } from "@pi-extensions/shared/sandbox-registry";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,
@@ -131,7 +132,7 @@ async function executeCode(
   cwd: string,
   signal?: AbortSignal,
   executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-  toolCtx?: { sessionManager?: any; getContextUsage?: () => any; ctx?: any; pi?: any },
+  toolCtx?: { sessionManager?: any; getContextUsage?: () => any },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
 
@@ -310,42 +311,10 @@ async function executeCode(
     });
   }
 
-  // Generic passthrough tool wrappers — call registered tools from sandbox
-  if (toolCtx?.pi && toolCtx?.ctx) {
-    const passthroughNames = [
-      "mesh_tell", "mesh_ask", "mesh_reply", "mesh_broadcast",
-      "mesh_peers", "mesh_view", "mesh_join_channel", "mesh_leave_channel", "mesh_chat",
-      "editor_open", "editor_highlight", "editor_reveal", "editor_state",
-      "git-ai",
-      "hotseat_handbook_update", "hotseat_handbook_read",
-    ];
-    // Try to get full tool definitions (with execute method)
-    const getToolDef = (toolCtx.pi as any).getToolDefinition?.bind(toolCtx.pi)
-      ?? ((name: string) => {
-        // Fallback: scan getAllTools and hope execute is there (it won't be)
-        const info = toolCtx.pi.getAllTools().find((t: any) => t.name === name);
-        return info?.execute ? info : undefined;
-      });
-    const wrappers: Record<string, unknown> = {};
-    for (const name of passthroughNames) {
-      const tool = getToolDef(name);
-      if (!tool?.execute) continue;
-      const camelName = name.replace(/[-_]([a-z])/g, (_: string, c: string) => c.toUpperCase());
-      wrappers[camelName] = async (params: any = {}) => {
-        const result = await tool.execute("sandbox-" + Date.now(), params, undefined, undefined, toolCtx.ctx);
-        if (result?.content) {
-          if (typeof result.content === "string") return result.content;
-          if (Array.isArray(result.content)) {
-            return result.content
-              .filter((c: any) => c.type === "text")
-              .map((c: any) => c.text)
-              .join("\n");
-          }
-        }
-        return JSON.stringify(result);
-      };
-    }
-    Object.assign(sess.context, wrappers);
+  // Inject sandbox functions registered by other extensions
+  const sandboxFns = getSandboxFns();
+  if (Object.keys(sandboxFns).length > 0) {
+    Object.assign(sess.context, sandboxFns);
   }
 
   try {
@@ -610,7 +579,7 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         signal,
         timeoutMs,
-        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage, ctx, pi },
+        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage },
       );
 
       let text = output || "";

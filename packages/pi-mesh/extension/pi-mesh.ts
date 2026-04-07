@@ -1666,6 +1666,59 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// ── Register sandbox-callable functions for code-mode ──────────────
+	try {
+		const { registerSandboxFn } = require("@pi-extensions/shared/sandbox-registry");
+		registerSandboxFn("meshTell", async (params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }) => {
+			const resolved = resolveTargetSessionId(params.sessionId);
+			const mode = (params.waitFor ?? "delivered") as MeshTellReceiptPhase;
+			if (mode === "none") {
+				mesh.tell(resolved, params.message);
+				return JSON.stringify({ sent: true, sessionId: resolved });
+			}
+			const ack = await mesh.tellAndWaitForReceipt(resolved, params.message, mode, params.timeoutMs ?? 10_000);
+			return JSON.stringify({ sent: true, sessionId: resolved, ack });
+		});
+		registerSandboxFn("meshAsk", async (params: { sessionId: string; message: unknown; timeoutMs?: number; waitFor?: string }) => {
+			const resolved = resolveTargetSessionId(params.sessionId);
+			const reply = await mesh.askAndWaitForReply(resolved, params.message, params.timeoutMs ?? 30_000, (params.waitFor ?? "delivered") as MeshTellReceiptPhase);
+			return JSON.stringify(reply);
+		});
+		registerSandboxFn("meshPeers", async () => {
+			return JSON.stringify(mesh.peers());
+		});
+		registerSandboxFn("meshView", async (params: { sessionId: string; start?: number; end?: number; timeoutMs?: number }) => {
+			const resolved = resolveTargetSessionId(params.sessionId);
+			const reply = await mesh.askAndWaitForReply(resolved, { type: "view", start: params.start ?? -20, end: params.end ?? 0 }, params.timeoutMs ?? 10_000);
+			return JSON.stringify(reply);
+		});
+		registerSandboxFn("meshBroadcast", async (params: { topic: string; message: unknown }) => {
+			mesh.broadcast(params.topic, params.message);
+			return JSON.stringify({ broadcast: true, topic: params.topic });
+		});
+		registerSandboxFn("meshChat", async (params: { channelId: string; message: unknown }) => {
+			mesh.chat(params.channelId, params.message);
+			return JSON.stringify({ sent: true, channelId: params.channelId });
+		});
+		registerSandboxFn("meshReply", async (params: { requestId: number; response: unknown }) => {
+			const sender = pendingReplies.get(params.requestId);
+			if (!sender) return JSON.stringify({ error: "No pending request with id " + params.requestId });
+			sender(params.response);
+			pendingReplies.delete(params.requestId);
+			return JSON.stringify({ replied: true, requestId: params.requestId });
+		});
+		registerSandboxFn("meshJoinChannel", async (params: { channelId: string }) => {
+			joinAndPersist(params.channelId);
+			return JSON.stringify({ joined: params.channelId });
+		});
+		registerSandboxFn("meshLeaveChannel", async (params: { channelId: string }) => {
+			leaveAndPersist(params.channelId);
+			return JSON.stringify({ left: params.channelId });
+		});
+	} catch {
+		// code-mode/shared not available — skip sandbox registration
+	}
+
 	pi.registerMessageRenderer("mesh-list", (msg, expanded, theme) =>
 		renderToolResult(msg, expanded, theme),
 	);
