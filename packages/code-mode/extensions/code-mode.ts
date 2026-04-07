@@ -119,6 +119,7 @@ function createSession(): PersistentSession {
 
 let session: PersistentSession | null = null;
 let escaped = false;
+let contextSize: number | null = null; // null = send everything
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -263,6 +264,10 @@ async function executeCode(
           }
           sm.appendCustomEntry("code-mode:" + key, data);
           return "Saved: " + key;
+        },
+        setContextSize: (n?: number) => {
+          contextSize = n ?? null;
+          return n ? "Context limited to last " + n + " messages" : "Context size reset (sending all messages)";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
@@ -445,6 +450,13 @@ export default function (pi: ExtensionAPI) {
     // Extend tool reference with all registered extension tools
     extendWithAllTools(pi);
     rebuildCachedReference();
+  });
+
+  // Context window management — filter messages before LLM call
+  pi.on("context", (event) => {
+    if (contextSize !== null && event.messages.length > contextSize) {
+      return { messages: event.messages.slice(-contextSize) };
+    }
   });
 
   // /escape_code_mode — user-facing escape hatch
