@@ -1350,7 +1350,7 @@ function createPersistentStore() {
 
 			const size = estimateSize(oldest.entry.value);
 			const age = currentTurn - oldest.turn;
-			warnings.push("\u23f3 $.${oldest.key} EVICTED to free memory (was ${size}, last used ${age} turns ago). Use $.__pin('${oldest.key}') to protect.");
+			warnings.push("\u23f3 $." + oldest.key + " EVICTED to free memory (was " + size + ", last used " + age + " turns ago). Use $.__pin('" + oldest.key + "') to protect.");
 			store.delete(oldest.key);
 		}
 
@@ -1374,9 +1374,9 @@ function createPersistentStore() {
 			const size = estimateSize(entry.value);
 			const age = currentTurn - entry.lastAccessTurn;
 			if (entry.pinned) {
-				lines.push("  $.${key}: ${size} (pinned, last used ${age} turns ago)");
+				lines.push("  $." + key + ": " + size + " (pinned, last used " + age + " turns ago)");
 			} else {
-				lines.push("  $.${key}: ${size} (last used ${age} turns ago)");
+				lines.push("  $." + key + ": " + size + " (last used " + age + " turns ago)");
 			}
 		}
 		return lines.join("\n");
@@ -1403,18 +1403,18 @@ function createPersistentStore() {
 				case "__pin":
 					return (name: string) => {
 						const entry = store.get(name);
-						if (!entry) return "$.${name} not found";
+						if (!entry) return "$." + name + " not found";
 						entry.pinned = true;
 						entry.lastAccessTurn = currentTurn;
-						return "$.${name} pinned (will not expire)";
+						return "$." + name + " pinned (will not expire)";
 					};
 				case "__unpin":
 					return (name: string) => {
 						const entry = store.get(name);
-						if (!entry) return "$.${name} not found";
+						if (!entry) return "$." + name + " not found";
 						entry.pinned = false;
 						entry.lastAccessTurn = currentTurn;
-						return "$.${name} unpinned (subject to memory eviction)";
+						return "$." + name + " unpinned (subject to memory eviction)";
 					};
 				case "__keys":
 					return () => [...store.keys()];
