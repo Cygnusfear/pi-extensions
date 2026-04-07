@@ -2501,17 +2501,10 @@ export default function (pi: ExtensionAPI) {
 				highlighted = preview;
 			}
 
-			// Apply consistent bg to all lines (#313340 matches lipgloss toolSuccessBg)
-			const CODE_BG = "\x1b[48;2;49;51;64m";
-			const ANSI_RST = "\x1b[0m";
-			const CLEAR_EOL = "\x1b[K"; // fill rest of line with current bg
-			const wrapBg = (line: string) =>
-				CODE_BG + line.replace(/\x1b\[0m/g, ANSI_RST + CODE_BG) + CLEAR_EOL + ANSI_RST;
-
-			let text = wrapBg(theme.fg("toolTitle", theme.bold("execute_code")));
-			text += "\n" + wrapBg("") + "\n" + highlighted.map(wrapBg).join("\n");
+			let text = theme.fg("toolTitle", theme.bold("execute_code"));
+			text += "\n\n" + highlighted.join("\n");
 			if (remaining > 0) {
-				text += "\n" + wrapBg(theme.fg("muted", `... (${remaining} more lines)`));
+				text += theme.fg("muted", `\n... (${remaining} more lines)`);
 			}
 			return new Text(text, 0, 0);
 		},
