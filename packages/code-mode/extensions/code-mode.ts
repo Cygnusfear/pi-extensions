@@ -319,15 +319,20 @@ async function executeCode(
       "git-ai",
       "hotseat_handbook_update", "hotseat_handbook_read",
     ];
-    const allTools = toolCtx.pi.getAllTools();
+    // Try to get full tool definitions (with execute method)
+    const getToolDef = (toolCtx.pi as any).getToolDefinition?.bind(toolCtx.pi)
+      ?? ((name: string) => {
+        // Fallback: scan getAllTools and hope execute is there (it won't be)
+        const info = toolCtx.pi.getAllTools().find((t: any) => t.name === name);
+        return info?.execute ? info : undefined;
+      });
     const wrappers: Record<string, unknown> = {};
     for (const name of passthroughNames) {
-      const tool = allTools.find((t: any) => t.name === name);
-      if (!tool) continue;
+      const tool = getToolDef(name);
+      if (!tool?.execute) continue;
       const camelName = name.replace(/[-_]([a-z])/g, (_: string, c: string) => c.toUpperCase());
       wrappers[camelName] = async (params: any = {}) => {
         const result = await tool.execute("sandbox-" + Date.now(), params, undefined, undefined, toolCtx.ctx);
-        // Extract text from AgentToolResult
         if (result?.content) {
           if (typeof result.content === "string") return result.content;
           if (Array.isArray(result.content)) {
