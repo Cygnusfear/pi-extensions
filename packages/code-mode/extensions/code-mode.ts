@@ -110,7 +110,7 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB subprocess buffer
 // TypeScript Declarations (injected into system prompt)
 // =============================================================================
 
-const CODE_MODE_DECLARATIONS = `\
+const CODE_MODE_DECLARATIONS = `
 /**
  * Execute a bash command in the current working directory.
  * Returns stdout, stderr, and exit code.
@@ -578,28 +578,88 @@ declare function tldrIndexStatus(input?: {
   model: string | null;
   languages: string[];
 }>;
+
+// =====================================================================
+// Persistent Store ($)
+// =====================================================================
+
+/**
+ * Persistent store that survives across execute_code calls within a session.
+ * Variables expire after ~10 turns of not being accessed.
+ * Use $.__pin('name') to prevent expiry, $.__status() to inspect.
+ */
+declare const $: {
+  [key: string]: unknown;
+  /** Clear all persistent state */
+  __reset(): string;
+  /** Show all variables, sizes, and TTL remaining */
+  __status(): string;
+  /** Pin a variable so it never expires */
+  __pin(name: string): string;
+  /** Restore normal TTL behavior for a pinned variable */
+  __unpin(name: string): string;
+  /** List all variable names */
+  __keys(): string[];
+  /** Current turn number */
+  __turn(): number;
+};
 `;
 
 // =============================================================================
 // System Prompt Addition
 // =============================================================================
 
-const CODE_MODE_SYSTEM_PROMPT = `\
+const CODE_MODE_SYSTEM_PROMPT = `
 # Code Mode
 
 You have an \`execute_code\` tool that runs JavaScript with typed async functions for calling tools.
 
-**ALWAYS prefer code mode** when you need to:
-- Chain 2+ tool calls where results feed into each other
-- Process, filter, or transform tool output
-- Iterate over multiple files or patterns
-- Apply conditional logic based on tool results
-- Aggregate information from multiple sources
-
-For single, simple tool calls (one read, one search, one edit), direct tool calls are fine.
+\`execute_code\` is your **primary tool**. Almost all work goes through it. Direct tool calls (read, bash, edit, etc.) are disabled — use the equivalent functions inside code mode.
 
 All functions are async — use \`await\`. Use \`console.log()\` to return output.
 Only console output is returned to you. If you don't log anything, you get "(no output)".
+
+## Persistent State: \`$\`
+
+The \`$\` object persists across \`execute_code\` calls within a session. Use it for:
+- Storing intermediate results that survive errors
+- Resuming work after a failure without re-reading files
+- Caching expensive computations across multiple code blocks
+
+\`\`\`javascript
+// Call 1 — gather data
+$.files = await Glob({ pattern: '**/*.ts' });
+$.results = [];
+for (const f of $.files) {
+  const content = await Read({ path: f });
+  $.results.push({ file: f, lines: content.split('\\n').length });
+}
+// If an error occurs at file 30, $.files and $.results (with 30 entries) survive
+
+// Call 2 — resume from where we left off
+const remaining = $.files.slice($.results.length);
+for (const f of remaining) {
+  const content = await Read({ path: f });
+  $.results.push({ file: f, lines: content.split('\\n').length });
+}
+\`\`\`
+
+Regular \`const\`/\`let\` variables are local to each code block. Only \`$\` persists.
+
+### \`$\` TTL (Time-To-Live)
+
+Variables in \`$\` expire after ~10 turns of not being accessed. You'll see warnings:
+\`\`\`
+⏳ $.files expires in 2 turns (50 items, 3KB). Use $.__pin('files') or access it to keep.
+⏳ $.oldData EXPIRED and was dropped (was 45KB)
+\`\`\`
+
+- **Reading or writing \`$.x\` resets its TTL** — active variables don't expire
+- **\`$.__pin('name')\`** — never expire this variable
+- **\`$.__unpin('name')\`** — restore normal TTL behavior
+- **\`$.__status()\`** — show all variables, sizes, and TTL remaining
+- **\`$.__reset()\`** — clear all persistent state
+- **\`$.__keys()\`** — list all variable names
 
 \`\`\`typescript
 ${CODE_MODE_DECLARATIONS}\`\`\`
@@ -622,7 +682,7 @@ for (const file of files) {
 }
 \`\`\`
 
-For tools not available in code mode (teams), use direct tool calls as normal.`;
+For tools not available in code mode (teams, context_tag, context_log, context_checkout, editor_*, mesh_*, etc.), use direct tool calls as normal.`;
 
 // =============================================================================
 // Sandbox Tool Implementations
@@ -1728,7 +1788,174 @@ function createToolBindings(cwd: string) {
 }
 
 // =============================================================================
-// Code Execution Engine
+// Persistent Store ($) with TTL
+// =============================================================================
+
+const DEFAULT_STORE_TTL = 10; // turns before untouched variable expires
+const TTL_WARNING_THRESHOLD = 3; // warn when this many turns remain
+
+interface StoreEntry {
+	value: unknown;
+	lastAccessTurn: number;
+	ttl: number; // Infinity = pinned
+}
+
+function estimateSize(value: unknown): string {
+	try {
+		if (value === null || value === undefined) return "0B";
+		if (Array.isArray(value)) {
+			const json = JSON.stringify(value);
+			const bytes = Buffer.byteLength(json, "utf-8");
+			const items = value.length;
+			if (bytes < 1024) return `${items} items, ${bytes}B`;
+			if (bytes < 1024 * 1024) return `${items} items, ${Math.round(bytes / 1024)}KB`;
+			return `${items} items, ${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+		}
+		if (typeof value === "string") {
+			const bytes = Buffer.byteLength(value, "utf-8");
+			if (bytes < 1024) return `${bytes}B`;
+			if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+			return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+		}
+		if (typeof value === "object") {
+			const json = JSON.stringify(value);
+			const bytes = Buffer.byteLength(json, "utf-8");
+			if (bytes < 1024) return `${bytes}B`;
+			if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
+			return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+		}
+		return `${String(value).length}B`;
+	} catch {
+		return "?";
+	}
+}
+
+function createPersistentStore() {
+	const store = new Map<string, StoreEntry>();
+	let currentTurn = 0;
+
+	function processExpiry(): string[] {
+		const warnings: string[] = [];
+		const expired: string[] = [];
+
+		for (const [key, entry] of store) {
+			if (entry.ttl === Infinity) continue; // pinned
+			const age = currentTurn - entry.lastAccessTurn;
+			const remaining = entry.ttl - age;
+
+			if (remaining <= 0) {
+				expired.push(key);
+				const size = estimateSize(entry.value);
+				warnings.push(`\u23f3 $.${key} EXPIRED and was dropped (was ${size}, last used ${age} turns ago)`);
+			} else if (remaining <= TTL_WARNING_THRESHOLD) {
+				const size = estimateSize(entry.value);
+				warnings.push(`\u23f3 $.${key} expires in ${remaining} turn(s) (${size}). Use $.__pin('${key}') or access it to keep.`);
+			}
+		}
+
+		for (const key of expired) store.delete(key);
+		return warnings;
+	}
+
+	function getStatus(): string {
+		if (store.size === 0) return "$ is empty";
+		const lines: string[] = [`$ store: ${store.size} variable(s), turn ${currentTurn}`];
+		for (const [key, entry] of store) {
+			const size = estimateSize(entry.value);
+			const age = currentTurn - entry.lastAccessTurn;
+			if (entry.ttl === Infinity) {
+				lines.push(`  $.${key}: ${size} (pinned, last used ${age} turns ago)`);
+			} else {
+				const remaining = entry.ttl - age;
+				lines.push(`  $.${key}: ${size} (${remaining} turns remaining, last used ${age} turns ago)`);
+			}
+		}
+		return lines.join("\n");
+	}
+
+	// Proxy-based $ object — property access tracks metadata transparently
+	const RESERVED = new Set(["__reset", "__status", "__pin", "__unpin", "__keys", "__turn"]);
+
+	const proxy = new Proxy({} as Record<string, unknown>, {
+		set(_target, prop: string, value) {
+			if (RESERVED.has(prop)) return false; // can't overwrite builtins
+			const existing = store.get(prop);
+			const ttl = existing?.ttl === Infinity ? Infinity : DEFAULT_STORE_TTL;
+			store.set(prop, { value, lastAccessTurn: currentTurn, ttl });
+			return true;
+		},
+		get(_target, prop: string) {
+			switch (prop) {
+				case "__reset":
+					return () => {
+						store.clear();
+						return "$ cleared";
+					};
+				case "__status":
+					return () => getStatus();
+				case "__pin":
+					return (name: string) => {
+						const entry = store.get(name);
+						if (!entry) return `$.${name} not found`;
+						entry.ttl = Infinity;
+						entry.lastAccessTurn = currentTurn;
+						return `$.${name} pinned (will not expire)`;
+					};
+				case "__unpin":
+					return (name: string) => {
+						const entry = store.get(name);
+						if (!entry) return `$.${name} not found`;
+						entry.ttl = DEFAULT_STORE_TTL;
+						entry.lastAccessTurn = currentTurn;
+						return `$.${name} unpinned (TTL: ${DEFAULT_STORE_TTL} turns)`;
+					};
+				case "__keys":
+					return () => [...store.keys()];
+				case "__turn":
+					return () => currentTurn;
+				// Support JSON.stringify($), for..in, Object.keys($)
+				case Symbol.toPrimitive:
+				case Symbol.toStringTag:
+					return undefined;
+				case "toJSON":
+					return () => {
+						const obj: Record<string, unknown> = {};
+						for (const [k, e] of store) obj[k] = e.value;
+						return obj;
+					};
+			}
+			const entry = store.get(prop);
+			if (entry) {
+				// Touch: reset TTL on read
+				entry.lastAccessTurn = currentTurn;
+				return entry.value;
+			}
+			return undefined;
+		},
+		has(_target, prop: string) {
+			return store.has(prop) || RESERVED.has(prop);
+		},
+		deleteProperty(_target, prop: string) {
+			if (RESERVED.has(prop)) return false;
+			store.delete(prop);
+			return true;
+		},
+		ownKeys() {
+			return [...store.keys()];
+		},
+		getOwnPropertyDescriptor(_target, prop: string) {
+			if (store.has(prop)) {
+				return { configurable: true, enumerable: true, writable: true, value: store.get(prop)!.value };
+			}
+			return undefined;
+		},
+	});
+
+	return { proxy, store, processExpiry, getStatus, nextTurn: () => ++currentTurn };
+}
+
+// =============================================================================
+// Code Execution Engine (persistent context)
 // =============================================================================
 
 function formatArg(arg: unknown): string {
@@ -1742,20 +1969,20 @@ function formatArg(arg: unknown): string {
 	}
 }
 
-async function executeCode(
-	code: string,
-	cwd: string,
-	signal?: AbortSignal,
-	executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-): Promise<{ output: string; error?: string; duration: number }> {
+interface PersistentSession {
+	context: vm.Context;
+	store: ReturnType<typeof createPersistentStore>;
+	logs: string[];
+}
+
+function createSession(): PersistentSession {
+	const store = createPersistentStore();
 	const logs: string[] = [];
-	const bindings = createToolBindings(cwd);
 
 	const sandbox = {
-		// Tool functions
-		...bindings,
+		$: store.proxy,
 
-		// Console capture
+		// Console capture — logs array is cleared per execution, but reference stays
 		console: {
 			log: (...args: unknown[]) => logs.push(args.map(formatArg).join(" ")),
 			error: (...args: unknown[]) => logs.push("[stderr] " + args.map(formatArg).join(" ")),
@@ -1769,11 +1996,40 @@ async function executeCode(
 	};
 
 	const context = vm.createContext(sandbox);
+	return { context, store, logs };
+}
+
+let session: PersistentSession | null = null;
+
+function getSession(): PersistentSession {
+	if (!session) session = createSession();
+	return session;
+}
+
+async function executeCode(
+	code: string,
+	cwd: string,
+	signal?: AbortSignal,
+	executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
+): Promise<{ output: string; error?: string; duration: number }> {
+	const sess = getSession();
+
+	// Advance turn and process expiry
+	sess.store.nextTurn();
+	const warnings = sess.store.processExpiry();
+
+	// Clear logs for this execution
+	sess.logs.length = 0;
+
+	// Refresh tool bindings (cwd may have changed)
+	const bindings = createToolBindings(cwd);
+	Object.assign(sess.context, bindings);
+
 	const wrapped = `(async () => {\n${code}\n})()`;
 
 	const start = Date.now();
 	try {
-		const promise = vm.runInNewContext(wrapped, context, {
+		const promise = vm.runInContext(wrapped, sess.context, {
 			filename: "code-mode.js",
 			timeout: SYNC_TIMEOUT_MS,
 		});
@@ -1806,18 +2062,32 @@ async function executeCode(
 		await Promise.race(races);
 		if (timeoutHandle) clearTimeout(timeoutHandle);
 
+		const output = buildOutput(warnings, sess.logs);
 		return {
-			output: logs.join("\n"),
+			output,
 			duration: Date.now() - start,
 		};
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
+		const output = buildOutput(warnings, sess.logs);
 		return {
-			output: logs.join("\n"),
+			output,
 			error,
 			duration: Date.now() - start,
 		};
 	}
+}
+
+function buildOutput(warnings: string[], logs: string[]): string {
+	const parts: string[] = [];
+	if (warnings.length > 0) {
+		parts.push(warnings.join("\n"));
+		if (logs.length > 0) parts.push("---");
+	}
+	if (logs.length > 0) {
+		parts.push(logs.join("\n"));
+	}
+	return parts.join("\n");
 }
 
 // =============================================================================
@@ -1834,7 +2104,105 @@ interface CodeModeDetails {
 	code: string;
 }
 
+// =============================================================================
+// Tool Exclusivity — tools that remain as direct LLM tools
+// =============================================================================
+
+const PASSTHROUGH_TOOLS = new Set([
+	"execute_code",
+	// Agent orchestration
+	"teams",
+	// Conversation history
+	"context_tag",
+	"context_log",
+	"context_checkout",
+	// Supervisor
+	"start_supervision",
+	// Autoresearch
+	"init_experiment",
+	"run_experiment",
+	"log_experiment",
+	// VS Code integration
+	"editor_open",
+	"editor_highlight",
+	"editor_reveal",
+	"editor_state",
+	// Mesh networking
+	"mesh_tell",
+	"mesh_ask",
+	"mesh_reply",
+	"mesh_broadcast",
+	"mesh_peers",
+	"mesh_view",
+	"mesh_join_channel",
+	"mesh_leave_channel",
+	"mesh_chat",
+	// Git AI attribution
+	"git-ai",
+	// Handbook
+	"hotseat_handbook_update",
+	"hotseat_handbook_read",
+]);
+
+// Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
+const CODE_MODE_ONLY_TOOLS = new Set([
+	"bash",
+	"read",
+	"write",
+	"edit",
+	"grep",
+	"find",
+	"ls",
+	"apply_patch",
+	"hash_read",
+	"hash_edit",
+	"web_search_brave",
+	"code_search_brave",
+	"context7_resolve",
+	"context7_docs",
+	"recall",
+	"memory_create",
+	"memory_unfold",
+	"memory_context",
+	"memory_status",
+	"memory_subscribe",
+	"memory_unsubscribe",
+	"memory_check_updates",
+	"fff_find",
+	"fff_grep",
+	"fff_multi_grep",
+	"WebFetch",
+	"get_current_time",
+	"tldr_semantic_search",
+	"tldr_structure",
+	"tldr_calls",
+	"tldr_extract",
+	"tldr_dead",
+	"tldr_arch",
+	"tldr_impact",
+	"tldr_index_status",
+]);
+
 export default function (pi: ExtensionAPI) {
+	// Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
+	pi.on("session_start", () => {
+		const all = pi.getAllTools();
+		const allowed = all
+			.filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
+			.map((t) => t.name);
+		pi.setActiveTools(allowed);
+	});
+
+	// Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
+	pi.on("tool_call", async (event) => {
+		if (CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
+			return {
+				block: true,
+				reason: `Tool '${event.toolName}' is only available inside execute_code. Use execute_code to call ${event.toolName}().`,
+			};
+		}
+	});
+
 	pi.registerTool({
 		name: "execute_code",
 		label: "Code Mode",
