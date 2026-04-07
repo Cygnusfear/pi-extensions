@@ -1,0 +1,23 @@
+packages/code-mode/extensions/code-mode.ts
+  984fa3c6e2f16489 125,1118-1127,1133-1134,2035-2057,2102,2104-2113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "31e4fc9c7b26ceae5d678dfda449b007e74e1a12",
+  "prompts": {
+    "984fa3c6e2f16489": {
+      "agent_id": {
+        "tool": "Adam Comet Jenniskens",
+        "id": "0449c56b-87c2-4807-803f-d8575f727ff5",
+        "model": "zai/glm-5-turbo"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 48,
+      "total_deletions": 7,
+      "accepted_lines": 48,
+      "overriden_lines": 0
+    }
+  }
+}
