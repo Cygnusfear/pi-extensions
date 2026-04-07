@@ -8,8 +8,17 @@
  * Inspired by: https://blog.cloudflare.com/code-mode/
  */
 
-import type { ExtensionAPI, ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
-import { keyHint } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolRenderResultOptions, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import {
+	keyHint,
+	bashToolDefinition,
+	readToolDefinition,
+	writeToolDefinition,
+	editToolDefinition,
+	grepToolDefinition,
+	findToolDefinition,
+	lsToolDefinition,
+} from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -578,6 +587,13 @@ declare function tldrIndexStatus(input?: {
   model: string | null;
   languages: string[];
 }>;
+
+/**
+ * Get detailed help for a sandbox function — description, guidelines, parameters.
+ * Usage: console.log(await man('Read')) or console.log(await man('bash'))
+ */
+declare function man(name: string): Promise<string>;
+
 
 // =====================================================================
 // Persistent Store ($)
@@ -1795,6 +1811,15 @@ function createToolBindings(cwd: string) {
 		tldrIndexStatus: async (input?: { path?: string }) => {
 			return tldrIndexStatusAPI(input?.path ?? cwd);
 		},
+
+		// =====================================================================
+		// man() — get detailed help for any sandbox function
+		// =====================================================================
+
+		man: async (name: string): Promise<string> => {
+			return formatManPage(name);
+		},
+
 	};
 }
 
@@ -2149,6 +2174,132 @@ interface CodeModeDetails {
 // Tool Exclusivity — tools that remain as direct LLM tools
 // =============================================================================
 
+
+// =============================================================================
+// Tool Reference — auto-extracted from built-in tool definitions
+// =============================================================================
+
+/** Shape of what we extract from each tool definition for the sandbox */
+interface SandboxToolRef {
+	name: string;
+	description: string;
+	snippet: string;
+	guidelines: string[];
+	params: string; // formatted parameter docs
+}
+
+/** Map from sandbox function name -> tool reference */
+const toolRefMap = new Map<string, SandboxToolRef>();
+
+/** Cached reference text for system prompt injection */
+let cachedToolReference = "";
+
+/** Name mapping: sandbox function -> built-in tool definition name */
+const SANDBOX_TO_TOOL_NAME: Record<string, string> = {
+	Bash: "bash",
+	Read: "read",
+	Write: "write",
+	Edit: "edit",
+	Grep: "grep",
+	Glob: "find",
+	find: "find",
+	fd: "find",
+	ls: "ls",
+};
+
+function extractParamDocs(paramsDef: any): string {
+	if (!paramsDef?.properties) return "";
+	const lines: string[] = [];
+	for (const [key, schema] of Object.entries(paramsDef.properties) as [string, any][]) {
+		const desc = schema.description || "";
+		const optional = schema.optional ? " (optional)" : "";
+		if (desc) lines.push("  - " + key + optional + ": " + desc);
+	}
+	return lines.join("\n");
+}
+
+function buildToolRef(name: string, def: ToolDefinition): SandboxToolRef {
+	return {
+		name,
+		description: def.description || "",
+		snippet: (def as any).promptSnippet || "",
+		guidelines: (def as any).promptGuidelines || [],
+		params: extractParamDocs(def.parameters),
+	};
+}
+
+function initToolRefs(): void {
+	const builtinDefs: [string, ToolDefinition][] = [
+		["bash", bashToolDefinition],
+		["read", readToolDefinition],
+		["write", writeToolDefinition],
+		["edit", editToolDefinition],
+		["grep", grepToolDefinition],
+		["find", findToolDefinition],
+		["ls", lsToolDefinition],
+	];
+
+	for (const [name, def] of builtinDefs) {
+		const ref = buildToolRef(name, def);
+		toolRefMap.set(name, ref);
+		for (const [sandbox, tool] of Object.entries(SANDBOX_TO_TOOL_NAME)) {
+			if (tool === name) toolRefMap.set(sandbox, ref);
+		}
+	}
+
+	const sections: string[] = ["## Sandbox Function Reference (auto-extracted from tool definitions)"];
+	for (const [name, ref] of toolRefMap) {
+		if (SANDBOX_TO_TOOL_NAME[name]) continue;
+		const lineArr: string[] = [];
+		if (ref.snippet) lineArr.push("**" + name + "**: " + ref.snippet);
+		else if (ref.description) lineArr.push("**" + name + "**: " + ref.description.split(".")[0] + ".");
+		for (const g of ref.guidelines) lineArr.push("- " + g);
+		if (lineArr.length) sections.push(lineArr.join("\n"));
+	}
+	cachedToolReference = sections.join("\n\n");
+}
+
+// Initialize at load time
+initToolRefs();
+
+/** Format a full manual page for man() */
+function formatManPage(name: string): string {
+	const key = name.toLowerCase();
+	const ref = toolRefMap.get(key) || toolRefMap.get(name);
+	if (!ref) {
+		const available = [...new Set([...toolRefMap.keys()].filter(k => !SANDBOX_TO_TOOL_NAME[k]))].join(", ");
+		return "No manual entry for '" + name + "'. Available: " + available;
+	}
+
+	const lineArr: string[] = [];
+	lineArr.push("## " + ref.name);
+	if (ref.description) lineArr.push(ref.description);
+	if (ref.snippet) lineArr.push("*" + ref.snippet + "*");
+	if (ref.guidelines.length) {
+		lineArr.push("");
+		lineArr.push("Guidelines:");
+		for (const g of ref.guidelines) lineArr.push("- " + g);
+	}
+	if (ref.params) {
+		lineArr.push("");
+		lineArr.push("Parameters:");
+		lineArr.push(ref.params);
+	}
+	const sandboxNotes = SANDBOX_FN_NOTES[key];
+	if (sandboxNotes) {
+		lineArr.push("");
+		lineArr.push("Sandbox notes:");
+		lineArr.push(sandboxNotes);
+	}
+	return lineArr.join("\n");
+}
+
+/** Behavioral notes that differ between standalone tool and sandbox function */
+const SANDBOX_FN_NOTES: Record<string, string> = {
+	bash: "Timeouts do NOT throw. Returns { stdout, stderr, exitCode: -1, timedOut: true }. Check result.timedOut.",
+};
+
+
 const PASSTHROUGH_TOOLS = new Set([
 	"execute_code",
 	// Agent orchestration
@@ -2250,7 +2401,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Execute JavaScript code with typed async functions for calling tools. " +
 			"Use for multi-step operations, loops, data processing, and chaining tool calls. " +
-			"Available functions: Bash, Read, Write, Edit, Glob, rg, fd, WebFetch, sleep, " +
+			"Available functions: Bash, Read, Write, Edit, Glob, rg, fd, WebFetch, sleep, man, " +
 			"mai, maiTicket, recall, memoryContext, memoryCreate, memoryUnfold, memoryStatus, " +
 			"memorySubscribe, memoryUnsubscribe, memoryCheckUpdates, " +
 			"braveSearch, braveCodeSearch, getCurrentTime, hashRead, hashEdit, applyPatch, " +
@@ -2268,6 +2419,13 @@ export default function (pi: ExtensionAPI) {
 					description:
 						"Execution timeout in seconds (default: 120, max: 600). " +
 						"Increase for long-running operations like browser automation or large builds.",
+			promptGuidelines: [
+				"Use man('ToolName') to see detailed help for any sandbox function.",
+				"Use $ to persist data across code blocks. Regular const/let die after each call.",
+				"Errors are non-fatal. $ survives. After an error, reference $.var to continue.",
+				"Bash timeouts return { timedOut: true } instead of throwing.",
+				"Prefer one large code block over many small execute_code calls.",
+			],
 					minimum: 1,
 					maximum: 600,
 				}),
@@ -2364,7 +2522,7 @@ export default function (pi: ExtensionAPI) {
 	// Inject code-mode declarations and instructions into system prompt
 	pi.on("before_agent_start", async (event) => {
 		return {
-			systemPrompt: event.systemPrompt + "\n\n" + CODE_MODE_SYSTEM_PROMPT,
+			systemPrompt: event.systemPrompt + "\n\n" + CODE_MODE_SYSTEM_PROMPT + "\n\n" + cachedToolReference,
 		};
 	});
 }
