@@ -2228,7 +2228,7 @@ function buildToolRef(name: string, def: ToolDefinition): SandboxToolRef {
 	};
 }
 
-function initToolRefs(): void {
+function initBuiltinToolRefs(): void {
 	const builtinDefs: [string, ToolDefinition][] = [
 		["bash", bashToolDefinition],
 		["read", readToolDefinition],
@@ -2246,7 +2246,27 @@ function initToolRefs(): void {
 			if (tool === name) toolRefMap.set(sandbox, ref);
 		}
 	}
+}
 
+/** Pull descriptions from all registered tools (built-in + extensions) */
+function extendWithAllTools(api: ExtensionAPI): void {
+	const allTools = api.getAllTools();
+	for (const tool of allTools) {
+		if (toolRefMap.has(tool.name)) continue;
+		if (tool.name === "execute_code") continue;
+		const params = extractParamDocs(tool.parameters);
+		toolRefMap.set(tool.name, {
+			name: tool.name,
+			description: tool.description || "",
+			snippet: "",
+			guidelines: [],
+			params,
+		});
+	}
+}
+
+/** Rebuild the cached reference text from toolRefMap */
+function rebuildCachedReference(): void {
 	const sections: string[] = ["## Sandbox Function Reference (auto-extracted from tool definitions)"];
 	for (const [name, ref] of toolRefMap) {
 		if (SANDBOX_TO_TOOL_NAME[name]) continue;
@@ -2259,8 +2279,15 @@ function initToolRefs(): void {
 	cachedToolReference = sections.join("\n\n");
 }
 
-// Initialize at load time
-initToolRefs();
+// Initialize built-in refs at load time
+initBuiltinToolRefs();
+rebuildCachedReference();
+
+pi.on("session_start", () => {
+	extendWithAllTools(pi);
+	rebuildCachedReference();
+});
+
 
 /** Format a full manual page for man() */
 function formatManPage(name: string): string {
