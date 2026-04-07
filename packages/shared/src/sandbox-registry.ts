@@ -3,28 +3,31 @@
  * Extensions register their tool implementations here.
  * Code-mode reads and injects them into the sandbox.
  *
- * Pattern:
- *   // In your extension's session_start:
- *   import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
- *   registerSandboxFn("meshTell", async (params) => { ... });
- *
- *   // Code-mode picks them up automatically.
+ * Uses globalThis to guarantee shared state across module instances
+ * (jiti/bun may create separate module instances per extension).
  */
 
-const registry = new Map<string, (...args: any[]) => any>();
+const REGISTRY_KEY = "__pi_sandbox_fn_registry__";
+
+function getRegistry(): Map<string, (...args: any[]) => any> {
+	if (!(globalThis as any)[REGISTRY_KEY]) {
+		(globalThis as any)[REGISTRY_KEY] = new Map<string, (...args: any[]) => any>();
+	}
+	return (globalThis as any)[REGISTRY_KEY];
+}
 
 export function registerSandboxFn(name: string, fn: (...args: any[]) => any): void {
-  registry.set(name, fn);
+	getRegistry().set(name, fn);
 }
 
 export function unregisterSandboxFn(name: string): void {
-  registry.delete(name);
+	getRegistry().delete(name);
 }
 
 export function getSandboxFns(): Record<string, (...args: any[]) => any> {
-  return Object.fromEntries(registry);
+	return Object.fromEntries(getRegistry());
 }
 
 export function getSandboxFnNames(): string[] {
-  return [...registry.keys()];
+	return [...getRegistry().keys()];
 }
