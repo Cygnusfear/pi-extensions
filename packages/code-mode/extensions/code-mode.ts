@@ -259,6 +259,7 @@ async function executeCode(
         name: () => sm.getSessionName() ?? null,
         save: (key: string, data: unknown) => {
           if (!key || !key.trim()) return "Key cannot be empty";
+          if (key.length > 128) return "Key too long (max 128 chars)";
           let json: string;
           try {
             json = JSON.stringify(data);
@@ -274,6 +275,9 @@ async function executeCode(
           if (n === undefined || n === null) {
             contextSize = null;
             return "Context size reset (sending all messages)";
+          }
+          if (typeof n !== "number" || !isFinite(n)) {
+            return "Invalid context size: must be a finite number";
           }
           const size = Math.max(4, Math.abs(Math.round(n)));
           contextSize = size;
