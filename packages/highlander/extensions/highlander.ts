@@ -12,7 +12,6 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { registerSandboxFn } from "../../shared/src/sandbox-registry.js";
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
