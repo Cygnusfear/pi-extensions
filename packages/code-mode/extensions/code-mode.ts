@@ -2501,17 +2501,16 @@ export default function (pi: ExtensionAPI) {
 				highlighted = preview;
 			}
 
-			// Apply tool panel background to code lines (#313340 matches lipgloss toolSuccessBg)
+			// Apply consistent bg to all lines (#313340 matches lipgloss toolSuccessBg)
 			const CODE_BG = "\x1b[48;2;49;51;64m";
 			const ANSI_RST = "\x1b[0m";
-			const bgLines = highlighted.map((l: string) =>
-				CODE_BG + l.replace(/\x1b\[0m/g, ANSI_RST + CODE_BG) + ANSI_RST,
-			);
+			const wrapBg = (line: string) =>
+				CODE_BG + line.replace(/\x1b\[0m/g, ANSI_RST + CODE_BG) + ANSI_RST;
 
-			let text = theme.fg("toolTitle", theme.bold("execute_code"));
-			text += "\n\n" + bgLines.join("\n");
+			let text = wrapBg(theme.fg("toolTitle", theme.bold("execute_code")));
+			text += "\n" + wrapBg("") + "\n" + highlighted.map(wrapBg).join("\n");
 			if (remaining > 0) {
-				text += theme.fg("muted", `\n... (${remaining} more lines)`);
+				text += "\n" + wrapBg(theme.fg("muted", `... (${remaining} more lines)`));
 			}
 			return new Text(text, 0, 0);
 		},
