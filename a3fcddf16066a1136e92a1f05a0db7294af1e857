@@ -1,0 +1,23 @@
+packages/code-mode/extensions/code-mode.ts
+  984fa3c6e2f16489 2408-2411
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "a3fcddf16066a1136e92a1f05a0db7294af1e857",
+  "prompts": {
+    "984fa3c6e2f16489": {
+      "agent_id": {
+        "tool": "Adam Comet Jenniskens",
+        "id": "0449c56b-87c2-4807-803f-d8575f727ff5",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 5,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
