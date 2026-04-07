@@ -102,3 +102,5 @@ for (const file of files) {
   }
 }
 ```
+
+Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.

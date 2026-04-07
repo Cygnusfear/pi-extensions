@@ -1758,7 +1758,9 @@ rebuildCachedReference();
 /** Format a full manual page for man() */
 function formatManPage(name: string): string {
 	const key = name.toLowerCase();
-	const ref = toolRefMap.get(key) || toolRefMap.get(name);
+	// camelCase fallback: applyPatch → apply_patch, meshPeers → mesh_peers
+	const snakeCase = name.replace(/([A-Z])/g, "_$1").toLowerCase();
+	const ref = toolRefMap.get(key) || toolRefMap.get(name) || toolRefMap.get(snakeCase);
 	if (!ref) {
 		const available = [...new Set([...toolRefMap.keys()].filter(k => !SANDBOX_TO_TOOL_NAME[k]))].join(", ");
 		return "No manual entry for '" + name + "'. Available: " + available;
@@ -1795,6 +1797,7 @@ const SANDBOX_FN_NOTES: Record<string, string> = {
 
 const PASSTHROUGH_TOOLS = new Set([
 	"execute_code",
+	"apply_patch",
 	// Agent orchestration
 	"teams",
 	// Conversation history
