@@ -2497,7 +2497,10 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const { highlightCode: hl } = require("../../shared/src/tui-diff-renderer.ts");
 				highlighted = hl(preview.join("\n"), "code-mode.js");
-			} catch {
+				const hasAnsi = highlighted.some((l: string) => /\x1b\[/.test(l));
+				process.stderr.write("[code-mode] Shiki highlight: " + highlighted.length + " lines, hasAnsi=" + hasAnsi + "\n");
+			} catch (e: any) {
+				process.stderr.write("[code-mode] Shiki failed: " + (e?.message || e) + "\n");
 				highlighted = preview;
 			}
 
