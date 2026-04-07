@@ -516,6 +516,12 @@ declare const session: {
   save(key: string, data: unknown): string;
   /** Load previously saved data from the session file */
   load(key: string): unknown;
+  /**
+   * Limit context sent to API to the last N messages (minimum 4).
+   * Call with no args to reset to full context. Your $ store and session.save() data survive trimming.
+   * Use this to manage context rot — distill important state first, then trim.
+   */
+  setContextSize(n?: number): string;
 };
 
 // =====================================================================

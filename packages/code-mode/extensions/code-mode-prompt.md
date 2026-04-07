@@ -144,6 +144,69 @@ const ctx = session.load("ctx");       // restore after reload
 
 `$` is fast runtime memory (survives compaction). `session.save()` is durable storage (survives reload).
 
+### Context Hygiene — The RLM Pattern
+
+Your conversation context is finite. When it fills up, model quality degrades ("context rot"). But your `$` store and `session.save()` have no context limit. You are an RLM (Recursive Language Model): your "environment" is `$` + `session.save()`, and your "context window" is what you choose to keep.
+
+**The cycle: Distill → Store → Trim → Continue**
+
+```javascript
+// 1. READ your conversation history
+const entries = session.entries();
+const msgs = session.messages();
+const usage = session.tokens();  // { tokens, contextWindow }
+
+// 2. DISTILL important state into $ vars (survives trimming)
+$.goal = "implement auth middleware";
+$.filesDone = ["src/auth.ts", "src/middleware.ts"];
+$.filesRemaining = ["src/routes.ts"];
+$.decisions = { strategy: "JWT + refresh tokens", store: "httpOnly cookie" };
+$.keyLearnings = "express middleware runs sequentially, use next()";
+
+// 3. PERSIST critical state (survives reload/session switch)
+session.save("tpv", {
+  goal: $.goal,
+  progress: "2/3 files done",
+  decisions: $.decisions,
+  nextSteps: "wire up routes.ts",
+  fileContents: { /* any extracted data */ }
+});
+
+// 4. TRIM — remove old messages, keep your state
+session.setContextSize(6);  // keep last 6 messages only
+
+// 5. CONTINUE — read from $ on demand instead of re-reading files
+// Your $ store and session saves are intact. You just shed the old conversation.
+```
+
+**When to do this:**
+- When you see the 🚨 context warning in your output (≥ 40% context used)
+- Before starting a new phase of work (investigation → implementation → testing)
+- After reading many files — store the extracted info, don't keep the raw reads in context
+
+**What to distill:**
+- Current goal and progress (TPV — Total Perspective Vortex)
+- Key files and their locations, what you've learned about them
+- Decisions made and why (so you don't re-litigate)
+- Extracted data: function signatures, error messages, config values
+- Remaining work / next steps
+
+**What NOT to distill:**
+- Raw file contents (read them again from `$` cache or disk)
+- Full conversation history (that's what you're trimming)
+- console.log outputs you've already processed
+
+**Reading back distilled state:**
+```javascript
+// After trimming, recall your state
+const tpv = session.load("tpv");
+console.log("Goal:", tpv.goal);
+console.log("Remaining:", tpv.nextSteps);
+
+// Or from $ (faster, survives compaction)
+console.log($.filesRemaining);
+```
+
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
 
 Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshReply, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead. These call the registered tools directly.

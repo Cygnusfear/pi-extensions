@@ -86,6 +86,40 @@ function formatArg(arg: unknown): string {
   }
 }
 
+/** Build context usage footer for execute_code output. Returns null when usage is low. */
+function buildContextFooter(ctx: {
+  sessionManager?: any;
+  getContextUsage?: () => any;
+}): string | null {
+  const getUsage = ctx.getContextUsage;
+  if (!getUsage) return null;
+  try {
+    const usage = getUsage();
+    if (!usage || usage.percent === null || usage.percent < 30) return null;
+
+    // Aggregate total session cost from assistant message entries
+    let totalCost = 0;
+    const sm = ctx.sessionManager;
+    if (sm) {
+      for (const entry of sm.getEntries()) {
+        if (entry.type === "message" && entry.message?.role === "assistant") {
+          totalCost += entry.message.usage?.cost?.total ?? 0;
+        }
+      }
+    }
+
+    const pct = usage.percent.toFixed(1);
+    const cost = `$${totalCost.toFixed(3)}`;
+
+    if (usage.percent >= 40) {
+      return `🚨 ${pct}% / ${cost} — distill important state into $ vars + session.save(), then session.setContextSize(N) to trim old messages`;
+    }
+    return `📊 ${pct}% / ${cost}`;
+  } catch {
+    return null;
+  }
+}
+
 interface PersistentSession {
   context: vm.Context;
   store: ReturnType<typeof createPersistentStore>;
@@ -476,7 +510,78 @@ export default function (pi: ExtensionAPI) {
   // Context window management — filter messages before LLM call
   pi.on("context", (event) => {
     if (contextSize !== null && event.messages.length > contextSize) {
-      return { messages: event.messages.slice(-contextSize) };
+      const sliced = event.messages.slice(-contextSize);
+      // Pi internal roles: "user", "assistant", "toolResult"
+      // Anthropic API requires: first msg is user, toolResults must match assistant toolCalls.
+      // We must find a clean boundary that doesn't orphan toolCall/toolResult pairs.
+
+      // Step 1: Find the first user message — that's our required start anchor.
+      let startIdx = -1;
+      for (let i = 0; i < sliced.length; i++) {
+        if (sliced[i].role === "user") {
+          startIdx = i;
+          break;
+        }
+      }
+      if (startIdx === -1) {
+        // No user message in slice — can't form a valid sequence, send everything.
+        return;
+      }
+
+      // Step 2: Walk forward from startIdx and build a valid sequence.
+      // Collect toolCall IDs from each assistant, then verify following toolResults match.
+      const result: typeof sliced = [sliced[startIdx]];
+      for (let i = startIdx + 1; i < sliced.length; i++) {
+        const msg = sliced[i];
+        if (msg.role === "assistant") {
+          // Accept this assistant. Collect its toolCall IDs (if any).
+          const toolCallIds = new Set<string>();
+          if (Array.isArray(msg.content)) {
+            for (const block of msg.content) {
+              if (block.type === "toolCall" && block.id) {
+                toolCallIds.add(block.id);
+              }
+            }
+          }
+          result.push(msg);
+          if (toolCallIds.size > 0) {
+            // Expect the next messages to be toolResults matching these IDs.
+            // Collect all consecutive toolResults and verify they cover our toolCalls.
+            const toolResults: typeof sliced = [];
+            let j = i + 1;
+            while (j < sliced.length && sliced[j].role === "toolResult") {
+              toolResults.push(sliced[j]);
+              j++;
+            }
+            // Check: do the toolResults cover ALL toolCall IDs?
+            const resultIds = new Set(toolResults.map((tr: any) => tr.toolCallId));
+            const allCovered = [...toolCallIds].every((id) => resultIds.has(id));
+            if (allCovered) {
+              // Complete pair — include all toolResults and continue from j.
+              result.push(...toolResults);
+              i = j - 1; // for loop will i++
+            } else {
+              // Incomplete pair — drop both the assistant and its toolResults.
+              // Remove the assistant we just pushed.
+              result.pop();
+              // Skip the toolResults too.
+              i = j - 1;
+            }
+          }
+          // Assistant without toolCalls: fine, continue.
+        } else if (msg.role === "toolResult") {
+          // Orphaned toolResult (no preceding assistant with matching toolCall).
+          // Skip it.
+          continue;
+        } else if (msg.role === "user") {
+          result.push(msg);
+        }
+      }
+
+      if (result.length === 0) {
+        return; // Fallback: send everything
+      }
+      return { messages: result };
     }
   });
 
@@ -588,6 +693,12 @@ export default function (pi: ExtensionAPI) {
       }
       if (!text) {
         text = "(no output — use console.log() to return results)";
+      }
+
+      // Context usage footer (shown when ≥ 30%, warning at ≥ 40%)
+      const ctxFooter = buildContextFooter(ctx as any);
+      if (ctxFooter) {
+        text += "\n\n" + ctxFooter;
       }
 
       // Truncate if too large
