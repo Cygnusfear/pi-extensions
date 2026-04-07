@@ -30,6 +30,9 @@ import path from "node:path";
 import os from "node:os";
 import TurndownService from "turndown";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
+import { highlightCode } from "@pi-extensions/shared/tui-diff-renderer";
+// Eagerly start Shiki loading on import
+import "@pi-extensions/shared/tui-diff-renderer";
 import { safeJsonParse, safeResponseJson } from "@pi-extensions/shared/safe-json";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import { fffFindAPI, fffGrepAPI, fffMultiGrepAPI } from "@pi-extensions/fff/api";
@@ -2486,12 +2489,15 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args: { code: string }, theme: Theme) {
-			const lines = (args.code || "").split("\n");
-			const preview = lines.slice(0, CODE_PREVIEW_LINES);
-			const remaining = lines.length - preview.length;
+			const rawLines = (args.code || "").split("\n");
+			const preview = rawLines.slice(0, CODE_PREVIEW_LINES);
+			const remaining = rawLines.length - preview.length;
+
+			// Syntax-highlight the code preview via Shiki
+			const highlighted = highlightCode(preview.join("\n"), "code-mode.js");
 
 			let text = theme.fg("toolTitle", theme.bold("execute_code"));
-			text += "\n\n" + preview.map((l: string) => theme.fg("toolOutput", l)).join("\n");
+			text += "\n\n" + highlighted.join("\n");
 			if (remaining > 0) {
 				text += theme.fg("muted", `\n... (${remaining} more lines)`);
 			}
