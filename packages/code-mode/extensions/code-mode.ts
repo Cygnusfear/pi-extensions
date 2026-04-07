@@ -24,6 +24,7 @@ import vm from "node:vm";
 require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
 import { getSandboxFns } from "../../shared/src/sandbox-registry";
+import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,
@@ -154,6 +155,7 @@ function createSession(): PersistentSession {
 let session: PersistentSession | null = null;
 let escaped = false;
 let contextSize: number | null = null; // null = send everything
+let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -165,7 +167,15 @@ async function executeCode(
   cwd: string,
   signal?: AbortSignal,
   executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-  toolCtx?: { sessionManager?: any; getContextUsage?: () => any; confirmFn?: (title: string, body: string) => Promise<boolean> },
+  toolCtx?: {
+    sessionManager?: any;
+    getContextUsage?: () => any;
+    confirmFn?: (title: string, body: string) => Promise<boolean>;
+    compact?: (options?: any) => void;
+    setLabel?: (entryId: string, label: string | undefined) => void;
+    navigateTree?: (targetId: string, options?: any) => Promise<any>;
+    abort?: () => void;
+  },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
 
@@ -316,6 +326,13 @@ async function executeCode(
           const size = Math.max(4, Math.abs(Math.round(n)));
           contextSize = size;
           return "Context limited to last " + size + " messages";
+        },
+        squash: () => {
+          if (!toolCtx?.compact) {
+            return "Error: compaction not available in this context";
+          }
+          toolCtx.compact();
+          return "Squash triggered — old messages will be summarized, recent messages kept intact. Session will reload.";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
@@ -506,6 +523,11 @@ export default function (pi: ExtensionAPI) {
     // Extend tool reference with all registered extension tools
     extendWithAllTools(pi);
     rebuildCachedReference();
+  });
+
+  // Register highlander sandbox fn — calls pi tool if available
+  registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
+    return pi.callTool("highlander", params);
   });
 
   // Context window management — filter messages before LLM call
