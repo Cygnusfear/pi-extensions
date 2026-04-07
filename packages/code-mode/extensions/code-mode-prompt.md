@@ -89,6 +89,23 @@ $.content2 = await Read({ path: $.files[1] });
 console.log($.content, $.content2);
 ```
 
+### Async across calls
+
+Promises stashed on `$` survive across `execute_code` calls. The vm.Context persists, so pending promises keep running in the background.
+
+```javascript
+// Call 1 — fire slow calls, don't await
+$.search = braveSearch({ query: 'node vm performance', numResults: 3 });
+$.memory = recall({ query: 'architecture decisions', limit: 5 });
+// continue with other work immediately...
+const files = await Glob({ pattern: '**/*.ts' });
+
+// Call 2 — pick up results (instant if already resolved)
+const [search, memory] = await Promise.allSettled([$.search, $.memory]);
+```
+
+This enables parallel I/O across calls — fire multiple slow operations, do other work, collect results later.
+
 ### Example
 ```javascript
 // Find all TypeScript files with TODO comments

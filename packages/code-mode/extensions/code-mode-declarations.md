@@ -491,7 +491,8 @@ declare function readImage(input: {
 
 /**
  * Persistent store that survives across execute_code calls within a session.
- * Variables expire after ~10 turns of not being accessed.
+ * Variables persist indefinitely until total memory exceeds 50MB — then LRU unpinned vars are evicted.
+ * Promises stashed on $ survive across calls — fire async work, pick up results later.
  * Use $.__pin('name') to protect from memory eviction, $.__status() to inspect.
  */
 declare const $: {
