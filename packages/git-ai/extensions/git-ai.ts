@@ -290,6 +290,31 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			gitAiAvailable = false;
 		}
+
+		// Register sandbox-callable function for code-mode (ESM import to share module instance)
+		try {
+			const { registerSandboxFn } = await import("../../shared/src/sandbox-registry");
+			registerSandboxFn("gitAi", async (params: { command: string; args?: string[] }) => {
+				const validCommands = ["blame", "stats", "search"];
+				if (!validCommands.includes(params.command)) {
+					return "Unknown command: " + params.command + ". Valid: " + validCommands.join(", ");
+				}
+				const { execFile } = await import("node:child_process");
+				const { promisify } = await import("node:util");
+				const execFileAsync = promisify(execFile);
+				try {
+					const result = await execFileAsync(gitAiBin, [params.command, ...(params.args || [])], {
+						timeout: 15000,
+						windowsHide: true,
+					});
+					return result.stdout || result.stderr || "(no output)";
+				} catch (e: any) {
+					return "Error: " + (e.message || String(e));
+				}
+			});
+		} catch (err) {
+			console.warn("[git-ai] Failed to register sandbox function:", err);
+		}
 	});
 
 	// ── PreToolUse: mark state before AI edit ──
@@ -398,28 +423,5 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// Register sandbox-callable function for code-mode
-	try {
-		const { registerSandboxFn } = require("../../shared/src/sandbox-registry");
-		registerSandboxFn("gitAi", async (params: { command: string; args?: string[] }) => {
-			const validCommands = ["blame", "stats", "search"];
-			if (!validCommands.includes(params.command)) {
-				return "Unknown command: " + params.command + ". Valid: " + validCommands.join(", ");
-			}
-			const { execFile } = require("node:child_process");
-			const { promisify } = require("node:util");
-			const execFileAsync = promisify(execFile);
-			try {
-				const result = await execFileAsync(gitAiBin, [params.command, ...(params.args || [])], {
-					timeout: 15000,
-					windowsHide: true,
-				});
-				return result.stdout || result.stderr || "(no output)";
-			} catch (e: any) {
-				return "Error: " + (e.message || String(e));
-			}
-		});
-	} catch {
-		// code-mode/shared not available — skip
-	}
+	// Sandbox registration moved to session_start (async ESM import for shared module instance)
 }
