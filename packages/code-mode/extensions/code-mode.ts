@@ -2043,8 +2043,7 @@ export default function (pi: ExtensionAPI) {
 				: DEFAULT_EXECUTION_TIMEOUT_MS;
 // Check escape mode toggle after execution
 			const sess = getSession();
-			const escapeEntry = sess.store.get("__escaped");
-			const wantEscape = escapeEntry?.value === true;
+			const wantEscape = sess.store.proxy.__escaped === true;
 			if (wantEscape !== escaped) {
 				escaped = wantEscape;
 				if (escaped) {
