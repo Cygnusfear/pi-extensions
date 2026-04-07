@@ -131,7 +131,7 @@ async function executeCode(
   cwd: string,
   signal?: AbortSignal,
   executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-  toolCtx?: { sessionManager?: any; getContextUsage?: () => any },
+  toolCtx?: { sessionManager?: any; getContextUsage?: () => any; ctx?: any; pi?: any },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
 
@@ -308,6 +308,39 @@ async function executeCode(
         },
       },
     });
+  }
+
+  // Generic passthrough tool wrappers — call registered tools from sandbox
+  if (toolCtx?.pi && toolCtx?.ctx) {
+    const passthroughNames = [
+      "mesh_tell", "mesh_ask", "mesh_reply", "mesh_broadcast",
+      "mesh_peers", "mesh_view", "mesh_join_channel", "mesh_leave_channel", "mesh_chat",
+      "editor_open", "editor_highlight", "editor_reveal", "editor_state",
+      "git-ai",
+      "hotseat_handbook_update", "hotseat_handbook_read",
+    ];
+    const allTools = toolCtx.pi.getAllTools();
+    const wrappers: Record<string, unknown> = {};
+    for (const name of passthroughNames) {
+      const tool = allTools.find((t: any) => t.name === name);
+      if (!tool) continue;
+      const camelName = name.replace(/[-_]([a-z])/g, (_: string, c: string) => c.toUpperCase());
+      wrappers[camelName] = async (params: any = {}) => {
+        const result = await tool.execute("sandbox-" + Date.now(), params, undefined, undefined, toolCtx.ctx);
+        // Extract text from AgentToolResult
+        if (result?.content) {
+          if (typeof result.content === "string") return result.content;
+          if (Array.isArray(result.content)) {
+            return result.content
+              .filter((c: any) => c.type === "text")
+              .map((c: any) => c.text)
+              .join("\n");
+          }
+        }
+        return JSON.stringify(result);
+      };
+    }
+    Object.assign(sess.context, wrappers);
   }
 
   try {
@@ -523,6 +556,7 @@ export default function (pi: ExtensionAPI) {
       "context7Resolve, context7Docs, fffFind, fffGrep, fffMultiGrep, " +
       "tldrSemanticSearch, tldrStructure, tldrCalls, tldrExtract, tldrDead, tldrArch, tldrImpact, tldrIndexStatus. " +
       "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
+      "Passthrough wrappers: meshTell, meshAsk, meshPeers, meshView, meshChat, editorOpen, editorState, gitAi. " +
       "Use console.log() to return results.",
     parameters: Type.Object({
       code: Type.String({
@@ -571,7 +605,7 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         signal,
         timeoutMs,
-        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage },
+        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage, ctx, pi },
       );
 
       let text = output || "";

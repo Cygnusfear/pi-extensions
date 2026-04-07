@@ -145,3 +145,5 @@ const ctx = session.load("ctx");       // restore after reload
 `$` is fast runtime memory (survives compaction). `session.save()` is durable storage (survives reload).
 
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
+
+Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshReply, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead. These call the registered tools directly.
