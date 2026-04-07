@@ -249,25 +249,35 @@ async function executeCode(
             .map((e: any) => ({ id: e.id, targetId: e.targetId, label: e.label, timestamp: e.timestamp }));
         },
         tag: (name: string) => {
+          if (!name || !name.trim()) return "Tag name cannot be empty";
           const leafId = sm.getLeafId();
           if (!leafId) return "No current position to tag";
-          sm.appendLabelChange(leafId, name);
-          return "Tagged: " + name;
+          sm.appendLabelChange(leafId, name.trim());
+          return "Tagged: " + name.trim();
         },
         id: () => sm.getSessionId(),
         name: () => sm.getSessionName() ?? null,
         save: (key: string, data: unknown) => {
+          if (!key || !key.trim()) return "Key cannot be empty";
+          let json: string;
           try {
-            JSON.stringify(data); // validate serializable
+            json = JSON.stringify(data);
           } catch {
             return "Cannot save: data is not JSON-serializable";
           }
-          sm.appendCustomEntry("code-mode:" + key, data);
-          return "Saved: " + key;
+          if (json === undefined) return "Cannot save: data is not JSON-serializable (function/symbol)";
+          if (json.length > 512 * 1024) return "Cannot save: data exceeds 512KB limit";
+          sm.appendCustomEntry("code-mode:" + key.trim(), data);
+          return "Saved: " + key.trim();
         },
         setContextSize: (n?: number) => {
-          contextSize = n ?? null;
-          return n ? "Context limited to last " + n + " messages" : "Context size reset (sending all messages)";
+          if (n === undefined || n === null) {
+            contextSize = null;
+            return "Context size reset (sending all messages)";
+          }
+          const size = Math.max(4, Math.abs(Math.round(n)));
+          contextSize = size;
+          return "Context limited to last " + size + " messages";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
