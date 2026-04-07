@@ -2283,11 +2283,6 @@ function rebuildCachedReference(): void {
 initBuiltinToolRefs();
 rebuildCachedReference();
 
-pi.on("session_start", () => {
-	extendWithAllTools(pi);
-	rebuildCachedReference();
-});
-
 
 /** Format a full manual page for man() */
 function formatManPage(name: string): string {
@@ -2410,6 +2405,10 @@ export default function (pi: ExtensionAPI) {
 			.filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
 			.map((t) => t.name);
 		pi.setActiveTools(allowed);
+
+		// Extend tool reference with all registered extension tools
+		extendWithAllTools(pi);
+		rebuildCachedReference();
 	});
 
 	// Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
