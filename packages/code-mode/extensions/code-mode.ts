@@ -170,10 +170,6 @@ async function executeCode(
       if (!m) continue;
       if (trimmed.includes(" of ") || trimmed.includes(" in ")) continue;
 
-      // Skip destructuring: const { ... } = or const [ ... ] =
-      const eqIdx = trimmed.indexOf("=");
-      const afterEq = trimmed.slice(eqIdx + 1).trimStart();
-      if (afterEq.startsWith("{") || afterEq.startsWith("[")) continue;
 
       names.push(m[1]);
     }
