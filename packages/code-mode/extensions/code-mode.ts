@@ -130,6 +130,7 @@ async function executeCode(
   cwd: string,
   signal?: AbortSignal,
   executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
+  toolCtx?: { sessionManager?: any; getContextUsage?: () => any },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
 
@@ -211,6 +212,84 @@ async function executeCode(
   sess.images.length = 0; // clear stashed images for this execution
   const bindings = createToolBindings({ cwd, images: sess.images });
   Object.assign(sess.context, bindings);
+
+  // Inject session introspection API if ctx available
+  if (toolCtx?.sessionManager) {
+    const sm = toolCtx.sessionManager;
+    const getUsage = toolCtx.getContextUsage;
+    Object.assign(sess.context, {
+      session: {
+        messages: () => {
+          const branch = sm.getBranch();
+          return branch
+            .filter((e: any) => e.type === "message")
+            .map((e: any) => {
+              const m = e.message;
+              const content = typeof m.content === "string"
+                ? m.content
+                : Array.isArray(m.content)
+                  ? m.content
+                      .filter((p: any) => p.type === "text")
+                      .map((p: any) => p.text)
+                      .join("\n")
+                  : "";
+              return { id: e.id, role: m.role, content, timestamp: e.timestamp };
+            });
+        },
+        tokens: () => {
+          if (!getUsage) return null;
+          const usage = getUsage();
+          return usage ?? null;
+        },
+        tags: () => {
+          const entries = sm.getEntries();
+          return entries
+            .filter((e: any) => e.type === "label" && e.label)
+            .map((e: any) => ({ id: e.id, targetId: e.targetId, label: e.label, timestamp: e.timestamp }));
+        },
+        tag: (name: string) => {
+          const leafId = sm.getLeafId();
+          if (!leafId) return "No current position to tag";
+          sm.appendLabelChange(leafId, name);
+          return "Tagged: " + name;
+        },
+        id: () => sm.getSessionId(),
+        name: () => sm.getSessionName() ?? null,
+        save: (key: string, data: unknown) => {
+          try {
+            JSON.stringify(data); // validate serializable
+          } catch {
+            return "Cannot save: data is not JSON-serializable";
+          }
+          sm.appendCustomEntry("code-mode:" + key, data);
+          return "Saved: " + key;
+        },
+        load: (key: string) => {
+          const entries = sm.getEntries();
+          const prefix = "code-mode:" + key;
+          // Find the LAST matching custom entry
+          let latest: any = null;
+          for (const e of entries) {
+            if (e.type === "custom" && e.customType === prefix) {
+              latest = e.data;
+            }
+          }
+          return latest;
+        },
+        entries: () => {
+          return sm.getBranch().map((e: any) => ({
+            id: e.id,
+            type: e.type,
+            timestamp: e.timestamp,
+            ...(e.type === "message" ? { role: e.message?.role } : {}),
+            ...(e.type === "label" ? { label: e.label } : {}),
+            ...(e.type === "compaction" || e.type === "branch_summary" ? { summary: e.summary } : {}),
+            ...(e.type === "custom" ? { customType: e.customType, data: e.data } : {}),
+          }));
+        },
+      },
+    });
+  }
 
   try {
     const promise = vm.runInContext(wrapped, sess.context, {
@@ -417,6 +496,7 @@ export default function (pi: ExtensionAPI) {
       "braveSearch, braveCodeSearch, getCurrentTime, hashRead, hashEdit, applyPatch, " +
       "context7Resolve, context7Docs, fffFind, fffGrep, fffMultiGrep, " +
       "tldrSemanticSearch, tldrStructure, tldrCalls, tldrExtract, tldrDead, tldrArch, tldrImpact, tldrIndexStatus. " +
+      "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
       "Use console.log() to return results.",
     parameters: Type.Object({
       code: Type.String({
@@ -465,6 +545,7 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         signal,
         timeoutMs,
+        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage },
       );
 
       let text = output || "";

@@ -124,4 +124,24 @@ for (const file of files) {
 }
 ```
 
+### Session management
+
+The `session` object gives you programmatic access to your conversation context:
+
+```javascript
+// Inspect your context
+const msgs = session.messages();       // all conversation messages
+const usage = session.tokens();        // { tokens, contextWindow }
+const tags = session.tags();           // all tags/milestones
+
+// Manage context
+session.tag("before-refactor");        // bookmark current position
+
+// Persist data across reloads (writes to session file)
+session.save("ctx", { goal: "...", decisions: [...] });
+const ctx = session.load("ctx");       // restore after reload
+```
+
+`$` is fast runtime memory (survives compaction). `session.save()` is durable storage (survives reload).
+
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.

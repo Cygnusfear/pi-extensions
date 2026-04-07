@@ -486,6 +486,39 @@ declare function readImage(input: {
 
 
 // =====================================================================
+// Session API (read/manage conversation context)
+// =====================================================================
+
+/**
+ * Programmatic access to your conversation session.
+ * Read messages, manage tags, compact history, persist data across reloads.
+ */
+declare const session: {
+  /** Get conversation messages (filtered to message entries only) */
+  messages(): Array<{ id: string; role: string; content: string; timestamp: string }>;
+  /** Get current token usage stats */
+  tokens(): { tokens: number; contextWindow: number } | null;
+  /** Get all tags/labels in the session */
+  tags(): Array<{ id: string; targetId: string; label: string; timestamp: string }>;
+  /** Tag the current position (like context_tag) */
+  tag(name: string): string;
+  /** Get session ID */
+  id(): string;
+  /** Get session name */
+  name(): string | null;
+  /** Get all session entries (messages, tags, compactions, custom) */
+  entries(): Array<{
+    id: string; type: string; timestamp: string;
+    role?: string; label?: string; summary?: string;
+    customType?: string; data?: unknown;
+  }>;
+  /** Save structured data to the session file (survives reload) */
+  save(key: string, data: unknown): string;
+  /** Load previously saved data from the session file */
+  load(key: string): unknown;
+};
+
+// =====================================================================
 // Persistent Store ($)
 // =====================================================================
 

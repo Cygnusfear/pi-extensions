@@ -1,10 +1,14 @@
 import type { StoreEntry } from "./types";
+import fs from "node:fs";
+import path from "node:path";
 
 // ===========================================================================
 // Persistent Store ($) with memory-based eviction
 // ===========================================================================
 
 export const MAX_STORE_MEMORY = 50 * 1024 * 1024; // 50MB — eviction threshold
+const STORE_FILENAME = ".pi/code-mode-store.json";
+const MAX_DISK_SIZE = 5 * 1024 * 1024; // 5MB
 
 
 function estimateSizeHuman(value: unknown): string {
@@ -45,9 +49,52 @@ function estimateSize(value: unknown): string {
   }
 }
 
-export function createPersistentStore(opts?: { getEscaped?: () => boolean }) {
+export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?: string }) {
   const store = new Map<string, StoreEntry>();
   let currentTurn = 0;
+  const persisted = new Set<string>();
+  const diskPath = opts?.cwd ? path.join(opts.cwd, STORE_FILENAME) : null;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function loadFromDisk(): void {
+    if (!diskPath) return;
+    try {
+      if (!fs.existsSync(diskPath)) return;
+      const raw = fs.readFileSync(diskPath, "utf-8");
+      const data = JSON.parse(raw) as Record<string, { value: unknown; persistedAt: string }>;
+      for (const [key, entry] of Object.entries(data)) {
+        store.set(key, { value: entry.value, lastAccessTurn: currentTurn, pinned: true });
+        persisted.add(key);
+      }
+    } catch {}
+  }
+
+  function flushToDisk(): void {
+    if (!diskPath) return;
+    try {
+      const data: Record<string, { value: unknown; persistedAt: string }> = {};
+      for (const key of persisted) {
+        const entry = store.get(key);
+        if (!entry) continue;
+        // Skip non-serializable values
+        try { JSON.stringify(entry.value); } catch { continue; }
+        data[key] = { value: entry.value, persistedAt: new Date().toISOString() };
+      }
+      const json = JSON.stringify(data, null, 2);
+      if (Buffer.byteLength(json) > MAX_DISK_SIZE) return; // refuse if too large
+      const dir = path.dirname(diskPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(diskPath, json, "utf-8");
+    } catch {}
+  }
+
+  function debouncedFlush(): void {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = setTimeout(flushToDisk, 500);
+  }
+
+  // Load persisted vars on creation
+  loadFromDisk();
 
   function totalMemoryBytes(): number {
     let total = 0;
@@ -133,6 +180,9 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean }) {
     "__escaped",
     "__sandbox",
     "__escape",
+    "__persist",
+    "__forget",
+    "__persisted",
   ]);
 
   const proxy = new Proxy({} as Record<string, unknown>, {
@@ -140,6 +190,7 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean }) {
       if (RESERVED.has(prop)) return false;
       const existing = store.get(prop);
       store.set(prop, { value, lastAccessTurn: currentTurn, pinned: existing?.pinned ?? false });
+      if (persisted.has(prop)) debouncedFlush();
       return true;
     },
     get(_target, prop: string) {
@@ -181,6 +232,27 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean }) {
             store.set("__escaped", { value: false, lastAccessTurn: currentTurn, pinned: true });
             return "Sandbox mode: tools restricted to execute_code";
           };
+
+        case "__persist":
+          return (name: string) => {
+            const entry = store.get(name);
+            if (!entry) return "$." + name + " not found";
+            try { JSON.stringify(entry.value); } catch {
+              return "$." + name + " cannot be persisted (not JSON-serializable)";
+            }
+            persisted.add(name);
+            entry.pinned = true; // persisted vars are always pinned
+            flushToDisk();
+            return "$." + name + " persisted to disk (survives reload)";
+          };
+        case "__forget":
+          return (name: string) => {
+            persisted.delete(name);
+            flushToDisk();
+            return "$." + name + " removed from disk persistence";
+          };
+        case "__persisted":
+          return () => [...persisted];
         case "__escaped":
           return () => !!(opts?.getEscaped?.());
         case Symbol.toPrimitive:
