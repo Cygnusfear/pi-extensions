@@ -30,8 +30,7 @@ import path from "node:path";
 import os from "node:os";
 import TurndownService from "turndown";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
-import { highlightCode } from "@pi-extensions/shared/tui-diff-renderer";
-// Eagerly start Shiki loading on import
+// Eagerly start Shiki loading on import (same singleton as core-edit-ui)
 import "@pi-extensions/shared/tui-diff-renderer";
 import { safeJsonParse, safeResponseJson } from "@pi-extensions/shared/safe-json";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
@@ -2493,8 +2492,14 @@ export default function (pi: ExtensionAPI) {
 			const preview = rawLines.slice(0, CODE_PREVIEW_LINES);
 			const remaining = rawLines.length - preview.length;
 
-			// Syntax-highlight the code preview via Shiki
-			const highlighted = highlightCode(preview.join("\n"), "code-mode.js");
+			// Syntax-highlight via Shiki (same instance as core-edit-ui)
+			let highlighted: string[];
+			try {
+				const { highlightCode: hl } = require("../../shared/src/tui-diff-renderer.ts");
+				highlighted = hl(preview.join("\n"), "code-mode.js");
+			} catch {
+				highlighted = preview;
+			}
 
 			let text = theme.fg("toolTitle", theme.bold("execute_code"));
 			text += "\n\n" + highlighted.join("\n");
