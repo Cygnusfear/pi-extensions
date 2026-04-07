@@ -359,6 +359,224 @@ async function executeCode(
         },
       },
     });
+
+    // Context management functions (vendored from pi-context, always available)
+    Object.assign(sess.context, {
+      contextTag: (args: { name: string; target?: string }) => {
+        if (!args?.name || !args.name.trim()) return "Error: tag name required";
+        const tagName = args.name.trim();
+
+        const resolveTargetId = (target: string): string => {
+          if (target.toLowerCase() === "root") { const t = sm.getTree(); return t.length > 0 ? t[0].entry.id : target; }
+          if (/^[0-9a-f]{8,}$/i.test(target)) return target;
+          const stack: any[] = [...sm.getTree()];
+          while (stack.length > 0) { const n = stack.pop()!; if (sm.getLabel(n.entry.id) === target) return n.entry.id; if (n.children?.length) stack.push(...n.children); }
+          return target;
+        };
+
+        const findTagInTree = (nodes: any[], name: string): string | null => {
+          for (const n of nodes) {
+            if (sm.getLabel(n.entry.id) === name) return n.entry.id;
+            const r = findTagInTree(n.children || [], name);
+            if (r) return r;
+          }
+          return null;
+        };
+
+        const existing = findTagInTree(sm.getTree(), tagName);
+        if (existing) return "Error: Tag '" + tagName + "' already exists at " + existing;
+
+        let id = args.target ? resolveTargetId(args.target) : undefined;
+        if (!id) {
+          const branch = sm.getBranch();
+          for (let i = branch.length - 1; i >= 0; i--) {
+            const entry = branch[i];
+            if (entry.type === "message" && entry.message.role === "toolResult") continue;
+            id = entry.id;
+            break;
+          }
+          if (!id) id = sm.getLeafId() ?? "";
+        }
+
+        if (toolCtx?.setLabel) {
+          toolCtx.setLabel(id, tagName);
+        } else {
+          sm.appendLabelChange(id, tagName);
+        }
+        return "Tagged '" + tagName + "' at " + id;
+      },
+
+      contextLog: (args?: { limit?: number; verbose?: boolean }) => {
+        const branch = sm.getBranch();
+        const leafId = sm.getLeafId();
+        const verbose = args?.verbose ?? false;
+        const limit = args?.limit ?? 50;
+
+        const getContent = (entry: any): string => {
+          if (entry.type === "branch_summary" || entry.type === "compaction") return (entry.summary || "[No summary]").slice(0, 120);
+          if (entry.type === "label") return "tag: " + entry.label;
+          if (entry.type === "message") {
+            const msg = entry.message;
+            if (msg.role === "toolResult") {
+              const text = (msg.content || []).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+              return "(" + msg.toolName + ") " + (text.length > 80 ? text.slice(0, 80) + "..." : text);
+            }
+            if (msg.role === "bashExecution") return "[Bash] " + msg.command;
+            if (msg.role === "user") return (typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim() : "").slice(0, 120);
+            if (msg.role === "assistant") {
+              let text = typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim() : "";
+              const tcs = (msg.content || []).filter((c: any) => c.type === "toolCall").map((tc: any) => tc.name);
+              if (tcs.length) text = (text ? text + " | " : "") + "tools: " + tcs.join(", ");
+              return text.slice(0, 120);
+            }
+          }
+          return "";
+        };
+
+        const isInteresting = (entry: any): boolean => {
+          if (entry.id === leafId) return true;
+          if (branch[0] && entry.id === branch[0].id) return true;
+          if (sm.getLabel(entry.id)) return true;
+          if (entry.type === "label") return false;
+          if (entry.type === "branch_summary" || entry.type === "compaction") return true;
+          if (sm.getChildren(entry.id).length > 1) return true;
+          if (entry.type === "message" && entry.message.role === "user") return true;
+          return false;
+        };
+
+        const seq: any[] = [];
+        const backboneIds = new Set(branch.map((e: any) => e.id));
+        branch.forEach((entry: any) => {
+          seq.push(entry);
+          sm.getChildren(entry.id).forEach((child: any) => {
+            if ((child.type === "branch_summary" || child.type === "compaction") && !backboneIds.has(child.id)) seq.push(child);
+          });
+        });
+
+        const visIds = new Set<string>();
+        seq.forEach((e: any) => { if (verbose || isInteresting(e)) visIds.add(e.id); });
+        let vis = seq.filter((e: any) => visIds.has(e.id));
+        if (vis.length > limit) {
+          const allowed = new Set(vis.slice(-limit).map((e: any) => e.id));
+          visIds.clear();
+          allowed.forEach((id: string) => visIds.add(id));
+        }
+
+        const lines: string[] = [];
+        let hidden = 0;
+        seq.forEach((entry: any) => {
+          if (!visIds.has(entry.id)) { hidden++; return; }
+          if (hidden > 0) { lines.push("  ... (" + hidden + " hidden) ..."); hidden = 0; }
+          const isHead = entry.id === leafId;
+          const label = sm.getLabel(entry.id);
+          const body = getContent(entry).replace(/\s+/g, " ");
+          let role = entry.type === "message" ? (entry.message.role === "assistant" ? "AI" : entry.message.role === "user" ? "USER" : "TOOL") : entry.type === "compaction" || entry.type === "branch_summary" ? "SUMMARY" : entry.type.toUpperCase();
+          if (role === "CUSTOM_MESSAGE") return;
+          const meta = [branch[0] && entry.id === branch[0].id ? "ROOT" : null, isHead ? "HEAD" : null, label ? "tag:" + label : null].filter(Boolean).join(", ");
+          lines.push((isHead ? "*" : role === "USER" ? "•" : "|") + " " + entry.id.slice(0, 8) + (meta ? " (" + meta + ")" : "") + " [" + role + "] " + body);
+        });
+        if (hidden > 0) lines.push("  ... (" + hidden + " hidden) ...");
+
+        const usage = getUsage ? getUsage() : null;
+        let usageStr = "Unknown";
+        if (usage) usageStr = (usage.percent?.toFixed(1) ?? "?") + "% (" + Math.round((usage.tokens ?? 0) / 1024) + "k/" + Math.round((usage.contextWindow ?? 0) / 1024) + "k)";
+        let stepsSince = 0, nearestTag = "None";
+        for (let i = branch.length - 1; i >= 0; i--) { const l = sm.getLabel(branch[i].id); if (l) { nearestTag = l; break; } stepsSince++; }
+        return "[Context Dashboard]\n• Usage: " + usageStr + "\n• Steps since '" + nearestTag + "': " + stepsSince + "\n---\n" + (lines.join("\n") || "(empty)");
+      },
+
+      contextCheckout: (args: { target: string; message: string; backupTag?: string }) => {
+        if (!args?.target) return "Error: target required";
+        if (!args?.message) return "Error: message required";
+
+        const resolveId = (target: string): string => {
+          if (target.toLowerCase() === "root") { const t = sm.getTree(); return t.length > 0 ? t[0].entry.id : target; }
+          if (/^[0-9a-f]{8,}$/i.test(target)) return target;
+          const stack: any[] = [...sm.getTree()];
+          while (stack.length > 0) { const n = stack.pop()!; if (sm.getLabel(n.entry.id) === target) return n.entry.id; if (n.children?.length) stack.push(...n.children); }
+          return target;
+        };
+
+        const tid = resolveId(args.target);
+        const currentLeaf = sm.getLeafId();
+        if (currentLeaf === tid) return "Already at target " + tid;
+        if (args.backupTag && currentLeaf && toolCtx?.setLabel) toolCtx.setLabel(currentLeaf, args.backupTag);
+
+        const label = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
+        const origin = label ? "tag: " + label : (currentLeaf || "unknown");
+        const enrichedMessage = "(summary from " + origin + ")\n" + args.message;
+
+        const nid = sm.branchWithSummary(tid, enrichedMessage);
+        pendingCheckout = { targetId: nid, enrichedMessage, backupTag: args.backupTag };
+
+        return "Checkout initiated -> " + args.target + ". Backup: " + (args.backupTag || "none") + ". Navigation completes after this turn.";
+      },
+
+    // Context management functions (vendored from pi-context, always available)
+    Object.assign(sess.context, {
+      contextTag: (args) => {
+        if (!args?.name || !args.name.trim()) return "Error: tag name required";
+        const tagName = args.name.trim();
+        const resolveTargetId = (target) => {
+          if (target.toLowerCase() === "root") { const t = sm.getTree(); return t.length > 0 ? t[0].entry.id : target; }
+          if (/^[0-9a-f]{8,}$/i.test(target)) return target;
+          const stack = [...sm.getTree()];
+          while (stack.length > 0) { const n = stack.pop(); if (sm.getLabel(n.entry.id) === target) return n.entry.id; if (n.children?.length) stack.push(...n.children); }
+          return target;
+        };
+        const findTagInTree = (nodes, name) => {
+          for (const n of nodes) { if (sm.getLabel(n.entry.id) === name) return n.entry.id; const r = findTagInTree(n.children || [], name); if (r) return r; }
+          return null;
+        };
+        const existing = findTagInTree(sm.getTree(), tagName);
+        if (existing) return "Error: Tag '" + tagName + "' already exists at " + existing;
+        let id = args.target ? resolveTargetId(args.target) : undefined;
+        if (!id) { const branch = sm.getBranch(); for (let i = branch.length - 1; i >= 0; i--) { const e = branch[i]; if (e.type === "message" && e.message.role === "toolResult") continue; id = e.id; break; } if (!id) id = sm.getLeafId() ?? ""; }
+        if (toolCtx?.setLabel) toolCtx.setLabel(id, tagName); else sm.appendLabelChange(id, tagName);
+        return "Tagged '" + tagName + "' at " + id;
+      },
+      contextLog: (args) => {
+        const branch = sm.getBranch(), leafId = sm.getLeafId(), verbose = args?.verbose ?? false, limit = args?.limit ?? 50;
+        const getContent = (entry) => {
+          if (entry.type === "branch_summary" || entry.type === "compaction") return (entry.summary || "[No summary]").slice(0, 120);
+          if (entry.type === "label") return "tag: " + entry.label;
+          if (entry.type === "message") {
+            const msg = entry.message;
+            if (msg.role === "toolResult") { const t = (msg.content||[]).filter(p=>p.type==="text").map(p=>p.text).join(" ").trim(); return "("+msg.toolName+") "+(t.length>80?t.slice(0,80)+"...":t); }
+            if (msg.role === "bashExecution") return "[Bash] "+msg.command;
+            if (msg.role === "user" || msg.role === "assistant") { let t = typeof msg.content==="string"?msg.content:Array.isArray(msg.content)?msg.content.filter(p=>p.type==="text").map(p=>p.text).join(" ").trim():""; if(msg.role==="assistant"){const tcs=(msg.content||[]).filter(c=>c.type==="toolCall").map(tc=>tc.name);if(tcs.length)t=(t?t+" | ":"")+"tools: "+tcs.join(", ");} return t.slice(0,120); }
+          }
+          return "";
+        };
+        const isInteresting = (e) => e.id===leafId || (branch[0]&&e.id===branch[0].id) || sm.getLabel(e.id) || e.type==="branch_summary"||e.type==="compaction" || sm.getChildren(e.id).length>1 || (e.type==="message"&&e.message.role==="user");
+        const seq = [], backboneIds = new Set(branch.map(e=>e.id));
+        branch.forEach(entry => { seq.push(entry); sm.getChildren(entry.id).forEach(child => { if ((child.type==="branch_summary"||child.type==="compaction")&&!backboneIds.has(child.id)) seq.push(child); }); });
+        const visIds = new Set(); seq.forEach(e => { if (verbose || isInteresting(e)) visIds.add(e.id); });
+        let vis = seq.filter(e => visIds.has(e.id));
+        if (vis.length > limit) { const allowed = new Set(vis.slice(-limit).map(e=>e.id)); visIds.clear(); allowed.forEach(id => visIds.add(id)); }
+        const lines = []; let hidden = 0;
+        seq.forEach(entry => { if (!visIds.has(entry.id)) { hidden++; return; } if (hidden>0) { lines.push("  ... ("+hidden+" hidden) ..."); hidden=0; } const isHead=entry.id===leafId, label=sm.getLabel(entry.id), body=getContent(entry).replace(/\s+/g," "); let role=entry.type==="message"?(entry.message.role==="assistant"?"AI":entry.message.role==="user"?"USER":"TOOL"):entry.type==="compaction"||entry.type==="branch_summary"?"SUMMARY":entry.type.toUpperCase(); if(role==="CUSTOM_MESSAGE")return; const meta=[branch[0]&&entry.id===branch[0].id?"ROOT":null,isHead?"HEAD":null,label?"tag:"+label:null].filter(Boolean).join(", "); lines.push((isHead?"*":role==="USER"?"•":"|")+" "+entry.id.slice(0,8)+(meta?" ("+meta+")":"")+" ["+role+"] "+body); });
+        if (hidden>0) lines.push("  ... ("+hidden+" hidden) ...");
+        const usage = getUsage?getUsage():null; let usageStr="Unknown";
+        if(usage) usageStr=(usage.percent?.toFixed(1)??"?")+"% ("+Math.round((usage.tokens??0)/1024)+"k/"+Math.round((usage.contextWindow??0)/1024)+"k)";
+        let stepsSince=0,nearestTag="None"; for(let i=branch.length-1;i>=0;i--){const l=sm.getLabel(branch[i].id);if(l){nearestTag=l;break;}stepsSince++;}
+        return "[Context Dashboard]\n• Usage: "+usageStr+"\n• Steps since '"+nearestTag+"': "+stepsSince+"\n---\n"+(lines.join("\n")||"(empty)");
+      },
+      contextCheckout: (args) => {
+        if (!args?.target) return "Error: target required";
+        if (!args?.message) return "Error: message required";
+        const resolveId = (target) => { if(target.toLowerCase()==="root"){const t=sm.getTree();return t.length>0?t[0].entry.id:target;} if(/^[0-9a-f]{8,}$/i.test(target)) return target; const stack=[...sm.getTree()]; while(stack.length>0){const n=stack.pop();if(sm.getLabel(n.entry.id)===target)return n.entry.id;if(n.children?.length)stack.push(...n.children);} return target; };
+        const tid = resolveId(args.target), currentLeaf = sm.getLeafId();
+        if (currentLeaf === tid) return "Already at target " + tid;
+        if (args.backupTag && currentLeaf && toolCtx?.setLabel) toolCtx.setLabel(currentLeaf, args.backupTag);
+        const label = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
+        const origin = label ? "tag: " + label : (currentLeaf || "unknown");
+        const enrichedMessage = "(summary from " + origin + ")\n" + args.message;
+        const nid = sm.branchWithSummary(tid, enrichedMessage);
+        pendingCheckout = { targetId: nid, enrichedMessage, backupTag: args.backupTag };
+        return "Checkout initiated -> " + args.target + ". Backup: " + (args.backupTag || "none") + ". Navigation completes after this turn.";
+      },
+    });
   }
 
   // Inject sandbox functions registered by other extensions
@@ -533,7 +751,7 @@ export default function (pi: ExtensionAPI) {
       const mockPi: any = { tool: (def: any) => { tool = def; }, callTool: async () => "", getAllTools: () => [] };
       mod.default(mockPi);
       if (!tool?.execute) return "Highlander: no execute fn";
-      const result = await tool.execute(params);
+      const result = await tool.execute("highlander-sandbox", params, undefined, undefined, {});
       return typeof result === "string" ? result : JSON.stringify(result);
     } catch (e: any) {
       return "Highlander error: " + e.message;
