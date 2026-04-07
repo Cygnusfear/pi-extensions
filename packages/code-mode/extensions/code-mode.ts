@@ -106,10 +106,10 @@ function buildContextFooter(ctx: {
     const context = maxK > 0 ? `${usedK}k/${maxK}k CONTEXT` : `${pct}% CONTEXT`;
 
     if (usage.percent >= 90) {
-      return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.setContextSize(N) or you WILL lose context`;
+      return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.squash() or contextCheckout() to reclaim context`;
     }
     if (usage.percent >= 70) {
-      return `🚨 ${pct}% (${context}) URGENT COMPACTION — distill into $ + session.save(), then session.setContextSize(N)`;
+      return `🚨 ${pct}% (${context}) URGENT — session.squash() to compact, or contextCheckout() to squash a segment`;
     }
     if (usage.percent >= 40) {
       return `🙈 ${pct}% (${context}) idiot threshold — start distilling state into $ vars + session.save()`;
@@ -530,9 +530,11 @@ export default function (pi: ExtensionAPI) {
     try {
       const mod = await import("../../highlander/extensions/highlander.ts");
       let tool: any = null;
-      mod.default({ tool: (def: any) => { tool = def; }, callTool: () => {}, getAllTools: () => [] });
-      if (tool) return await tool.execute(params);
-      return "Highlander: tool not registered";
+      const mockPi: any = { tool: (def: any) => { tool = def; }, callTool: async () => "", getAllTools: () => [] };
+      mod.default(mockPi);
+      if (!tool?.execute) return "Highlander: no execute fn";
+      const result = await tool.execute(params);
+      return typeof result === "string" ? result : JSON.stringify(result);
     } catch (e: any) {
       return "Highlander error: " + e.message;
     }
