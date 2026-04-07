@@ -330,8 +330,4 @@ export default function register(pi: ExtensionAPI) {
 		},
 	});
 	
-	// Register as sandbox function for code-mode
-	registerSandboxFn("highlander", async (params) => {
-		return pi.callTool("highlander", params);
-	});
 }
