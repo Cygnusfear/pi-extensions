@@ -1,4 +1,29 @@
 /**
+
+/**
+ * Highlander — BM25 search across session JSONL logs. 🔪
+ * Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
+ */
+declare function highlander(input: {
+  /** Action: 'search'=BM25 across all sessions, 'grep'=find entries in one session, 'view'=read entries, 'list'=browse sessions, 'self'=search current live session */
+  action: "search" | "view" | "grep" | "list" | "self";
+  /** Search query (for search/grep/self) */
+  query?: string;
+  /** Session ID, partial ID, or 'self' (for view/grep). Omit to auto-detect current session. */
+  session?: string;
+  /** Filter by project path substring */
+  project?: string;
+  /** Only sessions after this date (ISO string) */
+  since?: string;
+  /** Entry window start (default -20). Negative=offset from end. */
+  start?: number;
+  /** Entry window end (default 0=last entry). */
+  end?: number;
+  /** Max results (default 10) */
+  limit?: number;
+  /** Ad-hoc entries for BM25 (action=grep only). Pass any {text}[] to search over. */
+  entries?: Array<{ index?: number; label?: string; text: string }>;
+}): Promise<string>;
  * Execute a bash command in the current working directory.
  * Returns stdout, stderr, and exit code.
  */

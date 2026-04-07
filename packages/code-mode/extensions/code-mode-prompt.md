@@ -209,4 +209,26 @@ console.log($.filesRemaining);
 
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
 
-Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshReply, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead. These call the registered tools directly.
+Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshReply, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead, highlander. These call the registered tools directly.
+
+### Highlander — session history search 🔪
+
+Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
+
+```javascript
+// Search across all sessions
+const r1 = await highlander({ action: "search", query: "teams ghost worker" });
+
+// Search the current live session (no session ID needed)
+const r2 = await highlander({ action: "self", query: "highlander skull context" });
+
+// Grep a specific session's entries
+const r3 = await highlander({ action: "grep", session: "0fe1623e", query: "context window" });
+
+// Read entries from any session by index
+const r4 = await highlander({ action: "view", session: "0fe1623e", start: 720, end: 730 });
+
+// Ad-hoc BM25 over arbitrary text — e.g. session.messages()
+const msgs = session.messages();
+const r5 = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
+```
