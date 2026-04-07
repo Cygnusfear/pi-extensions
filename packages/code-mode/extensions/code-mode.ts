@@ -165,7 +165,7 @@ async function executeCode(
   cwd: string,
   signal?: AbortSignal,
   executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-  toolCtx?: { sessionManager?: any; getContextUsage?: () => any },
+  toolCtx?: { sessionManager?: any; getContextUsage?: () => any; confirmFn?: (title: string, body: string) => Promise<boolean> },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
 
@@ -245,7 +245,7 @@ async function executeCode(
   // --- Layer 2: Execute with fault tolerance ---
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
-  const bindings = createToolBindings({ cwd, images: sess.images });
+  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn });
   Object.assign(sess.context, bindings);
 
   // Inject session introspection API if ctx available
@@ -451,6 +451,8 @@ const PASSTHROUGH_TOOLS = new Set([
   // Handbook
   "hotseat_handbook_update",
   "hotseat_handbook_read",
+  // Session search
+  "highlander",
 ]);
 
 // Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
@@ -683,7 +685,13 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         signal,
         timeoutMs,
-        { sessionManager: (ctx as any).sessionManager, getContextUsage: (ctx as any).getContextUsage },
+        {
+          sessionManager: (ctx as any).sessionManager,
+          getContextUsage: (ctx as any).getContextUsage,
+          confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
+            | ((title: string, body: string) => Promise<boolean>)
+            | undefined,
+        },
       );
 
       let text = output || "";

@@ -12,6 +12,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { registerSandboxFn } from "../../shared/src/sandbox-registry.js";
 import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -327,5 +328,10 @@ export default function register(pi: ExtensionAPI) {
 				default: return `Unknown action: ${args.action}`;
 			}
 		},
+	});
+	
+	// Register as sandbox function for code-mode
+	registerSandboxFn("highlander", async (params) => {
+		return pi.callTool("highlander", params);
 	});
 }
