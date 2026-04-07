@@ -1,17 +1,24 @@
 # brave-search
 
-Standalone pi package for the brave-search extension.
+Web and code search via Brave's search API.
 
 ## Setup
 
-Set `BRAVE_API_KEY` in your shell environment before starting pi.
+Set `BRAVE_API_KEY` in your shell environment before starting pi:
 
 ```bash
 export BRAVE_API_KEY="your-key"
 ```
 
-If you want a repo-local env file, put it in `.env.local` and source it before starting pi:
+Or use a repo-local `.env.local`:
 
 ```bash
 source .env.local
 ```
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `web_search_brave` | Web search via Brave's LLM Context API |
+| `code_search_brave` | Search for code examples, API docs, technical documentation |
