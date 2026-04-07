@@ -23,7 +23,7 @@ import vm from "node:vm";
 // Eagerly start Shiki loading via relative path (must match require() in renderCall)
 require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
-import { getSandboxFns } from "@pi-extensions/shared/sandbox-registry";
+import { getSandboxFns } from "../../shared/src/sandbox-registry";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,

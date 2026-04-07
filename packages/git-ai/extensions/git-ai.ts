@@ -400,7 +400,7 @@ export default function (pi: ExtensionAPI) {
 
 	// Register sandbox-callable function for code-mode
 	try {
-		const { registerSandboxFn } = require("@pi-extensions/shared/sandbox-registry");
+		const { registerSandboxFn } = require("../../shared/src/sandbox-registry");
 		registerSandboxFn("gitAi", async (params: { command: string; args?: string[] }) => {
 			const validCommands = ["blame", "stats", "search"];
 			if (!validCommands.includes(params.command)) {

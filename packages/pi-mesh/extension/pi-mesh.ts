@@ -1668,7 +1668,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 	// ── Register sandbox-callable functions for code-mode ──────────────
 	try {
-		const { registerSandboxFn } = require("@pi-extensions/shared/sandbox-registry");
+		const { registerSandboxFn } = require("../../shared/src/sandbox-registry");
 		registerSandboxFn("meshTell", async (params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }) => {
 			const resolved = resolveTargetSessionId(params.sessionId);
 			const mode = (params.waitFor ?? "delivered") as MeshTellReceiptPhase;
