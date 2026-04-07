@@ -16,9 +16,9 @@
     "@sinclair/typebox": "*"
   },
   "dependencies": {
-    "@pi-extensions/fff": "workspace:*",
-    "@pi-extensions/shared": "workspace:*",
-    "@pi-extensions/tldr-code": "workspace:*",
+    "@pi-extensions/fff": "*",
+    "@pi-extensions/shared": "*",
+    "@pi-extensions/tldr-code": "*",
     "turndown": "*"
   },
   "files": [

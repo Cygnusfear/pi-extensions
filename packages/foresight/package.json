@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@mariozechner/pi-ai": "*",
-    "@pi-extensions/shared": "workspace:*"
+    "@pi-extensions/shared": "*"
   },
   "files": [
     "extensions"

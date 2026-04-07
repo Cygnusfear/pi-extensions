@@ -38,6 +38,6 @@
     "@mariozechner/pi-ai": "*"
   },
   "dependencies": {
-    "@pi-extensions/shared": "workspace:*"
+    "@pi-extensions/shared": "*"
   }
 }

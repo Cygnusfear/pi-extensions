@@ -8,7 +8,7 @@
   "dependencies": {
     "@aliou/pi-utils-settings": "^0.1.0",
     "@aliou/pi-utils-ui": "^0.1.0",
-    "@pi-extensions/shared": "workspace:*"
+    "@pi-extensions/shared": "*"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.65.0",

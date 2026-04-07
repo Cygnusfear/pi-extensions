@@ -17,7 +17,7 @@
     "@sinclair/typebox": "*"
   },
   "dependencies": {
-    "@pi-extensions/shared": "workspace:*"
+    "@pi-extensions/shared": "*"
   },
   "files": [
     "extensions"

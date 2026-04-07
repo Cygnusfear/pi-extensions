@@ -16,7 +16,7 @@
     ]
   },
   "dependencies": {
-    "@pi-extensions/shared": "workspace:*",
-    "@pi-extensions/pi-mesh": "workspace:*"
+    "@pi-extensions/shared": "*",
+    "@pi-extensions/pi-mesh": "*"
   }
 }

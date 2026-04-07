@@ -26,7 +26,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@mariozechner/pi-ai": "*",
-        "@pi-extensions/shared": "workspace:*",
+        "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.65.0",
@@ -38,9 +38,9 @@
       "name": "@pi-extensions/code-mode",
       "version": "0.0.1",
       "dependencies": {
-        "@pi-extensions/fff": "workspace:*",
-        "@pi-extensions/shared": "workspace:*",
-        "@pi-extensions/tldr-code": "workspace:*",
+        "@pi-extensions/fff": "*",
+        "@pi-extensions/shared": "*",
+        "@pi-extensions/tldr-code": "*",
         "turndown": "*",
       },
       "peerDependencies": {
@@ -72,7 +72,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@mariozechner/pi-ai": "*",
-        "@pi-extensions/shared": "workspace:*",
+        "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.65.0",
@@ -92,7 +92,7 @@
       "name": "@pi-extensions/core-read-ui",
       "version": "0.0.1",
       "dependencies": {
-        "@pi-extensions/shared": "workspace:*",
+        "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.65.0",
@@ -122,7 +122,7 @@
       "dependencies": {
         "@aliou/pi-utils-settings": "^0.1.0",
         "@aliou/pi-utils-ui": "^0.1.0",
-        "@pi-extensions/shared": "workspace:*",
+        "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
         "@mariozechner/pi-ai": "*",
@@ -175,6 +175,10 @@
       "dependencies": {
         "@mariozechner/pi-coding-agent": ">=0.65.0",
       },
+    },
+    "packages/git-ai": {
+      "name": "@pi-extensions/git-ai",
+      "version": "0.0.1",
     },
     "packages/git-safety": {
       "name": "@pi-extensions/git-safety",
@@ -357,7 +361,7 @@
       "name": "@pi-extensions/tldr-code",
       "version": "0.0.1",
       "dependencies": {
-        "@pi-extensions/shared": "workspace:*",
+        "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
         "@mariozechner/pi-ai": "*",
@@ -582,6 +586,8 @@
     "@pi-extensions/file-tools": ["@pi-extensions/file-tools@workspace:packages/file-tools"],
 
     "@pi-extensions/foresight": ["@pi-extensions/foresight@workspace:packages/foresight"],
+
+    "@pi-extensions/git-ai": ["@pi-extensions/git-ai@workspace:packages/git-ai"],
 
     "@pi-extensions/git-safety": ["@pi-extensions/git-safety@workspace:packages/git-safety"],
 

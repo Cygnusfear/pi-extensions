@@ -20,7 +20,7 @@
     "@mariozechner/pi-coding-agent": ">=0.65.0"
   },
   "dependencies": {
-    "@pi-extensions/shared": "workspace:*",
+    "@pi-extensions/shared": "*",
     "@sinclair/typebox": "*"
   }
 }
