@@ -103,10 +103,13 @@ function buildContextFooter(ctx: {
     const context = `${usedK}k/${maxK}k CONTEXT`;
 
     if (usage.percent >= 90) {
-      return `🚨 ${pct}% (${context}) URGENT — distill into $ + session.save(), then session.setContextSize(N) NOW`;
+      return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.setContextSize(N) or you WILL lose context`;
+    }
+    if (usage.percent >= 70) {
+      return `🚨 ${pct}% (${context}) URGENT COMPACTION — distill into $ + session.save(), then session.setContextSize(N)`;
     }
     if (usage.percent >= 40) {
-      return `🚨 ${pct}% (${context}) — distill important state into $ vars + session.save(), then session.setContextSize(N) to trim old messages`;
+      return `🙈 ${pct}% (${context}) idiot threshold — start distilling state into $ vars + session.save()`;
     }
     return `📊 ${pct}% (${context})`;
   } catch {
