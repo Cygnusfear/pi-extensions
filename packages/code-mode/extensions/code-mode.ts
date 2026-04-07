@@ -694,6 +694,18 @@ Variables in \`$\` expire after ~10 turns of not being accessed. You'll see warn
 \`\`\`typescript
 ${CODE_MODE_DECLARATIONS}\`\`\`
 
+### When to use \`$\`
+
+Use \`$\` for any data you need across multiple code blocks:
+
+- **Multi-step workflows**: reading files in one block, processing in another
+- **Error recovery**: store progress so you can resume after a crash  
+- **Caching**: avoid re-reading or re-computing expensive things
+- **Accumulating results**: building up arrays/maps across iterations
+
+Use \`console.log()\` for final output you want the user to see. You can do both in one line:
+\`$.data = await Read({...}); console.log($.data);\` — store AND display.
+
 ### Example
 \`\`\`javascript
 // Find all TypeScript files with TODO comments
