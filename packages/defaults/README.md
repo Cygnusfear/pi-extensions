@@ -1,76 +1,122 @@
-# defaults
+# @pi-extensions/defaults
 
-Sensible defaults and quality-of-life improvements for Pi.
+The default pi experience — AGENTS.md discovery, session naming, terminal titles, notifications, theme selection, and project initialization.
+
+## Why
+
+Pi works out of the box, but every project has conventions, and every developer has preferences. This extension bundle provides the quality-of-life features that make pi feel like a native part of your workflow rather than a generic chatbot.
 
 ## Features
 
-### Directory-aware read
+### AGENTS.md Discovery
 
-Overrides the built-in `read` tool to handle directories gracefully. When the agent calls `read` on a directory path, it returns a directory listing (via the native `ls` tool) instead of failing with an `EISDIR` error.
+Pi's built-in context loading walks **up** from `cwd` to find `AGENTS.md` files. This extension fills the gap by discovering `AGENTS.md` files in **subdirectories** — when the agent reads a file, any `AGENTS.md` between `cwd` and that file's directory is automatically loaded and injected into the tool result.
 
-- Files: delegated to native `read` (truncation, image handling, etc.)
-- Directories: delegated to native `ls` (sorted entries, truncation)
-- Non-existent paths: error from underlying tool
+- Walks from `cwd` to the target file's directory
+- Skips already-loaded files (session-aware, deduplicates across reads)
+- Respects `agentsIgnorePaths` configuration
+- Notifies the UI when new context is loaded
 
-### `get_current_time` tool
+### Session Naming
 
-Returns the current date and time with structured fields: formatted string, date, time, timezone, timezone name, day of week, and unix timestamp. Supports format parameter: `iso8601` (default), `unix`, `date`, `time`.
+Sessions get auto-named after the first user message using a lightweight title generator:
 
-### Subdirectory AGENTS.md discovery
+- Uses `google/gemini-2.5-flash-lite` for fast, cheap title generation
+- Preserves the user's language and technical terms
+- Max 50 characters, truncated at word boundaries
+- Fallback to first N characters of the user message if the model is unavailable
 
-Pi's built-in discovery only loads AGENTS.md files from the cwd and its ancestors. This hook fills the gap: when the agent reads a file, it checks for AGENTS.md files in the directories between cwd and the file being read, and injects their content alongside the tool result.
+### Terminal Title
 
-- Only triggers on `read` tool results (not bash, etc.)
-- Deduplicates per session (each AGENTS.md injected at most once)
-- Resets on session start/switch
-- Skips cwd's own AGENTS.md (already loaded by Pi)
-- Falls back to home directory as boundary if file is outside cwd
-- Supports global ignore list (`agentsIgnorePaths`) to skip selected AGENTS.md files/directories
+Sets the terminal window/tab title to reflect the current state:
 
-### Git rebase helper
+| State | Title format |
+|-------|-------------|
+| Idle | `π: project-name` |
+| Thinking | `π: project-name (thinking...)` |
+| Tool call | `π: project-name (tool_name)` |
+| Shutdown | `Terminal` |
 
-Intercepts git rebase commands that would hang in a non-interactive environment. Blocks the command and provides the correct syntax with `GIT_SEQUENCE_EDITOR` or `GIT_EDITOR` environment variables.
-
-- Interactive rebase (`git rebase -i`): suggests `GIT_SEQUENCE_EDITOR=: GIT_EDITOR=true`
-- Rebase continue: suggests `GIT_EDITOR=true` or `--no-edit`
-- Skips commands that already set editor-related env vars
+Shows breadcrumbs for nested directories: `π: monorepo > packages/core` (truncated to 2 levels max).
 
 ### Notifications
 
-Emits notification events consumed by the [presenter extension](../presenter/).
+Emits desktop notification events on agent state changes:
 
-- Plays attention sound when `ask_user` tool is invoked
-- Sends summary notification when agent finishes (loop count, tool count, error status)
+- **`ask_user`** — plays attention sound when agent needs input
+- **Agent end** — plays default sound with loop/tool count summary
+- Error tracking across turns
 
-### Terminal title
+The actual OSC sequences and sound playback are handled by the presenter extension.
 
-Updates the terminal title with a project breadcrumb (e.g. `pi: project > subdir`) and appends the current activity:
+### Theme Selector
 
-- Session start/switch: `pi: <project breadcrumb>`
-- Agent running: `pi: <project breadcrumb> (thinking...)`
-- Tool call: `pi: <project breadcrumb> (<tool name>)`
-- Session shutdown: resets to "Terminal"
+Interactive theme picker with live preview:
 
-Breadcrumbs are built from the project root (detected via `.git`, `.root`, `pnpm-workspace.yaml`) to the current directory, truncated to 2 levels.
+- Lists all available themes (built-in and custom)
+- Previews each theme as you browse
+- Restores original theme on cancel
 
-### Custom header
+### Project Init (`/project:init`)
 
-Pi logo with version number.
+Interactive wizard for initializing new projects:
 
-### Auto session naming
+- Scans catalog directories for skills and packages
+- Calls scout for recommendations based on your stack
+- Lets you select which skills/packages to install
+- Optionally generates an `AGENTS.md` for the project
 
-Automatically names sessions based on first user message after first turn completes.
+### Additional Commands
 
-Uses `google/gemini-2.5-flash-lite` to generate a 3-7 word title in sentence case.
+| Command | Description |
+|---------|-------------|
+| `/ad-name` | Set or auto-generate session name |
+| `/ad-name auto` | Force-regenerate session name |
+| `/theme` | Interactive theme selector with preview |
+| `/project:init` | Initialize project with skills, packages, and AGENTS.md |
+| `/defaults:settings` | Configure catalog directories, scan depth, ignore paths |
+| `/system-prompt` | View the assembled system prompt with skill breakdown |
 
-### `/ad-name` command
+## Tools
 
-| Command | Behavior |
-|---------|----------|
-| `/ad-name` | No name set: auto-generate. Has name: display current + hint |
-| `/ad-name foo` | Set name to "foo" |
-| `/ad-name auto` | Force regenerate via LLM |
+| Tool | Description |
+|------|-------------|
+| `get_current_time` | Get current date/time with timezone, day of week, unix timestamp, and formatted output |
 
-### `/theme` command
+### `get_current_time` Parameters
 
-Theme selector with live preview. Browse all available themes (built-in and custom), preview each one in real-time, and apply with Enter or cancel with Escape to restore the original.
+```typescript
+{
+  format?: "iso8601" | "unix" | "date" | "time" | string
+}
+```
+
+Returns structured details: `formatted`, `date`, `time`, `timezone`, `day_of_week`, `unix`.
+
+## Configuration
+
+Edit via `/defaults:settings` or directly in `~/.pi/extensions/defaults.json`:
+
+```json
+{
+  "catalog": ["~/pi-skills", "~/pi-packages"],
+  "catalogDepth": 3,
+  "agentsIgnorePaths": ["node_modules", ".git", "dist"]
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `catalog` | `[]` | Directories to scan for skills and packages |
+| `catalogDepth` | `3` | Maximum depth when scanning catalog directories |
+| `agentsIgnorePaths` | `[]` | Glob patterns to skip during AGENTS.md discovery |
+
+## Setup
+
+```json
+{
+  "extensions": ["@pi-extensions/defaults"]
+}
+```
+
+This extension loads as the base experience. Other extensions layer on top.

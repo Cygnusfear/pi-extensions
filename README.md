@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshot.png" alt="pi-extensions in action" width="900">
+  <img src="docs/screenshot.png" alt="pi-extensions in action" width="70%">
   <h1 align="center">💄 pi-extensions <sup style="text-transform:super;"
   >(for bananas 🍌)</sup></h1>
 </p>
@@ -36,7 +36,7 @@ pi install ./packages/pi-mesh
 Full workspace (run once after changing dependencies):
 
 ```bash
-pi install git:cygnusfear/pi-extensions
+pi install git:https://github.com/cygnusfear/pi-extensions
 ```
 
 Each package is independently installable, testable, and removable via `~/.pi/agent/settings.json` or project `.pi/settings.json`.

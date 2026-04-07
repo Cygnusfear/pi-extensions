@@ -1,52 +1,157 @@
-# pi-mesh
+# @pi-extensions/pi-mesh
 
-Peer-to-peer agent communication layer for pi. Built on Zenoh via `bun:ffi`.
+Peer-to-peer mesh networking for pi sessions, powered by Zenoh.
 
-Every pi session gets automatic peer discovery and direct messaging — no central server, no daemon, no subprocess.
+Connect multiple pi coding sessions on the same machine or across a network so they can exchange messages, coordinate work, and share state — all without a central server.
+
+## Features
+
+- **Sidecar architecture** — one native Rust daemon per machine, shared by all sessions via Unix socket
+- **Zero-configuration LAN** — mDNS scouting discovers peers automatically
+- **Cross-machine routing** — Tailscale endpoint configuration for WAN mesh
+- **Direct messaging** — `mesh_tell` with delivery receipts (delivered/visible)
+- **Request/reply** — `mesh_ask` with receipt tracking, distinguishes "not delivered" from "delivered but no reply"
+- **Channel pub/sub** — named channels for group communication with ambient batching
+- **Session viewing** — read recent entries from any live peer's session
+- **Identity system** — stable mesh identities decoupled from ephemeral connection IDs
+- **Nickname claiming** — distributed tie-breaking with `claimedAt` timestamps
+- **Busy-session awareness** — ambient chat batches for idle sessions, instant injection for active ones
+- **Nerd font icons** — automatic detection of terminal capabilities
 
 ## Architecture
 
 ```
-native/          Rust cdylib — thin wrapper around Zenoh (loaded via bun:ffi)
-extension/       TypeScript pi-extension — mesh tools, presence, session identity
+┌─────────────┐     Unix Socket     ┌──────────────────┐
+│  pi session  │ ◄──────────────────► │   pi-mesh native  │
+│  (Node.js)   │   ~/.pi/mesh.sock    │   (Rust sidecar)  │
+└─────────────┘                       └────────┬─────────┘
+                                               │
+                                         Zenoh protocol
+                                               │
+                                    ┌──────────┴──────────┐
+                                    │                     │
+                              ┌─────┴─────┐        ┌─────┴─────┐
+                              │  Session  │        │  Session  │
+                              │    B      │        │    C      │
+                              └───────────┘        └───────────┘
 ```
 
-## Build
+The sidecar is a **singleton daemon** — the first pi session spawns it, all subsequent sessions connect to the existing instance. The sidecar stays alive until 60 seconds after the last client disconnects.
+
+## How It Works
+
+### Transport: Zenoh
+
+[Zenoh](https://zenoh.io/) is a pub/sub + query protocol designed for low-latency, high-throughput distributed systems. It handles:
+
+- **Peer discovery** via multicast scouting (mDNS)
+- **Reliable pub/sub** with key expressions
+- **Query/get** with timeout-based request/reply
+- **Multi-transport**: UDP unicast, TCP, TLS, QUIC, WebSocket
+
+The native Rust sidecar manages a single Zenoh session and multiplexes all client connections through it.
+
+### Identity System
+
+Each session has a layered identity:
+
+| Layer | ID Type | Scope | Stability |
+|-------|---------|-------|-----------|
+| Zenoh Peer ID | `zid` | Machine | Shared across sessions |
+| Client ID | `clientId` | Connection | Per-socket, ephemeral |
+| Session ID | `sessionId` | pi session | Changes on resume/checkout |
+| Mesh ID | `meshId` | Agent identity | Stable across reconnects |
+
+The `meshId` is the routing identity — it persists in the session file and survives sidecar restarts, session compaction, and context checkouts.
+
+### Delivery Receipts
+
+Direct messages support two receipt phases:
+
+1. **delivered** — the target session's extension received the message
+2. **visible** — the target session surfaced it to the UI/session log
+
+This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "peer busy but received."
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `mesh_peers` | List all visible pi sessions on the mesh |
+| `mesh_tell` | Send a direct message (with optional delivery receipt) |
+| `mesh_ask` | Send a request and wait for a reply |
+| `mesh_reply` | Reply to a pending inbound request |
+| `mesh_view` | Read recent session entries from another peer |
+| `mesh_broadcast` | Broadcast to all peers on a topic |
+| `mesh_join_channel` | Join a named channel |
+| `mesh_leave_channel` | Leave a channel |
+| `mesh_chat` | Post a message to a channel |
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/mesh list` | Show all peers |
+| `/mesh tell <peer> <msg>` | Direct message a peer |
+| `/mesh ask <peer> <msg>` | Request/reply with a peer |
+| `/mesh view <peer>` | View a peer's recent session |
+| `/mesh join <channel>` | Join a channel |
+| `/mesh leave <channel>` | Leave a channel |
+| `/mesh chat <channel> <msg>` | Post to a channel |
+| `/mesh mute [on|off]` | Block outbound messages |
+| `/mesh deafen [on|off]` | Silence inbound chat/tells |
+| `/mesh status` | Show mute/deafen state |
+
+## Building the Native Library
+
+The Rust sidecar must be compiled before use:
 
 ```bash
-cd native
-bash build.sh
+cd packages/pi-mesh/native
+cargo build --release
 ```
 
-Produces `libpi_mesh_native.dylib` (Mac) or `libpi_mesh_native.so` (Linux).
+This produces `target/release/pi-mesh` (or `pi-mesh.exe` on Windows). The TypeScript extension automatically resolves the binary path at startup.
 
-## Test
+### Requirements
 
-```bash
-cd native
-bash run-test.sh
+- Rust 1.85+ (edition 2024)
+- C compiler (for libc dependency)
+
+## Configuration
+
+Mesh behavior is configurable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PI_MESH_AMBIENT_CHAT_BATCH_MS` | `750` | Milliseconds to batch ambient channel messages |
+| `HOME` | — | Socket path: `~/.pi/mesh.sock` |
+
+### Mesh Config (Zenoh)
+
+The mesh config object controls transport behavior:
+
+```ts
+interface MeshConfig {
+  mode?: "peer" | "client" | "router";
+  endpoints?: string[];       // Tailscale IPs for cross-machine
+  scouting?: boolean;         // mDNS discovery (default: true)
+  announceIntervalMs?: number; // Peer announcement frequency
+}
 ```
 
-Runs cargo tests (25) and Bun FFI integration tests (19).
+## Setup
 
-## Transport decision
+1. Build the native binary: `cd packages/pi-mesh/native && cargo build --release`
+2. Install the extension in your pi config
+3. Launch multiple pi sessions — they discover each other automatically via mDNS
+4. Use `/mesh list` to see peers, `/mesh tell` to message them
 
-Zenoh via `bun:ffi` — a Rust cdylib loaded in-process. Evaluated 18+ alternatives including Hyperswarm (crashes on Bun), NATS (needs daemon), libp2p (heavy).
+For cross-machine mesh, configure endpoints with Tailscale IPs or other reachable addresses.
 
-## Install
+## Dependencies
 
-```bash
-pi install /path/to/pi-mesh
-```
-
-The extension is loaded automatically. If the native binary is missing you'll see a warning and the mesh tools will be disabled — run `cd native && bash build.sh` to build it first.
-
-## Status
-
-- [x] Tranche 1: Rust native bridge (production, 7 iterations, opus + gpt-5.4 reviewed)
-- [x] Tranche 2: TypeScript extension + MCP tools
-- [ ] Tranche 3: Replace presence
-- [ ] Tranche 4: Replace gateway dependency
-- [ ] Tranche 5: Replace teams file polling
-- [ ] Tranche 6: Replace server seance (P2)
-- [ ] Tranche 7: Remote session attach (P2)
+- **zenoh** 1.7.2 — pub/sub + query transport protocol
+- **tokio** — async runtime
+- **@pi-extensions/shared** — session nickname and identity utilities
+- **@sinclair/typebox** — tool parameter schemas

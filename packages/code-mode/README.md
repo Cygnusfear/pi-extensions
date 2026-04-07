@@ -1,26 +1,234 @@
-# code-mode
+# @pi-extensions/code-mode
 
-Provides a single `execute_code` tool that lets the LLM write JavaScript calling available tools as typed async functions.
+Execute JavaScript as your primary interface to every tool — multi-step operations, loops, parallel I/O, and complex logic in a single code block instead of dozens of individual tool calls.
 
-More efficient than direct tool calls for multi-step operations, complex logic, loops, and chaining tool calls. The sandbox provides persistent state (`$`), typed declarations for all tools, and configurable execution timeouts.
+This is **not** a sandbox escape or eval hack. Code-mode replaces the traditional one-tool-call-per-turn pattern with a persistent Node.js VM that gives the LLM typed async functions for every registered tool, a cross-call persistent store (`$`), a session management API, and automatic context hygiene. It is the single biggest productivity improvement in the pi agent stack.
 
 Inspired by [Cloudflare's code mode](https://blog.cloudflare.com/code-mode/).
 
+## Why code-mode matters
+
+Without code-mode, every file read, grep, bash command, or edit is a separate LLM turn. Refactoring a function across 5 files = 5 reads + 1 think + 5 edits = **11 turns**. With code-mode, all of that happens in **one** `execute_code` call — the agent writes a loop, reads all files, decides what to change, and writes them all.
+
+- **Fewer turns** = lower cost, lower latency, better coherence
+- **Persistent state** means errors don't lose progress — `$` survives crashes
+- **Parallel I/O** — fire `await Promise.all([Read(...), Bash(...), WebFetch(...)])` in a single block
+- **Typed declarations** — every function has full TypeScript signatures, so the LLM knows the exact API
+
 ## Features
 
-- **Typed async functions** — all pi tools available as declared async functions
-- **Persistent `$` store** — variables survive across `execute_code` calls (50MB cap, LRU eviction)
-- **Auto-persist** — top-level `const`/`let`/`var`/function declarations auto-saved to `$`
-- **Session API** — programmatic access to messages, tokens, tags, context trimming
+- **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
+- **Persistent `$` store** — variables survive across calls (50MB cap, LRU eviction). No time limit.
+- **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
+- **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.setContextSize()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
-- **Context hygiene** — built-in output truncation and context usage warnings
-- **Passthrough tools** — mesh, editor, git-ai, handbook all callable from sandbox
+- **Fault tolerance** — errors are non-fatal. `$` survives. After an error, reference `$.var` to continue.
+- **Context hygiene** — built-in context usage footer (warnings at ≥40%), output truncation at 200KB
+- **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
+- **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
+- **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
+- **Tool exclusivity enforcement** — sandbox-only tools (bash, read, write, edit, grep, etc.) are blocked if the LLM tries to call them directly
+
+## The `$` persistent store
+
+The `$` object is a Proxy-backed store that persists across `execute_code` calls within a session. It is the agent's working memory.
+
+### Basic usage
+
+```javascript
+// Call 1 — gather data
+$.files = await Glob({ pattern: '**/*.ts' });
+$.results = [];
+for (const f of $.files) {
+  const content = await Read({ path: f });
+  $.results.push({ file: f, lines: content.split('\n').length });
+}
+// If an error occurs at file 30, $.files and $.results (with 30 entries) survive
+
+// Call 2 — resume from where we left off
+const remaining = $.files.slice($.results.length);
+for (const f of remaining) {
+  const content = await Read({ path: f });
+  $.results.push({ file: f, lines: content.split('\n').length });
+}
+```
+
+### Memory management
+
+```javascript
+$.__pin('importantData');   // protect from LRU eviction (survives even at 50MB cap)
+$.__unpin('importantData'); // make evictable again
+$.__status();               // show all variables, sizes, total memory
+$.__keys();                 // list all variable names
+$.__reset();                // clear all persistent state
+```
+
+Variables don't expire from time — only from memory pressure. When the 50MB cap is hit, least-recently-used unpinned variables are evicted first.
+
+### Auto-persist
+
+Top-level declarations are automatically copied to `$`:
+
+```javascript
+const config = await Read({ path: 'package.json' });
+// Next call: $.config is available
+
+function extractVersions(pkg) { return Object.keys(pkg.dependencies || {}); }
+// Next call: $.extractVersions() is available
+```
+
+### Async across calls
+
+Promises stashed on `$` survive across calls. The VM context persists, so pending promises keep running:
+
+```javascript
+// Call 1 — fire slow calls, don't await
+$.search = braveSearch({ query: 'node vm performance', numResults: 3 });
+$.memory = recall({ query: 'architecture decisions', limit: 5 });
+const files = await Glob({ pattern: '**/*.ts' });
+
+// Call 2 — pick up results (instant if already resolved)
+const [search, memory] = await Promise.allSettled([$.search, $.memory]);
+```
+
+## Session API
+
+The `session` object provides programmatic access to conversation context:
+
+```javascript
+const msgs = session.messages();     // all conversation messages
+const usage = session.tokens();      // { tokens, contextWindow }
+const tags = session.tags();         // all tags/milestones
+const id = session.id();             // session ID
+const name = session.name();         // session name (nullable)
+
+session.tag("before-refactor");      // bookmark current position
+
+session.save("ctx", { goal: "...", decisions: [...] });  // survives reload
+const ctx = session.load("ctx");     // restore
+
+session.entries();                   // all session entries (messages, tags, compactions, custom)
+session.setContextSize(6);           // keep last 6 messages only (context hygiene)
+```
+
+### Context hygiene — the RLM pattern
+
+When context fills up, model quality degrades. The cycle is: **Distill → Store → Trim → Continue**.
+
+```javascript
+// 1. Distill state into $ vars
+$.goal = "implement auth middleware";
+$.filesDone = ["src/auth.ts", "src/middleware.ts"];
+$.filesRemaining = ["src/routes.ts"];
+
+// 2. Persist to session file (survives reload)
+session.save("tpv", { goal: $.goal, progress: "2/3 files done", nextSteps: "wire up routes.ts" });
+
+// 3. Trim old messages
+session.setContextSize(6);
+
+// 4. Continue from $ — no re-reading needed
+const tpv = session.load("tpv");
+console.log("Remaining:", tpv.nextSteps);
+```
+
+## Available sandbox functions
+
+All of these are available inside `execute_code` as typed async functions:
+
+| Function | Description |
+|----------|-------------|
+| `Bash({ command, cwd?, timeout? })` | Execute shell commands |
+| `Read({ path, offset?, limit? })` | Read file contents |
+| `Write({ path, content })` | Write/create files |
+| `Edit({ path, edits: [{oldText, newText}] })` | Precise text replacement |
+| `Glob({ pattern, path? })` | Find files by glob |
+| `rg({ args })` | Run ripgrep search |
+| `fd({ args })` | Find files with fd |
+| `WebFetch({ url, format?, timeout? })` | Fetch URL content |
+| `sleep(ms)` | Pause execution |
+| `man(name)` | Get help for any sandbox function |
+| `readImage({ path })` | Read image files (png, jpg, gif, webp) |
+| `mai({ args? })` | Run mai CLI commands |
+| `maiTicket({...})` | Create tickets |
+| `recall({...})` | Search Foresight memory |
+| `memoryCreate({...})` | Create memory nodes |
+| `memoryUnfold({...})` | Expand memory nodes |
+| `memoryContext({...})` | Get contextual memories |
+| `braveSearch({...})` | Web search via Brave |
+| `braveCodeSearch({...})` | Code search via Brave |
+| `getCurrentTime(format?)` | Get current date/time |
+| `hashRead({ path, startLine?, endLine? })` | Read file with hashline anchors |
+| `hashEdit({ path, edits })` | Edit with hashline verification |
+| `applyPatch({ patchText })` | Apply patch-format edits |
+| `context7Resolve({...})` | Resolve library names |
+| `context7Docs({...})` | Fetch library docs |
+| `fffFind({ query, maxResults?, cwd? })` | Fuzzy file search |
+| `fffGrep({ query, mode?, maxResults?, context?, cwd? })` | Content search |
+| `fffMultiGrep({ patterns, constraints?, maxResults?, context?, cwd? })` | Multi-pattern search |
+| `tldrSemanticSearch({...})` | Semantic code search |
+| `tldrStructure({ path })` | Show code structure |
+| `tldrCalls({ path })` | Build call graph |
+| `tldrExtract({ file })` | Extract file analysis |
+| `tldrDead({ path })` | Find dead functions |
+| `tldrArch({ path })` | Detect architecture layers |
+| `tldrImpact({ func, path })` | Find all callers |
+
+### Passthrough wrappers
+
+These call the registered tools directly from inside the sandbox:
+
+`meshTell`, `meshAsk`, `meshPeers`, `meshView`, `meshChat`, `meshBroadcast`, `meshReply`, `meshJoinChannel`, `meshLeaveChannel`, `editorOpen`, `editorHighlight`, `editorReveal`, `editorState`, `gitAi`, `hotseatHandbookUpdate`, `hotseatHandbookRead`
+
+## Escape hatch
+
+If the sandbox restriction is too limiting for a specific task:
+
+- `/escape_code_mode` — restores all tools for direct LLM access
+- `/code_mode` — re-enables sandbox mode
+
+The LLM can also toggle escape mode programmatically by setting `$.__escaped = true`.
+
+## Execution model
+
+Code runs in a **persistent** Node.js `vm.Context` — the context object (including `$`, console overrides, and timer bindings) is created once per session and reused for every `execute_code` call. Tool bindings are refreshed on each call (in case `cwd` changed), but state on `$` carries over.
+
+The execution flow has three layers:
+
+1. **Syntax pre-validation** — code is parsed before touching `$`. Syntax errors produce a clear message without affecting stored state.
+2. **Fault-tolerant execution** — code runs in a try/catch. Errors are caught, partial output is preserved, and a recovery hint tells the agent which `$` variables survived.
+3. **Context management** — after execution, if context usage is ≥30%, a footer shows the percentage and cost. At ≥40%, it warns the agent to distill and trim.
+
+## Tool exclusivity
+
+When code-mode is active, these tools are **sandbox-only** (blocked from direct LLM calls):
+
+bash, read, write, edit, grep, find, ls, apply_patch, hash_read, hash_edit, web_search_brave, code_search_brave, context7_resolve, context7_docs, recall, memory_*, fff_*, WebFetch, get_current_time, tldr_*
+
+These remain as **direct LLM tools**: execute_code, apply_patch, teams, context_*, start_supervision, init/run/log_experiment, editor_*, mesh_*, git-ai, hotseat_*, bash_bg_*
 
 ## Files
 
-- `extensions/code-mode.ts` — extension entry point and VM execution engine
-- `extensions/code-mode-prompt.md` — system prompt injected when code-mode is active
-- `extensions/code-mode-declarations.md` — TypeScript declarations for all sandbox functions
-- `src/sandbox-tools.ts` — tool binding creation
-- `src/persistent-store.ts` — `$` store implementation
-- `src/tool-reference.ts` — cached tool reference builder
+| File | Purpose |
+|------|---------|
+| `extensions/code-mode.ts` | Extension entry point, VM engine, tool registration, session hooks |
+| `extensions/code-mode-prompt.md` | System prompt injected into the LLM when code-mode is active |
+| `extensions/code-mode-declarations.md` | Full TypeScript declarations for all sandbox functions |
+| `src/sandbox-tools.ts` | Creates the tool binding functions injected into the VM context |
+| `src/persistent-store.ts` | `$` store implementation — Proxy-backed, LRU eviction, auto-persist |
+| `src/patch-parser.ts` | `apply_patch` parser and applier (used inside sandbox) |
+| `src/hashline.ts` | Hashline anchor computation (used inside sandbox) |
+| `src/shell-utils.ts` | Shell argument splitting and escaping utilities |
+| `src/tool-reference.ts` | Builds cached tool reference text for the system prompt |
+| `src/types.ts` | Shared type definitions |
+
+## Dependencies
+
+- `@mariozechner/pi-coding-agent` — core extension API
+- `@mariozechner/pi-tui` — TUI rendering for code previews
+- `@sinclair/typebox` — parameter schema types
+- `@pi-extensions/shared` — diff renderer (Shiki), sandbox registry, tool UI utils
+
+## Setup
+
+Code-mode is typically installed via pi's extension system. No additional configuration is required — it activates automatically on session start and injects its system prompt and tool declarations.

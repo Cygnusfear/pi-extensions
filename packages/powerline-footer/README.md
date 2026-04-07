@@ -4,170 +4,174 @@
 
 # pi-powerline-footer
 
-Customizes the default [pi](https://github.com/badlogic/pi-mono) editor with a powerline-style status bar, welcome overlay, and AI-generated "vibes" for loading messages. Inspired by [Powerlevel10k](https://github.com/romkatv/powerlevel10k) and [oh-my-pi](https://github.com/can1357/oh-my-pi).
+Powerline-style status bar for [pi](https://github.com/badlogic/pi-mono) — beautiful, responsive, and packed with information. Inspired by [Powerlevel10k](https://github.com/romkatv/powerlevel10k) and [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
-<img width="1261" height="817" alt="Image" src="https://github.com/user-attachments/assets/4cc43320-3fb8-4503-b857-69dffa7028f2" />
-
-## Features
-
-**Working Vibes** — AI-generated themed loading messages. Set `/vibe star trek` and your "Working..." becomes "Running diagnostics..." or "Engaging warp drive...". Supports any theme: pirate, zen, noir, cowboy, etc.
-
-**Welcome overlay** — Branded splash screen shown as centered overlay on startup. Shows gradient logo, model info, keyboard tips, loaded AGENTS.md/extensions/skills/templates counts, and recent sessions. Auto-dismisses after 30 seconds or on any key press.
-
-**Rounded box design** — Status renders directly in the editor's top border, not as a separate footer.
-
-**Live thinking level indicator** — Shows current thinking level (`thinking:off`, `thinking:med`, etc.) with color-coded gradient. High and xhigh levels get a rainbow shimmer effect inspired by Claude Code's ultrathink.
-
-**Smart defaults** — Nerd Font auto-detection for iTerm, WezTerm, Kitty, Ghostty, and Alacritty with ASCII fallbacks. Colors matched to oh-my-pi's dark theme.
-
-**Git integration** — Async status fetching with 1s cache TTL. Automatically invalidates on file writes/edits. Shows branch, staged (+), unstaged (*), and untracked (?) counts.
-
-**Context awareness** — Color-coded warnings at 70% (yellow) and 90% (red) context usage. Auto-compact indicator when enabled.
-
-**Token intelligence** — Smart formatting (1.2k, 45M), subscription detection (shows "(sub)" vs dollar cost).
+<img width="1261" height="817" alt="Screenshot" src="https://github.com/user-attachments/assets/4cc43320-3fb8-4503-b857-69dffa7028f2" />
 
 ## Installation
 
 ```bash
-pi install npm:pi-powerline-footer
+pi install npm:@pi-extensions/powerline-footer
 ```
 
 Restart pi to activate.
 
-## Usage
+## Features
 
-Activates automatically. Toggle with `/powerline`, switch presets with `/powerline <name>`.
+- **19 segments** — model, thinking, git, tokens, cost, context, time, session, hostname, and more
+- **6 presets** — from minimal to full nerd dashboard, one command to switch
+- **10 separator styles** — powerline arrows, slashes, dots, chevrons, stars, and plain ASCII
+- **Responsive layout** — segments overflow to a secondary row on narrow terminals
+- **Welcome overlay** — branded splash with model info, keyboard tips, and recent sessions
+- **Working vibes** — AI-generated themed loading messages (e.g. `/vibe star trek`)
+- **Rainbow thinking** — high/xhigh thinking levels shimmer with a rainbow gradient
+- **Zero git stampedes** — uses pi's built-in `FooterDataProvider` for branch info, no subprocess spawning
+- **Incremental usage stats** — O(1) per render, processes only new session events
+- **Theme overrides** — per-preset color schemes plus user-level `theme.json`
 
-| Preset | Description |
-|--------|-------------|
-| `default` | Model, thinking, path (basename), git, context, tokens, cost |
-| `minimal` | Just path (basename), git, context |
-| `compact` | Model, git, cost, context |
-| `full` | Everything including hostname, time, abbreviated path |
-| `nerd` | Maximum detail for Nerd Font users |
-| `ascii` | Safe for any terminal |
+## Quick Start
 
-**Environment:** `POWERLINE_NERD_FONTS=1` to force Nerd Fonts, `=0` for ASCII.
-
-## Working Vibes
-
-Transform boring "Working..." messages into themed phrases that match your style:
+Activates automatically. Toggle and configure with:
 
 ```
-/vibe star trek    → "Running diagnostics...", "Engaging warp drive..."
-/vibe pirate       → "Hoisting the sails...", "Charting course..."
-/vibe zen          → "Breathing deeply...", "Finding balance..."
-/vibe noir         → "Following the trail...", "Checking the angles..."
-/vibe              → Shows current theme, mode, and model
-/vibe off          → Disables (back to "Working...")
-/vibe model        → Shows current model
-/vibe model openai/gpt-4o-mini → Use a different model
-/vibe mode         → Shows current mode (generate or file)
-/vibe mode file    → Switch to file-based mode (instant, no API calls)
-/vibe mode generate → Switch to on-demand generation (contextual)
-/vibe generate mafia 200 → Pre-generate 200 vibes and save to file
+/powerline              # toggle on/off
+/powerline default      # switch preset
+/powerline nerd         # maximum detail
+/powerline minimal      # just the essentials
 ```
 
-### Configuration
+## Presets
 
-In `~/.pi/agent/settings.json`:
-
-```json
-{
-  "workingVibe": "star trek",                              // Theme phrase
-  "workingVibeMode": "generate",                           // "generate" (on-demand) or "file" (pre-generated)
-  "workingVibeModel": "anthropic/claude-haiku-4-5",        // Optional: model to use (default)
-  "workingVibeFallback": "Working",                        // Optional: fallback message
-  "workingVibeRefreshInterval": 30,                        // Optional: seconds between refreshes (default 30)
-  "workingVibePrompt": "Generate a {theme} loading message for: {task}",  // Optional: custom prompt template
-  "workingVibeMaxLength": 65                         // Optional: max message length (default 65)
-}
-```
-
-### Modes
-
-| Mode | Description | Pros | Cons |
-|------|-------------|------|------|
-| `generate` | On-demand AI generation (default) | Contextual, hints at actual task | ~$0.000015/msg, 500ms latency |
-| `file` | Pull from pre-generated file | Instant, zero cost, works offline | Not contextual |
-
-**File mode setup:**
-```bash
-/vibe generate mafia 200    # Generate 200 vibes, save to ~/.pi/agent/vibes/mafia.txt
-/vibe mode file             # Switch to file mode
-/vibe mafia                 # Now uses the file
-```
-
-**How file mode works:**
-1. Vibes are loaded from `~/.pi/agent/vibes/{theme}.txt` into memory
-2. Uses seeded shuffle (Mulberry32 PRNG) — cycles through all vibes before repeating
-3. New seed each session — different order every time you restart pi
-4. Zero latency, zero cost, works offline
-
-**Prompt template variables (generate mode only):**
-- `{theme}` — the current vibe theme (e.g., "star trek", "mafia")
-- `{task}` — context hint (user prompt initially, then agent's response text or tool info on refresh)
-- `{exclude}` — recent vibes to avoid (auto-populated, e.g., "Don't use: vibe1, vibe2...")
-
-**How it works:**
-1. When you send a message, shows "Channeling {theme}..." placeholder
-2. AI generates a themed message in the background (3s timeout)
-3. Message updates to the themed version (e.g., "Engaging warp drive...")
-4. During long tasks, refreshes on tool calls (rate-limited, default 30s)
-5. Cost: ~$0.000015 per generation (60 tokens @ haiku pricing)
-
-## Thinking Level Display
-
-The thinking segment shows live updates when you change thinking level:
-
-| Level | Display | Color |
-|-------|---------|-------|
-| off | `thinking:off` | gray |
-| minimal | `thinking:min` | purple-gray |
-| low | `thinking:low` | blue |
-| medium | `thinking:med` | teal |
-| high | `thinking:high` | 🌈 rainbow |
-| xhigh | `thinking:xhigh` | 🌈 rainbow |
-
-## Path Display
-
-The path segment supports three modes:
-
-| Mode | Example | Description |
-|------|---------|-------------|
-| `basename` | `powerline-footer` | Just the directory name (default) |
-| `abbreviated` | `…/extensions/powerline-footer` | Full path with home abbreviated and length limit |
-| `full` | `~/.pi/agent/extensions/powerline-footer` | Complete path with home abbreviated |
-
-Configure via preset options: `path: { mode: "full" }`
+| Preset | Segments | Style |
+|--------|----------|-------|
+| `default` | session, path, context, model, thinking | Dot separators, basename path |
+| `minimal` | path, git, context | Slash separators, muted colors |
+| `compact` | model, session, git, cost, context | Thin powerline, tight layout |
+| `full` | pi, hostname, model, thinking, path, git, tokens, cost, context, time, extensions | Full powerline, every stat |
+| `nerd` | Everything — 15+ segments with cache read/write, thinking, extensions | Vibrant colors, Nerd Font icons |
+| `ascii` | model, path, git, tokens, cost, context | Plain ASCII, safe for any terminal |
 
 ## Segments
 
-`pi` · `model` · `thinking` · `path` · `git` · `subagents` · `token_in` · `token_out` · `token_total` · `cost` · `context_pct` · `context_total` · `time_spent` · `time` · `session` · `hostname` · `cache_read` · `cache_write`
+| ID | Display | Description |
+|----|---------|-------------|
+| `pi` | π / 🅿️ | Pi icon/branding |
+| `model` | ◈ claude-sonnet-4-6 | Current model name |
+| `thinking` | 🧠 med | Live thinking level (off/min/low/med/high/xhigh) |
+| `path` | 📁 powerline-footer | Working directory (basename, abbreviated, or full) |
+| `git` | ⎇ main +2 *1 | Branch name with staged/unstaged/untracked counts |
+| `token_in` | in: 45.2k | Input tokens used |
+| `token_out` | out: 12.3k | Output tokens used |
+| `token_total` | ⊛ 57.5k | Total tokens |
+| `cache_read` | cache in: 38.1k | Cache read tokens |
+| `cache_write` | cache out: 2.1k | Cache write tokens |
+| `cost` | $0.42 | Session cost (shows `sub` for subscription users) |
+| `context_pct` | ◫ 42.3%/200k ⚡ | Context usage with auto-compact indicator |
+| `context_total` | ◫ 200k | Context window size |
+| `time_spent` | ⟳ 15m32s | Session elapsed time |
+| `time` | ⟳ 14:32 | Current clock time |
+| `session` | id abc12345 | Session name or ID prefix |
+| `hostname` | host macbook | Machine hostname |
+| `hostname` | AG | Subagent count (reserved) |
+| `extension_statuses` | MCP: 6 servers | Compact extension status messages |
+
+### Segment Options
+
+Each preset can fine-tune segments via `segmentOptions`:
+
+```typescript
+{
+  model: { showThinkingLevel: boolean },       // show thinking in model segment
+  path: { mode: "basename"|"abbreviated"|"full", maxLength: number },
+  git: { showBranch, showStaged, showUnstaged, showUntracked },
+  time: { format: "12h"|"24h", showSeconds: boolean }
+}
+```
 
 ## Separators
 
-`powerline` · `powerline-thin` · `slash` · `pipe` · `dot` · `chevron` · `star` · `block` · `none` · `ascii`
+| Style | Characters | Best for |
+|-------|-----------|----------|
+| `powerline` | ▓▒ │ ╲ ╱ | Full preset, Nerd Font users |
+| `powerline-thin` | │ ╲ ╱ | Compact, clean look |
+| `slash` | / | Minimal preset |
+| `pipe` | | | Classic terminal |
+| `dot` | · | Default preset, subtle |
+| `chevron` | › ‹ | Modern, lightweight |
+| `star` | ✦ | Decorative |
+| `block` | █ | Heavy, high contrast |
+| `none` | (space) | Bare minimum |
+| `ascii` | > < | Fallback for basic terminals |
+
+## Thinking Level Display
+
+| Level | Display | Effect |
+|-------|---------|--------|
+| off | 🧠 off | Gray |
+| minimal | 🧠 min | Purple-gray |
+| low | 🧠 low | Blue |
+| medium | 🧠 med | Teal |
+| high | 🧠 high | 🌈 Rainbow shimmer |
+| xhigh | 🧠 ultrathink | 🌈 Rainbow shimmer |
+
+## Working Vibes
+
+Transform boring "Working..." messages into themed phrases:
+
+```
+/vibe star trek        → "Running diagnostics...", "Engaging warp drive..."
+/vibe pirate           → "Hoisting the sails...", "Charting course..."
+/vibe zen              → "Breathing deeply...", "Finding balance..."
+/vibe noir             → "Following the trail...", "Checking the angles..."
+/vibe off              → Disable (back to "Working...")
+```
+
+Two modes:
+- **generate** — on-demand AI generation, contextual to your task (~$0.000015/msg)
+- **file** — pre-generated vibes file, instant and offline
+
+```
+/vibe generate mafia 200    # Pre-generate 200 vibes
+/vibe mode file             # Switch to file mode
+```
+
+Configure in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "workingVibe": "star trek",
+  "workingVibeMode": "generate",
+  "workingVibeModel": "anthropic/claude-haiku-4-5",
+  "workingVibeRefreshInterval": 30
+}
+```
 
 ## Theming
 
-Colors are configurable via pi's theme system. Each preset defines its own color scheme, and you can override individual colors with a `theme.json` file in the extension directory.
+### Color Resolution
 
-### Default Colors
+1. User overrides in `theme.json` (highest priority)
+2. Preset color scheme
+3. Default colors
 
-| Semantic | Theme Color | Description |
-|----------|-------------|-------------|
-| `pi` | `accent` | Pi icon |
-| `model` | `primary` | Model name |
-| `path` | `muted` | Directory path |
-| `gitClean` | `success` | Git branch (clean) |
-| `gitDirty` | `warning` | Git branch (dirty) |
-| `thinking` | `muted` | Thinking level |
-| `context` | `dim` | Context usage |
-| `contextWarn` | `warning` | Context usage >70% |
-| `contextError` | `error` | Context usage >90% |
-| `cost` | `primary` | Cost display |
-| `tokens` | `muted` | Token counts |
+### Semantic Colors
+
+| Name | Default | Description |
+|------|---------|-------------|
+| `pi` | accent | Pi icon |
+| `nickname` | #ff9d00 | Mesh nickname |
+| `model` | dim | Model name |
+| `path` | success | Directory path |
+| `git` / `gitClean` | dim | Clean git branch |
+| `gitDirty` | warning | Dirty git branch |
+| `thinking` | muted | Thinking level |
+| `context` | dim | Context usage (normal) |
+| `contextWarn` | warning | Context >70% |
+| `contextError` | error | Context >90% |
+| `cost` | text | Cost display |
+| `tokens` | muted | Token counts |
+| `separator` | dim | Segment separators |
+| `border` | borderMuted | Editor borders |
 
 ### Custom Theme Override
 
@@ -178,14 +182,25 @@ Create `~/.pi/agent/extensions/powerline-footer/theme.json`:
   "colors": {
     "pi": "#ff5500",
     "model": "accent",
-    "path": "#00afaf",
-    "gitClean": "success"
+    "path": "#00afaf"
   }
 }
 ```
 
-Colors can be:
-- **Theme color names**: `accent`, `primary`, `muted`, `dim`, `text`, `success`, `warning`, `error`, `borderMuted`
-- **Hex colors**: `#ff5500`, `#d787af`
+Accepts theme color names (`accent`, `muted`, `dim`, etc.) or hex values (`#ff5500`).
 
-See `theme.example.json` for all available options.
+### Nerd Font Support
+
+Auto-detected for iTerm2, WezTerm, Kitty, Ghostty, and Alacritty. Force with environment variables:
+
+```bash
+POWERLINE_NERD_FONTS=1    # Force Nerd Fonts
+POWERLINE_NERD_FONTS=0    # Force ASCII fallback
+```
+
+## Architecture
+
+- **Incremental stats** — usage cache tracks position in session events, only processes new entries. Survives context checkouts via full recomputation.
+- **Responsive layout** — segments fit top bar first, overflow to secondary row. Cached per render cycle (50ms TTL) for consistency between editor and widget.
+- **Git status** — delegated to pi's `FooterDataProvider`, no subprocess spawning. Reactively re-renders on branch change.
+- **Welcome overlay** — rendered as centered overlay on startup with gradient logo, model info, and keyboard shortcuts. Auto-dismisses after 30s.

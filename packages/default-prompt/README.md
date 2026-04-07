@@ -1,3 +1,46 @@
 # default-prompt
 
-Standalone pi package for the default-prompt extension.
+Additive system prompt layering — loads a global default prompt and an optional repo-local overlay into every agent turn.
+
+## Features
+
+- **Bundled global prompt** — ships with `prompts/default.md` containing pi's core instructions (guard protocols, communication rules, coding standards)
+- **Repo-local overlay** — drop a `.prompts/default.md` in your repo root to add project-specific instructions
+- **Both layers are additive** — they append to the base system prompt, never replace it
+- **Frontmatter stripping** — YAML frontmatter is automatically removed before injection
+- **Hot-reload with caching** — files are stat-checked on each turn; only re-read when mtime changes
+
+## Prompt Layer Order
+
+```
+1. Base system prompt (from pi core)
+2. Bundled default.md (from this package)
+3. .prompts/default.md (from repo root, if present)
+```
+
+## Adding Repo-Specific Instructions
+
+Create `.prompts/default.md` in your repository root:
+
+```markdown
+---
+description: Project-specific instructions for my-app
+---
+
+## Code Style
+
+- Use strict TypeScript with no `any`
+- All functions must have JSDoc comments
+- prefer `const` over `let`
+
+## Architecture
+
+- All state lives in stores/ — never mutate props
+- API calls go through services/api.ts
+```
+
+This overlay is automatically picked up and injected on every agent turn.
+
+## Setup
+
+No setup required. The bundled prompt loads automatically. Repo overlays are opt-in via `.prompts/default.md`.

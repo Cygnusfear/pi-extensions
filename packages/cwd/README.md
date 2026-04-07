@@ -1,46 +1,56 @@
 # @pi-ext/cwd
 
-Change the current session's base directory.
+Change the session's working directory mid-conversation — with history preservation and tab completion.
+
+## Why
+
+Pi sessions are tied to a working directory. Without this extension, changing directories means starting a new session and losing context. `/cwd` lets you switch projects mid-session by forking the conversation into the new directory's session bucket.
+
+## Features
+
+- **Directory switching** — change the session base to any absolute or relative path
+- **Path expansion** — supports home directory (`~`), relative paths, and absolute paths
+- **Tab completion** — suggests directories as you type, with home path abbreviation
+- **Session forking** — conversation history is preserved when switching directories
+- **Git awareness** — displays repository root information alongside the base path
+- **Validation** — rejects non-existent paths and non-directories with clear error messages
 
 ## Usage
 
 ```
-/cwd                         # print current base + repo info
-/cwd ~/Projects/trek         # absolute or home-relative
-/cwd .worktrees/something    # relative to current base
+# Show current base directory and git repo info
+/cwd
+
+# Switch to a different project
+/cwd ~/other-project
+
+# Switch to a subdirectory (relative to current base)
+/cwd .worktrees/feature-branch
+
+# Tab-complete a path
+/cwd ~/pro<TAB>
 ```
 
-## Behavior
+## How It Works
 
-- **Session-local.** Changing cwd affects **this session only**. Other open Pi
-  sessions are untouched.
-- **Agents inherit.** Workers spawned after `/cwd` use the new base
-  automatically (`ctx.cwd` is updated across all extensions and built-in
-  tools).
-- **History preserved.** The current session is forked into the new cwd's
-  session bucket and switched into. Your conversation survives the change.
-- **Existing agents untouched.** Workers that were already running keep their
-  original worktree/cwd. Only new spawns pick up the new base.
+1. Validates the target path exists and is a directory
+2. Forks the current session file into the new directory's session bucket via `SessionManager.forkFrom()`
+3. Switches to the forked session — conversation history is preserved
+4. Displays the new base directory and git repo info
 
-## How it works
+Worker sessions inherit the new base directory automatically. Other pi sessions are unaffected.
 
-Pi bakes cwd into the session at creation time. There's no mutable cwd field,
-so the extension does the only safe thing:
+## Command
 
-1. Forks the current session into the target cwd via
-   `SessionManager.forkFrom()`.
-2. Calls `ctx.switchSession()` on the forked file, which tears down the
-   current runtime and rebuilds it against the new cwd.
-3. `process.chdir()` happens inside Pi's runtime apply step, so every
-   cwd-bound service (tools, footer, teams) snaps to the new base.
+| Command | Description |
+|---------|-------------|
+| `/cwd` | Show current base directory and git repo info |
+| `/cwd <path>` | Change session base to the specified directory |
 
-This is the same machinery Pi uses for `/fork`, just parameterized on the
-target directory.
+## Setup
 
-## Limitations
-
-- The current session must be persisted. In-memory sessions (rare in
-  interactive mode) cannot be forked.
-- Changing cwd always creates a new session file in the new cwd's bucket
-  (`~/.pi/agent/sessions/<encoded-target-cwd>/`). Repeated `/cwd` calls
-  chain these via `parentSession` — cheap, but visible in the session list.
+```json
+{
+  "extensions": ["@pi-ext/cwd"]
+}
+```
