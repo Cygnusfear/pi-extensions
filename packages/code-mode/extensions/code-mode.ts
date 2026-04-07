@@ -596,6 +596,18 @@ declare function tldrIndexStatus(input?: {
  */
 declare function man(name: string): Promise<string>;
 
+/**
+ * Read an image file and include it in the tool result so the LLM can see it.
+ * Supports png, jpg, gif, webp. Returns a confirmation string.
+ * The image is sent as an attachment alongside the text output.
+ */
+declare function readImage(input: {
+  /** Path to the image file */
+  path: string;
+  /** Working directory override */
+  cwd?: string;
+}): Promise<string>;
+
 
 // =====================================================================
 // Persistent Store ($)
@@ -1104,7 +1116,7 @@ function spawnAsync({
 	});
 }
 
-function createToolBindings(cwd: string) {
+function createToolBindings(cwd: string, images: Array<{ data: string; mimeType: string }>) {
 	const turndown = new TurndownService({
 		headingStyle: "atx",
 		hr: "---",
@@ -1815,6 +1827,31 @@ function createToolBindings(cwd: string) {
 		},
 
 		// =====================================================================
+		// readImage() — read image file and include in tool result for LLM
+		// =====================================================================
+
+		readImage: async ({ path: filePath, cwd: explicitCwd }: { path: string; cwd?: string }): Promise<string> => {
+			const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+			const resolved = resolvePath(filePath, base);
+			const ext = path.extname(resolved).toLowerCase();
+			const mimeMap = {
+				".png": "image/png",
+				".jpg": "image/jpeg",
+				".jpeg": "image/jpeg",
+				".gif": "image/gif",
+				".webp": "image/webp",
+			} as Record<string, string>;
+			const mimeType = mimeMap[ext];
+			if (!mimeType) {
+				throw new Error("Unsupported image type: " + ext + ". Supported: png, jpg, gif, webp");
+			}
+			const buffer = fs.readFileSync(resolved);
+			const base64 = buffer.toString("base64");
+			images.push({ data: base64, mimeType });
+			return "Image loaded: " + path.basename(resolved) + " (" + mimeType + ", " + Math.round(buffer.length / 1024) + "KB)";
+		},
+
+		// =====================================================================
 		// man() — get detailed help for any sandbox function
 		// =====================================================================
 
@@ -2011,11 +2048,13 @@ interface PersistentSession {
 	context: vm.Context;
 	store: ReturnType<typeof createPersistentStore>;
 	logs: string[];
+	images: Array<{ data: string; mimeType: string }>; // stashed by readImage()
 }
 
 function createSession(): PersistentSession {
 	const store = createPersistentStore();
 	const logs: string[] = [];
+	const images: Array<{ data: string; mimeType: string }> = [];
 
 	const sandbox = {
 		$: store.proxy,
@@ -2034,7 +2073,7 @@ function createSession(): PersistentSession {
 	};
 
 	const context = vm.createContext(sandbox);
-	return { context, store, logs };
+	return { context, store, logs, images };
 }
 
 let session: PersistentSession | null = null;
@@ -2083,7 +2122,8 @@ async function executeCode(
 
 	// --- Layer 2: Execute with fault tolerance ---
 	// Refresh tool bindings (cwd may have changed)
-	const bindings = createToolBindings(cwd);
+	sess.images.length = 0; // clear stashed images for this execution
+	const bindings = createToolBindings(cwd, sess.images);
 	Object.assign(sess.context, bindings);
 
 	try {
@@ -2429,7 +2469,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Execute JavaScript code with typed async functions for calling tools. " +
 			"Use for multi-step operations, loops, data processing, and chaining tool calls. " +
-			"Available functions: Bash, Read, Write, Edit, Glob, rg, fd, WebFetch, sleep, man, " +
+			"Available functions: Bash, Read, Write, Edit, Glob, rg, fd, WebFetch, sleep, man, readImage, " +
 			"mai, maiTicket, recall, memoryContext, memoryCreate, memoryUnfold, memoryStatus, " +
 			"memorySubscribe, memoryUnsubscribe, memoryCheckUpdates, " +
 			"braveSearch, braveCodeSearch, getCurrentTime, hashRead, hashEdit, applyPatch, " +
@@ -2481,8 +2521,14 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const lineCount = text.split("\n").length;
+			// Include any images stashed by readImage()
+			const imageContent = getSession().images.map((img) => ({
+				type: "image" as const,
+				data: img.data,
+				mimeType: img.mimeType,
+			}));
 			return {
-				content: [{ type: "text" as const, text }],
+				content: [{ type: "text" as const, text }, ...imageContent],
 				details: { duration, error, lineCount, code: params.code } satisfies CodeModeDetails,
 			};
 		},
