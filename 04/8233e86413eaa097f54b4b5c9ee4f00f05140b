@@ -1,0 +1,21 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "048233e86413eaa097f54b4b5c9ee4f00f05140b",
+  "prompts": {
+    "3e9a7a670be5f426": {
+      "agent_id": {
+        "tool": "Helen Geodesic Alpher",
+        "id": "7ab9ef09-3989-4fe1-b4c2-0eab7a2b57ff",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 65,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
