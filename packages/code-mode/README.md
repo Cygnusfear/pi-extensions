@@ -28,6 +28,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
 - **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
 - **Tool exclusivity enforcement** — sandbox-only tools (bash, read, write, edit, grep, etc.) are blocked if the LLM tries to call them directly
+- **Git-safety integration** — destructive git commands and `.git` writes inside sandbox functions show interactive confirmation dialogs (same as direct tool calls)
 
 ## The `$` persistent store
 
@@ -138,7 +139,7 @@ All of these are available inside `execute_code` as typed async functions:
 
 | Function | Description |
 |----------|-------------|
-| `Bash({ command, cwd?, timeout? })` | Execute shell commands |
+| `Bash({ command, cwd?, timeout? })` | Execute shell commands (git-safety guards apply — shows confirm dialog for destructive git ops) |
 | `Read({ path, offset?, limit? })` | Read file contents |
 | `Write({ path, content })` | Write/create files |
 | `Edit({ path, edits: [{oldText, newText}] })` | Precise text replacement |

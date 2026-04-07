@@ -547,7 +547,57 @@ declare const session: {
    * Use this to manage context rot — distill important state first, then trim.
    */
   setContextSize(n?: number): string;
+  /**
+   * Trigger native compaction — summarizes old messages into a summary,
+   * keeps recent messages intact. Like /compact but agent-initiated.
+   * Use when context warnings appear (≥70%) to reclaim space without losing track.
+   */
+  squash(): string;
 };
+
+// =====================================================================
+// Context Management (vendored from pi-context)
+// =====================================================================
+
+/**
+ * Create a named tag/bookmark in the conversation history.
+ * Use before risky changes, at task boundaries, and at stable milestones.
+ * Tags are the "table of contents" of your session — name them descriptively.
+ * Always available — no /acm needed.
+ */
+declare function contextTag(input: {
+  /** Tag name — use descriptive kebab-case like 'auth-jwt-start', 'db-migration-done' */
+  name: string;
+  /** Optional: target entry ID or existing tag name. Defaults to current HEAD. */
+  target?: string;
+}): string;
+
+/**
+ * View conversation history as a structured graph with context dashboard.
+ * Shows tags, summaries, user messages, and tool calls with a usage HUD.
+ * Use to orient yourself, find tag IDs for checkout, or check context health.
+ */
+declare function contextLog(input?: {
+  /** Max visible entries (default 50) */
+  limit?: number;
+  /** Show all messages including internal tool calls (default false) */
+  verbose?: boolean;
+}): string;
+
+/**
+ * Navigate to a different point in conversation history.
+ * Creates a branch with a summary of what you're leaving behind.
+ * Use backupTag to save the current state for later retrieval.
+ * Navigation completes after the current turn.
+ */
+declare function contextCheckout(input: {
+  /** Where to jump to — tag name, entry ID, or 'root' */
+  target: string;
+  /** Carryover summary for the new branch. Include: [Status] + [Reason] + [Important Changes] + [Next Step] */
+  message: string;
+  /** Optional: tag name for backing up current state before checkout */
+  backupTag?: string;
+}): string;
 
 // =====================================================================
 // Persistent Store ($)

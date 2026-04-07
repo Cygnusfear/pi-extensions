@@ -11,6 +11,7 @@ AI agents love running `git push --force`, `rm -rf .git`, and editing internal g
 - **Three protection modes** — `block`, `confirm`, and `off` — controlled via `/git-lock`
 - **Destructive git command detection** — blocks force-pushes, hard resets, branch deletions, and more
 - **`.git` directory write protection** — prevents write, edit, and patch operations targeting paths inside `.git/`
+- **Code-mode integration** — same interactive confirm dialogs work inside `execute_code` blocks
 - **`sed` blocker** — always blocked (broken on macOS); steers agents toward safe alternatives
 - **Process kill broadcast guard** — always-on, unconfigurable protection against broadcasting `SIGKILL` to user sessions
 - **`GIT_EDITOR` injection** — automatically sets `GIT_EDITOR=true` on `git rebase --continue` to prevent editor hangs
@@ -39,7 +40,16 @@ AI agents love running `git push --force`, `rm -rf .git`, and editing internal g
 
 - `write` tool targeting paths inside `.git/`
 - `edit` tool targeting paths inside `.git/`
+- `hashEdit` tool targeting paths inside `.git/`
 - `apply_patch` with file headers inside `.git/`
+
+### Code-mode integration
+
+All guards also work inside `execute_code` blocks. When a sandbox function (`Bash`, `Write`, `Edit`, `hashEdit`, `applyPatch`) triggers a git-safety guard:
+
+- **`confirm` mode**: Shows the same interactive confirmation dialog. If approved, logs `✅ Hooman approved <reason> [OK]`. If denied, blocks with error.
+- **`block` mode / workers**: Hard-blocks immediately with `❌ BLOCKED: <reason> 🛡️ GUARD PROTOCOL: HOOMAN MUST CONFIRM WITH [OK]`.
+- **`off` mode**: No protection.
 
 ### Always blocked (all modes)
 
