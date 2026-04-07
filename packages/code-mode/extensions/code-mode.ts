@@ -2501,8 +2501,8 @@ export default function (pi: ExtensionAPI) {
 				highlighted = preview;
 			}
 
-			// Apply github-dark background to code lines (#24292e)
-			const CODE_BG = "\x1b[48;2;36;41;46m";
+			// Apply tool panel background to code lines (#313340 matches lipgloss toolSuccessBg)
+			const CODE_BG = "\x1b[48;2;49;51;64m";
 			const ANSI_RST = "\x1b[0m";
 			const bgLines = highlighted.map((l: string) =>
 				CODE_BG + l.replace(/\x1b\[0m/g, ANSI_RST + CODE_BG) + ANSI_RST,
