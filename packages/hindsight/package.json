@@ -1,0 +1,15 @@
+{
+  "name": "@pi-extensions/hindsight",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions/hindsight.ts"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.65.0",
+    "@sinclair/typebox": "*"
+  },
+  "files": ["extensions"],
+  "dependencies": {}
+}
