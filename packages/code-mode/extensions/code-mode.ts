@@ -1527,9 +1527,52 @@ async function executeCode(
 	// Clear logs for this execution
 	sess.logs.length = 0;
 
+	function extractAutoPersistNames(code: string): string[] {
+	const names: string[] = [];
+	const lines = code.split("\n");
+	let braceDepth = 0;
+	let parenDepth = 0;
+
+	for (const rawLine of lines) {
+		const trimmed = rawLine.trimStart();
+
+		// Skip empty lines and comments
+		if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/*")) continue;
+
+		// Track scope depth (braces not inside parens are real scope changes)
+		for (const ch of rawLine) {
+			if (ch === "(" || ch === "[") parenDepth++;
+			if (ch === ")" || ch === "]") parenDepth--;
+			if (parenDepth <= 0) {
+				if (ch === "{") braceDepth++;
+				if (ch === "}") braceDepth--;
+			}
+		}
+
+		// Only match at IIFE body level (depth 0-1)
+		if (braceDepth > 1) continue;
+
+		// Match: const/let/var name = (not for...of/in)
+		const m = trimmed.match(/^(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/);
+		if (!m) continue;
+		if (trimmed.includes(" of ") || trimmed.includes(" in ")) continue;
+
+		// Skip destructuring: const { ... } = or const [ ... ] =
+		const eqIdx = trimmed.indexOf("=");
+		const afterEq = trimmed.slice(eqIdx + 1).trimStart();
+		if (afterEq.startsWith("{") || afterEq.startsWith("[")) continue;
+
+		names.push(m[1]);
+	}
+
+	return [...new Set(names)];
+}
+
 	// --- Layer 1: Syntax pre-validation ---
 	// Catch parse errors (Unexpected EOF, etc.) without touching the store
-	const wrapped = `(async () => {\n${code}\n})()`;
+	const autoPersistNames = extractAutoPersistNames(params.code);
+	const autoPersistSuffix = autoPersistNames.map(n => `$.${n} = typeof ${n} !== "undefined" ? ${n} : $.${n};`).join("\n");
+	const wrapped = `(async () => {\n${params.code}\n${autoPersistSuffix}\n})()`;
 	const start = Date.now();
 	try {
 		new vm.Script(wrapped, { filename: "code-mode.js" });
@@ -1760,12 +1803,23 @@ function stripForMatch(s: string): string {
 	return s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+/** Aliases for abbreviated compound tool names */
+const TOOL_ALIASES: Record<string, string> = {
+	hotseatRead: "hotseat_handbook_read",
+	hotseatUpdate: "hotseat_handbook_update",
+	hotseatHandbook: "hotseat_handbook_read",
+	initExperiment: "init_experiment",
+	runExperiment: "run_experiment",
+	logExperiment: "log_experiment",
+};
+
 function formatManPage(name: string): string {
-	const key = name.toLowerCase();
+	const resolvedName = TOOL_ALIASES[name] || name;
+	const key = resolvedName.toLowerCase();
 	// camelCase fallback: applyPatch → apply_patch, meshPeers → mesh_peers
-	const snakeCase = name.replace(/([A-Z])/g, "_$1").toLowerCase();
+	const snakeCase = resolvedName.replace(/([A-Z])/g, "_$1").toLowerCase();
 	// Strip-based fallback: gitAi → gitai matches git-ai
-	const stripped = stripForMatch(name);
+	const stripped = stripForMatch(resolvedName);
 	let ref = toolRefMap.get(key) || toolRefMap.get(name) || toolRefMap.get(snakeCase);
 	if (!ref) {
 		// Fuzzy match: strip non-alnum from both sides

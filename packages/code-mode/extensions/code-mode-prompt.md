@@ -32,6 +32,8 @@ for (const f of remaining) {
 
 Regular `const`/`let` variables are local to each code block. Only `$` persists — with no time limit, only a 50MB memory cap.
 
+Top-level `const`/`let`/`var` declarations (not inside functions/loops/if-blocks) are automatically persisted to `$` at the end of each call. So `const sm = await Read(...)` makes `$.sm` available in the next call.
+
 ### Memory Management
 
 `$` variables persist indefinitely until total memory exceeds 50MB. When the cap is hit, least-recently-used unpinned variables are evicted first. You'll see:
