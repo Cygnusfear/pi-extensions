@@ -25,6 +25,7 @@ require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
 import { getSandboxFns } from "../../shared/src/sandbox-registry";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
+import { createHighlanderExecutor } from "../../shared/src/highlander-core";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,
@@ -157,8 +158,7 @@ let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 let squashPhase: "idle" | "reviewing" = "idle";
-
-
+let currentHighlanderSessionFile: string | null = null;
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -261,6 +261,7 @@ async function executeCode(
   // --- Layer 2: Execute with fault tolerance ---
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
+  currentHighlanderSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
   const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal });
   Object.assign(sess.context, bindings);
 
@@ -725,17 +726,9 @@ export default function (pi: ExtensionAPI) {
 
   // Register highlander sandbox fn — calls pi tool if available
   {
-    let _hlExecute: ((args: any) => Promise<string>) | null = null;
-        // Eager init — import at registration time, not in the VM sandbox
-    try {
-      const _hlMod = require("../../highlander/extensions/highlander.ts");
-      const _hlDefault = _hlMod.default ?? _hlMod;
-      if (typeof _hlDefault === "function") {
-        _hlDefault({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
-      }
-    } catch (e: any) {
-      console.error("[code-mode] highlander init:", e?.message);
-    }
+    const _hlExecute = createHighlanderExecutor({
+      getCurrentSessionFile: () => currentHighlanderSessionFile,
+    });
 
     let _bm25: any = null;
     try { _bm25 = require("../../shared/src/bm25.js"); } catch {}
