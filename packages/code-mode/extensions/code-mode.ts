@@ -176,6 +176,8 @@ async function executeCode(
     setLabel?: (entryId: string, label: string | undefined) => void;
     navigateTree?: (targetId: string, options?: any) => Promise<any>;
     abort?: () => void;
+    model?: any;
+    modelRegistry?: any;
   },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
@@ -328,17 +330,63 @@ async function executeCode(
           contextSize = size;
           return "Context limited to last " + size + " messages";
         },
-        squash: () => {
+        squash: (options?: { continue?: string }) => {
           if (!toolCtx?.compact) {
             return "Error: compaction not available in this context";
           }
           if (pendingSquash) {
             // Phase 2: apply the cached compaction
+            if (options?.continue) {
+              // Store continuation prompt so it's injected after reload
+              sess.store.proxy.__squashContinue = options.continue;
+            }
             toolCtx.compact();
             return "Squash applied — compaction in progress, session will reload.";
           }
-          // Phase 1: trigger compaction (session_before_compact hook will intercept, cancel, and stash)
-          toolCtx.compact();
+          // Phase 1: generate summary in background, stash to $.preCompact
+          (async () => {
+            try {
+              const { prepareCompaction, compact: runCompact, DEFAULT_COMPACTION_SETTINGS } = await import("@mariozechner/pi-coding-agent");
+              const entries = sm.getBranch();
+              const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
+              if (!preparation) return; // nothing to compact
+
+              const model = toolCtx.model;
+              if (!model) return;
+              const auth = await toolCtx.modelRegistry?.getApiKeyAndHeaders(model);
+              if (!auth?.ok) return;
+
+              const result = await runCompact(preparation, model, auth.apiKey ?? "", auth.headers);
+
+              // Build outline from messages being summarized
+              const outline: string[] = [];
+              for (const msg of preparation.messagesToSummarize) {
+                if (typeof msg.content === "string") {
+                  outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+                } else if (Array.isArray(msg.content)) {
+                  const text = (msg.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+                  const tools = (msg.content as any[]).filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+                  if (text || tools.length) {
+                    outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+                  }
+                }
+              }
+
+              // Stash for agent review
+              sess.store.proxy.preCompact = {
+                summary: result.summary,
+                messageCount: preparation.messagesToSummarize.length,
+                outline: outline.join("\n"),
+                firstKeptEntryId: result.firstKeptEntryId,
+                tokensBefore: result.tokensBefore,
+              };
+
+              // Cache for phase 2 hook
+              pendingSquash = { result, preparation };
+            } catch (e: any) {
+              console.error("[code-mode] squash phase 1 error:", e?.message || e);
+            }
+          })();
           return "Squash phase 1 — compaction summary is being generated. Review $.preCompact on the next turn, extract anything important to $, then call session.squash() again to apply.";
         },
         load: (key: string) => {
@@ -697,18 +745,15 @@ export default function (pi: ExtensionAPI) {
       return _hlExecute;
     }
 
-    // Parse duration strings: "2h" → ms, "7d" → ms, "30m" → ms
-    function parseDuration(s: string): number {
-      const m = s.match(/^(\d+(?:\.\d+)?)(m|h|d|w)$/);
-      if (!m) return 7 * 86400000; // default 7d
-      const v = parseFloat(m[1]);
-      switch (m[2]) {
-        case "m": return v * 60000;
-        case "h": return v * 3600000;
-        case "d": return v * 86400000;
-        case "w": return v * 604800000;
-        default: return v * 86400000;
-      }
+    // Resolve duration object to ms. Shape matches Temporal.Duration.from().
+    // { minutes: 30 }, { hours: 2 }, { days: 7 }, { days: 1, hours: 12 }
+    type Duration = { minutes?: number; hours?: number; days?: number; weeks?: number };
+    function resolveDuration(d: Duration): number {
+      return (d.minutes ?? 0) * 60_000
+           + (d.hours ?? 0) * 3_600_000
+           + (d.days ?? 0) * 86_400_000
+           + (d.weeks ?? 0) * 604_800_000
+           || 7 * 86_400_000; // default 7d
     }
 
     // Parse timestamp from entry label like "3:03:12 PM tool result"
@@ -736,9 +781,9 @@ export default function (pi: ExtensionAPI) {
       });
       result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
 
-      result.rerank = (opts: { recency?: string }) => {
+      result.rerank = (opts: { recency?: Duration }) => {
         const now = Date.now();
-        const halfLife = opts.recency ? parseDuration(opts.recency) : 7 * 86400000;
+        const halfLife = opts.recency ? resolveDuration(opts.recency as Duration) : 7 * 86_400_000;
 
         const scored = hits.map(h => {
           const ts = h.timestamp ?? now;
@@ -1058,6 +1103,8 @@ export default function (pi: ExtensionAPI) {
           compact: (ctx as any).compact?.bind(ctx),
           setLabel: (id: string, label: string | undefined) => pi.setLabel(id, label),
           abort: () => ctx.abort(),
+          model: (ctx as any).model,
+          modelRegistry: (ctx as any).modelRegistry,
         },
       );
 
@@ -1173,70 +1220,23 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Two-phase squash: intercept compaction to let agent review before applying
+  // Two-phase squash: serve cached compaction result on phase 2
   pi.on("session_before_compact", async (event, ctx) => {
     if (pendingSquash) {
-      // Phase 2: apply the cached compaction result (no re-summarization)
-      const result = pendingSquash;
+      // Phase 2: return the pre-generated summary (no re-summarization)
+      const cached = pendingSquash;
       pendingSquash = null;
       return {
         compaction: {
-          summary: result.result.summary,
-          firstKeptEntryId: result.result.firstKeptEntryId,
-          tokensBefore: result.result.tokensBefore,
-          details: result.result.details,
+          summary: cached.result.summary,
+          firstKeptEntryId: cached.result.firstKeptEntryId,
+          tokensBefore: cached.result.tokensBefore,
+          details: cached.result.details,
         },
       };
     }
-
-    // Phase 1: generate summary, stash for review, cancel the compaction
-    const { preparation, signal } = event;
-    try {
-      const { compact: runCompact } = await import("@mariozechner/pi-coding-agent");
-      const model = ctx.model;
-      if (!model) throw new Error("No model available for summarization");
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-      if (!auth.ok) throw new Error("Failed to resolve API key for model");
-      const apiKey = auth.apiKey ?? "";
-      const headers = auth.headers;
-
-      // Generate the summary using pi's compact function
-      const result = await runCompact(preparation, model, apiKey, headers, event.customInstructions, signal);
-
-      // Serialize messages for the outline
-      const outline: string[] = [];
-      for (const msg of preparation.messagesToSummarize) {
-        if (typeof msg.content === "string") {
-          outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
-        } else if (Array.isArray(msg.content)) {
-          const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-          const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
-          if (text || tools.length) {
-            outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
-          }
-        }
-      }
-
-      // Stash into $ for agent review
-      const sess = getSession();
-      sess.store.proxy.preCompact = {
-        summary: result.summary,
-        messageCount: preparation.messagesToSummarize.length,
-        outline: outline.join("\n"),
-        firstKeptEntryId: result.firstKeptEntryId,
-        tokensBefore: result.tokensBefore,
-      };
-
-      // Cache the result for phase 2
-      pendingSquash = { result, preparation };
-
-      // Cancel the compaction — agent reviews first
-      return { cancel: true };
-    } catch (e: any) {
-      // Log the error and fall through to normal compaction
-      console.error("[code-mode] Two-phase squash error:", e?.message || e, e?.stack?.split("\n").slice(0, 3).join("\n"));
-      return undefined;
-    }
+    // Not a two-phase squash — let pi handle normally
+    return undefined;
   });
 
   // Deferred context checkout — navigate after the current turn completes
