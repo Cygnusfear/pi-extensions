@@ -157,7 +157,7 @@ let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 let squashPhase: "idle" | "reviewing" = "idle";
-let squashContinueText: string | null = null;
+
 
 
 function getSession(): PersistentSession {
@@ -339,7 +339,9 @@ async function executeCode(
           if (squashPhase === "reviewing") {
             // Phase 2: agent has reviewed, apply compaction
             squashPhase = "idle";
-            squashContinueText = options?.continue ?? null;
+            if (options?.continue) {
+              sess.store.proxy.squashContinue = options.continue;
+            }
             toolCtx.compact();
             return "Squash applied — compaction in progress, session will reload.";
           }
@@ -702,7 +704,7 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 
 export default function (pi: ExtensionAPI) {
   // Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
-  pi.on("session_start", () => {
+  pi.on("session_start", (event) => {
     const all = pi.getAllTools();
     const allowed = all
       .filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
@@ -712,6 +714,20 @@ export default function (pi: ExtensionAPI) {
     // Extend tool reference with all registered extension tools
     extendWithAllTools(pi);
     rebuildCachedReference();
+
+    // After compaction reload, inject continuation message if pending
+    if (event.reason === "reload") {
+      const sess = getSession();
+      const continueText = sess.store.proxy.squashContinue;
+      if (continueText) {
+        delete sess.store.proxy.squashContinue;
+        sm.appendMessage({
+          role: "user",
+          content: continueText,
+          timestamp: Date.now(),
+        });
+      }
+    }
   });
 
   // Register highlander sandbox fn — calls pi tool if available
@@ -1187,15 +1203,7 @@ export default function (pi: ExtensionAPI) {
         ...existing,
         summary: event.compactionEntry.summary,
       };
-      // Inject continuation message so agent auto-resumes after reload
-      if (squashContinueText) {
-        sm.appendMessage({
-          role: "user",
-          content: squashContinueText,
-          timestamp: Date.now(),
-        });
-        squashContinueText = null;
-      }
+
     } catch (e: any) {
       console.error("[code-mode] preCompact summary error:", e?.message || e);
     }
