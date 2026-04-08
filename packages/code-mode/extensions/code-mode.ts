@@ -729,13 +729,18 @@ export default function (pi: ExtensionAPI) {
           const continueText = fs.readFileSync(continueFile, "utf-8");
           fs.unlinkSync(continueFile);
           if (continueText) {
+            const logFile = path.join(require("os").tmpdir(), "pi-squash-debug.log");
+            fs.appendFileSync(logFile, new Date().toISOString() + " found continue text, scheduling sendUserMessage\n");
             setTimeout(() => {
               try {
+                fs.appendFileSync(logFile, new Date().toISOString() + " calling pi.sendUserMessage...\n");
+                fs.appendFileSync(logFile, "  typeof pi.sendUserMessage = " + typeof pi.sendUserMessage + "\n");
                 pi.sendUserMessage(continueText);
+                fs.appendFileSync(logFile, new Date().toISOString() + " sendUserMessage called OK\n");
               } catch (e: any) {
-                console.error("[code-mode] squash continue error:", e?.message || e);
+                fs.appendFileSync(logFile, new Date().toISOString() + " sendUserMessage ERROR: " + (e?.message || e) + "\n" + (e?.stack || "") + "\n");
               }
-            }, 1000);
+            }, 2000);
           }
         }
       } catch (e: any) {
@@ -840,7 +845,7 @@ export default function (pi: ExtensionAPI) {
             } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) { cur.text += (cur.text ? " " : "") + line.trim(); cur.rawBlock += "\n" + line; }
           }
           if (cur) hits.push(cur);
-          for (const h of hits) { h.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 5; const e = await hlInit(); if (!e) return "N/A"; return e({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx }); }; h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
+          for (const h of hits) { h.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 5; if (!_hlExecute) return "N/A"; return _hlExecute({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx }); }; h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
         }
         if (action === "search") {
           const blocks = raw.split("━━━").filter(Boolean);
@@ -849,8 +854,8 @@ export default function (pi: ExtensionAPI) {
             const idMatch = header.match(/([a-f0-9]{8})/); const scoreMatch = header.match(/\[(\d+\.?\d*)\]/); const nameMatch = header.match(/\]\s+(.+?)\s*·/); const isoMatch = header.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
             if (idMatch) {
               const entry: any = { session: idMatch[1], score: scoreMatch ? parseFloat(scoreMatch[1]) : 0, name: nameMatch?.[1]?.trim() ?? "", text: content.trim(), rawBlock, timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : Date.now() };
-              entry.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 10; const e = await hlInit(); if (!e) return "N/A"; return e({ action: "view", session: entry.session, start: -ctx, end: 0 }); };
-              entry.grep = async (query: string, limit?: number) => { const e = await hlInit(); if (!e) return "N/A"; return e({ action: "grep", session: entry.session, query, limit: limit ?? 10 }); };
+              entry.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 10; if (!_hlExecute) return "N/A"; return _hlExecute({ action: "view", session: entry.session, start: -ctx, end: 0 }); };
+              entry.grep = async (query: string, limit?: number) => { if (!_hlExecute) return "N/A"; return _hlExecute({ action: "grep", session: entry.session, query, limit: limit ?? 10 }); };
               entry.toString = () => rawBlock;
               hits.push(entry);
             }
