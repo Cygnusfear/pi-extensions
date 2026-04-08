@@ -705,6 +705,11 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 export default function (pi: ExtensionAPI) {
   // Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
   pi.on("session_start", (event) => {
+    // DEBUG: log session_start reason
+    try {
+      const fs = require("fs");
+      fs.appendFileSync("/tmp/pi-session-start.log", new Date().toISOString() + " reason=" + event.reason + "\n");
+    } catch {}
     const all = pi.getAllTools();
     const allowed = all
       .filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
@@ -721,11 +726,14 @@ export default function (pi: ExtensionAPI) {
       const continueText = sess.store.proxy.squashContinue;
       if (continueText) {
         delete sess.store.proxy.squashContinue;
-        sm.appendMessage({
-          role: "user",
-          content: continueText,
-          timestamp: Date.now(),
-        });
+        // Defer so the UI loop is ready to accept input
+        setTimeout(() => {
+          try {
+            pi.sendUserMessage(continueText);
+          } catch (e: any) {
+            console.error("[code-mode] squash continue error:", e?.message || e);
+          }
+        }, 500);
       }
     }
   });
@@ -774,9 +782,10 @@ export default function (pi: ExtensionAPI) {
       r[Symbol.for("nodejs.util.inspect.custom")] = () => rawText;
       r.text = () => rawText;
       r.json = () => hits.map((h: any) => { const { expand, grep, rerank, limit, toString, ...rest } = h; return rest; });
-      r.limit = (n: number) => { const s = hits.slice(0, n); return enrichPipeHits(s, s.map((h: any) => h.toString()).join("\n")); };
-      r.rerank = (opts: { recency?: Duration }) => {
-        const now = Date.now(); const hl = opts.recency ? resolveDuration(opts.recency) : 7 * 86_400_000;
+      r.limit = (n: number) => { const s = hits.slice(0, Math.max(0, n)); return enrichPipeHits(s, s.map((h: any) => h.toString()).join("\n")); };
+      r.rerank = (opts?: { recency?: Duration }) => {
+        if (!opts) opts = {};
+        const now = Date.now(); const hl = Math.max(1, opts.recency ? resolveDuration(opts.recency) : 7 * 86_400_000);
         const scored = hits.map((h: any) => { const ts = h.timestamp ?? now; const decay = Math.exp(-Math.max(0, now - ts) * Math.LN2 / hl); return { ...h, score: (h.score ?? 1) * decay, originalScore: h.score, recencyWeight: decay }; });
         scored.sort((a: any, b: any) => b.score - a.score);
         const raw = scored.map((h: any) => { const age = h.timestamp ? " · " + relativeAge(Date.now() - h.timestamp) : ""; return h.rawBlock ? h.rawBlock.replace(/━━━\s*$/, age + " ━━━") : h.toString(); }).join("\n\n");
@@ -787,11 +796,12 @@ export default function (pi: ExtensionAPI) {
 
     async function hlPipe(data: any[], shape: any, query: string) {
       const bm25 = await getBm25();
-      const preset = typeof shape === "string" ? HL_PRESETS[shape] : (shape._preset ? HL_PRESETS[shape._preset] : shape);
+      const preset = !shape ? { fields: { text: 1 } } : typeof shape === "string" ? (HL_PRESETS[shape] ?? { fields: { text: 1 } }) : (shape._preset ? HL_PRESETS[shape._preset] : shape);
       const fields = preset?.fields ?? shape?.fields ?? { text: 1 };
       const extract = preset?.extract ?? ((item: any) => { const doc: any = {}; for (const k of Object.keys(fields)) doc[k] = typeof item === "string" ? item : String(item[k] ?? ""); return doc; });
       const docs = data.map((item: any, i: number) => ({ id: String(i), fields: extract(item, i) }));
       const index = bm25.buildBm25Index(docs, fields);
+      if (typeof query !== "string" || !query.trim()) return enrichPipeHits([], "");
       const results = bm25.searchBm25(index, query, data.length);
       const hits = results.map((r: any) => {
         const i = parseInt(r.id); const item = data[i]; const extracted = extract(item, i);
@@ -841,14 +851,16 @@ export default function (pi: ExtensionAPI) {
           }
         }
         if (hits.length > 0) return enrichPipeHits(hits, raw);
-        return raw;
-      }
-      return (await exec(params)) ?? "";
+        }
+        // view/list — raw string
+        return (await exec(params)) ?? "";
     }
 
     const hlFn = async (...args: any[]) => {
       try {
-        if (Array.isArray(args[0])) return hlPipe(args[0], args[1], args[2]);
+        if (!args.length || args[0] == null) return enrichPipeHits([], "No input provided");
+        if (Array.isArray(args[0])) return hlPipe(args[0], args[1] ?? { fields: { text: 1 } }, String(args[2] ?? ""));
+        if (typeof args[0] !== "object") return enrichPipeHits([], "Expected array or { action, query } object");
         return hlSession(args[0] as Record<string, unknown>);
       } catch (e: any) { return "Highlander error: " + e.message; }
     };
