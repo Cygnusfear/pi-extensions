@@ -794,7 +794,6 @@ export default function (pi: ExtensionAPI) {
 
         scored.sort((a: any, b: any) => b.score - a.score);
 
-        // Format with relative time
         function relativeAge(ms: number): string {
           const mins = Math.floor(ms / 60000);
           if (mins < 60) return mins + "m ago";
@@ -804,13 +803,18 @@ export default function (pi: ExtensionAPI) {
           return days + "d ago";
         }
         const rerankedRaw = scored.map((h: any) => {
-          const age = h.timestamp ? relativeAge(now - h.timestamp) : "";
-          if (h.index !== undefined) {
-            const ts = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : "";
-            const text = (h.text || "").slice(0, 200);
-            return `[#${h.index}] ${ts} ${h.label} · ${age}\n  ${text}`;
+          const age = h.timestamp ? " · " + relativeAge(now - h.timestamp) : "";
+          // Use the original formatted block, just inject relative time
+          if (h.rawBlock) {
+            // For search results: inject age after the session ID in the ━━━ header
+            return h.rawBlock.replace(/━━━\s*$/, age + " ━━━");
           }
-          return `━━━ ${h.name || h.session} · ${age} · ${h.session} ━━━\n  score: ${h.originalScore?.toFixed(2) ?? "?"} × ${h.recencyWeight?.toFixed(3) ?? "?"} = ${h.score.toFixed(2)}`;
+          // Fallback
+          const text = (h.text || "").slice(0, 200);
+          if (h.index !== undefined) {
+            return `[#${h.index}] ${h.label}${age}\n  ${text}`;
+          }
+          return `${h.name || h.session}${age}\n  ${text}`;
         }).join("\n\n");
 
         // Preserve expand/grep on each hit
@@ -856,12 +860,14 @@ export default function (pi: ExtensionAPI) {
                   index: parseInt(m[1]),
                   label,
                   text: "",
+                  rawBlock: line,
                   session: sessionId,
                   timestamp: parseEntryTimestamp(label) ?? Date.now(),
                   expand: null as any,
                 };
               } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) {
                 cur.text += (cur.text ? " " : "") + line.trim();
+                cur.rawBlock += (cur.rawBlock ? "\n" : "") + line;
               }
             }
             if (cur) hits.push(cur);
