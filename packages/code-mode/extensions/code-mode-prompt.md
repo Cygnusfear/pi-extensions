@@ -203,7 +203,16 @@ hits.rerank({ recency: { hours: 6 } }) // boost recent
 hits.limit(3)                            // top 3
 hits.text()                              // formatted string
 hits.json()                              // plain JSON
-// Drill down:
+// Drill down with explicit calls:
 // highlander({ action: "view", session: hits[0].session, start: -5, end: 0 })
 // highlander({ action: "grep", session: hits[0].session, query: "term" })
+```
+
+**Pipe mode:** BM25-search any array. First arg is array → pipe mode; object → session mode.
+
+```javascript
+const hits = await highlander(tickets, highlander.tickets, "ghost debris");
+const hits = await highlander(messages, highlander.session, "architecture decision");
+const hits = await highlander(data, { fields: { title: 3, body: 1 } }, "query");
+// Shapes: highlander.tickets, .session, .code, .docs, .logs, .lines
 ```

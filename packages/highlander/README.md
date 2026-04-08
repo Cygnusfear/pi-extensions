@@ -30,7 +30,7 @@ const hits = await highlander({ action: "grep", session: "0fe1623e", query: "con
 ```
 Returns matching entry numbers for drill-down.
 
-Pass ad-hoc entries to BM25-search arbitrary text:
+Or pass ad-hoc entries to search any text:
 ```javascript
 const msgs = session.messages();
 const hits = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
