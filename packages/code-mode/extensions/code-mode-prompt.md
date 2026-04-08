@@ -146,67 +146,74 @@ const ctx = session.load("ctx");       // restore after reload
 
 ### Context Management
 
-Your conversation context is finite. When it fills up, model quality degrades ("context rot"). You have tools to manage this:
+Your conversation context is finite. When it fills up, model quality degrades ("context rot"). You have tools to manage this.
 
-**1. Tag your work** — `contextTag` creates bookmarks at stable points:
+**The lifecycle:** tag → work → squash → continue. Squash proactively during long sessions, not just at warning thresholds.
+
+#### When to squash
+
+Don't wait for warning emojis. Squash at natural boundaries:
+- **Finished a research phase** — read 10 files, understood the architecture, ready to implement
+- **Completed a milestone** — feature works, tests pass, about to start next feature
+- **After a complex debugging session** — found root cause, fix applied, ready to move on
+- **Context feels heavy** — you're re-reading old messages to remember what you decided
+
+#### How to squash well
+
+The LLM summary captures WHAT happened. It WILL MISS the why, the dead ends, the "almost worked" attempts, and the implicit understanding you've built. That's what `$` is for.
+
+**Bad `$.ctx` — shallow metadata (loses everything that matters):**
 ```javascript
-contextTag({ name: "auth-jwt-start" });
-// ... do work ...
-contextTag({ name: "auth-jwt-done" });
+$.ctx = { goal: "fix auth", files: ["auth.ts"], progress: "50%" };
 ```
 
-**2. View your history** — `contextLog` shows the session graph with usage stats:
+**Good `$.ctx` — thick narrative with gotchas:**
 ```javascript
-contextLog({ limit: 30 });
+$.ctx = `AUTH REFACTOR — mid-stream
+Goal: Replace session cookies with JWT + refresh token rotation
+Done: JWT signing works (HS256, secret from env.JWT_SECRET), login/logout endpoints updated
+In progress: Refresh token rotation — store hashed tokens in DB, not plain text. See src/auth.ts:142
+Gotchas:
+  - refreshTokens table uses token_hash not token — wasted 20 min debugging this
+  - Old session cookie middleware still runs on /health — DO NOT remove, load balancer needs it
+  - User model has no .tokenVersion field yet — need migration before deploying
+Dead ends: cookie approach (mobile clients can't do cookies), plain tokens in Redis (security rejected)
+Next: Write refresh token rotation logic at src/auth.ts:142, then DB migration for tokenVersion`;
 ```
 
-**3. Squash old context** — `session.squash()` is a two-phase compaction:
+#### The two-phase squash
 
-**Phase 1** — Call `session.squash()`. It builds an outline of all messages
-and stashes it in `$.preCompact` (with outline and message count).
-The compaction is NOT applied yet — you get to review first.
+**Phase 1** — `session.squash()` builds an outline and stashes it in `$.preCompact`. No compaction happens yet.
 
-**Phase 2** — Review `$.preCompact.outline`, extract anything the summary might miss
-into `$` vars (gotchas, specific line numbers, error details, decisions).
-Then call `session.squash()` again to apply the compaction.
+**Phase 2** — You review what might be lost, write thick context to `$`, then `session.squash({ continue: "..." })` applies compaction and auto-continues with your message.
 
 ```javascript
-// Phase 1 — generate summary, stash for review
+// Phase 1 — generate outline
 session.squash();
 
-// ... next turn: review what's about to be lost ...
-console.log($.preCompact.summary);    // the draft summary
-console.log($.preCompact.outline);    // condensed message list
-// extract anything the summary missed:
-$.gotchas = "token must be invalidated BEFORE reissue — race condition at line 45";
-$.fileNotes = { "src/auth.ts": "refreshToken() has the fix, pool size=50" };
+// Next turn: review and preserve
+console.log($.preCompact.messageCount);  // how many messages will be summarized
+// Write thick context NOW — this is your only chance
+$.ctx = "AUTH REFACTOR mid-stream... (thick narrative with gotchas, dead ends, next steps)";
 
-// Phase 2 — apply compaction (uses cached summary, no re-summarization)
-session.squash({ continue: "Compaction done. Continue with the auth refactor — next step is adding refresh token rotation." });
+// Phase 2 — apply compaction + auto-continue
+session.squash({ continue: "Squash done. Continue implementing refresh token rotation at src/auth.ts:142." });
 ```
 
-**4. Checkout / branch** — `contextCheckout` navigates to a tag with a summary:
-```javascript
-// Research done — squash the exploration into a summary
-contextTag({ name: "timeout-research-start" });
-// ... read 5 log files, find root cause ...
-contextCheckout({
-  target: "timeout-research-start",
-  message: "Root cause: DB connection pool exhaustion. Fix: increase pool size to 50. Next: implement fix.",
-  backupTag: "timeout-research-raw"  // save raw history just in case
-});
-```
+The `continue` message is injected as a user message after compaction, so you automatically pick up where you left off. Write it like a handoff note to your future self.
 
-**When to act:**
-- See 📊 (≥30%): tag your current position, start being mindful
-- See 🙈 (≥40%): distill important state into `$` vars and `session.save()`
-- See 🚨 (≥70%): call `session.squash()` to compact, or `contextCheckout` to squash a segment
-- See 💀 (≥90%): `session.squash()` NOW or you will lose context
+#### Quick tools
 
-**What to preserve in `$` before squashing:**
-- Current goal, progress, remaining tasks
-- Key file locations, extracted data, error states
-- Decisions made and why
+**Tag bookmarks:** `contextTag({ name: "before-refactor" })`
+**View history:** `contextLog({ limit: 30 })`
+**Branch/squash segment:** `contextCheckout({ target: "before-refactor", message: "Refactor done. Next: write tests." })`
+
+#### Warning thresholds
+
+- 📊 ≥30%: tag your position, start being mindful
+- 🙈 ≥40%: write thick `$` vars, prepare to squash
+- 🚨 ≥70%: `session.squash()` now
+- 💀 ≥90%: `session.squash()` IMMEDIATELY — you are about to lose context
 
 Some tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
 

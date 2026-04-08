@@ -18,7 +18,7 @@ Instant model switching with slash commands. Zero maintenance — always resolve
 | `/haiku` | Anthropic | Latest `claude-haiku-*` | `claude-haiku-4-5` |
 | `/codex` | OpenAI Codex | Latest `gpt-*-codex` | `gpt-5.3-codex` |
 | `/gpt` | OpenAI Codex | Latest `gpt-5.*` | `gpt-5.4` |
-| `/zai` | ZAI | `glm-5` | `glm-5` |
+| `/zai` | ZAI Coding | `glm-5.1*` | `glm-5.1` |
 | `/zturbo` | ZAI | `glm-5-turbo` | `glm-5-turbo` |
 | `/z5v` | ZAI | `glm-5v*` | `glm-5v-turbo` |
 | `/z47` | ZAI | `glm-4.7` | `glm-4.7` |
