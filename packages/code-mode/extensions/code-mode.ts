@@ -697,55 +697,134 @@ export default function (pi: ExtensionAPI) {
       return _hlExecute;
     }
 
+    // Parse duration strings: "2h" → ms, "7d" → ms, "30m" → ms
+    function parseDuration(s: string): number {
+      const m = s.match(/^(\d+(?:\.\d+)?)(m|h|d|w)$/);
+      if (!m) return 7 * 86400000; // default 7d
+      const v = parseFloat(m[1]);
+      switch (m[2]) {
+        case "m": return v * 60000;
+        case "h": return v * 3600000;
+        case "d": return v * 86400000;
+        case "w": return v * 604800000;
+        default: return v * 86400000;
+      }
+    }
+
+    // Parse timestamp from entry label like "3:03:12 PM tool result"
+    function parseEntryTimestamp(label: string): number | null {
+      const m = label.match(/^(\d{1,2}:\d{2}:\d{2}\s*[AP]M)/i);
+      if (!m) return null;
+      const d = new Date();
+      const [time, ampm] = m[1].split(/\s+/);
+      const [h, min, sec] = time.split(":").map(Number);
+      let hour = h;
+      if (ampm?.toUpperCase() === "PM" && hour !== 12) hour += 12;
+      if (ampm?.toUpperCase() === "AM" && hour === 12) hour = 0;
+      d.setHours(hour, min, sec, 0);
+      return d.getTime();
+    }
+
+    // Enrich a hits array with builder methods
+    function enrichHits(hits: any[], raw: string, hlInitFn: typeof hlInit): any[] {
+      const result = hits as any;
+      result.toString = () => raw;
+      result.text = () => raw;
+      result.json = () => hits.map((h: any) => {
+        const { expand, grep, rerank, toString, ...rest } = h;
+        return rest;
+      });
+      result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
+
+      result.rerank = (opts: { recency?: string }) => {
+        const now = Date.now();
+        const halfLife = opts.recency ? parseDuration(opts.recency) : 7 * 86400000;
+
+        const scored = hits.map(h => {
+          const ts = h.timestamp ?? now;
+          const age = Math.max(0, now - ts);
+          const decay = Math.exp(-age * Math.LN2 / halfLife);
+          const baseScore = h.score ?? 1;
+          return { ...h, score: baseScore * decay, originalScore: baseScore, recencyWeight: decay };
+        });
+
+        scored.sort((a: any, b: any) => b.score - a.score);
+
+        // Re-format for display
+        const rerankedRaw = scored.map((h: any) => {
+          const ts = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : "";
+          const text = (h.text || "").slice(0, 200);
+          if (h.index !== undefined) {
+            return `[${h.score.toFixed(2)}] [#${h.index}] ${ts} ${h.label}\n  ${text}`;
+          }
+          return `[${h.score.toFixed(2)}] ${h.name || h.session} ${ts}\n  ${text}`;
+        }).join("\n\n");
+
+        // Preserve expand/grep on each hit
+        for (const h of scored) {
+          if (!h.expand) {
+            h.expand = async (o?: { context?: number }) => {
+              const ctx = o?.context ?? 5;
+              const exec = await hlInitFn();
+              if (!exec) return "Highlander not available";
+              return exec({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx });
+            };
+          }
+        }
+
+        return enrichHits(scored, rerankedRaw, hlInitFn);
+      };
+
+      return result;
+    }
+
     registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
       try {
         const exec = await hlInit();
         if (!exec) return "Highlander: init failed";
         const action = params.action as string;
 
-        // For grep/self/search — return rich objects with .expand()
+        // For grep/self/search — return rich objects with builder methods
         if (action === "grep" || action === "self" || action === "search") {
           const raw = (await exec(params)) ?? "";
-          // Parse the text output into structured hits
           const hits: any[] = [];
-          const entryPattern = /\[#(\d+)\]\s*(\S+)?\s*(.*)/g;
-          const sessionPattern = /━━━.*?([a-f0-9]{8})\s*━━━/g;
           const sessionId = (params.session as string) || "self";
 
-          // For grep/self — parse entry-level results
+          // Parse entry-level results (grep/self)
           if (action === "grep" || action === "self") {
             const lines = raw.split("\n");
-            let currentEntry: any = null;
+            let cur: any = null;
             for (const line of lines) {
-              const match = line.match(/^\[#(\d+)\]\s*(.+)/);
-              if (match) {
-                if (currentEntry) hits.push(currentEntry);
-                currentEntry = {
-                  index: parseInt(match[1]),
-                  label: match[2].trim(),
+              const m = line.match(/^\[#(\d+)\]\s*(.+)/);
+              if (m) {
+                if (cur) hits.push(cur);
+                const label = m[2].trim();
+                cur = {
+                  index: parseInt(m[1]),
+                  label,
                   text: "",
                   session: sessionId,
+                  timestamp: parseEntryTimestamp(label) ?? Date.now(),
                   expand: null as any,
                 };
-              } else if (currentEntry && line.startsWith("  ") && !line.includes("→ highlander")) {
-                currentEntry.text += (currentEntry.text ? " " : "") + line.trim();
+              } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) {
+                cur.text += (cur.text ? " " : "") + line.trim();
               }
             }
-            if (currentEntry) hits.push(currentEntry);
+            if (cur) hits.push(cur);
 
-            // Add .expand() to each hit
-            for (const hit of hits) {
-              hit.expand = async (opts?: { context?: number }) => {
-                const ctx = opts?.context ?? 5;
-                const viewExec = await hlInit();
-                if (!viewExec) return "Highlander not available";
-                return viewExec({ action: "view", session: hit.session, start: hit.index - ctx, end: hit.index + ctx });
+            for (const h of hits) {
+              h.expand = async (o?: { context?: number }) => {
+                const ctx = o?.context ?? 5;
+                const e = await hlInit();
+                if (!e) return "Highlander not available";
+                return e({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx });
               };
-              hit.toString = () => `[#${hit.index}] ${hit.label}\n  ${hit.text.slice(0, 200)}`;
+              h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`;
             }
           }
 
-          // For search — parse session-level results
+          // Parse session-level results (search)
           if (action === "search") {
             const blocks = raw.split("━━━").filter(Boolean);
             for (let i = 0; i < blocks.length - 1; i += 2) {
@@ -753,24 +832,27 @@ export default function (pi: ExtensionAPI) {
               const idMatch = header.match(/([a-f0-9]{8})\s/);
               const scoreMatch = blocks[i].match(/\[([\d.]+)\]/);
               const nameMatch = header.match(/^\s*(.+?)\s*·/);
+              const dateMatch = header.match(/·\s*(\d+\/\d+\/\d+)\s*·/);
               if (idMatch) {
                 const entry: any = {
                   session: idMatch[1],
                   score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
                   name: nameMatch?.[1]?.trim() ?? "",
                   text: header.trim(),
+                  timestamp: dateMatch ? new Date(dateMatch[1]).getTime() : Date.now(),
                   expand: null as any,
+                  grep: null as any,
                 };
-                entry.expand = async (opts?: { context?: number }) => {
-                  const ctx = opts?.context ?? 10;
-                  const viewExec = await hlInit();
-                  if (!viewExec) return "Highlander not available";
-                  return viewExec({ action: "view", session: entry.session, start: -ctx, end: 0 });
+                entry.expand = async (o?: { context?: number }) => {
+                  const ctx = o?.context ?? 10;
+                  const e = await hlInit();
+                  if (!e) return "Highlander not available";
+                  return e({ action: "view", session: entry.session, start: -ctx, end: 0 });
                 };
                 entry.grep = async (query: string, limit?: number) => {
-                  const gExec = await hlInit();
-                  if (!gExec) return "Highlander not available";
-                  return gExec({ action: "grep", session: entry.session, query, limit: limit ?? 10 });
+                  const e = await hlInit();
+                  if (!e) return "Highlander not available";
+                  return e({ action: "grep", session: entry.session, query, limit: limit ?? 10 });
                 };
                 entry.toString = () => `[${entry.score.toFixed(2)}] ${entry.name} · ${entry.session}`;
                 hits.push(entry);
@@ -778,23 +860,11 @@ export default function (pi: ExtensionAPI) {
             }
           }
 
-          // If we got structured hits, return them as an array with a nice toString
-          if (hits.length > 0) {
-            const result = hits as any;
-            result.toString = () => raw;
-            result.text = () => raw;
-            result.json = () => hits.map((h: any) => {
-              const { expand, grep, toString, ...rest } = h;
-              return rest;
-            });
-            result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
-            return result;
-          }
-          // Fallback: return raw string
+          if (hits.length > 0) return enrichHits(hits, raw, hlInit);
           return raw;
         }
 
-        // For view/list — return raw string
+        // view/list — raw string
         return (await exec(params)) ?? "";
       } catch (e: any) {
         return "Highlander error: " + e.message;
@@ -1122,14 +1192,16 @@ export default function (pi: ExtensionAPI) {
     // Phase 1: generate summary, stash for review, cancel the compaction
     const { preparation, signal } = event;
     try {
-      const { compact, serializeConversation, convertToLlm } = await import("@mariozechner/pi-coding-agent");
-      const model = (ctx as any).model;
-      const modelRegistry = (ctx as any).modelRegistry;
-      const apiKey = model ? modelRegistry?.resolveApiKey?.(model) ?? "" : "";
-      const headers = model?.headers;
+      const { compact: runCompact } = await import("@mariozechner/pi-coding-agent");
+      const model = ctx.model;
+      if (!model) throw new Error("No model available for summarization");
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) throw new Error("Failed to resolve API key for model");
+      const apiKey = auth.apiKey ?? "";
+      const headers = auth.headers;
 
-      // Generate the summary
-      const result = await compact(preparation, model, apiKey, headers, undefined, signal);
+      // Generate the summary using pi's compact function
+      const result = await runCompact(preparation, model, apiKey, headers, event.customInstructions, signal);
 
       // Serialize messages for the outline
       const outline: string[] = [];
@@ -1160,8 +1232,9 @@ export default function (pi: ExtensionAPI) {
 
       // Cancel the compaction — agent reviews first
       return { cancel: true };
-    } catch (e) {
-      // If summary generation fails, just let normal compaction proceed
+    } catch (e: any) {
+      // Log the error and fall through to normal compaction
+      console.error("[code-mode] Two-phase squash error:", e?.message || e, e?.stack?.split("\n").slice(0, 3).join("\n"));
       return undefined;
     }
   });
