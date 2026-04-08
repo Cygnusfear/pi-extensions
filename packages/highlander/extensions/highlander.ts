@@ -194,7 +194,7 @@ function doSearch(args: { query: string; project?: string; since?: string; limit
 		const info = sessionMap.get(hit.id);
 		if (!info) continue;
 		const date = new Date(info.created).toLocaleDateString();
-		lines.push(`━━━ [${hit.score.toFixed(2)}] ${info.name || "CWD"} · ${date} · ${info.messageCount} msgs · ${info.id.slice(0, 8)} ━━━`);
+		lines.push(`━━━ [${hit.score.toFixed(2)}] ${info.name || "CWD"} · ${date} · ${info.messageCount} msgs · ${info.id.slice(0, 8)} · ${info.modified} ━━━`);
 		lines.push(`  cwd: ${info.cwd.replace(os.homedir(), "~")}`);
 		for (const snip of extractSnippets(info.allMessagesText || "", queryTerms, 2, 100))
 			lines.push(`  > ${snip}`);

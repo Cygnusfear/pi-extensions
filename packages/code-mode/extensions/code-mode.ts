@@ -794,14 +794,23 @@ export default function (pi: ExtensionAPI) {
 
         scored.sort((a: any, b: any) => b.score - a.score);
 
-        // Re-format for display
+        // Format with relative time
+        function relativeAge(ms: number): string {
+          const mins = Math.floor(ms / 60000);
+          if (mins < 60) return mins + "m ago";
+          const hrs = Math.floor(mins / 60);
+          if (hrs < 24) return hrs + "h ago";
+          const days = Math.floor(hrs / 24);
+          return days + "d ago";
+        }
         const rerankedRaw = scored.map((h: any) => {
-          const ts = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : "";
-          const text = (h.text || "").slice(0, 200);
+          const age = h.timestamp ? relativeAge(now - h.timestamp) : "";
           if (h.index !== undefined) {
-            return `[${h.score.toFixed(2)}] [#${h.index}] ${ts} ${h.label}\n  ${text}`;
+            const ts = h.timestamp ? new Date(h.timestamp).toLocaleTimeString() : "";
+            const text = (h.text || "").slice(0, 200);
+            return `[#${h.index}] ${ts} ${h.label} · ${age}\n  ${text}`;
           }
-          return `[${h.score.toFixed(2)}] ${h.name || h.session} ${ts}\n  ${text}`;
+          return `━━━ ${h.name || h.session} · ${age} · ${h.session} ━━━\n  score: ${h.originalScore?.toFixed(2) ?? "?"} × ${h.recencyWeight?.toFixed(3) ?? "?"} = ${h.score.toFixed(2)}`;
         }).join("\n\n");
 
         // Preserve expand/grep on each hit
@@ -876,6 +885,7 @@ export default function (pi: ExtensionAPI) {
               const idMatch = header.match(/([a-f0-9]{8})/);
               const scoreMatch = header.match(/\[([\d.]+)\]/);
               const nameMatch = header.match(/\]\s+(.+?)\s*·/);
+              const isoMatch = header.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
               const dateMatch = header.match(/·\s*(\d+\/\d+\/\d+)\s*·/);
               if (idMatch) {
                 const entry: any = {
@@ -883,7 +893,7 @@ export default function (pi: ExtensionAPI) {
                   score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
                   name: nameMatch?.[1]?.trim() ?? "",
                   text: header.trim(),
-                  timestamp: dateMatch ? new Date(dateMatch[1]).getTime() : Date.now(),
+                  timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : dateMatch ? new Date(dateMatch[1]).getTime() : Date.now(),
                   expand: null as any,
                   grep: null as any,
                 };
@@ -1143,10 +1153,11 @@ export default function (pi: ExtensionAPI) {
       };
     },
 
-    renderCall(args: { code: string }, theme: Theme) {
+    renderCall(args: { code: string }, theme: Theme, context: { expanded: boolean }) {
       const rawLines = (args.code || "").split("\n");
-      const preview = rawLines.slice(0, CODE_PREVIEW_LINES);
-      const remaining = rawLines.length - preview.length;
+      const showAll = context.expanded;
+      const preview = showAll ? rawLines : rawLines.slice(0, CODE_PREVIEW_LINES);
+      const remaining = showAll ? 0 : rawLines.length - preview.length;
 
       // Syntax-highlight via Shiki (same instance as core-edit-ui)
       let highlighted: string[];
@@ -1165,7 +1176,10 @@ export default function (pi: ExtensionAPI) {
       let text = theme.fg("toolTitle", theme.bold("execute_code"));
       text += "\n\n" + safeLines.join("\n");
       if (remaining > 0) {
-        text += theme.fg("muted", `\n... (${remaining} more lines)`);
+        text +=
+          "\n" +
+          theme.fg("muted", `... (${remaining} more lines,`) +
+          ` ${keyHint("app.tools.expand", "to expand")})`;
       }
       return new Text(text, 0, 0);
     },
