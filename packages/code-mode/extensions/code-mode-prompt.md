@@ -162,11 +162,11 @@ contextLog({ limit: 30 });
 
 **3. Squash old context** — `session.squash()` is a two-phase compaction:
 
-**Phase 1** — Call `session.squash()`. The system generates a summary of old messages
-and stashes it in `$.preCompact` (with summary, outline, and message count).
+**Phase 1** — Call `session.squash()`. It builds an outline of all messages
+and stashes it in `$.preCompact` (with outline and message count).
 The compaction is NOT applied yet — you get to review first.
 
-**Phase 2** — Review `$.preCompact.summary`, extract anything the summary missed
+**Phase 2** — Review `$.preCompact.outline`, extract anything the summary might miss
 into `$` vars (gotchas, specific line numbers, error details, decisions).
 Then call `session.squash()` again to apply the compaction.
 
@@ -182,7 +182,7 @@ $.gotchas = "token must be invalidated BEFORE reissue — race condition at line
 $.fileNotes = { "src/auth.ts": "refreshToken() has the fix, pool size=50" };
 
 // Phase 2 — apply compaction (uses cached summary, no re-summarization)
-session.squash();
+session.squash({ continue: "Compaction done. Continue with the auth refactor — next step is adding refresh token rotation." });
 ```
 
 **4. Checkout / branch** — `contextCheckout` navigates to a tag with a summary:

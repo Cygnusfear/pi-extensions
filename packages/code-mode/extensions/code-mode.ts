@@ -156,7 +156,9 @@ let session: PersistentSession | null = null;
 let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
-let pendingSquash: { result: any; preparation: any } | null = null;
+let squashPhase: "idle" | "reviewing" = "idle";
+let squashContinueText: string | null = null;
+
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -334,17 +336,38 @@ async function executeCode(
           if (!toolCtx?.compact) {
             return "Error: compaction not available in this context";
           }
-          if (pendingSquash) {
-            // Phase 2: apply the cached compaction
+          if (squashPhase === "reviewing") {
+            // Phase 2: agent has reviewed, apply compaction
+            squashPhase = "idle";
+            squashContinueText = options?.continue ?? null;
             toolCtx.compact();
-            const contMsg = options?.continue
-              ? " Continue after reload: " + options.continue
-              : "";
-            return "Squash applied — compaction in progress, session will reload." + contMsg;
+            return "Squash applied — compaction in progress, session will reload.";
           }
-          // Phase 1: trigger compaction — hook will intercept, generate summary, cancel
-          toolCtx.compact();
-          return "Squash phase 1 — compaction summary is being generated. Review $.preCompact on the next turn, extract anything important to $, then call session.squash() again to apply.";
+          // Phase 1: build outline from current session, stash for review
+          const branch = sm.getBranch();
+          const outline: string[] = [];
+          let msgCount = 0;
+          for (const entry of branch) {
+            if (entry.type !== "message") continue;
+            const msg = (entry as any).message;
+            if (!msg) continue;
+            msgCount++;
+            if (typeof msg.content === "string") {
+              outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+            } else if (Array.isArray(msg.content)) {
+              const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+              const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+              if (text || tools.length) {
+                outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+              }
+            }
+          }
+          sess.store.proxy.preCompact = {
+            messageCount: msgCount,
+            outline: outline.join("\n"),
+          };
+          squashPhase = "reviewing";
+          return "Squash phase 1 complete — $.preCompact has an outline of " + msgCount + " messages. Review it, extract anything important to $, then call session.squash() again to apply.";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
@@ -702,201 +725,119 @@ export default function (pi: ExtensionAPI) {
       return _hlExecute;
     }
 
-    // Resolve duration object to ms. Shape matches Temporal.Duration.from().
-    // { minutes: 30 }, { hours: 2 }, { days: 7 }, { days: 1, hours: 12 }
+    let _bm25: any = null;
+    async function getBm25() {
+      if (!_bm25) _bm25 = await import("../../shared/src/bm25.js");
+      return _bm25;
+    }
+
     type Duration = { minutes?: number; hours?: number; days?: number; weeks?: number };
     function resolveDuration(d: Duration): number {
-      return (d.minutes ?? 0) * 60_000
-           + (d.hours ?? 0) * 3_600_000
-           + (d.days ?? 0) * 86_400_000
-           + (d.weeks ?? 0) * 604_800_000
-           || 7 * 86_400_000; // default 7d
+      return (d.minutes ?? 0) * 60_000 + (d.hours ?? 0) * 3_600_000 + (d.days ?? 0) * 86_400_000 + (d.weeks ?? 0) * 604_800_000 || 7 * 86_400_000;
+    }
+    function relativeAge(ms: number): string {
+      const mins = Math.floor(ms / 60000);
+      if (mins < 60) return mins + "m ago";
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + "h ago";
+      return Math.floor(hrs / 24) + "d ago";
     }
 
-    // Parse timestamp from entry label like "3:03:12 PM tool result"
-    function parseEntryTimestamp(label: string): number | null {
-      const m = label.match(/^(\d{1,2}:\d{2}:\d{2}\s*[AP]M)/i);
-      if (!m) return null;
-      const d = new Date();
-      const [time, ampm] = m[1].split(/\s+/);
-      const [h, min, sec] = time.split(":").map(Number);
-      let hour = h;
-      if (ampm?.toUpperCase() === "PM" && hour !== 12) hour += 12;
-      if (ampm?.toUpperCase() === "AM" && hour === 12) hour = 0;
-      d.setHours(hour, min, sec, 0);
-      return d.getTime();
-    }
+    const HL_PRESETS: Record<string, any> = {
+      tickets: { _preset: "tickets", fields: { title: 3, body: 1, tags: 2 }, extract: (item: any) => ({ title: item.title ?? item.name ?? (typeof item === "string" ? (item.match(/^#\s+(.+)/m)?.[1] ?? "") : ""), body: item.body ?? item.text ?? item.content ?? (typeof item === "string" ? item : ""), tags: Array.isArray(item.tags) ? item.tags.join(" ") : (item.tags ?? "") }) },
+      session: { _preset: "session", fields: { label: 1.5, text: 1 }, extract: (item: any) => ({ label: item.role ?? item.label ?? "", text: item.content ?? item.text ?? (typeof item === "string" ? item : JSON.stringify(item)) }) },
+      code: { _preset: "code", fields: { name: 4, path: 1, body: 1 }, extract: (item: any) => ({ name: item.name ?? item.function ?? "", path: item.path ?? item.file ?? "", body: item.body ?? item.text ?? item.content ?? (typeof item === "string" ? item : "") }) },
+      docs: { _preset: "docs", fields: { path: 2, body: 1 }, extract: (item: any) => ({ path: item.path ?? item.file ?? item.name ?? "", body: item.body ?? item.text ?? item.content ?? (typeof item === "string" ? item : "") }) },
+      logs: { _preset: "logs", fields: { text: 1 }, extract: (item: any) => ({ text: typeof item === "string" ? item : (item.text ?? item.message ?? JSON.stringify(item)) }) },
+      lines: { _preset: "lines", fields: { text: 1 }, extract: (item: any) => ({ text: String(item) }) },
+    };
 
-    // Enrich a hits array with builder methods
-    function enrichHits(hits: any[], raw: string, hlInitFn: typeof hlInit): any[] {
-      const result = hits as any;
-      result.toString = () => raw;
-      result.text = () => raw;
-      result.json = () => hits.map((h: any) => {
-        const { expand, grep, rerank, toString, ...rest } = h;
-        return rest;
-      });
-      result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
-
-      result.limit = (n: number) => {
-        const sliced = hits.slice(0, n);
-        const slicedRaw = sliced.map((h: any) => h.rawBlock || h.toString()).join("\n");
-        return enrichHits(sliced, slicedRaw, hlInitFn);
-      };
-
-      result.rerank = (opts: { recency?: Duration }) => {
-        const now = Date.now();
-        const halfLife = opts.recency ? resolveDuration(opts.recency as Duration) : 7 * 86_400_000;
-
-        const scored = hits.map(h => {
-          const ts = h.timestamp ?? now;
-          const age = Math.max(0, now - ts);
-          const decay = Math.exp(-age * Math.LN2 / halfLife);
-          const baseScore = h.score ?? 1;
-          return { ...h, score: baseScore * decay, originalScore: baseScore, recencyWeight: decay };
-        });
-
+    function enrichPipeHits(hits: any[], rawText: string): any {
+      const r = hits as any;
+      r.toString = () => rawText;
+      r[Symbol.for("nodejs.util.inspect.custom")] = () => rawText;
+      r.text = () => rawText;
+      r.json = () => hits.map((h: any) => { const { expand, grep, rerank, limit, toString, ...rest } = h; return rest; });
+      r.limit = (n: number) => { const s = hits.slice(0, n); return enrichPipeHits(s, s.map((h: any) => h.toString()).join("\n")); };
+      r.rerank = (opts: { recency?: Duration }) => {
+        const now = Date.now(); const hl = opts.recency ? resolveDuration(opts.recency) : 7 * 86_400_000;
+        const scored = hits.map((h: any) => { const ts = h.timestamp ?? now; const decay = Math.exp(-Math.max(0, now - ts) * Math.LN2 / hl); return { ...h, score: (h.score ?? 1) * decay, originalScore: h.score, recencyWeight: decay }; });
         scored.sort((a: any, b: any) => b.score - a.score);
-
-        function relativeAge(ms: number): string {
-          const mins = Math.floor(ms / 60000);
-          if (mins < 60) return mins + "m ago";
-          const hrs = Math.floor(mins / 60);
-          if (hrs < 24) return hrs + "h ago";
-          const days = Math.floor(hrs / 24);
-          return days + "d ago";
-        }
-        const rerankedRaw = scored.map((h: any) => {
-          const age = h.timestamp ? " · " + relativeAge(now - h.timestamp) : "";
-          // Use the original formatted block, just inject relative time
-          if (h.rawBlock) {
-            // For search results: inject age after the session ID in the ━━━ header
-            return h.rawBlock.replace(/━━━\s*$/, age + " ━━━");
-          }
-          // Fallback
-          const text = (h.text || "").slice(0, 200);
-          if (h.index !== undefined) {
-            return `[#${h.index}] ${h.label}${age}\n  ${text}`;
-          }
-          return `${h.name || h.session}${age}\n  ${text}`;
-        }).join("\n\n");
-
-        // Preserve expand/grep on each hit
-        for (const h of scored) {
-          if (!h.expand) {
-            h.expand = async (o?: { context?: number }) => {
-              const ctx = o?.context ?? 5;
-              const exec = await hlInitFn();
-              if (!exec) return "Highlander not available";
-              return exec({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx });
-            };
-          }
-        }
-
-        return enrichHits(scored, rerankedRaw, hlInitFn);
+        const raw = scored.map((h: any) => { const age = h.timestamp ? " · " + relativeAge(Date.now() - h.timestamp) : ""; return h.rawBlock ? h.rawBlock.replace(/━━━\s*$/, age + " ━━━") : h.toString(); }).join("\n\n");
+        return enrichPipeHits(scored, raw);
       };
-
-      return result;
+      return r;
     }
 
-    registerSandboxFn("highlander", async (params: Record<string, unknown>) => {
-      try {
-        const exec = await hlInit();
-        if (!exec) return "Highlander: init failed";
-        const action = params.action as string;
+    async function hlPipe(data: any[], shape: any, query: string) {
+      const bm25 = await getBm25();
+      const preset = typeof shape === "string" ? HL_PRESETS[shape] : (shape._preset ? HL_PRESETS[shape._preset] : shape);
+      const fields = preset?.fields ?? shape?.fields ?? { text: 1 };
+      const extract = preset?.extract ?? ((item: any) => { const doc: any = {}; for (const k of Object.keys(fields)) doc[k] = typeof item === "string" ? item : String(item[k] ?? ""); return doc; });
+      const docs = data.map((item: any, i: number) => ({ id: String(i), fields: extract(item, i) }));
+      const index = bm25.buildBm25Index(docs, fields);
+      const results = bm25.searchBm25(index, query, data.length);
+      const hits = results.map((r: any) => {
+        const i = parseInt(r.id); const item = data[i]; const extracted = extract(item, i);
+        const preview = Object.values(extracted).filter(Boolean).join(" | ").slice(0, 200);
+        const hit: any = { index: i, score: r.score, item, ...extracted, timestamp: item?.timestamp ? new Date(item.timestamp).getTime() : item?.modified ? new Date(item.modified).getTime() : undefined };
+        hit.toString = () => `[${r.score.toFixed(1)}] #${i} ${preview}`;
+        return hit;
+      });
+      return enrichPipeHits(hits, hits.map((h: any) => h.toString()).join("\n"));
+    }
 
-        // For grep/self/search — return rich objects with builder methods
-        if (action === "grep" || action === "self" || action === "search") {
-          const raw = (await exec(params)) ?? "";
-          const hits: any[] = [];
-          const sessionId = (params.session as string) || "self";
-
-          // Parse entry-level results (grep/self)
-          if (action === "grep" || action === "self") {
-            const lines = raw.split("\n");
-            let cur: any = null;
-            for (const line of lines) {
-              const m = line.match(/^\[#(\d+)\]\s*(.+)/);
-              if (m) {
-                if (cur) hits.push(cur);
-                const label = m[2].trim();
-                cur = {
-                  index: parseInt(m[1]),
-                  label,
-                  text: "",
-                  rawBlock: line,
-                  session: sessionId,
-                  timestamp: parseEntryTimestamp(label) ?? Date.now(),
-                  expand: null as any,
-                };
-              } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) {
-                cur.text += (cur.text ? " " : "") + line.trim();
-                cur.rawBlock += (cur.rawBlock ? "\n" : "") + line;
-              }
-            }
-            if (cur) hits.push(cur);
-
-            for (const h of hits) {
-              h.expand = async (o?: { context?: number }) => {
-                const ctx = o?.context ?? 5;
-                const e = await hlInit();
-                if (!e) return "Highlander not available";
-                return e({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx });
-              };
-              h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`;
-            }
+    async function hlSession(params: Record<string, unknown>) {
+      const exec = await hlInit();
+      if (!exec) return "Highlander: init failed";
+      const action = params.action as string;
+      if (action === "grep" || action === "self" || action === "search") {
+        const raw = (await exec(params)) ?? "";
+        const hits: any[] = []; const sessionId = (params.session as string) || "self";
+        if (action === "grep" || action === "self") {
+          const lines = raw.split("\n"); let cur: any = null;
+          for (const line of lines) {
+            const m = line.match(/^\[#(\d+)\]\s*(.+)/);
+            if (m) {
+              if (cur) hits.push(cur);
+              const label = m[2].trim();
+              const tm = label.match(/^(\d{1,2}:\d{2}:\d{2}\s*[AP]M)/i);
+              let ts = Date.now();
+              if (tm) { const d = new Date(); const [time, ampm] = tm[1].split(/\s+/); const [h, min, sec] = time.split(":").map(Number); let hour = h; if (ampm?.toUpperCase() === "PM" && hour !== 12) hour += 12; if (ampm?.toUpperCase() === "AM" && hour === 12) hour = 0; d.setHours(hour, min, sec, 0); ts = d.getTime(); }
+              cur = { index: parseInt(m[1]), label, text: "", rawBlock: line, session: sessionId, timestamp: ts, expand: null as any };
+            } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) { cur.text += (cur.text ? " " : "") + line.trim(); cur.rawBlock += "\n" + line; }
           }
-
-          // Parse session-level results (search)
-          if (action === "search") {
-            const blocks = raw.split("━━━").filter(Boolean);
-            for (let i = 1; i < blocks.length; i += 2) {
-              const header = blocks[i];
-              const content = blocks[i + 1] ?? "";
-              const rawBlock = "━━━" + header + "━━━" + content;
-              const idMatch = header.match(/([a-f0-9]{8})/);
-              const scoreMatch = header.match(/\[([\d.]+)\]/);
-              const nameMatch = header.match(/\]\s+(.+?)\s*·/);
-              const isoMatch = header.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
-              const dateMatch = header.match(/·\s*(\d+\/\d+\/\d+)\s*·/);
-              if (idMatch) {
-                const entry: any = {
-                  session: idMatch[1],
-                  score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
-                  name: nameMatch?.[1]?.trim() ?? "",
-                  text: content.trim(),
-                  rawBlock,
-                  timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : dateMatch ? new Date(dateMatch[1]).getTime() : Date.now(),
-                  expand: null as any,
-                  grep: null as any,
-                };
-                entry.expand = async (o?: { context?: number }) => {
-                  const ctx = o?.context ?? 10;
-                  const e = await hlInit();
-                  if (!e) return "Highlander not available";
-                  return e({ action: "view", session: entry.session, start: -ctx, end: 0 });
-                };
-                entry.grep = async (query: string, limit?: number) => {
-                  const e = await hlInit();
-                  if (!e) return "Highlander not available";
-                  return e({ action: "grep", session: entry.session, query, limit: limit ?? 10 });
-                };
-                entry.toString = () => `[${entry.score.toFixed(2)}] ${entry.name} · ${entry.session}`;
-                hits.push(entry);
-              }
-            }
-          }
-
-          if (hits.length > 0) return enrichHits(hits, raw, hlInit);
-          return raw;
+          if (cur) hits.push(cur);
+          for (const h of hits) { h.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 5; const e = await hlInit(); if (!e) return "N/A"; return e({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx }); }; h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
         }
-
-        // view/list — raw string
-        return (await exec(params)) ?? "";
-      } catch (e: any) {
-        return "Highlander error: " + e.message;
+        if (action === "search") {
+          const blocks = raw.split("━━━").filter(Boolean);
+          for (let i = 1; i < blocks.length; i += 2) {
+            const header = blocks[i]; const content = blocks[i + 1] ?? ""; const rawBlock = "━━━" + header + "━━━" + content;
+            const idMatch = header.match(/([a-f0-9]{8})/); const scoreMatch = header.match(/\[(\d+\.?\d*)\]/); const nameMatch = header.match(/\]\s+(.+?)\s*·/); const isoMatch = header.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
+            if (idMatch) {
+              const entry: any = { session: idMatch[1], score: scoreMatch ? parseFloat(scoreMatch[1]) : 0, name: nameMatch?.[1]?.trim() ?? "", text: content.trim(), rawBlock, timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : Date.now() };
+              entry.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 10; const e = await hlInit(); if (!e) return "N/A"; return e({ action: "view", session: entry.session, start: -ctx, end: 0 }); };
+              entry.grep = async (query: string, limit?: number) => { const e = await hlInit(); if (!e) return "N/A"; return e({ action: "grep", session: entry.session, query, limit: limit ?? 10 }); };
+              entry.toString = () => rawBlock;
+              hits.push(entry);
+            }
+          }
+        }
+        if (hits.length > 0) return enrichPipeHits(hits, raw);
+        return raw;
       }
-    });
+      return (await exec(params)) ?? "";
+    }
+
+    const hlFn = async (...args: any[]) => {
+      try {
+        if (Array.isArray(args[0])) return hlPipe(args[0], args[1], args[2]);
+        return hlSession(args[0] as Record<string, unknown>);
+      } catch (e: any) { return "Highlander error: " + e.message; }
+    };
+    for (const [name, preset] of Object.entries(HL_PRESETS)) (hlFn as any)[name] = preset;
+    registerSandboxFn("highlander", hlFn);
   }
 
   // Context window management — filter messages before LLM call
@@ -1206,35 +1147,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Two-phase squash: serve cached compaction result on phase 2
+  // Stash compaction data into $.preCompact for post-compaction review
   pi.on("session_before_compact", async (event, ctx) => {
-    if (pendingSquash) {
-      // Phase 2: return the pre-generated summary (no re-summarization)
-      const cached = pendingSquash;
-      pendingSquash = null;
-      return {
-        compaction: {
-          summary: cached.result.summary,
-          firstKeptEntryId: cached.result.firstKeptEntryId,
-          tokensBefore: cached.result.tokensBefore,
-          details: cached.result.details,
-        },
-      };
-    }
-
-    // Phase 1: generate summary, stash for agent review, cancel compaction
-    const { preparation, signal } = event;
+    const { preparation } = event;
     try {
-      const { compact: runCompact } = await import("@mariozechner/pi-coding-agent");
-      const model = ctx.model;
-      if (!model) return undefined; // no model, let pi handle normally
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-      if (!auth.ok) return undefined;
-
-      // Generate the summary
-      const result = await runCompact(preparation, model, auth.apiKey ?? "", auth.headers, event.customInstructions, signal);
-
-      // Build outline from messages being summarized
+      // Build outline of what's being compacted
       const outline: string[] = [];
       for (const msg of preparation.messagesToSummarize) {
         if (typeof msg.content === "string") {
@@ -1248,24 +1165,39 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // Stash into $ for agent review
+      // Stash outline into $ — the summary will be added by session_compact
       const sess = getSession();
       sess.store.proxy.preCompact = {
-        summary: result.summary,
         messageCount: preparation.messagesToSummarize.length,
         outline: outline.join("\n"),
-        firstKeptEntryId: result.firstKeptEntryId,
-        tokensBefore: result.tokensBefore,
       };
-
-      // Cache result for phase 2
-      pendingSquash = { result, preparation };
-
-      // Cancel — agent reviews first
-      return { cancel: true };
     } catch (e: any) {
-      console.error("[code-mode] squash phase 1 error:", e?.message || e);
-      return undefined; // fall through to normal compaction
+      console.error("[code-mode] preCompact outline error:", e?.message || e);
+    }
+    // Let compaction proceed normally
+    return undefined;
+  });
+
+  // After compaction completes, add summary to $.preCompact and inject continuation
+  pi.on("session_compact", async (event) => {
+    try {
+      const sess = getSession();
+      const existing = sess.store.proxy.preCompact || {};
+      sess.store.proxy.preCompact = {
+        ...existing,
+        summary: event.compactionEntry.summary,
+      };
+      // Inject continuation message so agent auto-resumes after reload
+      if (squashContinueText) {
+        sm.appendMessage({
+          role: "user",
+          content: squashContinueText,
+          timestamp: Date.now(),
+        });
+        squashContinueText = null;
+      }
+    } catch (e: any) {
+      console.error("[code-mode] preCompact summary error:", e?.message || e);
     }
   });
 

@@ -553,10 +553,13 @@ declare const session: {
    * the cached compaction. This lets you review what's being lost and extract
    * critical details to $ before the old messages are replaced by the summary.
    *
-   * Phase 1: session.squash() → $.preCompact = { summary, outline, messageCount }
+   * Phase 1: session.squash() → $.preCompact = { outline, messageCount }
    * Phase 2: review $.preCompact, save important stuff to $, then session.squash() again
+   *
+   * Pass { continue: "..." } in phase 2 to inject a follow-up message after reload,
+   * so the agent auto-resumes without waiting for user input.
    */
-  squash(): string;
+  squash(options?: { continue?: string }): string;
 };
 
 // =====================================================================
