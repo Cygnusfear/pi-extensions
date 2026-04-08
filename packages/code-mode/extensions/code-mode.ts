@@ -345,7 +345,8 @@ async function executeCode(
           // Phase 1: generate summary in background, stash to $.preCompact
           (async () => {
             try {
-              const { prepareCompaction, compact: runCompact, DEFAULT_COMPACTION_SETTINGS } = await import("@mariozechner/pi-coding-agent");
+              const { compact: runCompact, DEFAULT_COMPACTION_SETTINGS } = await import("@mariozechner/pi-coding-agent");
+              const { prepareCompaction } = await import("@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js");
               const entries = sm.getBranch();
               const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
               if (!preparation) return; // nothing to compact
@@ -888,6 +889,8 @@ export default function (pi: ExtensionAPI) {
             const blocks = raw.split("━━━").filter(Boolean);
             for (let i = 1; i < blocks.length; i += 2) {
               const header = blocks[i];
+              const content = blocks[i + 1] ?? "";
+              const rawBlock = "━━━" + header + "━━━" + content;
               const idMatch = header.match(/([a-f0-9]{8})/);
               const scoreMatch = header.match(/\[([\d.]+)\]/);
               const nameMatch = header.match(/\]\s+(.+?)\s*·/);
@@ -898,7 +901,8 @@ export default function (pi: ExtensionAPI) {
                   session: idMatch[1],
                   score: scoreMatch ? parseFloat(scoreMatch[1]) : 0,
                   name: nameMatch?.[1]?.trim() ?? "",
-                  text: header.trim(),
+                  text: content.trim(),
+                  rawBlock,
                   timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : dateMatch ? new Date(dateMatch[1]).getTime() : Date.now(),
                   expand: null as any,
                   grep: null as any,
