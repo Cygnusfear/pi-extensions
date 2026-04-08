@@ -340,7 +340,10 @@ async function executeCode(
             // Phase 2: agent has reviewed, apply compaction
             squashPhase = "idle";
             if (options?.continue) {
-              sess.store.proxy.squashContinue = options.continue;
+              const fs = require("fs");
+              const path = require("path");
+              const continueFile = path.join(require("os").tmpdir(), "pi-squash-continue-" + sm.getSessionId() + ".txt");
+              fs.writeFileSync(continueFile, options.continue, "utf-8");
             }
             toolCtx.compact();
             return "Squash applied — compaction in progress, session will reload.";
@@ -705,11 +708,7 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 export default function (pi: ExtensionAPI) {
   // Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
   pi.on("session_start", (event) => {
-    // DEBUG: log session_start reason
-    try {
-      const fs = require("fs");
-      fs.appendFileSync("/tmp/pi-session-start.log", new Date().toISOString() + " reason=" + event.reason + "\n");
-    } catch {}
+
     const all = pi.getAllTools();
     const allowed = all
       .filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
@@ -721,19 +720,26 @@ export default function (pi: ExtensionAPI) {
     rebuildCachedReference();
 
     // After compaction reload, inject continuation message if pending
-    if (event.reason === "reload") {
-      const sess = getSession();
-      const continueText = sess.store.proxy.squashContinue;
-      if (continueText) {
-        delete sess.store.proxy.squashContinue;
-        // Defer so the UI loop is ready to accept input
-        setTimeout(() => {
-          try {
-            pi.sendUserMessage(continueText);
-          } catch (e: any) {
-            console.error("[code-mode] squash continue error:", e?.message || e);
+    if (event.reason === "reload" || event.reason === "startup") {
+      try {
+        const fs = require("fs");
+        const path = require("path");
+        const continueFile = path.join(require("os").tmpdir(), "pi-squash-continue-" + sm.getSessionId() + ".txt");
+        if (fs.existsSync(continueFile)) {
+          const continueText = fs.readFileSync(continueFile, "utf-8");
+          fs.unlinkSync(continueFile);
+          if (continueText) {
+            setTimeout(() => {
+              try {
+                pi.sendUserMessage(continueText);
+              } catch (e: any) {
+                console.error("[code-mode] squash continue error:", e?.message || e);
+              }
+            }, 1000);
           }
-        }, 500);
+        }
+      } catch (e: any) {
+        console.error("[code-mode] squash continue file error:", e?.message || e);
       }
     }
   });
@@ -850,7 +856,7 @@ export default function (pi: ExtensionAPI) {
             }
           }
         }
-        if (hits.length > 0) return enrichPipeHits(hits, raw);
+        return enrichPipeHits(hits, raw);
         }
         // view/list — raw string
         return (await exec(params)) ?? "";
