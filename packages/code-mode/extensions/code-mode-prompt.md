@@ -245,8 +245,11 @@ const r5 = await highlander({ action: "grep", entries: msgs, query: "worker life
 
 ```javascript
 const hits = await highlander({ action: "self", query: "teams lifecycle" });
-hits.text()                          // raw formatted string
-hits.json()                          // clean JSON (no methods)
-await hits[0].expand({ context: 5 }) // ±5 entries around this hit
-await hits[0].grep("specific term")  // grep inside that session (search results only)
+hits.rerank({ recency: { hours: 6 } }) // boost recent sessions
+hits.limit(3)                         // keep top 3
+hits.text()                           // raw formatted string
+hits.json()                           // clean JSON (no methods)
+// Drill down with explicit calls:
+// highlander({ action: "view", session: hits[0].session, start: -5, end: 0 })
+// highlander({ action: "grep", session: hits[0].session, query: "term" })
 ```

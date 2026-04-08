@@ -49,7 +49,7 @@ const sessions = await highlander({ action: "list", project: "trek", since: "202
 
 ## Chainable results
 
-`search`, `self`, and `grep` return arrays of hit objects with methods:
+`search`, `self`, and `grep` return arrays of hit objects with builder methods:
 
 ```javascript
 const hits = await highlander({ action: "self", query: "teams lifecycle", limit: 5 });
@@ -58,38 +58,51 @@ const hits = await highlander({ action: "self", query: "teams lifecycle", limit:
 console.log(hits);           // formatted text output
 console.log(hits[0]);        // single hit with index, label, text, session
 
-// Drill down
-await hits[0].expand({ context: 5 });  // ±5 entries around this hit
-await hits[0].expand({ context: 20 }); // wider context
+// Sort by recency
+hits.rerank({ recency: { hours: 6 } });  // boost recent sessions
+
+// Slice results
+hits.limit(3);               // keep top 3
 
 // Format control
 hits.text();                 // raw formatted string
 hits.json();                 // clean JSON array (no methods)
-
-// Cross-session: search results also have .grep()
-const sessions = await highlander({ action: "search", query: "mesh reliability" });
-await sessions[0].grep("tell timeout");  // grep inside that specific session
 ```
 
-### Typical workflow
+### Drill-down
+
+Use explicit `highlander()` calls to explore hits:
 
 ```javascript
-// 1. Search — what sessions talked about this?
-const sessions = await highlander({ action: "search", query: "fork mode decision" });
+// Search → find matching sessions
+const hits = await highlander({ action: "search", query: "fork mode decision" });
 
-// 2. Grep — find the exact entries in the best match
-const entries = await highlander({ action: "grep", session: sessions[0].session, query: "fork" });
+// Grep → find exact entries in the best match
+const entries = await highlander({ action: "grep", session: hits[0].session, query: "fork" });
 
-// 3. Expand — read the full context around the key entry
-const context = await entries[2].expand({ context: 10 });
-console.log(context);
+// View → read full context around a key entry
+const ctx = await highlander({ action: "view", session: hits[0].session, start: entries[2].index - 10, end: entries[2].index + 10 });
 ```
 
-Or in one shot from the current session:
+## General-purpose pipe
+
+Pass an array, a shape, and a query to BM25-search any data:
+
 ```javascript
-const hits = await highlander({ action: "self", query: "architecture decision" });
-console.log(await hits[0].expand({ context: 10 }));
+// Search ticket titles + bodies
+const hits = await highlander(tickets, highlander.tickets, "ghost debris");
+
+// Search arbitrary objects
+const hits = await highlander(
+  [{ x: "hello", y: "world" }, { x: "foo", y: "bar" }],
+  { fields: { x: 3, y: 1 } },
+  "hello"
+);
+
+// Built-in shapes: highlander.tickets, .session, .code, .docs, .logs, .lines
 ```
+
+Pipe results also support the builder chain: `.rerank()`, `.limit()`, `.text()`, `.json()`.
 
 ## How it works
 
