@@ -10,6 +10,8 @@ export interface SandboxContext {
   confirmFn?: (title: string, body: string) => Promise<boolean>;
   /** Optional log function — writes to sandbox console output */
   logFn?: (msg: string) => void;
+  /** Optional abort signal — when provided, sandbox tools check it and abort early */
+  signal?: AbortSignal;
 }
 
 /**

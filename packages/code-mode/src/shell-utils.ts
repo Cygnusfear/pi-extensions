@@ -111,6 +111,8 @@ export interface SpawnAsyncOptions {
   cwd?: string;
   timeout?: number;
   env?: NodeJS.ProcessEnv;
+  /** External abort signal — kills the child process tree on abort */
+  signal?: AbortSignal;
 }
 
 export interface SpawnAsyncResult {
@@ -146,6 +148,7 @@ export function spawnAsync({
   cwd: spawnCwd,
   timeout = SUBPROCESS_TIMEOUT_MS,
   env,
+  signal: externalSignal,
 }: SpawnAsyncOptions): Promise<SpawnAsyncResult> {
   return new Promise((resolve) => {
     const stdoutChunks: Buffer[] = [];
@@ -155,6 +158,9 @@ export function spawnAsync({
     let settled = false;
 
     const timeoutSignal = AbortSignal.timeout(timeout);
+    const combinedSignal = externalSignal
+      ? AbortSignal.any([timeoutSignal, externalSignal])
+      : timeoutSignal;
 
     const child = spawn(cmd, args, {
       cwd: spawnCwd,
@@ -163,7 +169,7 @@ export function spawnAsync({
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const onTimeout = () => {
+    const onAbort = () => {
       if (settled) return;
       settled = true;
       if (child.pid) killTree(child.pid);
@@ -171,11 +177,11 @@ export function spawnAsync({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
         status: null,
-        error: new Error(`Timed out after ${timeout}ms`),
+        error: new Error(externalSignal?.aborted ? "Aborted" : `Timed out after ${timeout}ms`),
       });
     };
 
-    timeoutSignal.addEventListener("abort", onTimeout, { once: true });
+    combinedSignal.addEventListener("abort", onAbort, { once: true });
 
     child.stdout!.on("data", (chunk: Buffer) => {
       stdoutLen += chunk.length;
@@ -190,7 +196,7 @@ export function spawnAsync({
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
-      timeoutSignal.removeEventListener("abort", onTimeout);
+      combinedSignal.removeEventListener("abort", onAbort);
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
@@ -202,7 +208,7 @@ export function spawnAsync({
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
-      timeoutSignal.removeEventListener("abort", onTimeout);
+      combinedSignal.removeEventListener("abort", onAbort);
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),

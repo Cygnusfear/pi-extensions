@@ -41,7 +41,7 @@ import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
 
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
-  const { cwd, images } = ctx;
+  const { cwd, images, signal } = ctx;
   const turndown = new TurndownService({
     headingStyle: "atx",
     hr: "---",
@@ -50,6 +50,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     emDelimiter: "*",
   });
   turndown.remove(["script", "style", "meta", "link", "noscript"]);
+
+  /** Throw if the abort signal has fired. */
+  const throwIfAborted = () => {
+    if (signal?.aborted) throw new Error("Aborted");
+  };
 
   return {
     Bash: async ({
@@ -61,6 +66,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       cwd?: string;
       timeout?: number;
     }) => {
+      throwIfAborted();
       // Process-kill broadcast guard — ALWAYS active, not gated by git-lock mode.
       const killResult = isProcessKillBroadcast(command);
       if (killResult) throw new Error(processKillGuardError(killResult.reason));
@@ -91,6 +97,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         args: ["-c", command],
         cwd: dir,
         timeout: timeoutMs,
+        signal,
       });
       if (result.error) {
         const isTimeout = result.error.message.includes("Timed out");
@@ -204,6 +211,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         cmd: "fd",
         args: ["--glob", pattern, "--type", "f", "."],
         cwd: dir,
+        signal,
       });
       if (result.error) {
         throw new Error(`Glob failed: ${result.error.message}`);
@@ -217,6 +225,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         cmd: "rg",
         args: splitShellArgs(args),
         cwd: dir,
+        signal,
       });
       if (result.error) {
         throw new Error(`rg error: ${result.error.message}`);
@@ -231,6 +240,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         cmd: "fd",
         args: splitShellArgs(args),
         cwd: dir,
+        signal,
       });
       if (result.error) {
         throw new Error(`fd error: ${result.error.message}`);
@@ -250,9 +260,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       if (!url.startsWith("http://") && !url.startsWith("https://")) {
         throw new Error("URL must start with http:// or https://");
       }
-      const signal = AbortSignal.timeout(Math.min(timeout, 120) * 1000);
+      const fetchSignal = signal
+        ? AbortSignal.any([AbortSignal.timeout(Math.min(timeout, 120) * 1000), signal])
+        : AbortSignal.timeout(Math.min(timeout, 120) * 1000);
       const response = await fetch(url, {
-        signal,
+        signal: fetchSignal,
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
@@ -274,7 +286,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         .trim();
     },
 
-    sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+    sleep: (ms: number) => {
+      if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+      return new Promise((resolve, reject) => {
+        if (signal.aborted) { reject(new Error("Aborted")); return; }
+        const timer = setTimeout(resolve, ms);
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Aborted")); }, { once: true });
+      });
+    },
 
     // =====================================================================
     // Ticket management (mai CLI)
@@ -286,6 +305,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         cmd: "mai",
         args: splitShellArgs(args),
         cwd: dir,
+        signal,
       });
       if (result.error) throw new Error(`mai error: ${result.error.message}`);
       const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
@@ -333,6 +353,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         cmd: "mai",
         args: createArgs,
         cwd: dir,
+        signal,
       });
       if (createResult.error) throw new Error(`mai ticket error: ${createResult.error.message}`);
       if (createResult.status !== 0) {
@@ -351,6 +372,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           cmd: "mai",
           args: ["start", id],
           cwd: dir,
+          signal,
         });
         started = startResult.status === 0;
       }
@@ -472,7 +494,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           "Accept-Encoding": "identity",
           "X-Subscription-Token": apiKey,
         },
-        signal: AbortSignal.timeout(15_000),
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
       });
 
       if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -520,7 +542,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           "Accept-Encoding": "identity",
           "X-Subscription-Token": apiKey,
         },
-        signal: AbortSignal.timeout(15_000),
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
       });
 
       if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
@@ -659,7 +681,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           method: "tools/call",
           params: { name: "resolve-library-id", arguments: { query, libraryName } },
         }),
-        signal: AbortSignal.timeout(30_000),
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
       const json = await safeResponseJson<{
@@ -688,7 +710,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           method: "tools/call",
           params: { name: "query-docs", arguments: { libraryId, query } },
         }),
-        signal: AbortSignal.timeout(30_000),
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
       });
       if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
       const json = await safeResponseJson<{

@@ -1,3 +1,14 @@
+## Orientation
+
+If this is your first turn, read the environment skill:
+
+```javascript
+const env = await Read({ path: 'skills/environment/SKILL.md' });
+console.log(env);
+```
+
+This covers code-mode, ` persistence, highlander search, foresight memory, teams delegation, context management, and the tool boundary.
+
 You have an `execute_code` tool that runs JavaScript with typed async functions for calling tools.
 
 `execute_code` is your **primary tool**. Almost all work goes through it. Direct tool calls (read, bash, edit, etc.) are disabled — use the equivalent functions inside code mode.
