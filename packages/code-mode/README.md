@@ -2,7 +2,7 @@
 
 Execute JavaScript as your primary interface to every tool — multi-step operations, loops, parallel I/O, and complex logic in a single code block instead of dozens of individual tool calls.
 
-This is **not** a sandbox escape or eval hack. Code-mode replaces the traditional one-tool-call-per-turn pattern with a persistent Node.js VM that gives the LLM typed async functions for every registered tool, a cross-call persistent store (`$`), a session management API, and automatic context hygiene. It is the single biggest productivity improvement in the pi agent stack.
+This is **not** a sandbox escape or eval hack. Code-mode replaces one-tool-per-turn with a persistent Node.js VM where every registered tool becomes a typed async function. The `$` store survives across calls. Session management and context hygiene are built in. It's the biggest productivity gain in the pi stack.
 
 Inspired by [Cloudflare's code mode](https://blog.cloudflare.com/code-mode/).
 
@@ -22,13 +22,13 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
-- **Fault tolerance** — errors are non-fatal. `$` survives. After an error, reference `$.var` to continue.
+- **Errors don't kill your state** — `$` survives crashes. Pick up where you left off with `$.var`.
 - **Context management** — two-phase squash with auto-continue, context usage warnings, output truncation at 200KB
 - **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
 - **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
-- **Tool exclusivity enforcement** — sandbox-only tools (bash, read, write, edit, grep, etc.) are blocked if the LLM tries to call them directly
-- **Git-safety integration** — destructive git commands and `.git` writes inside sandbox functions show interactive confirmation dialogs (same as direct tool calls)
+- **Tool exclusivity** — sandbox-only tools (bash, read, write, edit, grep, etc.) can't be called directly by the LLM
+- **Git safety** — destructive git commands and `.git` writes ask for confirmation first
 
 ## The `$` persistent store
 

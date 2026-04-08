@@ -8,7 +8,7 @@ BM25 search across all pi session history.
 
 Agents forget between sessions. Foresight saves curated memories — not the raw conversation: the debug trails, the rejected alternatives, the "why did we do X" that never made it into a memory node.
 
-Highlander searches that raw history across every session, every project.
+Highlander searches that raw history. Every session. Every project.
 
 ## Actions
 
@@ -16,21 +16,21 @@ Highlander searches that raw history across every session, every project.
 ```javascript
 const hits = await highlander({ action: "search", query: "teams ghost worker", limit: 5 });
 ```
-BM25 across all sessions. Returns ranked hits with snippets.
+Search across all sessions. Ranked by relevance, with text snippets.
 
 ### self — search the current live session
 ```javascript
 const hits = await highlander({ action: "self", query: "highlander skull context" });
 ```
-No session ID needed.
+Search your own conversation. No session ID needed.
 
 ### grep — find entries in a specific session
 ```javascript
 const hits = await highlander({ action: "grep", session: "0fe1623e", query: "context window" });
 ```
-Returns matching entry numbers for drill-down.
+Get matching entry numbers so you can drill down.
 
-Or pass ad-hoc entries to search any text:
+You can also search any array of text on the fly:
 ```javascript
 const msgs = session.messages();
 const hits = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
@@ -49,7 +49,7 @@ const sessions = await highlander({ action: "list", project: "trek", since: "202
 
 ## Builder chain
 
-`search`, `self`, and `grep` return arrays with builder methods:
+`search`, `self`, and `grep` return arrays you can chain:
 
 ```javascript
 const hits = await highlander({ action: "self", query: "teams lifecycle", limit: 5 });
@@ -62,7 +62,7 @@ hits.json()                              // plain JSON array
 
 ## Drill-down
 
-Explore hits with explicit calls:
+Explore hits with a second call:
 
 ```javascript
 const hits = await highlander({ action: "search", query: "fork mode decision" });

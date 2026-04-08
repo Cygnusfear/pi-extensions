@@ -175,27 +175,27 @@ Most passthrough tools are also available as sandbox functions (camelCase): mesh
 
 ### Highlander — session history search 🔪
 
-BM25 search across all pi session history. Dead sessions included.
+Search all pi session history — including dead sessions. BM25 ranked.
 
 ```javascript
 // Search across all sessions
 const r1 = await highlander({ action: "search", query: "teams ghost worker" });
 
-// Search current live session
+// Search your own live session
 const r2 = await highlander({ action: "self", query: "highlander skull context" });
 
-// Grep entries in a specific session
+// Find entries in a specific session
 const r3 = await highlander({ action: "grep", session: "0fe1623e", query: "context window" });
 
-// Read entries from any session
+// Read entries from any session (dead or alive)
 const r4 = await highlander({ action: "view", session: "0fe1623e", start: 720, end: 730 });
 
-// Ad-hoc BM25 over arbitrary data
+// Search any array of text on the fly
 const msgs = session.messages();
 const r5 = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
 ```
 
-**Builder chain:** `search`, `self`, and `grep` return chainable arrays:
+**Builder chain:** `search`, `self`, and `grep` return arrays you can chain:
 
 ```javascript
 const hits = await highlander({ action: "self", query: "teams lifecycle" });
@@ -203,12 +203,12 @@ hits.rerank({ recency: { hours: 6 } }) // boost recent
 hits.limit(3)                            // top 3
 hits.text()                              // formatted string
 hits.json()                              // plain JSON
-// Drill down with explicit calls:
+// Drill down:
 // highlander({ action: "view", session: hits[0].session, start: -5, end: 0 })
 // highlander({ action: "grep", session: hits[0].session, query: "term" })
 ```
 
-**Pipe mode:** BM25-search any array. First arg is array → pipe mode; object → session mode.
+**Pipe mode:** Pass an array first → BM25 any data. Pass an object first → session mode.
 
 ```javascript
 const hits = await highlander(tickets, highlander.tickets, "ghost debris");
