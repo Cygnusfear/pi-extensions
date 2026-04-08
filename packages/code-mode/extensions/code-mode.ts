@@ -336,12 +336,11 @@ async function executeCode(
           }
           if (pendingSquash) {
             // Phase 2: apply the cached compaction
-            if (options?.continue) {
-              // Store continuation prompt so it's injected after reload
-              sess.store.proxy.__squashContinue = options.continue;
-            }
             toolCtx.compact();
-            return "Squash applied — compaction in progress, session will reload.";
+            const contMsg = options?.continue
+              ? " Continue after reload: " + options.continue
+              : "";
+            return "Squash applied — compaction in progress, session will reload." + contMsg;
           }
           // Phase 1: generate summary in background, stash to $.preCompact
           (async () => {
@@ -872,11 +871,11 @@ export default function (pi: ExtensionAPI) {
           // Parse session-level results (search)
           if (action === "search") {
             const blocks = raw.split("━━━").filter(Boolean);
-            for (let i = 0; i < blocks.length - 1; i += 2) {
-              const header = blocks[i + 1];
-              const idMatch = header.match(/([a-f0-9]{8})\s/);
-              const scoreMatch = blocks[i].match(/\[([\d.]+)\]/);
-              const nameMatch = header.match(/^\s*(.+?)\s*·/);
+            for (let i = 1; i < blocks.length; i += 2) {
+              const header = blocks[i];
+              const idMatch = header.match(/([a-f0-9]{8})/);
+              const scoreMatch = header.match(/\[([\d.]+)\]/);
+              const nameMatch = header.match(/\]\s+(.+?)\s*·/);
               const dateMatch = header.match(/·\s*(\d+\/\d+\/\d+)\s*·/);
               if (idMatch) {
                 const entry: any = {

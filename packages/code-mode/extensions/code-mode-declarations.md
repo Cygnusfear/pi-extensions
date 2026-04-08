@@ -557,12 +557,6 @@ declare const session: {
    * Phase 2: review $.preCompact, save important stuff to $, then session.squash() again
    */
   squash(): string;
-  /**
-   * Limit context sent to API to the last N messages (minimum 4).
-   * Call with no args to reset to full context. Your $ store and session.save() data survive trimming.
-   * Use this to manage context rot — distill important state first, then trim.
-   */
-  setContextSize(n?: number): string;
 };
 
 // =====================================================================
