@@ -342,9 +342,26 @@ async function executeCode(
             const continueText = options?.continue;
             toolCtx.compact({
               onComplete: () => {
+                const fs = require("fs");
+                fs.appendFileSync("/tmp/pi-squash-oncomplete.log",
+                  new Date().toISOString() + " onComplete fired, continueText=" + !!continueText + "\n");
                 if (continueText) {
-                  pi.sendUserMessage(continueText);
+                  try {
+                    fs.appendFileSync("/tmp/pi-squash-oncomplete.log",
+                      "  calling pi.sendUserMessage, typeof=" + typeof pi?.sendUserMessage + "\n");
+                    pi.sendUserMessage(continueText);
+                    fs.appendFileSync("/tmp/pi-squash-oncomplete.log",
+                      "  sendUserMessage called OK\n");
+                  } catch (e) {
+                    fs.appendFileSync("/tmp/pi-squash-oncomplete.log",
+                      "  sendUserMessage ERROR: " + (e?.message || e) + "\n");
+                  }
                 }
+              },
+              onError: (err) => {
+                const fs = require("fs");
+                fs.appendFileSync("/tmp/pi-squash-oncomplete.log",
+                  new Date().toISOString() + " onError: " + (err?.message || err) + "\n");
               },
             });
             return "Squash applied — compaction in progress." + (continueText ? " Continuation message queued." : "");
@@ -726,6 +743,7 @@ export default function (pi: ExtensionAPI) {
   // Register highlander sandbox fn — calls pi tool if available
   {
     let _hlExecute: ((args: any) => Promise<string>) | null = null;
+    let _hlSandboxFn: ((...args: any[]) => any) | null = null;
     // Eager init — import at registration time, not in the VM sandbox
     try {
       const _hlMod = require("../../highlander/extensions/highlander.ts");
@@ -820,7 +838,7 @@ export default function (pi: ExtensionAPI) {
             } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) { cur.text += (cur.text ? " " : "") + line.trim(); cur.rawBlock += "\n" + line; }
           }
           if (cur) hits.push(cur);
-          for (const h of hits) { h.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 5; if (!_hlExecute) return "N/A"; return _hlExecute({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx }); }; h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
+          for (const h of hits) { h.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 5; return _hlSandboxFn!({ action: "view", session: h.session, start: h.index - ctx, end: h.index + ctx }); }; h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
         }
         if (action === "search") {
           const blocks = raw.split("━━━").filter(Boolean);
@@ -829,8 +847,8 @@ export default function (pi: ExtensionAPI) {
             const idMatch = header.match(/([a-f0-9]{8})/); const scoreMatch = header.match(/\[(\d+\.?\d*)\]/); const nameMatch = header.match(/\]\s+(.+?)\s*·/); const isoMatch = header.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/);
             if (idMatch) {
               const entry: any = { session: idMatch[1], score: scoreMatch ? parseFloat(scoreMatch[1]) : 0, name: nameMatch?.[1]?.trim() ?? "", text: content.trim(), rawBlock, timestamp: isoMatch ? new Date(isoMatch[1]).getTime() : Date.now() };
-              entry.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 10; if (!_hlExecute) return "N/A"; return _hlExecute({ action: "view", session: entry.session, start: -ctx, end: 0 }); };
-              entry.grep = async (query: string, limit?: number) => { if (!_hlExecute) return "N/A"; return _hlExecute({ action: "grep", session: entry.session, query, limit: limit ?? 10 }); };
+              entry.expand = async (o?: { context?: number }) => { const ctx = o?.context ?? 10; return _hlSandboxFn!({ action: "view", session: entry.session, start: -ctx, end: 0 }); };
+              entry.grep = async (query: string, limit?: number) => { return _hlSandboxFn!({ action: "grep", session: entry.session, query, limit: limit ?? 10 }); };
               entry.toString = () => rawBlock;
               hits.push(entry);
             }
@@ -851,6 +869,7 @@ export default function (pi: ExtensionAPI) {
       } catch (e: any) { return "Highlander error: " + e.message; }
     };
     for (const [name, preset] of Object.entries(HL_PRESETS)) (hlFn as any)[name] = preset;
+    _hlSandboxFn = hlFn;
     registerSandboxFn("highlander", hlFn);
   }
 
