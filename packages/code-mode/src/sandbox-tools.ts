@@ -22,6 +22,7 @@ import {
   tldrStructureAPI,
 } from "@pi-extensions/tldr-code/api";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import TurndownService from "turndown";
 import type { HashlineEdit } from "./hashline";
@@ -121,6 +122,54 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         exitCode: result.status ?? 0,
         timedOut: false,
       };
+    },
+
+    Python: async ({
+      code,
+      cwd: explicitCwd,
+      timeout,
+    }: {
+      code: string;
+      cwd?: string;
+      timeout?: number;
+    }) => {
+      throwIfAborted();
+      const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
+      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+      const tmpFile = path.join(os.tmpdir(), `pi-python-${Date.now()}-${Math.random().toString(36).slice(2)}.py`);
+      fs.writeFileSync(tmpFile, code, "utf-8");
+      try {
+        const result = await spawnAsync({
+          cmd: "python3",
+          args: [tmpFile],
+          cwd: dir,
+          timeout: timeoutMs,
+          signal,
+        });
+        if (result.error) {
+          const isTimeout = result.error.message.includes("Timed out");
+          if (isTimeout) {
+            return {
+              stdout: result.stdout || "",
+              stderr:
+                (result.stderr || "") +
+                (result.stderr ? "\n" : "") +
+                `[TIMEOUT] ${result.error.message}`,
+              exitCode: -1,
+              timedOut: true,
+            };
+          }
+          throw new Error(`Python error: ${result.error.message}`);
+        }
+        return {
+          stdout: result.stdout || "",
+          stderr: result.stderr || "",
+          exitCode: result.status ?? 0,
+          timedOut: false,
+        };
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch { /* temp file cleanup best-effort */ }
+      }
     },
 
     Read: async ({

@@ -10,9 +10,8 @@ Connect multiple pi coding sessions on the same machine or across a network so t
 - **Zero-configuration LAN** — mDNS scouting discovers peers automatically
 - **Cross-machine routing** — Tailscale endpoint configuration for WAN mesh
 - **Direct messaging** — `mesh_tell` with delivery receipts (delivered/visible)
-- **Request/reply** — `mesh_ask` with receipt tracking, distinguishes "not delivered" from "delivered but no reply"
+- **Session viewing** — `mesh_view` reads recent entries from any live peer (uses ask/reply internally)
 - **Channel pub/sub** — named channels for group communication with ambient batching
-- **Session viewing** — read recent entries from any live peer's session
 - **Identity system** — stable mesh identities decoupled from ephemeral connection IDs
 - **Nickname claiming** — distributed tie-breaking with `claimedAt` timestamps
 - **Busy-session awareness** — ambient chat batches for idle sessions, instant injection for active ones
@@ -42,11 +41,10 @@ The sidecar is a **singleton daemon** — the first pi session spawns it, all su
 
 ### Transport: Zenoh
 
-[Zenoh](https://zenoh.io/) is a pub/sub + query protocol designed for low-latency, high-throughput distributed systems. It handles:
+[Zenoh](https://zenoh.io/) is the pub/sub transport underneath pi-mesh. It handles:
 
 - **Peer discovery** via multicast scouting (mDNS)
 - **Reliable pub/sub** with key expressions
-- **Query/get** with timeout-based request/reply
 - **Multi-transport**: UDP unicast, TCP, TLS, QUIC, WebSocket
 
 The native Rust sidecar manages a single Zenoh session and multiplexes all client connections through it.
@@ -79,8 +77,6 @@ This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "
 |------|-------------|
 | `mesh_peers` | List all visible pi sessions on the mesh |
 | `mesh_tell` | Send a direct message (with optional delivery receipt) |
-| `mesh_ask` | Send a request and wait for a reply |
-| `mesh_reply` | Reply to a pending inbound request |
 | `mesh_view` | Read recent session entries from another peer |
 | `mesh_broadcast` | Broadcast to all peers on a topic |
 | `mesh_join_channel` | Join a named channel |
@@ -93,7 +89,6 @@ This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "
 |---------|-------------|
 | `/mesh list` | Show all peers |
 | `/mesh tell <peer> <msg>` | Direct message a peer |
-| `/mesh ask <peer> <msg>` | Request/reply with a peer |
 | `/mesh view <peer>` | View a peer's recent session |
 | `/mesh join <channel>` | Join a channel |
 | `/mesh leave <channel>` | Leave a channel |
@@ -102,7 +97,7 @@ This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "
 | `/mesh deafen [on|off]` | Silence inbound chat/tells |
 | `/mesh status` | Show mute/deafen state |
 
-## Building the Native Library
+## Building the Native Binary
 
 The Rust sidecar must be compiled before use:
 
@@ -151,7 +146,7 @@ For cross-machine mesh, configure endpoints with Tailscale IPs or other reachabl
 
 ## Dependencies
 
-- **zenoh** 1.7.2 — pub/sub + query transport protocol
+- **zenoh** 1.7.2 — pub/sub transport protocol
 - **tokio** — async runtime
 - **@pi-extensions/shared** — session nickname and identity utilities
 - **@sinclair/typebox** — tool parameter schemas

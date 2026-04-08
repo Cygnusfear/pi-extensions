@@ -9,10 +9,10 @@
     "list": "bun pm ls"
   },
   "devDependencies": {
-    "@mariozechner/pi-agent-core": "0.65.0",
-    "@mariozechner/pi-ai": "0.65.0",
-    "@mariozechner/pi-coding-agent": "0.65.0",
-    "@mariozechner/pi-tui": "0.65.0",
+    "@mariozechner/pi-agent-core": "0.66.0",
+    "@mariozechner/pi-ai": "0.66.0",
+    "@mariozechner/pi-coding-agent": "0.66.0",
+    "@mariozechner/pi-tui": "0.66.0",
     "@sinclair/typebox": "^0.34.41"
   },
   "pi": {
@@ -43,14 +43,12 @@
       "./packages/skills/extensions/skills.ts",
       "./packages/nested-skills/extensions/nested-skills.ts",
       "./packages/teams/index.ts",
-
       "./packages/webfetch/extensions/webfetch.ts",
       "./packages/worktree-summaries/extensions/worktree-summaries.ts",
       "./packages/image-links/extensions/image-links.ts",
       "./packages/fork-fixes/extensions/index.ts",
       "./packages/pi-mesh/extension/pi-mesh.ts",
-      "./packages/git-ai/extensions/git-ai.ts",
-      "./packages/claude-code-provider/extensions/claude-code-provider.ts"
+      "./packages/git-ai/extensions/git-ai.ts"
     ],
     "prompts": [
       "./packages/prompt-templates/prompts"

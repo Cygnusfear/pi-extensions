@@ -652,7 +652,6 @@ const PASSTHROUGH_TOOLS = new Set([
   // Mesh networking
   "mesh_tell",
   "mesh_ask",
-  "mesh_reply",
   "mesh_broadcast",
   "mesh_peers",
   "mesh_view",
@@ -982,6 +981,7 @@ export default function (pi: ExtensionAPI) {
       "braveSearch, braveCodeSearch, getCurrentTime, hashRead, hashEdit, applyPatch, " +
       "context7Resolve, context7Docs, fffFind, fffGrep, fffMultiGrep, " +
       "tldrSemanticSearch, tldrStructure, tldrCalls, tldrExtract, tldrDead, tldrArch, tldrImpact, tldrIndexStatus. " +
+      "Python code execution via Python({ code, cwd?, timeout? }). " +
       "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
       "Passthrough wrappers: meshTell, meshAsk, meshPeers, meshView, meshChat, editorOpen, editorState, gitAi. " +
       "Use console.log() to return results.",

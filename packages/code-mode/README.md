@@ -180,7 +180,7 @@ All of these are available inside `execute_code` as typed async functions:
 
 These call the registered tools directly from inside the sandbox:
 
-`meshTell`, `meshAsk`, `meshPeers`, `meshView`, `meshChat`, `meshBroadcast`, `meshReply`, `meshJoinChannel`, `meshLeaveChannel`, `editorOpen`, `editorHighlight`, `editorReveal`, `editorState`, `gitAi`, `hotseatHandbookUpdate`, `hotseatHandbookRead`
+`meshTell`, `meshAsk`, `meshPeers`, `meshView`, `meshChat`, `meshBroadcast`, `meshJoinChannel`, `meshLeaveChannel`, `editorOpen`, `editorHighlight`, `editorReveal`, `editorState`, `gitAi`, `hotseatHandbookUpdate`, `hotseatHandbookRead`
 
 ## Escape hatch
 

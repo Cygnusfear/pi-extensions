@@ -2,7 +2,7 @@
 //!
 //! One sidecar per machine, shared by all pi sessions.
 //! Listens on ~/.pi/mesh.sock for JSON-line connections.
-//! Each connection gets its own subscriptions/queryables multiplexed
+//! Each connection gets its own subscriptions multiplexed
 //! through a single Zenoh session.
 //!
 //! Lifecycle:
@@ -33,10 +33,6 @@ enum Command {
     Publish { topic: String, payload: String },
     Subscribe { topic: String },
     Unsubscribe { id: i32 },
-    Get { topic: String, payload: String, timeout_ms: Option<u32>, req_id: String },
-    Serve { topic: String },
-    Unserve { id: i32 },
-    Reply { query_id: u64, payload: String },
     Close,
 }
 
@@ -45,10 +41,7 @@ enum Command {
 enum Event {
     Ready { zid: String, client_id: String },
     Subscribed { id: i32 },
-    Served { id: i32 },
     Msg { topic: String, payload: String },
-    Query { query_id: u64, topic: String, payload: String },
-    Reply { req_id: String, payload: String },
     Error { msg: String },
 }
 
@@ -60,9 +53,11 @@ struct ClientCommand {
 }
 
 enum InternalEvent {
-    SubMsg { client_id: u64, topic: String, payload: String },
-    QueryIn { client_id: u64, query_id: u64, topic: String, payload: String, query: zenoh::query::Query },
-    GetReply { client_id: u64, req_id: String, payload: String },
+    SubMsg {
+        client_id: u64,
+        topic: String,
+        payload: String,
+    },
 }
 
 // ── Socket path ──────────────────────────────────────────────────────────────
@@ -159,7 +154,11 @@ async fn run() {
     };
 
     write_pidfile();
-    eprintln!("pi-mesh: listening on {} (zid={})", sock_path.display(), zid);
+    eprintln!(
+        "pi-mesh: listening on {} (zid={})",
+        sock_path.display(),
+        zid
+    );
 
     // Internal channels
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel::<InternalEvent>();
@@ -170,16 +169,11 @@ async fn run() {
     let mut next_client_id: u64 = 1;
 
     // Per-client resource tracking
-    let mut client_sub_aborts: HashMap<u64, HashMap<i32, tokio::task::AbortHandle>> = HashMap::new();
-    let mut client_serve_aborts: HashMap<u64, HashMap<i32, tokio::task::AbortHandle>> = HashMap::new();
+    let mut client_sub_aborts: HashMap<u64, HashMap<i32, tokio::task::AbortHandle>> =
+        HashMap::new();
 
     // Global counters
     let mut sub_counter: i32 = 0;
-    let mut serve_counter: i32 = 0;
-    let query_counter = Arc::new(std::sync::atomic::AtomicU64::new(1));
-
-    // Shared query storage (query_id → Query, keyed globally)
-    let mut pending_queries: HashMap<u64, (zenoh::query::Query, Instant)> = HashMap::new();
 
     // Grace period: shut down after no clients for this long
     let mut last_client_disconnect: Option<Instant> = None;
@@ -190,7 +184,10 @@ async fn run() {
         if client_senders.is_empty() {
             if let Some(t) = last_client_disconnect {
                 if t.elapsed() > grace_period {
-                    eprintln!("pi-mesh: no clients for {}s, shutting down", grace_period.as_secs());
+                    eprintln!(
+                        "pi-mesh: no clients for {}s, shutting down",
+                        grace_period.as_secs()
+                    );
                     break;
                 }
             }
@@ -210,7 +207,6 @@ async fn run() {
                         let (client_ev_tx, client_ev_rx) = mpsc::unbounded_channel();
                         client_senders.insert(client_id, client_ev_tx.clone());
                         client_sub_aborts.insert(client_id, HashMap::new());
-                        client_serve_aborts.insert(client_id, HashMap::new());
 
                         // Send ready event with unique client identity
                         let _ = client_ev_tx.send(Event::Ready { zid: zid.clone(), client_id: mesh_client_id.clone() });
@@ -272,98 +268,9 @@ async fn run() {
                         }
                     }
 
-                    Command::Get { topic, payload, timeout_ms, req_id } => {
-                        let dur = Duration::from_millis(timeout_ms.unwrap_or(30_000) as u64);
-                        let session2 = Arc::clone(&session);
-                        let ev_tx2 = ev_tx.clone();
-                        let cid = client_id;
-                        tokio::spawn(async move {
-                            match session2.get(&topic)
-                                .payload(payload.into_bytes())
-                                .timeout(dur)
-                                .await
-                            {
-                                Ok(receiver) => {
-                                    while let Ok(reply) = receiver.recv_async().await {
-                                        if let Ok(sample) = reply.result() {
-                                            let p = String::from_utf8_lossy(
-                                                &sample.payload().to_bytes()
-                                            ).into_owned();
-                                            let _ = ev_tx2.send(InternalEvent::GetReply {
-                                                client_id: cid, req_id: req_id.clone(), payload: p,
-                                            });
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = ev_tx2.send(InternalEvent::GetReply {
-                                        client_id: cid,
-                                        req_id,
-                                        payload: format!("{{\"error\":\"{e}\"}}"),
-                                    });
-                                }
-                            }
-                        });
-                    }
-
-                    Command::Serve { topic } => {
-                        match session.declare_queryable(&topic).await {
-                            Ok(queryable) => {
-                                serve_counter += 1;
-                                let id = serve_counter;
-                                let ev_tx2 = ev_tx.clone();
-                                let cid = client_id;
-                                let qc = query_counter.clone();
-                                let task = tokio::spawn(async move {
-                                    while let Ok(query) = queryable.recv_async().await {
-                                        let qid = qc.fetch_add(
-                                            1, std::sync::atomic::Ordering::Relaxed
-                                        );
-                                        let t = query.key_expr().as_str().to_string();
-                                        let p = query.payload()
-                                            .map(|p| String::from_utf8_lossy(
-                                                &p.to_bytes()
-                                            ).into_owned())
-                                            .unwrap_or_default();
-                                        let _ = ev_tx2.send(InternalEvent::QueryIn {
-                                            client_id: cid, query_id: qid,
-                                            topic: t, payload: p, query,
-                                        });
-                                    }
-                                });
-                                if let Some(serves) = client_serve_aborts.get_mut(&client_id) {
-                                    serves.insert(id, task.abort_handle());
-                                }
-                                send_to_client(&client_senders, client_id,
-                                    Event::Served { id });
-                            }
-                            Err(e) => send_to_client(&client_senders, client_id,
-                                Event::Error { msg: format!("serve: {e}") }),
-                        }
-                    }
-
-                    Command::Unserve { id } => {
-                        if let Some(serves) = client_serve_aborts.get_mut(&client_id) {
-                            if let Some(abort) = serves.remove(&id) {
-                                abort.abort();
-                            }
-                        }
-                    }
-
-                    Command::Reply { query_id, payload } => {
-                        if let Some((query, _)) = pending_queries.remove(&query_id) {
-                            let key = query.key_expr().to_string();
-                            if let Err(e) = query.reply(key, payload.into_bytes()).await {
-                                send_to_client(&client_senders, client_id,
-                                    Event::Error { msg: format!("reply: {e}") });
-                            }
-                        }
-                    }
-
                     Command::Close => {
                         // Client disconnecting — clean up its resources
-                        cleanup_client(client_id, &mut client_senders,
-                            &mut client_sub_aborts, &mut client_serve_aborts);
+                        cleanup_client(client_id, &mut client_senders, &mut client_sub_aborts);
                         if client_senders.is_empty() {
                             last_client_disconnect = Some(Instant::now());
                         }
@@ -380,16 +287,6 @@ async fn run() {
                         send_to_client(&client_senders, client_id,
                             Event::Msg { topic, payload });
                     }
-                    InternalEvent::QueryIn { client_id, query_id, topic, payload, query } => {
-                        pending_queries.retain(|_, (_, ts)| ts.elapsed() < Duration::from_secs(30));
-                        pending_queries.insert(query_id, (query, Instant::now()));
-                        send_to_client(&client_senders, client_id,
-                            Event::Query { query_id, topic, payload });
-                    }
-                    InternalEvent::GetReply { client_id, req_id, payload } => {
-                        send_to_client(&client_senders, client_id,
-                            Event::Reply { req_id, payload });
-                    }
                 }
             }
 
@@ -402,11 +299,10 @@ async fn run() {
 
     // Cleanup all clients
     for (cid, subs) in &client_sub_aborts {
-        for (_, abort) in subs { abort.abort(); }
+        for (_, abort) in subs {
+            abort.abort();
+        }
         let _ = cid;
-    }
-    for (_, serves) in &client_serve_aborts {
-        for (_, abort) in serves { abort.abort(); }
     }
 }
 
@@ -446,7 +342,7 @@ async fn handle_client(
 
             // Write events to client
             ev = ev_rx.recv() => {
-                let Some(ev) = ev else { break };
+                let Some(ev) = ev else { break; };
                 let mut buf = serde_json::to_vec(&ev).unwrap_or_default();
                 buf.push(b'\n');
                 if writer.write_all(&buf).await.is_err() {
@@ -457,7 +353,10 @@ async fn handle_client(
     }
 
     // Notify main loop this client is gone
-    let _ = cmd_tx.send(ClientCommand { client_id, cmd: Command::Close });
+    let _ = cmd_tx.send(ClientCommand {
+        client_id,
+        cmd: Command::Close,
+    });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -476,13 +375,11 @@ fn cleanup_client(
     client_id: u64,
     senders: &mut HashMap<u64, mpsc::UnboundedSender<Event>>,
     sub_aborts: &mut HashMap<u64, HashMap<i32, tokio::task::AbortHandle>>,
-    serve_aborts: &mut HashMap<u64, HashMap<i32, tokio::task::AbortHandle>>,
 ) {
     senders.remove(&client_id);
     if let Some(subs) = sub_aborts.remove(&client_id) {
-        for (_, abort) in subs { abort.abort(); }
-    }
-    if let Some(serves) = serve_aborts.remove(&client_id) {
-        for (_, abort) in serves { abort.abort(); }
+        for (_, abort) in subs {
+            abort.abort();
+        }
     }
 }

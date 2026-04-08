@@ -41,6 +41,20 @@ declare function Bash(input: {
 }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
 
 /**
+ * Execute Python code in a subprocess.
+ * Writes code to a temp file and runs `python3` on it — no shell quoting issues.
+ * Returns stdout, stderr, and exit code.
+ */
+declare function Python(input: {
+  /** Python code to execute */
+  code: string;
+  /** Working directory override */
+  cwd?: string;
+  /** Timeout in seconds (default: 30) */
+  timeout?: number;
+}): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
+
+/**
  * Read the contents of a file.
  * Returns the file text. Supports line-based offset and limit.
  */

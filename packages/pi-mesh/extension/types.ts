@@ -47,11 +47,14 @@ export interface MeshTellAckEnvelope {
 	timestamp: number;
 }
 
+export type MeshAskReceiptWaitForPhase = "delivered" | "visible";
+export type MeshAskReceiptPhase = MeshAskReceiptWaitForPhase | "busy";
+
 export interface MeshAskReceiptEnvelope {
 	kind: "mesh:ask:receipt";
 	askId: string;
 	from: string;
-	phase: "delivered" | "visible";
+	phase: MeshAskReceiptPhase;
 	timestamp: number;
 }
 
@@ -73,10 +76,9 @@ export interface RequestEvent {
 	requestId: number;
 	from: PeerInfo;
 	payload: unknown;
-	askId?: string;
-	askReceiptRequested?: "delivered" | "visible";
-	/** Call reply() to send a response back to the caller. Can only be called once. */
-	reply: (response: unknown) => void;
+	askId: string;
+	askReceiptRequested?: MeshAskReceiptWaitForPhase;
+	timeoutMs?: number;
 }
 
 /** Emitted on the "channel" event when a message arrives on a joined channel. */
