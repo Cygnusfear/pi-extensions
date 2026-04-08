@@ -298,12 +298,44 @@ function getLastUserMessage(context: any): string | null {
 			continue;
 		}
 
-		// Skip automated worktree context injections
 		if (isAutomatedContextMessage(text)) continue;
-
 		return text;
 	}
 	return null;
+}
+
+/**
+ * Serialize new messages since lastMessageCount into a single message
+ * that includes tool results and user messages the model hasn't seen.
+ *
+ * Claude Code's session already has the assistant's response (it generated it),
+ * but it doesn't have pi's tool results or subsequent user messages.
+ */
+function serializeNewMessages(context: any, fromIndex: number): string | null {
+	const messages = context.messages || [];
+	if (fromIndex >= messages.length) return null;
+
+	const newMessages = messages.slice(fromIndex);
+	const parts: string[] = [];
+
+	for (const msg of newMessages) {
+		if (msg.role === "toolResult") {
+			const text = (msg.content || [])
+				.map((b: any) => b.type === "text" ? b.text : "")
+				.filter(Boolean).join("\n");
+			parts.push(`<tool_result>\n<tool_use_id>${msg.toolCallId}</tool_use_id>\n${msg.isError ? "<is_error>true</is_error>\n" : ""}<content>\n${text}\n</content>\n</tool_result>`);
+		} else if (msg.role === "user") {
+			const text = typeof msg.content === "string"
+				? msg.content
+				: (msg.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+			if (isAutomatedContextMessage(text)) continue;
+			parts.push(text);
+		}
+		// Skip assistant messages — Claude Code already has these (it generated them)
+	}
+
+	if (parts.length === 0) return null;
+	return parts.join("\n\n");
 }
 
 /** Detect automated pi context messages that shouldn't be sent as user turns. */
@@ -495,17 +527,22 @@ async function runTurn(
 		needsFullContext = true;
 	}
 
+	const prevMessageCount = session.lastMessageCount;
 	session.lastMessageCount = currentMessageCount;
 
 	// ── Build and send message ───────────────────────────────────────
 	let messageToSend: string;
 
 	if (needsFullContext || session.turnCount === 0) {
+		// First turn or post-compaction: serialize everything
 		messageToSend = serializeFullContext(context);
 	} else {
-		const lastMsg = getLastUserMessage(context);
-		if (!lastMsg) {
-			// All remaining messages were automated context — skip this turn
+		// Subsequent turn: send new messages since last turn.
+		// This includes tool results (which the model needs to see)
+		// and the latest user message.
+		const delta = serializeNewMessages(context, prevMessageCount);
+		if (!delta) {
+			// Nothing new (all automated context) — skip
 			const output: any = {
 				role: "assistant", content: [{ type: "text", text: "" }],
 				api: API_TYPE, provider: PROVIDER_NAME, model: piModelId,
@@ -517,7 +554,7 @@ async function runTurn(
 			stream.end();
 			return;
 		}
-		messageToSend = lastMsg;
+		messageToSend = delta;
 	}
 
 	sendMessage(session, messageToSend);
@@ -557,11 +594,9 @@ async function runTurn(
 		if (!started) { started = true; stream.push({ type: "start", partial: output }); }
 	};
 
-	// Track hallucination state for streaming suppression.
-	// After a <tool_use> block, suppress everything (model should stop but doesn't).
-	// Inside <tool_result> blocks, suppress (model fabricating results).
+	// Streaming suppression state (reset per turn).
 	let insideHallucinatedResult = false;
-	let seenToolUseClose = false; // true after we see </tool_use> — suppress remaining text
+	let seenToolUseClose = false;
 
 	let aborted = false;
 	if (options?.signal) {
