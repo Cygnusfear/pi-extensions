@@ -541,23 +541,19 @@ declare const session: {
   save(key: string, data: unknown): string;
   /** Load previously saved data from the session file */
   load(key: string): unknown;
+
   /**
-   * Limit context sent to API to the last N messages (minimum 4).
-   * Call with no args to reset to full context. Your $ store and session.save() data survive trimming.
-   * Use this to manage context rot — distill important state first, then trim.
-   */
-  setContextSize(n?: number): string;
-  /**
-   * Two-phase compaction. First call generates a summary and stashes it in
+   * Two-phase compaction. First call builds an outline and stashes it in
    * $.preCompact for review (compaction is NOT applied). Second call applies
-   * the cached compaction. This lets you review what's being lost and extract
+   * the compaction. This lets you review what's being lost and extract
    * critical details to $ before the old messages are replaced by the summary.
    *
    * Phase 1: session.squash() → $.preCompact = { outline, messageCount }
    * Phase 2: review $.preCompact, save important stuff to $, then session.squash() again
    *
-   * Pass { continue: "..." } in phase 2 to inject a follow-up message after reload,
-   * so the agent auto-resumes without waiting for user input.
+   * Pass { continue: "..." } in phase 2 to auto-continue after compaction.
+   * The continue message is injected as a user message via onComplete, so the agent
+   * automatically picks up where it left off without waiting for user input.
    */
   squash(options?: { continue?: string }): string;
 };

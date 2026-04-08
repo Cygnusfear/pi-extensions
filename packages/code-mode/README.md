@@ -20,10 +20,10 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
 - **Persistent `$` store** — variables survive across calls (50MB cap, LRU eviction). No time limit.
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
-- **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.setContextSize()` for programmatic context management
+- **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
 - **Fault tolerance** — errors are non-fatal. `$` survives. After an error, reference `$.var` to continue.
-- **Context hygiene** — built-in context usage footer (warnings at ≥40%), output truncation at 200KB
+- **Context management** — two-phase squash with auto-continue, context usage warnings, output truncation at 200KB
 - **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
 - **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
@@ -109,29 +109,30 @@ session.save("ctx", { goal: "...", decisions: [...] });  // survives reload
 const ctx = session.load("ctx");     // restore
 
 session.entries();                   // all session entries (messages, tags, compactions, custom)
-session.setContextSize(6);           // keep last 6 messages only (context hygiene)
+session.squash();                    // two-phase context compaction (see below)
 ```
 
-### Context hygiene — the RLM pattern
+### Context management — two-phase squash
 
-When context fills up, model quality degrades. The cycle is: **Distill → Store → Trim → Continue**.
+When context fills up, model quality degrades. Use `session.squash()` — a two-phase compaction that lets you review before committing.
 
 ```javascript
-// 1. Distill state into $ vars
-$.goal = "implement auth middleware";
-$.filesDone = ["src/auth.ts", "src/middleware.ts"];
-$.filesRemaining = ["src/routes.ts"];
+// Phase 1 — build outline, stash for review (no compaction yet)
+session.squash();
+// $.preCompact = { outline, messageCount }
 
-// 2. Persist to session file (survives reload)
-session.save("tpv", { goal: $.goal, progress: "2/3 files done", nextSteps: "wire up routes.ts" });
+// Review and preserve thick context in $
+$.ctx = `AUTH REFACTOR — mid-stream
+Done: JWT signing works, login/logout updated
+Gotcha: refreshTokens.token_hash — NOT token — wasted 20 min on this
+Next: Write rotation logic at src/auth.ts:142`;
 
-// 3. Trim old messages
-session.setContextSize(6);
-
-// 4. Continue from $ — no re-reading needed
-const tpv = session.load("tpv");
-console.log("Remaining:", tpv.nextSteps);
+// Phase 2 — apply compaction + auto-continue
+session.squash({ continue: "Squash done. Continue at src/auth.ts:142." });
+// Agent automatically picks up where it left off
 ```
+
+`$` and `session.save()` survive compaction. Write thick narrative context — gotchas, dead ends, line numbers — not shallow metadata.
 
 ## Available sandbox functions
 

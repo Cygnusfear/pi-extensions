@@ -1,0 +1,14 @@
+{
+  "name": "@pi-extensions/claude-code-provider",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "pi": {
+    "extensions": [
+      "./extensions/claude-code-provider.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.65.0"
+  }
+}

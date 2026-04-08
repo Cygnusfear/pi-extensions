@@ -49,7 +49,8 @@
       "./packages/image-links/extensions/image-links.ts",
       "./packages/fork-fixes/extensions/index.ts",
       "./packages/pi-mesh/extension/pi-mesh.ts",
-      "./packages/git-ai/extensions/git-ai.ts"
+      "./packages/git-ai/extensions/git-ai.ts",
+      "./packages/claude-code-provider/extensions/claude-code-provider.ts"
     ],
     "prompts": [
       "./packages/prompt-templates/prompts"
