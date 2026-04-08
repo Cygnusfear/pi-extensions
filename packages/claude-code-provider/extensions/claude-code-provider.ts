@@ -1,27 +1,27 @@
 /**
- * Claude Code Bridge Provider
+ * Claude Code Bridge Provider — v2
  *
  * Routes pi's model requests through a persistent interactive Claude Code
- * session. Uses --input-format stream-json / --output-format stream-json
- * to drive the session programmatically — this looks like a real interactive
- * session to Anthropic's auth layer, not a subprocess pipe.
+ * session using bidirectional NDJSON (stream-json mode).
  *
- * Architecture:
- *   pi agent loop
- *     → streamSimple()
- *       → writes user message as NDJSON to claude stdin
- *       → reads streaming response from claude stdout
- *       → pushes events into AssistantMessageEventStream
- *       → pi handles tool execution, context, everything
+ * v2 architecture: multi-turn message streaming with compaction support.
  *
- * The claude process stays alive across turns. One session per model.
+ *   Turn 1: pi sends full context as first message → Claude Code accumulates
+ *   Turn N: pi sends only the NEW user message → Claude Code's context grows naturally
+ *   Compaction: pi's message count drops → we kill the session and restart
+ *              with the compacted summary as the first message of a new session
+ *
+ * This means:
+ *   - Claude Code's native context window is used efficiently
+ *   - Pi's compaction actually reduces tokens (session restart)
+ *   - Multi-turn flows naturally without re-serializing everything
+ *   - Pi's context management tools (squash, setContextSize) work
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai";
 import { spawn, type ChildProcess } from "node:child_process";
 import readline from "node:readline";
-import { serializeContext } from "../src/context-serializer.ts";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,21 +77,27 @@ interface ClaudeSession {
 	ready: boolean;
 	lineBuffer: string[];
 	lineWaiters: Array<(line: string) => void>;
+	/** Number of messages pi had sent when this session was last used.
+	 *  Used to detect compaction (message count drops). */
+	lastMessageCount: number;
+	/** Number of user messages we've sent to this claude session. */
+	turnCount: number;
 }
 
 const sessions = new Map<string, ClaudeSession>();
 
-function getOrSpawnSession(cliModel: string): ClaudeSession {
-	const existing = sessions.get(cliModel);
-	if (existing && existing.process.exitCode === null) {
-		return existing;
-	}
-
-	// Clean up dead session
-	if (existing) {
+function killSession(cliModel: string): void {
+	const session = sessions.get(cliModel);
+	if (session) {
+		try { session.process.kill("SIGTERM"); } catch {}
+		try { session.rl.close(); } catch {}
 		sessions.delete(cliModel);
-		try { existing.rl.close(); } catch {}
 	}
+}
+
+function spawnSession(cliModel: string): ClaudeSession {
+	// Kill any existing session for this model
+	killSession(cliModel);
 
 	const args: string[] = [
 		"--input-format", "stream-json",
@@ -103,38 +109,14 @@ function getOrSpawnSession(cliModel: string): ClaudeSession {
 		"--no-session-persistence",
 	];
 
-	// NOTE: We intentionally do NOT use --system-prompt or --system-prompt-file.
-	// Replacing Claude Code's default system prompt triggers Anthropic's
-	// rate-limit detection and blocks the request. Pi's instructions are
-	// injected as part of the user message via the context serializer instead.
-
-	// Clean env to avoid inheriting parent Claude Code's auth context.
-	// CLAUDECODE=1 and CLAUDE_CODE_ENTRYPOINT from the parent session
-	// can cause the child to be classified differently for rate limiting.
+	// Clean env — inherited CLAUDECODE vars don't affect rate limiting
+	// but we clean them for hygiene.
 	const cleanEnv = { ...process.env };
 	delete cleanEnv.CLAUDECODE;
 	delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
 	delete cleanEnv.CLAUDE_CODE_EXECPATH;
 	delete cleanEnv.CLAUDE_CODE_SIMPLE;
 
-	// Spawn through env -i to get a completely clean environment.
-	// This prevents any inherited state from the parent process from
-	// affecting Claude Code's rate limit classification.
-	const essentialEnv = [
-		`HOME=${cleanEnv.HOME}`,
-		`PATH=${cleanEnv.PATH}`,
-		`USER=${cleanEnv.USER}`,
-		`SHELL=${cleanEnv.SHELL || "/bin/zsh"}`,
-		`TERM=${cleanEnv.TERM || "xterm-256color"}`,
-		`LANG=${cleanEnv.LANG || "en_US.UTF-8"}`,
-	].filter(Boolean);
-
-	// Pass through any XDG dirs claude needs
-	if (cleanEnv.XDG_CONFIG_HOME) essentialEnv.push(`XDG_CONFIG_HOME=${cleanEnv.XDG_CONFIG_HOME}`);
-	if (cleanEnv.XDG_DATA_HOME) essentialEnv.push(`XDG_DATA_HOME=${cleanEnv.XDG_DATA_HOME}`);
-
-	// Spawn through sh -c to decouple from parent process tree.
-	// Claude Code may inspect parent process to detect nested/subprocess usage.
 	const escapedArgs = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
 	const child = spawn("sh", ["-c", `exec claude ${escapedArgs}`], {
 		stdio: ["pipe", "pipe", "pipe"],
@@ -148,32 +130,30 @@ function getOrSpawnSession(cliModel: string): ClaudeSession {
 		ready: false,
 		lineBuffer: [],
 		lineWaiters: [],
+		lastMessageCount: 0,
+		turnCount: 0,
 	};
 
-	// Route lines to waiters or buffer
 	session.rl.on("line", (line) => {
 		if (!line.trim()) return;
 		const waiter = session.lineWaiters.shift();
-		if (waiter) {
-			waiter(line);
-		} else {
-			session.lineBuffer.push(line);
-		}
+		if (waiter) waiter(line);
+		else session.lineBuffer.push(line);
 	});
 
-	// Collect stderr silently
 	child.stderr?.on("data", () => {});
-
-	// Clean up on exit
-	child.on("exit", () => {
-		sessions.delete(cliModel);
-	});
+	child.on("exit", () => sessions.delete(cliModel));
 
 	sessions.set(cliModel, session);
 	return session;
 }
 
-/** Read next NDJSON line from session — drains buffer first, then waits. */
+function getSession(cliModel: string): ClaudeSession | null {
+	const session = sessions.get(cliModel);
+	if (session && session.process.exitCode === null) return session;
+	return null;
+}
+
 function nextLine(session: ClaudeSession): Promise<string> {
 	const buffered = session.lineBuffer.shift();
 	if (buffered) return Promise.resolve(buffered);
@@ -182,20 +162,98 @@ function nextLine(session: ClaudeSession): Promise<string> {
 	});
 }
 
-/** Send a user message on stdin. */
 function sendMessage(session: ClaudeSession, content: string): void {
 	const msg = JSON.stringify({
 		type: "user",
-		message: {
-			role: "user",
-			content,
-		},
+		message: { role: "user", content },
 		session_id: session.sessionId,
 	});
 	session.process.stdin!.write(msg + "\n");
+	session.turnCount++;
 }
 
-// ── Stream event parsing (inline, for interactive protocol) ──────────────────
+// ── Context extraction helpers ───────────────────────────────────────────────
+
+/** Extract the last user message text from pi's context. */
+function getLastUserMessage(context: any): string | null {
+	const messages = context.messages;
+	if (!messages || messages.length === 0) return null;
+
+	// Walk backwards to find the last user message
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg.role === "user") {
+			if (typeof msg.content === "string") return msg.content;
+			if (Array.isArray(msg.content)) {
+				return msg.content
+					.filter((b: any) => b.type === "text")
+					.map((b: any) => b.text)
+					.join("\n");
+			}
+		}
+	}
+	return null;
+}
+
+/** Serialize the full context for a fresh session's first message. */
+function serializeFullContext(context: any): string {
+	const parts: string[] = [];
+
+	// Pi's system prompt as instructions (not as --system-prompt flag)
+	if (context.systemPrompt) {
+		parts.push("<system_instructions>", context.systemPrompt, "</system_instructions>", "");
+	}
+
+	// Tool definitions
+	if (context.tools && context.tools.length > 0) {
+		parts.push("## Available Tools", "");
+		for (const tool of context.tools) {
+			parts.push(`### ${tool.name}`);
+			if (tool.description) {
+				const desc = tool.description.length > 300 ? tool.description.slice(0, 300) + "..." : tool.description;
+				parts.push(desc);
+			}
+			if (tool.parameters?.properties) {
+				parts.push("Parameters:");
+				for (const [key, schema] of Object.entries(tool.parameters.properties) as [string, any][]) {
+					const type = schema.type || "any";
+					const desc = schema.description ? ` — ${schema.description}` : "";
+					parts.push(`  - ${key}: ${type}${desc}`);
+				}
+			}
+			parts.push("");
+		}
+	}
+
+	// Conversation history
+	const messages = context.messages || [];
+	if (messages.length > 0) {
+		parts.push("<conversation_history>");
+		for (const msg of messages) {
+			if (msg.role === "user") {
+				const text = typeof msg.content === "string"
+					? msg.content
+					: (msg.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
+				parts.push(`[H] ${text}`);
+			} else if (msg.role === "assistant") {
+				const text = (msg.content || []).map((b: any) => {
+					if (b.type === "text") return b.text;
+					if (b.type === "toolCall") return `<tool_use name="${b.name}">${JSON.stringify(b.arguments)}</tool_use>`;
+					return "";
+				}).filter(Boolean).join("\n");
+				parts.push(`[A] ${text}`);
+			} else if (msg.role === "toolResult") {
+				const text = (msg.content || []).map((b: any) => b.type === "text" ? b.text : "").filter(Boolean).join("\n");
+				parts.push(`[tool_result id=${msg.toolCallId}] ${text}`);
+			}
+		}
+		parts.push("</conversation_history>", "", "Continue the conversation. Respond as the assistant.");
+	}
+
+	return parts.join("\n");
+}
+
+// ── Stream event parsing ─────────────────────────────────────────────────────
 
 interface Usage {
 	input: number; output: number; cacheRead: number; cacheWrite: number;
@@ -218,26 +276,51 @@ function parseStreamingJson(json: string): Record<string, any> {
 	try { return JSON.parse(attempt); } catch { return {}; }
 }
 
-// ── streamSimple implementation ──────────────────────────────────────────────
+// ── streamSimple ─────────────────────────────────────────────────────────────
 
 function claudeCodeStream(model: any, context: any, options?: any) {
 	const stream = createAssistantMessageEventStream();
 
 	(async () => {
 		try {
-			const { systemPrompt, conversationPrompt } = serializeContext(context);
 			const piModelId = model.id || "cc-sonnet-4-6";
 			const cliModel = MODEL_CLI_MAP[piModelId] || "claude-sonnet-4-6";
+			const currentMessageCount = (context.messages || []).length;
 
-			const session = getOrSpawnSession(cliModel);
+			// ── Session lifecycle ────────────────────────────────────────
+			let session = getSession(cliModel);
+			let needsFullContext = false;
 
-			// Send the user message immediately — claude waits for first
-			// stdin message before emitting init in stream-json mode.
-			const prompt = conversationPrompt || "Continue.";
-			sendMessage(session, prompt);
+			if (!session) {
+				// No session — spawn fresh, send full context
+				session = spawnSession(cliModel);
+				needsFullContext = true;
+			} else if (currentMessageCount < session.lastMessageCount) {
+				// Message count dropped — compaction happened.
+				// Kill session and restart with compacted context.
+				session = spawnSession(cliModel);
+				needsFullContext = true;
+			}
+			// else: existing session, send only the delta (last user message)
 
-			// Wait for init if this is a fresh session — it comes AFTER the
-			// first message is sent, before the response starts streaming.
+			session.lastMessageCount = currentMessageCount;
+
+			// ── Send message ─────────────────────────────────────────────
+			let messageToSend: string;
+
+			if (needsFullContext || session.turnCount === 0) {
+				// First turn on this session: serialize everything
+				messageToSend = serializeFullContext(context);
+			} else {
+				// Subsequent turn: send just the last user message.
+				// Claude Code already has the prior context in its window.
+				const lastMsg = getLastUserMessage(context);
+				messageToSend = lastMsg || "Continue.";
+			}
+
+			sendMessage(session, messageToSend);
+
+			// Wait for init on fresh sessions
 			if (!session.ready) {
 				while (true) {
 					const line = await nextLine(session);
@@ -251,7 +334,7 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 				}
 			}
 
-			// Build the output object that we'll progressively fill
+			// ── Build output and stream events ───────────────────────────
 			const output: any = {
 				role: "assistant",
 				content: [],
@@ -265,27 +348,20 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 
 			let started = false;
 			const emitStart = () => {
-				if (!started) {
-					started = true;
-					stream.push({ type: "start", partial: output });
-				}
+				if (!started) { started = true; stream.push({ type: "start", partial: output }); }
 			};
 
-			// Handle abort
 			let aborted = false;
 			if (options?.signal) {
-				options.signal.addEventListener("abort", () => {
-					aborted = true;
-				}, { once: true });
+				options.signal.addEventListener("abort", () => { aborted = true; }, { once: true });
 			}
 
-			// Read response events until we hit a result
+			// ── Read response events ─────────────────────────────────────
 			while (!aborted) {
 				const line = await nextLine(session);
 				let data: any;
 				try { data = JSON.parse(line); } catch { continue; }
 
-				// ── stream_event — raw Anthropic SSE events ──────────────
 				if (data.type === "stream_event") {
 					const event = data.event;
 					if (!event) continue;
@@ -382,11 +458,10 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 					continue;
 				}
 
-				// ── result — turn complete ───────────────────────────────
+				// ── result — turn complete ─────────────────────────────
 				if (data.type === "result") {
 					emitStart();
 
-					// Final usage
 					const u = data.usage;
 					if (u) {
 						output.usage.input = u.input_tokens ?? output.usage.input;
@@ -396,7 +471,6 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 						output.usage.totalTokens = output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
 					}
 
-					// Clean up internal fields
 					for (const block of output.content) {
 						delete block._idx;
 						delete block._partialJson;
@@ -407,27 +481,11 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 						output.errorMessage = data.result || "Unknown error from Claude Code";
 						stream.push({ type: "error", reason: "error", error: output });
 					} else {
-						// If no content came from streaming, use result text
 						if (output.content.length === 0 && data.result) {
 							output.content.push({ type: "text", text: data.result });
 							stream.push({ type: "text_start", contentIndex: 0, partial: output });
 							stream.push({ type: "text_delta", contentIndex: 0, delta: data.result, partial: output });
 							stream.push({ type: "text_end", contentIndex: 0, content: data.result, partial: output });
-						}
-
-						// Extract <tool_use> XML from text if --tools "" forced text-based calls
-						for (const block of output.content) {
-							if (block.type !== "text") continue;
-							const { cleanText, toolCalls } = extractToolUsesFromText(block.text);
-							if (toolCalls.length > 0) {
-								block.text = cleanText;
-								for (const tc of toolCalls) {
-									output.content.push(tc);
-									const tcIdx = output.content.length - 1;
-									stream.push({ type: "toolcall_start", contentIndex: tcIdx, partial: output });
-									stream.push({ type: "toolcall_end", contentIndex: tcIdx, toolCall: tc, partial: output });
-								}
-							}
 						}
 
 						const hasToolCalls = output.content.some((b: any) => b.type === "toolCall");
@@ -437,8 +495,6 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 					stream.end();
 					return;
 				}
-
-				// Skip system, assistant (redundant), rate_limit_event, etc.
 			}
 
 			// Aborted
@@ -455,42 +511,18 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 					type: "error",
 					reason: "error",
 					error: {
-						role: "assistant",
-						content: [],
-						api: API_TYPE,
-						provider: PROVIDER_NAME,
-						model: model.id || "unknown",
+						role: "assistant", content: [],
+						api: API_TYPE, provider: PROVIDER_NAME, model: model.id || "unknown",
 						usage: { ...ZERO_USAGE, cost: { ...ZERO_USAGE.cost } },
-						stopReason: "error",
-						errorMessage: errMsg,
-						timestamp: Date.now(),
+						stopReason: "error", errorMessage: errMsg, timestamp: Date.now(),
 					},
 				});
 				stream.end();
-			} catch {
-				// Stream already ended
-			}
+			} catch {}
 		}
 	})();
 
 	return stream;
-}
-
-// ── Tool use extraction from text ────────────────────────────────────────────
-
-function extractToolUsesFromText(text: string): {
-	cleanText: string;
-	toolCalls: Array<{ type: "toolCall"; id: string; name: string; arguments: Record<string, any> }>;
-} {
-	const toolCalls: Array<{ type: "toolCall"; id: string; name: string; arguments: Record<string, any> }> = [];
-	const regex = /<tool_use>\s*<tool_name>(.*?)<\/tool_name>\s*<tool_id>(.*?)<\/tool_id>\s*<parameters>([\s\S]*?)<\/parameters>\s*<\/tool_use>/g;
-	let match;
-	while ((match = regex.exec(text)) !== null) {
-		let args: Record<string, any> = {};
-		try { args = JSON.parse(match[3].trim()); } catch { args = { _raw: match[3].trim() }; }
-		toolCalls.push({ type: "toolCall", id: match[2].trim(), name: match[1].trim(), arguments: args });
-	}
-	return { cleanText: text.replace(regex, "").trim(), toolCalls };
 }
 
 // ── Extension entry point ────────────────────────────────────────────────────
@@ -511,16 +543,10 @@ export default function (pi: ExtensionAPI) {
 			description: `Switch to ${model.name}`,
 			handler: async (_args, ctx) => {
 				const ok = await pi.setModel({
-					id: model.id,
-					name: model.name,
-					api: API_TYPE,
-					provider: PROVIDER_NAME,
-					baseUrl: DUMMY_BASE_URL,
-					reasoning: model.reasoning,
-					input: model.input,
-					cost: model.cost,
-					contextWindow: model.contextWindow,
-					maxTokens: model.maxTokens,
+					id: model.id, name: model.name, api: API_TYPE,
+					provider: PROVIDER_NAME, baseUrl: DUMMY_BASE_URL,
+					reasoning: model.reasoning, input: model.input, cost: model.cost,
+					contextWindow: model.contextWindow, maxTokens: model.maxTokens,
 				} as any);
 				if (ok) ctx.ui.notify(`Switched to ${model.name}`, "info");
 				else ctx.ui.notify(`Failed to switch to ${model.name}`, "error");
@@ -528,7 +554,14 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
-	// Clean up sessions on shutdown
+	// Restart sessions on compaction so the compacted context is used
+	pi.on("session_compact", () => {
+		for (const [cliModel] of sessions) {
+			killSession(cliModel);
+		}
+	});
+
+	// Clean up on shutdown
 	pi.on("session_shutdown", () => {
 		for (const [, session] of sessions) {
 			try { session.process.kill("SIGTERM"); } catch {}
