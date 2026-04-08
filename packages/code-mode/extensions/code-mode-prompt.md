@@ -233,3 +233,13 @@ const r4 = await highlander({ action: "view", session: "0fe1623e", start: 720, e
 const msgs = session.messages();
 const r5 = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
 ```
+
+**Chainable results:** `search`, `self`, and `grep` return arrays of hit objects with methods:
+
+```javascript
+const hits = await highlander({ action: "self", query: "teams lifecycle" });
+hits.text()                          // raw formatted string
+hits.json()                          // clean JSON (no methods)
+await hits[0].expand({ context: 5 }) // ±5 entries around this hit
+await hits[0].grep("specific term")  // grep inside that session (search results only)
+```
