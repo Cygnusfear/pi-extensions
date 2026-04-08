@@ -567,7 +567,11 @@ async function executeCode(
   try {
     const promise = vm.runInContext(wrapped, sess.context, {
       filename: "code-mode.js",
-      timeout: SYNC_TIMEOUT_MS,
+      // timeout intentionally omitted: Bun 1.3.9 applies vm.runInContext timeout to
+      // async code as well, causing a panic(main thread): unreachable when slow async
+      // operations (like multiple highlander calls) exceed the timeout. Async execution
+      // is bounded by the Promise.race timeout below. Sync parse errors are caught by
+      // the vm.Script(wrapped) call above.
     });
 
     // Race: execution vs timeout vs abort
