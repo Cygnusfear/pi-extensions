@@ -800,8 +800,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     async function hlSession(params: Record<string, unknown>) {
-      const exec = await hlInit();
-      if (!exec) return "Highlander: init failed";
+      if (!_hlExecute) return "Highlander: init failed";
+      const exec = _hlExecute;
       const action = params.action as string;
       if (action === "grep" || action === "self" || action === "search") {
         const raw = (await exec(params)) ?? "";
