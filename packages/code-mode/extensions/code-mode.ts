@@ -342,51 +342,8 @@ async function executeCode(
               : "";
             return "Squash applied — compaction in progress, session will reload." + contMsg;
           }
-          // Phase 1: generate summary in background, stash to $.preCompact
-          (async () => {
-            try {
-              const { compact: runCompact, DEFAULT_COMPACTION_SETTINGS } = await import("@mariozechner/pi-coding-agent");
-              const { prepareCompaction } = await import("@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js");
-              const entries = sm.getBranch();
-              const preparation = prepareCompaction(entries, DEFAULT_COMPACTION_SETTINGS);
-              if (!preparation) return; // nothing to compact
-
-              const model = toolCtx.model;
-              if (!model) return;
-              const auth = await toolCtx.modelRegistry?.getApiKeyAndHeaders(model);
-              if (!auth?.ok) return;
-
-              const result = await runCompact(preparation, model, auth.apiKey ?? "", auth.headers);
-
-              // Build outline from messages being summarized
-              const outline: string[] = [];
-              for (const msg of preparation.messagesToSummarize) {
-                if (typeof msg.content === "string") {
-                  outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
-                } else if (Array.isArray(msg.content)) {
-                  const text = (msg.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-                  const tools = (msg.content as any[]).filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
-                  if (text || tools.length) {
-                    outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
-                  }
-                }
-              }
-
-              // Stash for agent review
-              sess.store.proxy.preCompact = {
-                summary: result.summary,
-                messageCount: preparation.messagesToSummarize.length,
-                outline: outline.join("\n"),
-                firstKeptEntryId: result.firstKeptEntryId,
-                tokensBefore: result.tokensBefore,
-              };
-
-              // Cache for phase 2 hook
-              pendingSquash = { result, preparation };
-            } catch (e: any) {
-              console.error("[code-mode] squash phase 1 error:", e?.message || e);
-            }
-          })();
+          // Phase 1: trigger compaction — hook will intercept, generate summary, cancel
+          toolCtx.compact();
           return "Squash phase 1 — compaction summary is being generated. Review $.preCompact on the next turn, extract anything important to $, then call session.squash() again to apply.";
         },
         load: (key: string) => {
@@ -780,6 +737,12 @@ export default function (pi: ExtensionAPI) {
         return rest;
       });
       result[Symbol.for("nodejs.util.inspect.custom")] = () => raw;
+
+      result.limit = (n: number) => {
+        const sliced = hits.slice(0, n);
+        const slicedRaw = sliced.map((h: any) => h.rawBlock || h.toString()).join("\n");
+        return enrichHits(sliced, slicedRaw, hlInitFn);
+      };
 
       result.rerank = (opts: { recency?: Duration }) => {
         const now = Date.now();
@@ -1258,8 +1221,52 @@ export default function (pi: ExtensionAPI) {
         },
       };
     }
-    // Not a two-phase squash — let pi handle normally
-    return undefined;
+
+    // Phase 1: generate summary, stash for agent review, cancel compaction
+    const { preparation, signal } = event;
+    try {
+      const { compact: runCompact } = await import("@mariozechner/pi-coding-agent");
+      const model = ctx.model;
+      if (!model) return undefined; // no model, let pi handle normally
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok) return undefined;
+
+      // Generate the summary
+      const result = await runCompact(preparation, model, auth.apiKey ?? "", auth.headers, event.customInstructions, signal);
+
+      // Build outline from messages being summarized
+      const outline: string[] = [];
+      for (const msg of preparation.messagesToSummarize) {
+        if (typeof msg.content === "string") {
+          outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+        } else if (Array.isArray(msg.content)) {
+          const text = (msg.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+          const tools = (msg.content as any[]).filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+          if (text || tools.length) {
+            outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+          }
+        }
+      }
+
+      // Stash into $ for agent review
+      const sess = getSession();
+      sess.store.proxy.preCompact = {
+        summary: result.summary,
+        messageCount: preparation.messagesToSummarize.length,
+        outline: outline.join("\n"),
+        firstKeptEntryId: result.firstKeptEntryId,
+        tokensBefore: result.tokensBefore,
+      };
+
+      // Cache result for phase 2
+      pendingSquash = { result, preparation };
+
+      // Cancel — agent reviews first
+      return { cancel: true };
+    } catch (e: any) {
+      console.error("[code-mode] squash phase 1 error:", e?.message || e);
+      return undefined; // fall through to normal compaction
+    }
   });
 
   // Deferred context checkout — navigate after the current turn completes
