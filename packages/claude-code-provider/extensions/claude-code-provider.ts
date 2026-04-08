@@ -99,6 +99,17 @@ function spawnSession(cliModel: string): ClaudeSession {
 	// Kill any existing session for this model
 	killSession(cliModel);
 
+	// All Claude Code built-in tools — disallowed so the model only
+	// sees pi's tools (described in the user message preamble).
+	const DISALLOWED_TOOLS = [
+		"Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent",
+		"WebSearch", "WebFetch", "NotebookEdit", "Task", "AskUserQuestion",
+		"TodoWrite", "Skill", "ToolSearch", "CronCreate", "CronDelete",
+		"CronList", "EnterPlanMode", "EnterWorktree", "ExitPlanMode",
+		"ExitWorktree", "RemoteTrigger", "TaskOutput", "TaskStop",
+		"TaskCreate", "TaskGet", "TaskList", "TaskUpdate",
+	].join(" ");
+
 	const args: string[] = [
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
@@ -107,6 +118,7 @@ function spawnSession(cliModel: string): ClaudeSession {
 		"--include-partial-messages",
 		"--permission-mode", "acceptEdits",
 		"--no-session-persistence",
+		"--disallowedTools", DISALLOWED_TOOLS,
 	];
 
 	// Clean env — inherited CLAUDECODE vars don't affect rate limiting
@@ -207,6 +219,18 @@ function serializeFullContext(context: any): string {
 	// Tool definitions
 	if (context.tools && context.tools.length > 0) {
 		parts.push("## Available Tools", "");
+		parts.push("To use a tool, emit a tool_use XML block in this exact format:");
+		parts.push("```");
+		parts.push("<tool_use>");
+		parts.push("<tool_name>name_here</tool_name>");
+		parts.push("<tool_id>toolu_XX</tool_id>");
+		parts.push("<parameters>");
+		parts.push('{"param": "value"}');
+		parts.push("</parameters>");
+		parts.push("</tool_use>");
+		parts.push("```");
+		parts.push("Generate a unique tool_id (toolu_01, toolu_02, etc). After emitting a tool_use, STOP and wait for the result.", "");
+
 		for (const tool of context.tools) {
 			parts.push(`### ${tool.name}`);
 			if (tool.description) {
@@ -488,6 +512,23 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 							stream.push({ type: "text_end", contentIndex: 0, content: data.result, partial: output });
 						}
 
+						// Extract XML-based tool calls from text blocks.
+						// With --disallowedTools blocking Claude Code's tools, the model
+						// emits pi's tool calls as <tool_use> XML in its text response.
+						for (const block of output.content) {
+							if (block.type !== "text") continue;
+							const { cleanText, toolCalls } = extractToolUsesFromText(block.text);
+							if (toolCalls.length > 0) {
+								block.text = cleanText;
+								for (const tc of toolCalls) {
+									output.content.push(tc);
+									const tcIdx = output.content.length - 1;
+									stream.push({ type: "toolcall_start", contentIndex: tcIdx, partial: output });
+									stream.push({ type: "toolcall_end", contentIndex: tcIdx, toolCall: tc, partial: output });
+								}
+							}
+						}
+
 						const hasToolCalls = output.content.some((b: any) => b.type === "toolCall");
 						output.stopReason = hasToolCalls ? "toolUse" : "stop";
 						stream.push({ type: "done", reason: output.stopReason, message: output });
@@ -523,6 +564,23 @@ function claudeCodeStream(model: any, context: any, options?: any) {
 	})();
 
 	return stream;
+}
+
+// ── Tool use extraction from text ────────────────────────────────────────────
+
+function extractToolUsesFromText(text: string): {
+	cleanText: string;
+	toolCalls: Array<{ type: "toolCall"; id: string; name: string; arguments: Record<string, any> }>;
+} {
+	const toolCalls: Array<{ type: "toolCall"; id: string; name: string; arguments: Record<string, any> }> = [];
+	const regex = /<tool_use>\s*<tool_name>(.*?)<\/tool_name>\s*<tool_id>(.*?)<\/tool_id>\s*<parameters>([\s\S]*?)<\/parameters>\s*<\/tool_use>/g;
+	let match;
+	while ((match = regex.exec(text)) !== null) {
+		let args: Record<string, any> = {};
+		try { args = JSON.parse(match[3].trim()); } catch { args = { _raw: match[3].trim() }; }
+		toolCalls.push({ type: "toolCall", id: match[2].trim(), name: match[1].trim(), arguments: args });
+	}
+	return { cleanText: text.replace(regex, "").trim(), toolCalls };
 }
 
 // ── Extension entry point ────────────────────────────────────────────────────
