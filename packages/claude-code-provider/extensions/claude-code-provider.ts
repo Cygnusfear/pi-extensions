@@ -830,6 +830,20 @@ function extractToolUsesFromText(text: string): {
 	return { cleanText: text.replace(regex, "").trim(), toolCalls };
 }
 
+// ── Pre-warming ──────────────────────────────────────────────────────────────
+
+/**
+ * Pre-warm a session: spawn the claude process so it does its startup
+ * (loading MCP servers, plugins, settings) in the background. When the
+ * first real turn arrives, init comes quickly because the process is
+ * already running. This cuts first-turn latency from ~15s to ~3s.
+ */
+function prewarm(cliModel: string): void {
+	const existing = getSession(cliModel);
+	if (existing) return; // Already warm
+	spawnSession(cliModel);
+}
+
 // ── Extension entry point ────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -847,21 +861,46 @@ export default function (pi: ExtensionAPI) {
 		pi.registerCommand(shortName, {
 			description: `Switch to ${model.name}`,
 			handler: async (_args, ctx) => {
+				const cliModel = MODEL_CLI_MAP[model.id];
+
+				// Pre-warm the session BEFORE switching model.
+				// The spawn runs in background — by the time the user types
+				// their first message, the claude process is already started.
+				prewarm(cliModel);
+
 				const ok = await pi.setModel({
 					id: model.id, name: model.name, api: API_TYPE,
 					provider: PROVIDER_NAME, baseUrl: DUMMY_BASE_URL,
 					reasoning: model.reasoning, input: model.input, cost: model.cost,
 					contextWindow: model.contextWindow, maxTokens: model.maxTokens,
 				} as any);
-				if (ok) ctx.ui.notify(`Switched to ${model.name}`, "info");
+				if (ok) ctx.ui.notify(`Switched to ${model.name} (session warming up)`, "info");
 				else ctx.ui.notify(`Failed to switch to ${model.name}`, "error");
 			},
 		});
 	}
 
-	// Restart sessions on compaction
+	// Pre-warm the default cc model on session start.
+	// The user might switch to cc-* later — having the process ready
+	// eliminates the cold start when they do.
+	pi.on("session_start", () => {
+		// Only pre-warm if the user's current model is a cc-* model,
+		// or if they've used cc-* before in this session.
+		// For now, always pre-warm sonnet (most commonly used).
+		setTimeout(() => {
+			const defaultCli = MODEL_CLI_MAP["cc-sonnet-4-6"];
+			if (defaultCli) prewarm(defaultCli);
+		}, 3000); // Delay 3s to not compete with pi's own startup
+	});
+
+	// Restart sessions on compaction — but re-warm immediately
 	pi.on("session_compact", () => {
-		for (const [cliModel] of sessions) killSession(cliModel);
+		const activeModels = [...sessions.keys()];
+		for (const cliModel of activeModels) killSession(cliModel);
+		// Re-warm after a tick so the new session is ready fast
+		setTimeout(() => {
+			for (const cliModel of activeModels) prewarm(cliModel);
+		}, 100);
 	});
 
 	// Clean up on shutdown
