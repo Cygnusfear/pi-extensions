@@ -175,35 +175,35 @@ Most passthrough tools are also available as sandbox functions (camelCase): mesh
 
 ### Highlander — session history search 🔪
 
-Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
+BM25 search across all pi session history. Dead sessions included.
 
 ```javascript
 // Search across all sessions
 const r1 = await highlander({ action: "search", query: "teams ghost worker" });
 
-// Search the current live session (no session ID needed)
+// Search current live session
 const r2 = await highlander({ action: "self", query: "highlander skull context" });
 
-// Grep a specific session's entries
+// Grep entries in a specific session
 const r3 = await highlander({ action: "grep", session: "0fe1623e", query: "context window" });
 
-// Read entries from any session by index
+// Read entries from any session
 const r4 = await highlander({ action: "view", session: "0fe1623e", start: 720, end: 730 });
 
-// Ad-hoc BM25 over arbitrary text — e.g. session.messages()
+// Ad-hoc BM25 over arbitrary data
 const msgs = session.messages();
 const r5 = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
 ```
 
-**Chainable results:** `search`, `self`, and `grep` return arrays of hit objects with methods:
+**Builder chain:** `search`, `self`, and `grep` return chainable arrays:
 
 ```javascript
 const hits = await highlander({ action: "self", query: "teams lifecycle" });
-hits.rerank({ recency: { hours: 6 } }) // boost recent sessions
-hits.limit(3)                         // keep top 3
-hits.text()                           // raw formatted string
-hits.json()                           // clean JSON (no methods)
-// Drill down with explicit calls:
+hits.rerank({ recency: { hours: 6 } }) // boost recent
+hits.limit(3)                            // top 3
+hits.text()                              // formatted string
+hits.json()                              // plain JSON
+// Drill down:
 // highlander({ action: "view", session: hits[0].session, start: -5, end: 0 })
 // highlander({ action: "grep", session: hits[0].session, query: "term" })
 ```
