@@ -204,14 +204,6 @@
         "@sinclair/typebox": "*",
       },
     },
-    "packages/highlander": {
-      "name": "@pi-extensions/highlander",
-      "version": "0.0.1",
-      "peerDependencies": {
-        "@mariozechner/pi-coding-agent": ">=0.66.0",
-        "@sinclair/typebox": "*",
-      },
-    },
     "packages/image-links": {
       "name": "@pi-extensions/image-links",
       "version": "0.0.1",
@@ -281,6 +273,14 @@
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.66.0",
         "@mariozechner/pi-tui": "*",
+        "@sinclair/typebox": "*",
+      },
+    },
+    "packages/ouija": {
+      "name": "@pi-extensions/ouija",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
         "@sinclair/typebox": "*",
       },
     },
@@ -601,8 +601,6 @@
 
     "@pi-extensions/hashline-tools": ["@pi-extensions/hashline-tools@workspace:packages/hashline-tools"],
 
-    "@pi-extensions/highlander": ["@pi-extensions/highlander@workspace:packages/highlander"],
-
     "@pi-extensions/image-links": ["@pi-extensions/image-links@workspace:packages/image-links"],
 
     "@pi-extensions/lipgloss-theme": ["@pi-extensions/lipgloss-theme@workspace:packages/lipgloss-theme"],
@@ -618,6 +616,8 @@
     "@pi-extensions/nested-skills": ["@pi-extensions/nested-skills@workspace:packages/nested-skills"],
 
     "@pi-extensions/notify": ["@pi-extensions/notify@workspace:packages/notify"],
+
+    "@pi-extensions/ouija": ["@pi-extensions/ouija@workspace:packages/ouija"],
 
     "@pi-extensions/pi-mesh": ["@pi-extensions/pi-mesh@workspace:packages/pi-mesh"],
 

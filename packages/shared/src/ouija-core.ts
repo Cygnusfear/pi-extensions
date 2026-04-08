@@ -21,7 +21,7 @@ type SessionIndex = Record<string, { mtimeMs: number; info: SessionInfo }>;
 
 export type AdhocEntry = { index?: number; label?: string; text: string };
 
-export type HighlanderArgs = {
+export type OuijaArgs = {
 	action: "search" | "view" | "grep" | "list" | "self";
 	query?: string;
 	session?: string;
@@ -33,7 +33,7 @@ export type HighlanderArgs = {
 	entries?: AdhocEntry[];
 };
 
-export type HighlanderOptions = {
+export type OuijaOptions = {
 	getCurrentSessionFile?: () => string | null | undefined;
 };
 
@@ -91,13 +91,13 @@ function getFallbackCurrentSessionFile(): string | null {
 	}
 }
 
-function getCurrentSessionFile(options?: HighlanderOptions): string | null {
+function getCurrentSessionFile(options?: OuijaOptions): string | null {
 	const explicit = options?.getCurrentSessionFile?.();
 	if (explicit) return explicit;
 	return getFallbackCurrentSessionFile();
 }
 
-function resolveSessionFile(sessionId: string | undefined, options?: HighlanderOptions): string | null {
+function resolveSessionFile(sessionId: string | undefined, options?: OuijaOptions): string | null {
 	if (!sessionId || sessionId === "self") return getCurrentSessionFile(options);
 	const info = resolveSessionInfo(sessionId);
 	return info?.jsonlFile ?? null;
@@ -190,13 +190,13 @@ function doSearch(args: { query: string; project?: string; since?: string; limit
 		for (const snippet of extractSnippets(info.allMessagesText || "", queryTerms, 2, 100)) {
 			lines.push(`  > ${snippet}`);
 		}
-		lines.push(`  → highlander({ action: "grep", session: "${info.id.slice(0, 8)}", query: "..." })`);
+		lines.push(`  → ouija({ action: "grep", session: "${info.id.slice(0, 8)}", query: "..." })`);
 		lines.push("");
 	}
 	return lines.join("\n");
 }
 
-function doView(args: { session?: string; start?: number; end?: number }, options?: HighlanderOptions): string {
+function doView(args: { session?: string; start?: number; end?: number }, options?: OuijaOptions): string {
 	const file = resolveSessionFile(args.session, options);
 	if (!file) return args.session ? `Session '${args.session}' not found.` : "No current session detected.";
 	const entries = readMeaningfulSessionEntriesFromFile(file);
@@ -219,7 +219,7 @@ function doView(args: { session?: string; start?: number; end?: number }, option
 
 function doGrep(
 	args: { session?: string; query: string; limit?: number; entries?: AdhocEntry[] },
-	options?: HighlanderOptions,
+	options?: OuijaOptions,
 ): string {
 	if (args.entries?.length) {
 		const hits = bm25OverEntries(args.entries, args.query, args.limit ?? 10);
@@ -255,13 +255,13 @@ function doGrep(
 		const text = entry.text.length > 300 ? entry.text.slice(0, 300) + "..." : entry.text;
 		lines.push(`[#${entry.index}] ${ts}${entry.label}`);
 		lines.push(`  ${text.replace(/\n/g, " ")}`);
-		lines.push(`  → highlander({ action: "view", session: "${args.session || "self"}", start: ${entry.index - 2}, end: ${entry.index + 3} })`);
+		lines.push(`  → ouija({ action: "view", session: "${args.session || "self"}", start: ${entry.index - 2}, end: ${entry.index + 3} })`);
 		lines.push("");
 	}
 	return lines.join("\n");
 }
 
-function doSelf(args: { query: string; limit?: number }, options?: HighlanderOptions): string {
+function doSelf(args: { query: string; limit?: number }, options?: OuijaOptions): string {
 	const file = getCurrentSessionFile(options);
 	if (!file) return "No current session detected.";
 	return doGrep({ session: "self", query: args.query, limit: args.limit }, options);
@@ -288,8 +288,8 @@ function doList(args: { project?: string; since?: string; limit?: number }): str
 		.join("\n");
 }
 
-export function createHighlanderExecutor(options?: HighlanderOptions) {
-	return async (args: HighlanderArgs): Promise<string> => {
+export function createOuijaExecutor(options?: OuijaOptions) {
+	return async (args: OuijaArgs): Promise<string> => {
 		switch (args.action) {
 			case "search":
 				return args.query ? doSearch(args) : "Error: 'query' required";

@@ -25,7 +25,7 @@ require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
 import { getSandboxFns } from "../../shared/src/sandbox-registry";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
-import { createHighlanderExecutor } from "../../shared/src/highlander-core";
+import { createOuijaExecutor } from "../../shared/src/ouija-core";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,
@@ -158,7 +158,7 @@ let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 let squashPhase: "idle" | "reviewing" = "idle";
-let currentHighlanderSessionFile: string | null = null;
+let currentOuijaSessionFile: string | null = null;
 
 function getSession(): PersistentSession {
   if (!session) session = createSession();
@@ -261,7 +261,7 @@ async function executeCode(
   // --- Layer 2: Execute with fault tolerance ---
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
-  currentHighlanderSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
+  currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
   const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal });
   Object.assign(sess.context, bindings);
 
@@ -569,7 +569,7 @@ async function executeCode(
       filename: "code-mode.js",
       // timeout intentionally omitted: Bun 1.3.9 applies vm.runInContext timeout to
       // async code as well, causing a panic(main thread): unreachable when slow async
-      // operations (like multiple highlander calls) exceed the timeout. Async execution
+      // operations (like multiple ouija calls) exceed the timeout. Async execution
       // is bounded by the Promise.race timeout below. Sync parse errors are caught by
       // the vm.Script(wrapped) call above.
     });
@@ -669,7 +669,7 @@ const PASSTHROUGH_TOOLS = new Set([
   "hotseat_handbook_update",
   "hotseat_handbook_read",
   // Session search
-  "highlander",
+  "ouija",
 ]);
 
 // Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
@@ -728,10 +728,10 @@ export default function (pi: ExtensionAPI) {
 
   });
 
-  // Register highlander sandbox fn — calls pi tool if available
+  // Register ouija sandbox fn — calls pi tool if available
   {
-    const _hlExecute = createHighlanderExecutor({
-      getCurrentSessionFile: () => currentHighlanderSessionFile,
+    const _hlExecute = createOuijaExecutor({
+      getCurrentSessionFile: () => currentOuijaSessionFile,
     });
 
     let _bm25: any = null;
@@ -797,7 +797,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     async function hlSession(params: Record<string, unknown>) {
-      if (!_hlExecute) return "Highlander: init failed";
+      if (!_hlExecute) return "Ouija: init failed";
       const exec = _hlExecute;
       const action = params.action as string;
       if (action === "grep" || action === "self" || action === "search") {
@@ -814,7 +814,7 @@ export default function (pi: ExtensionAPI) {
               let ts = Date.now();
               if (tm) { const d = new Date(); const [time, ampm] = tm[1].split(/\s+/); const [h, min, sec] = time.split(":").map(Number); let hour = h; if (ampm?.toUpperCase() === "PM" && hour !== 12) hour += 12; if (ampm?.toUpperCase() === "AM" && hour === 12) hour = 0; d.setHours(hour, min, sec, 0); ts = d.getTime(); }
               cur = { index: parseInt(m[1]), label, text: "", rawBlock: line, session: sessionId, timestamp: ts, expand: null as any };
-            } else if (cur && line.startsWith("  ") && !line.includes("→ highlander")) { cur.text += (cur.text ? " " : "") + line.trim(); cur.rawBlock += "\n" + line; }
+            } else if (cur && line.startsWith("  ") && !line.includes("→ ouija")) { cur.text += (cur.text ? " " : "") + line.trim(); cur.rawBlock += "\n" + line; }
           }
           if (cur) hits.push(cur);
           for (const h of hits) {  h.toString = () => `[#${h.index}] ${h.label}\n  ${h.text.slice(0, 200)}`; }
@@ -845,10 +845,10 @@ export default function (pi: ExtensionAPI) {
         if (Array.isArray(args[0])) return hlPipe(args[0], args[1] ?? { fields: { text: 1 } }, String(args[2] ?? ""));
         if (typeof args[0] !== "object") return enrichPipeHits([], "Expected array or { action, query } object");
         return hlSession(args[0] as Record<string, unknown>);
-      } catch (e: any) { return "Highlander error: " + e.message; }
+      } catch (e: any) { return "Ouija error: " + e.message; }
     };
     for (const [name, preset] of Object.entries(HL_PRESETS)) (hlFn as any)[name] = preset;
-    registerSandboxFn("highlander", hlFn);
+    registerSandboxFn("ouija", hlFn);
   }
 
   // Context window management — filter messages before LLM call

@@ -1,10 +1,10 @@
 {
-  "name": "@pi-extensions/highlander",
+  "name": "@pi-extensions/ouija",
   "version": "0.0.1",
   "type": "module",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./extensions/highlander.ts"]
+    "extensions": ["./extensions/ouija.ts"]
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.66.0",

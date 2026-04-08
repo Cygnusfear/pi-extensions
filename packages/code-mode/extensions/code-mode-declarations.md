@@ -1,14 +1,14 @@
 /**
 
 /**
- * Highlander — BM25 search across session JSONL logs. 🔪
+ * Ouija — BM25 search across session JSONL logs. 🔮
  * Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
  */
 /**
- * Highlander — BM25 search across session JSONL logs. 🔪
+ * Ouija — BM25 search across session JSONL logs. 🔮
  * Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
  */
-declare function highlander(input: {
+declare function ouija(input: {
   /** Action: 'search'=BM25 across all sessions, 'grep'=find entries in one session, 'view'=read entries, 'list'=browse sessions, 'self'=search current live session */
   action: "search" | "view" | "grep" | "list" | "self";
   /** Search query (for search/grep/self) */

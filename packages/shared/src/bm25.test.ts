@@ -42,10 +42,10 @@ describe("BM25", () => {
 	test("field weights affect ranking", () => {
 		// Body-only match should rank below title match with same terms
 		const docs2 = [
-			{ id: "title-match", fields: { title: "highlander", body: "something else" } },
-			{ id: "body-match", fields: { title: "something else", body: "highlander context window usage" } },
+			{ id: "title-match", fields: { title: "ouija", body: "something else" } },
+			{ id: "body-match", fields: { title: "something else", body: "ouija context window usage" } },
 		];
-		const results = bm25Search(docs2, "highlander", { fieldWeights: { title: 5, body: 1 } });
+		const results = bm25Search(docs2, "ouija", { fieldWeights: { title: 5, body: 1 } });
 		expect(results[0].id).toBe("title-match");
 	});
 

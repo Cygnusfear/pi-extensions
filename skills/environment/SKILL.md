@@ -2,7 +2,7 @@
 name: environment
 description: Working in the pi-extensions environment — code-mode, persistence, memory, search, delegation, and context management. Read this first.
 metadata:
-  summary: "Orientation guide for agents working in pi-extensions. Code-mode paradigm, $ persistence, highlander search, foresight memory, teams delegation, context hygiene."
+  summary: "Orientation guide for agents working in pi-extensions. Code-mode paradigm, $ persistence, ouija search, foresight memory, teams delegation, context hygiene."
   type: guide
   domains: [onboarding, tools]
   audience: worker
@@ -44,26 +44,26 @@ This matters most when something crashes. `$` survives errors. Pick up where you
 
 Pin what matters: `$.__pin('importantData')` protects it from memory eviction.
 
-## Search your history: highlander 🔪
+## Search your history: ouija 🔮
 
 You can search every conversation you've ever had — including sessions that ended hours ago. BM25 ranked, no database.
 
 ```javascript
 // What sessions talked about this topic?
-const hits = await highlander({ action: "search", query: "teams ghost worker", limit: 5 });
+const hits = await ouija({ action: "search", query: "teams ghost worker", limit: 5 });
 
 // Search your own live session
-const self = await highlander({ action: "self", query: "BM25 engine" });
+const self = await ouija({ action: "self", query: "BM25 engine" });
 
 // Read a dead session's entries
-const ctx = await highlander({ action: "view", session: hits[0].session, start: -10, end: 0 });
+const ctx = await ouija({ action: "view", session: hits[0].session, start: -10, end: 0 });
 ```
 
 Chain results: `hits.rerank({ recency: { hours: 6 } }).limit(3).text()`
 
 Or BM25-search any array of objects:
 ```javascript
-const hits = await highlander(tickets, highlander.tickets, "ghost debris");
+const hits = await ouija(tickets, ouija.tickets, "ghost debris");
 ```
 
 **When to use it:** Before starting work on a topic you think might have come up before. Someone may have already debugged it, decided against it, or left notes about it.
@@ -162,7 +162,7 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Want to... | Use |
 |---|---|
 | Read files | `Read({ path })` in execute_code |
-| Search session history | `highlander({ action: "search", query })` |
+| Search session history | `ouija({ action: "search", query })` |
 | Search long-term memory | `recall({ query })` |
 | Store a learning | `memoryCreate({ factType, oneLiner, summary })` |
 | Spawn a worker | `teams({ action: "delegate", tasks })` — direct tool |

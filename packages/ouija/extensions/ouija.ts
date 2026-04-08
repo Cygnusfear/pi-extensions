@@ -1,5 +1,5 @@
 /**
- * Highlander — search and read past session JSONL logs. 🔪
+ * Ouija — search and read past session JSONL logs. 🔮
  *
  * Actions:
  *   search  — BM25 across all session indexes
@@ -13,15 +13,15 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { createHighlanderExecutor } from "../../shared/src/highlander-core.js";
+import { createOuijaExecutor } from "../../shared/src/ouija-core.js";
 
-const executeHighlander = createHighlanderExecutor();
+const executeOuija = createOuijaExecutor();
 
 export default function register(pi: ExtensionAPI) {
 	pi.tool({
-		name: "highlander",
+		name: "ouija",
 		description:
-			"Search and read past session JSONL logs — mesh_view for dead sessions. 🔪\n" +
+			"Search and read past session JSONL logs — channel the dead. 🔮\n" +
 			"search = BM25 across sessions, grep = find entries in one session, view = read entries,\n" +
 			"list = browse sessions, self = BM25 search the CURRENT live session.\n" +
 			"Also accepts entries[] for ad-hoc BM25 over arbitrary text arrays.",
@@ -41,6 +41,6 @@ export default function register(pi: ExtensionAPI) {
 				description: "Ad-hoc entries for BM25 (action=grep only). Pass any array of {text} objects.",
 			}),
 		}),
-		execute: executeHighlander,
+		execute: executeOuija,
 	});
 }

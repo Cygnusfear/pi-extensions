@@ -7,7 +7,7 @@ const env = await Read({ path: 'skills/environment/SKILL.md' });
 console.log(env);
 ```
 
-This covers code-mode, ` persistence, highlander search, foresight memory, teams delegation, context management, and the tool boundary.
+This covers code-mode, ` persistence, ouija search, foresight memory, teams delegation, context management, and the tool boundary.
 
 You have an `execute_code` tool that runs JavaScript with typed async functions for calling tools.
 
@@ -182,48 +182,48 @@ Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specifi
 
 **Thresholds:** 📊 ≥30% tag your position · 🙈 ≥40% write thick `$` vars · 🚨 ≥70% squash now · 💀 ≥90% squash immediatelySome tools are intentionally NOT in the sandbox — use direct tool calls for: teams, context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, apply_patch, experiments (init/run/log), hotseat_*, start_supervision.
 
-Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead, highlander. These call the registered tools directly.
+Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead, ouija. These call the registered tools directly.
 
-### Highlander — session history search 🔪
+### Ouija — session history search 🔮
 
 Search all pi session history — including dead sessions. BM25 ranked.
 
 ```javascript
 // Search across all sessions
-const r1 = await highlander({ action: "search", query: "teams ghost worker" });
+const r1 = await ouija({ action: "search", query: "teams ghost worker" });
 
 // Search your own live session
-const r2 = await highlander({ action: "self", query: "highlander skull context" });
+const r2 = await ouija({ action: "self", query: "ouija skull context" });
 
 // Find entries in a specific session
-const r3 = await highlander({ action: "grep", session: "0fe1623e", query: "context window" });
+const r3 = await ouija({ action: "grep", session: "0fe1623e", query: "context window" });
 
 // Read entries from any session (dead or alive)
-const r4 = await highlander({ action: "view", session: "0fe1623e", start: 720, end: 730 });
+const r4 = await ouija({ action: "view", session: "0fe1623e", start: 720, end: 730 });
 
 // Search any array of text on the fly
 const msgs = session.messages();
-const r5 = await highlander({ action: "grep", entries: msgs, query: "worker lifecycle" });
+const r5 = await ouija({ action: "grep", entries: msgs, query: "worker lifecycle" });
 ```
 
 **Builder chain:** `search`, `self`, and `grep` return arrays you can chain:
 
 ```javascript
-const hits = await highlander({ action: "self", query: "teams lifecycle" });
+const hits = await ouija({ action: "self", query: "teams lifecycle" });
 hits.rerank({ recency: { hours: 6 } }) // boost recent
 hits.limit(3)                            // top 3
 hits.text()                              // formatted string
 hits.json()                              // plain JSON
 // Drill down:
-// highlander({ action: "view", session: hits[0].session, start: -5, end: 0 })
-// highlander({ action: "grep", session: hits[0].session, query: "term" })
+// ouija({ action: "view", session: hits[0].session, start: -5, end: 0 })
+// ouija({ action: "grep", session: hits[0].session, query: "term" })
 ```
 
 **Pipe mode:** Pass an array first → BM25 any data. Pass an object first → session mode.
 
 ```javascript
-const hits = await highlander(tickets, highlander.tickets, "ghost debris");
-const hits = await highlander(messages, highlander.session, "architecture decision");
-const hits = await highlander(data, { fields: { title: 3, body: 1 } }, "query");
-// Shapes: highlander.tickets, .session, .code, .docs, .logs, .lines
+const hits = await ouija(tickets, ouija.tickets, "ghost debris");
+const hits = await ouija(messages, ouija.session, "architecture decision");
+const hits = await ouija(data, { fields: { title: 3, body: 1 } }, "query");
+// Shapes: ouija.tickets, .session, .code, .docs, .logs, .lines
 ```
