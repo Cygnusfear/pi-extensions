@@ -339,14 +339,15 @@ async function executeCode(
           if (squashPhase === "reviewing") {
             // Phase 2: agent has reviewed, apply compaction
             squashPhase = "idle";
-            if (options?.continue) {
-              const fs = require("fs");
-              const path = require("path");
-              const continueFile = path.join(require("os").tmpdir(), "pi-squash-continue-" + sm.getSessionId() + ".txt");
-              fs.writeFileSync(continueFile, options.continue, "utf-8");
-            }
-            toolCtx.compact();
-            return "Squash applied — compaction in progress, session will reload.";
+            const continueText = options?.continue;
+            toolCtx.compact({
+              onComplete: () => {
+                if (continueText) {
+                  pi.sendUserMessage(continueText);
+                }
+              },
+            });
+            return "Squash applied — compaction in progress." + (continueText ? " Continuation message queued." : "");
           }
           // Phase 1: build outline from current session, stash for review
           const branch = sm.getBranch();
@@ -707,7 +708,7 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 
 export default function (pi: ExtensionAPI) {
   // Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
-  pi.on("session_start", (event) => {
+  pi.on("session_start", () => {
 
     const all = pi.getAllTools();
     const allowed = all
@@ -719,52 +720,25 @@ export default function (pi: ExtensionAPI) {
     extendWithAllTools(pi);
     rebuildCachedReference();
 
-    // After compaction reload, inject continuation message if pending
-    if (event.reason === "reload" || event.reason === "startup") {
-      try {
-        const fs = require("fs");
-        const path = require("path");
-        const continueFile = path.join(require("os").tmpdir(), "pi-squash-continue-" + sm.getSessionId() + ".txt");
-        if (fs.existsSync(continueFile)) {
-          const continueText = fs.readFileSync(continueFile, "utf-8");
-          fs.unlinkSync(continueFile);
-          if (continueText) {
-            const logFile = path.join(require("os").tmpdir(), "pi-squash-debug.log");
-            fs.appendFileSync(logFile, new Date().toISOString() + " found continue text, scheduling sendUserMessage\n");
-            setTimeout(() => {
-              try {
-                fs.appendFileSync(logFile, new Date().toISOString() + " calling pi.sendUserMessage...\n");
-                fs.appendFileSync(logFile, "  typeof pi.sendUserMessage = " + typeof pi.sendUserMessage + "\n");
-                pi.sendUserMessage(continueText);
-                fs.appendFileSync(logFile, new Date().toISOString() + " sendUserMessage called OK\n");
-              } catch (e: any) {
-                fs.appendFileSync(logFile, new Date().toISOString() + " sendUserMessage ERROR: " + (e?.message || e) + "\n" + (e?.stack || "") + "\n");
-              }
-            }, 2000);
-          }
-        }
-      } catch (e: any) {
-        console.error("[code-mode] squash continue file error:", e?.message || e);
-      }
-    }
+
   });
 
   // Register highlander sandbox fn — calls pi tool if available
   {
     let _hlExecute: ((args: any) => Promise<string>) | null = null;
-    async function hlInit() {
-      if (!_hlExecute) {
-        const mod = await import("../../highlander/extensions/highlander.ts");
-        mod.default({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
+    // Eager init — import at registration time, not in the VM sandbox
+    try {
+      const _hlMod = require("../../highlander/extensions/highlander.ts");
+      const _hlDefault = _hlMod.default ?? _hlMod;
+      if (typeof _hlDefault === "function") {
+        _hlDefault({ tool: (def: any) => { _hlExecute = def.execute; } } as any);
       }
-      return _hlExecute;
+    } catch (e: any) {
+      console.error("[code-mode] highlander init:", e?.message);
     }
 
     let _bm25: any = null;
-    async function getBm25() {
-      if (!_bm25) _bm25 = await import("../../shared/src/bm25.js");
-      return _bm25;
-    }
+    try { _bm25 = require("../../shared/src/bm25.js"); } catch {}
 
     type Duration = { minutes?: number; hours?: number; days?: number; weeks?: number };
     function resolveDuration(d: Duration): number {
@@ -806,7 +780,8 @@ export default function (pi: ExtensionAPI) {
     }
 
     async function hlPipe(data: any[], shape: any, query: string) {
-      const bm25 = await getBm25();
+      const bm25 = _bm25;
+      if (!bm25) return enrichPipeHits([], "BM25 engine not available");
       const preset = !shape ? { fields: { text: 1 } } : typeof shape === "string" ? (HL_PRESETS[shape] ?? { fields: { text: 1 } }) : (shape._preset ? HL_PRESETS[shape._preset] : shape);
       const fields = preset?.fields ?? shape?.fields ?? { text: 1 };
       const extract = preset?.extract ?? ((item: any) => { const doc: any = {}; for (const k of Object.keys(fields)) doc[k] = typeof item === "string" ? item : String(item[k] ?? ""); return doc; });
