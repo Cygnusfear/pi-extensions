@@ -64,7 +64,7 @@ WRONG:
  - integration proofs
  - runtime transport tests
 
- rather than ordinary “small unit red/green” TDD.
+ rather than ordinary "small unit red/green" TDD.
 
  So the correct answer is:
 
@@ -79,7 +79,7 @@ WRONG:
  If you want that, reply with:
  - [USE TDD]
 
- and I’ll structure it as a proper red/green contract-driven effort.
+ and I'll structure it as a proper red/green contract-driven effort.
 RIGHT:
  Yes, it can be test-driven, but I need [USE TDD] from you before doing that
 ```
@@ -134,43 +134,6 @@ RIGHT: Fix: investigate SpacetimeDB composite btree API
 - **ULTRACRITICAL:** SIMPLEST vs BEST- ALWAYS USE THE BEST SOLUTION. THIS IS A CONTRACT. I'm not looking for the 'simplest approach' the simplest is not the best- we need the best! Even if the work is more difficult but the payoff is larger. We are looking for the highest PAYOFF.
 - **ULTRACRITICAL:** GUARD PROTOCOL -- YOU ARE NEVER ALLOWED TO VIOLATE CONTRACTS WITH THE HOOMAN -- When we do anything- we start a contract- EVERY DETAIL OF A PLAN, SPEC, TODO, ORDER, EVERYTHING is a contract, EVERY implementation detail is a contract. If you do not complete the SPEC, YOU VIOLATE THE CONTRACT. When you decide to do less, YOU ARE INTENTIONALLY VIOLATING the contract. When you decide 'to widen tolerance', YOU ARE INTENTIONALLY VIOLATING the contract. ALL OF THESE ARE UNACCEPTABLE IN ANY SITUATION. You CAN DISCUSS changing the contract with the hooman, IT IS ILLEGAL to change the contract WITHOUT THE HOOMAN'S CONSENT.
 - GUARD PROTOCOL -- if the Hooman TELLS YOU TO DO SOMETHING, you do not INTERPRET what they mean, you execute the EXACT DIRECTIVE.
-
-## Memory
-
-- `foresight memories <bank> --json` - recent memories / events
-- `foresight recall <bank> "<QUERY>" --json` - combined search with ranking and salience
-- `mai` - primary ticket workflow
-
-## File Search — prefer FFF tools
-
-Use `fff_find`, `fff_grep`, and `fff_multi_grep` as your **default search tools** instead of `rg`, `fd`, and `glob`.
-
-- **`fff_find`** for finding files by name (replaces `glob` / `fd`). Fuzzy, frecency-ranked, git-aware.
-- **`fff_grep`** for searching file contents (replaces `rg`). Search bare identifiers, not code syntax. Supports inline constraints: `*.rs query`, `src/ query`, `!test/ query`.
-- **`fff_multi_grep`** for OR-logic across multiple patterns in one call (replaces sequential `rg` calls). Pass all naming variants at once: `['ActorAuth', 'actor_auth']`.
-
-Do NOT use `rg`, `fd`, or `glob` tools — they are disabled. If you need rg-specific flags (e.g. `--replace`, `-l`, complex piping), use `bash` to run `rg` directly.
-
-**Rules:**
-
-- Search **bare identifiers** — not code syntax, not multi-word expressions.
-- After 2 greps, **read the file**. Don't keep grepping with variations.
-- Keep find queries **short** — 1-2 terms max.
-- Use constraints to narrow scope: `*.ts query`, `src/ query`, `!node_modules/ query`.
-
-## AST-aware tools — use instead of sed/regex hacks
-
-Never use `sed` for code transforms (broken on macOS anyway). Use AST-aware tools:
-
-- **Rust:** `rs-hack find/add/remove/rename/update/transform` — AST-aware, revertible, blazingly fast. Use for finding symbols, renaming across a codebase, adding/removing struct fields, commenting out unwraps, etc. Always prefer over grep-and-replace for Rust code.
-  - `rs-hack find --name MyStruct --paths src` — find all occurrences
-  - `rs-hack rename --name old_fn --to new_fn --paths src --apply` — rename everywhere
-  - `rs-hack add --name MyStruct --field-name email --field-type String --paths src --apply` — add field
-  - `rs-hack remove --name MyStruct --field-name old_field --paths src --apply` — remove field
-  - `rs-hack transform comment-out-unwraps --paths src --apply` — bulk transforms
-  - `rs-hack revert <run-id>` — undo any operation
-- **TypeScript:** `ast-grep run --lang typescript --pattern '...' file.ts` — structural search/replace.
-- **Rust builds:** don't compile with a 120s timeout — use a reasonable timeout. Incremental builds are fast, clean builds are not.
 
 ## Red Herring
 
