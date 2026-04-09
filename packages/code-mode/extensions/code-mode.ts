@@ -392,22 +392,17 @@ async function executeCode(
         squash: (options?: { continue?: string }) => {
           const log = (msg: string) => sess.logs.push(msg);
           if (!toolCtx?.compact) {
-            log("ERROR: compact() not available on toolCtx. Available keys: " + Object.keys(toolCtx || {}).join(", "));
+            log("session.squash(): compaction not available in this context");
             return;
           }
           const continueText = options?.continue;
-          try {
-            toolCtx.compact({
-              onComplete: () => {
-                if (continueText && toolCtx?.sendUserMessage) {
-                  toolCtx.sendUserMessage(continueText);
-                }
-              },
-            });
-            log("squash: compact() called successfully." + (continueText ? " Continuation message queued." : ""));
-          } catch (e: any) {
-            log("squash: compact() THREW: " + (e?.message || e));
-          }
+          toolCtx.compact({
+            onComplete: () => {
+              if (continueText && toolCtx?.sendUserMessage) {
+                toolCtx.sendUserMessage(continueText);
+              }
+            },
+          });
         },
         load: (key: string) => {
           const entries = sm.getEntries();
