@@ -201,9 +201,12 @@ const r3 = await ouija({ action: "grep", session: "0fe1623e", query: "context wi
 // Read entries from any session (dead or alive)
 const r4 = await ouija({ action: "view", session: "0fe1623e", start: 720, end: 730 });
 
+// Browse sessions for a project
+const r5 = await ouija({ action: "list", project: "trek", since: "2026-04-01", limit: 10 });
+
 // Search any array of text on the fly
 const msgs = session.messages();
-const r5 = await ouija({ action: "grep", entries: msgs, query: "worker lifecycle" });
+const r6 = await ouija({ action: "grep", entries: msgs, query: "worker lifecycle" });
 ```
 
 **Builder chain:** `search`, `self`, and `grep` return arrays you can chain:

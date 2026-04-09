@@ -57,6 +57,9 @@ const self = await ouija({ action: "self", query: "BM25 engine" });
 
 // Read a dead session's entries
 const ctx = await ouija({ action: "view", session: hits[0].session, start: -10, end: 0 });
+
+// Browse sessions for a project
+const sessions = await ouija({ action: "list", project: "trek", since: "2026-04-01" });
 ```
 
 Chain results: `hits.rerank({ recency: { hours: 6 } }).limit(3).text()`
