@@ -18,7 +18,7 @@ import { Type } from "@sinclair/typebox";
 
 let communicatorProvider = "zai";
 let communicatorModelId = "glm-5.1";
-let communicatorEnabled = true;
+let communicatorEnabled = false;
 
 // ~150k tokens budget for context (leave room for response in 200k window)
 // rough estimate: 1 token ≈ 4 chars
