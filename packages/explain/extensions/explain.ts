@@ -135,8 +135,17 @@ export default function (pi: ExtensionAPI) {
       // Bypass communicator when disabled — show raw text directly
       if (!communicatorEnabled) {
         return {
-          content: [{ type: "text", text: params.text }],
-          details: { explained: params.text, originalText: params.text, model: "disabled" },
+          content: [{ type: "text", text: "✓ Communicated to user." }],
+          details: { explained: params.text, originalText: params.text, model: "off" },
+        };
+      }
+
+      // Short messages don't need rewriting — pass through directly
+      const lineCount = params.text.split("\n").length;
+      if (lineCount < 6) {
+        return {
+          content: [{ type: "text", text: "✓ Communicated to user." }],
+          details: { explained: params.text, originalText: params.text, model: "passthrough" },
         };
       }
 
