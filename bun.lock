@@ -328,6 +328,14 @@
       "name": "@pi-extensions/prompt-templates",
       "version": "0.0.1",
     },
+    "packages/provider-filter": {
+      "name": "@pi-extensions/provider-filter",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@mariozechner/pi-tui": "*",
+      },
+    },
     "packages/reload": {
       "name": "@pi-ext/reload",
       "version": "0.1.1",
@@ -639,6 +647,8 @@
     "@pi-extensions/powerline-footer": ["@pi-extensions/powerline-footer@workspace:packages/powerline-footer"],
 
     "@pi-extensions/prompt-templates": ["@pi-extensions/prompt-templates@workspace:packages/prompt-templates"],
+
+    "@pi-extensions/provider-filter": ["@pi-extensions/provider-filter@workspace:packages/provider-filter"],
 
     "@pi-extensions/session-tab-title": ["@pi-extensions/session-tab-title@workspace:packages/session-tab-title"],
 

@@ -1,0 +1,20 @@
+{
+  "name": "@pi-extensions/provider-filter",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/provider-filter.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.66.0",
+    "@mariozechner/pi-tui": "*"
+  },
+  "files": [
+    "extensions"
+  ]
+}

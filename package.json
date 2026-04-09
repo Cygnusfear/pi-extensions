@@ -26,6 +26,7 @@
       "./packages/cwd/extensions/cwd.ts",
       "./packages/core-edit-ui/extensions/core-edit-ui.ts",
       "./packages/core-read-ui/extensions/core-read-ui.ts",
+      "./packages/provider-filter/extensions/provider-filter.ts",
       "./packages/default-prompt/extensions/default-prompt.ts",
       "./packages/defaults/index.ts",
       "./packages/explain/extensions/explain.ts",
