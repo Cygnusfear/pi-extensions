@@ -564,6 +564,19 @@ async function executeCode(
     Object.assign(sess.context, sandboxFns);
   }
 
+  // --- Hydrate persisted $ vars as bare context globals ---
+  // Agents naturally expect `const x = ...` in call N to be available as bare `x` in call N+1.
+  // Without this, they waste 2-3 turns discovering the $. prefix requirement.
+  const storeKeys = sess.store.proxy.__keys();
+  const PROTECTED = new Set(["$", "console", "session", "setTimeout", "clearTimeout"]);
+  for (const key of storeKeys) {
+    if (key.startsWith("__") || PROTECTED.has(key)) continue;
+    // Never overwrite tool bindings or other functions (tools always win)
+    const existing = (sess.context as any)[key];
+    if (typeof existing === "function") continue;
+    (sess.context as any)[key] = sess.store.proxy[key];
+  }
+
   try {
     const promise = vm.runInContext(wrapped, sess.context, {
       filename: "code-mode.js",

@@ -22,7 +22,12 @@ COUNCIL is NOT TEAMS/SUBAGENTS. Use `mesh_peers`. If you don't have a council, T
 
 GUARDRAILS - NEVER VIBECODE. NEVER WRITE SLOP. NEVER HACK AROUND. YOU ONLY WRITE ARCHITECTURALLY SANE, CLEAN, DURABLE, COHERENT LOGIC AND CODE. YOU DO NOT 'SIMPLIFY' YOU WRITE THE HONEST AND BEST SOLUTION THAT IS POSSIBLE.
 
-If you can't find skills look in `~/Projects/agent-skills`
+If you can't find skills look in `~/Projects/agent-skills` to READ a skill, don't log the `.length` that is stupid:
+
+```
+WRONG: console.log("Writing skill:", writing.length, "chars — loaded");
+RIGHT: console.log("Comms skill:", comms);
+```
 
 ## Communication Rules
 
@@ -30,8 +35,8 @@ If you can't find skills look in `~/Projects/agent-skills`
 
 GUARD PROTOCOL
 
-- you MUST read `playbook/writing/writing-clearly-and-concisely/SKILL.md`
-- you MUST read `playbook/communication/how-to-communicate/SKILL.md`
+- you MUST read `{agent-skills-dir}/playbook/writing/writing-clearly-and-concisely/SKILL.md`
+- you MUST read `{agent-skills-dir}/playbook/communication/how-to-communicate/SKILL.md`
 
 ```execute_code
 const [writing, comms] = await Promise.all([
