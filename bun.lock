@@ -134,6 +134,16 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/explain": {
+      "name": "@pi-extensions/explain",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@mariozechner/pi-ai": "*",
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@mariozechner/pi-tui": "*",
+        "@sinclair/typebox": "*",
+      },
+    },
     "packages/fff": {
       "name": "@pi-extensions/fff",
       "version": "0.0.1",
@@ -591,6 +601,8 @@
     "@pi-extensions/default-prompt": ["@pi-extensions/default-prompt@workspace:packages/default-prompt"],
 
     "@pi-extensions/defaults": ["@pi-extensions/defaults@workspace:packages/defaults"],
+
+    "@pi-extensions/explain": ["@pi-extensions/explain@workspace:packages/explain"],
 
     "@pi-extensions/fff": ["@pi-extensions/fff@workspace:packages/fff"],
 

@@ -28,6 +28,7 @@
       "./packages/core-read-ui/extensions/core-read-ui.ts",
       "./packages/default-prompt/extensions/default-prompt.ts",
       "./packages/defaults/index.ts",
+      "./packages/explain/extensions/explain.ts",
       "./packages/fff/extensions/fff.ts",
       "./packages/file-tools/extensions/file-tools.ts",
       "./packages/foresight/extensions/foresight.ts",
