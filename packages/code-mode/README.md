@@ -18,7 +18,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 ## Features
 
 - **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
-- **Persistent `$` store** — variables survive across calls (50MB cap, LRU eviction). No time limit.
+- **Persistent `$` store** — variables survive across calls (150MB cap, LRU eviction). No time limit.
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
@@ -57,25 +57,28 @@ for (const f of remaining) {
 ### Memory management
 
 ```javascript
-$.__pin('importantData');   // protect from LRU eviction (survives even at 50MB cap)
+$.__pin('importantData');   // protect from LRU eviction (survives even at 150MB cap)
 $.__unpin('importantData'); // make evictable again
 $.__status();               // show all variables, sizes, total memory
 $.__keys();                 // list all variable names
 $.__reset();                // clear all persistent state
 ```
 
-Variables don't expire from time — only from memory pressure. When the 50MB cap is hit, least-recently-used unpinned variables are evicted first.
+Variables don't expire from time — only from memory pressure. When the 150MB cap is hit, least-recently-used unpinned variables are evicted first.
 
 ### Auto-persist
 
-Top-level declarations are automatically copied to `$`:
+Top-level declarations are automatically persisted and hydrated as bare names:
 
 ```javascript
 const config = await Read({ path: 'package.json' });
-// Next call: $.config is available
+// Next call: config is available directly (no $.config needed)
+
+const { stdout: hash } = await Bash({ command: 'git rev-parse HEAD' });
+// Next call: hash is available directly
 
 function extractVersions(pkg) { return Object.keys(pkg.dependencies || {}); }
-// Next call: $.extractVersions() is available
+// Next call: extractVersions() is available directly
 ```
 
 ### Async across calls

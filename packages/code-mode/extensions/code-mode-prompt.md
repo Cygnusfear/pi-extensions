@@ -41,11 +41,11 @@ for (const f of remaining) {
 }
 ```
 
-Regular `const`/`let` variables are local to each code block. Only `$` persists — with no time limit, only a 150MB memory cap.
+Variables inside functions, loops, or if-blocks are local to that block and won't persist. Top-level declarations persist automatically — with no time limit, only a 150MB memory cap.
 
-Top-level `const`/`let`/`var` declarations (not inside functions/loops/if-blocks) are automatically persisted to `$` at the end of each call. So `const sm = await Read(...)` makes `$.sm` available in the next call.
+Top-level `const`/`let`/`var` declarations are automatically persisted and hydrated as bare names. So `const sm = await Read(...)` in call N means `sm` is available directly in call N+1 — no `$.sm` prefix needed. `$` still works too, but bare names are preferred for readability.
 
-Top-level `function` declarations are also auto-persisted. So `function helper() { ... }` makes `$.helper()` callable in subsequent calls.
+Top-level `function` declarations, `const { stdout: mergeBase } = ...` destructuring, and array destructuring (`const [a, b] = ...`) are all handled correctly via AST parsing.
 
 ### Memory Management
 
@@ -55,7 +55,7 @@ Top-level `function` declarations are also auto-persisted. So `function helper()
 ```
 
 - **Variables don't expire from time** — only from memory pressure
-- **`$.__pin('name')`** — protect from eviction (pinned vars survive even at 50MB)
+- **`$.__pin('name')`** — protect from eviction (pinned vars survive even at 150MB)
 - **`$.__unpin('name')`** — make subject to memory eviction again
 - **`$.__status()`** — show all variables, sizes, and total memory used
 - **`$.__reset()`** — clear all persistent state

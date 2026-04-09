@@ -1038,7 +1038,7 @@ export default function (pi: ExtensionAPI) {
             "Increase for long-running operations like browser automation or large builds.",
           promptGuidelines: [
             "Use man('ToolName') to see detailed help for any sandbox function.",
-            "Use $ to persist data across code blocks — no time limit, only 50MB memory cap.",
+            "Use $ to persist data across code blocks — no time limit, only 150MB memory cap.",
             "Errors are non-fatal. $ survives. After an error, reference $.var to continue.",
             "Bash timeouts return { timedOut: true } instead of throwing.",
             "Prefer one large code block over many small execute_code calls.",
