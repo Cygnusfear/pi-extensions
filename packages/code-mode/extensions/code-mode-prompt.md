@@ -86,6 +86,32 @@ Use explicit `$.` assignment when:
 
 Use `console.log()` for final output you want the user to see.
 
+### Background Self-Wake: console.wake()
+
+`console.log()` only writes to the current block output — gone when the block returns.
+`console.wake(message)` queues a message that **triggers a new agent turn** after this block finishes. It works from background promises that fire minutes later.
+
+```javascript
+// Fire a monitor, wake yourself when something changes
+$.monitor = (async () => {
+  for (let i = 0; i < 20; i++) {
+    await sleep(240000); // 4 minutes
+    const view = await meshView({ sessionId: 'worker-1', start: -2, end: 0 });
+    if (view.includes('completed')) {
+      console.wake("Worker finished! Results: " + view.slice(0, 500));
+      return;
+    }
+  }
+  console.wake("Monitor timed out after 80 minutes.");
+})();
+console.log("Monitor started — will wake me when the worker finishes.");
+```
+
+**Rules:**
+- Only ONE wake per execute_code block. Subsequent calls are silently ignored.
+- If the agent is idle → triggers a turn immediately.
+- If the agent is busy → queued and delivered when it finishes.
+
 ### Async across calls
 
 Promises stashed on `$` survive across `execute_code` calls. The vm.Context persists, so pending promises keep running in the background.

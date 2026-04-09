@@ -24,6 +24,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Timeout control** — configurable per-call (default 120s, max 600s)
 - **Errors don't kill your state** — `$` survives crashes. Pick up where you left off with `$.var`.
 - **Context management** — two-phase squash with auto-continue, context usage warnings, output truncation at 200KB
+- **Background self-wake** — `console.wake()` lets background promises trigger new agent turns (worker monitoring, file watching, etc.)
 - **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
 - **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
@@ -93,6 +94,83 @@ const files = await Glob({ pattern: '**/*.ts' });
 
 // Call 2 — pick up results (instant if already resolved)
 const [search, memory] = await Promise.allSettled([$.search, $.memory]);
+```
+
+## Background self-wake: `console.wake()`
+
+`console.log()` only writes to the current block output — gone when the block returns. Background promises that fire minutes later would normally write into the void.
+
+`console.wake(message)` fixes this. It queues a user message that **triggers a new agent turn** after the current block finishes. The agent literally wakes itself up — even from a background promise that fires minutes later.
+
+### How it works
+
+- **One wake per block** — subsequent calls are silently ignored (idempotent)
+- **Agent idle** → triggers a turn immediately
+- **Agent busy** → queued and delivered when the agent finishes its current turn
+- Uses the same `triggerTurn` mechanism that pi-mesh (inbound tells) and teams (worker events) use internally
+
+### Pattern: worker monitoring
+
+Fire a polling loop into the background, wake yourself when the worker finishes:
+
+```javascript
+// Fire-and-forget monitor — polls every 4 minutes, wakes agent on completion
+$.workerMonitor = (async () => {
+  for (let i = 0; i < 30; i++) {
+    await sleep(240000); // 4 minutes
+
+    try {
+      const view = await meshView({ sessionId: 'component-finisher', start: -1, end: 0, timeoutMs: 5000 });
+      const text = typeof view === 'string' ? view : JSON.stringify(view);
+
+      if (text.includes('DONE') || text.includes('team_finish') || text.includes('Marked')) {
+        console.wake('Worker FINISHED! Latest: ' + text.substring(0, 500));
+        return;
+      }
+
+      if (text.includes('stuck') || text.includes('idle')) {
+        console.wake('Worker STUCK/IDLE! Latest: ' + text.substring(0, 500));
+        return;
+      }
+      // Still working — keep monitoring silently
+    } catch(e) {
+      console.wake('Worker monitor error (possibly dead): ' + e.message);
+      return;
+    }
+  }
+  console.wake('Worker monitor timed out after 2 hours — check manually.');
+})();
+
+console.log('Monitor started — will wake me when the worker finishes, stalls, or dies.');
+```
+
+### Pattern: file watching
+
+```javascript
+$.logWatcher = (async () => {
+  let lastSize = 0;
+  for (let i = 0; i < 60; i++) {
+    await sleep(30000); // 30 seconds
+    const result = await Bash({ command: 'wc -c /tmp/build.log' });
+    const size = parseInt(result.stdout);
+    if (size < lastSize) {
+      console.wake('Build log was truncated — build likely restarted.');
+      return;
+    }
+    const content = await Bash({ command: 'tail -5 /tmp/build.log' });
+    if (content.stdout.includes('BUILD FAILED')) {
+      console.wake('Build FAILED! Last 5 lines: ' + content.stdout);
+      return;
+    }
+    if (content.stdout.includes('BUILD SUCCESS')) {
+      console.wake('Build succeeded! Output: ' + content.stdout);
+      return;
+    }
+    lastSize = size;
+  }
+  console.wake('Log watcher timed out after 30 minutes.');
+})();
+console.log('Watching build log...');
 ```
 
 ## Session API
@@ -178,6 +256,13 @@ All of these are available inside `execute_code` as typed async functions:
 | `tldrDead({ path })` | Find dead functions |
 | `tldrArch({ path })` | Detect architecture layers |
 | `tldrImpact({ func, path })` | Find all callers |
+
+### Console extensions
+
+| Function | Description |
+|----------|-------------|
+| `console.log(...args)` | Write to current block output (gone when block returns) |
+| `console.wake(...args)` | Queue a message that triggers a new agent turn — works from background promises |
 
 ### Passthrough wrappers
 

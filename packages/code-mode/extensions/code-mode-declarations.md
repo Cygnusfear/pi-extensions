@@ -642,3 +642,40 @@ declare const $: {
   /** Current turn number */
   __turn(): number;
 };
+
+// =====================================================================
+// Console Extensions
+// =====================================================================
+
+/**
+ * Queue a message that triggers a new agent turn after this execute_code block returns.
+ *
+ * Unlike console.log() which only writes to the current block's output (gone when the block
+ * finishes), console.wake() sends a message that wakes the agent up — even from a background
+ * promise that fires minutes later.
+ *
+ * Only ONE wake per execute_code block. Subsequent calls are silently ignored.
+ *
+ * Use cases:
+ * - Background monitoring: fire a polling promise onto $, wake yourself when something changes
+ * - Worker watching: poll a teams worker every few minutes, wake when it completes
+ * - File watching: tail a log file, wake when a pattern appears
+ *
+ * @example
+ * // Fire-and-forget monitor that wakes the agent when done
+ * $.monitor = (async () => {
+ *   for (let i = 0; i < 20; i++) {
+ *     await sleep(240000); // 4 minutes
+ *     const status = await meshView({ sessionId: 'my-worker', start: -2, end: 0 });
+ *     if (status.includes('completed')) {
+ *       console.wake("Worker finished! Check results.");
+ *       return;
+ *     }
+ *   }
+ *   console.wake("Monitor timed out — worker never completed.");
+ * })();
+ * console.log("Monitor started — will wake me when the worker finishes.");
+ */
+declare namespace console {
+  function wake(...args: unknown[]): void;
+}

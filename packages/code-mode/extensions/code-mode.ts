@@ -294,6 +294,20 @@ async function executeCode(
   const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal });
   Object.assign(sess.context, bindings);
 
+  // Inject console.wake — lets background promises trigger a new agent turn.
+  // console.log() only writes to the current block's output (gone when block returns).
+  // console.wake() queues a user message that triggers a turn after this block finishes.
+  if (toolCtx?.sendUserMessage) {
+    const send = toolCtx.sendUserMessage;
+    let wakeFired = false;
+    (sess.context as any).console.wake = (...args: unknown[]) => {
+      if (wakeFired) return;
+      wakeFired = true;
+      const message = args.map(formatArg).join(" ");
+      send(message);
+    };
+  }
+
   // Inject session introspection API if ctx available
   if (toolCtx?.sessionManager) {
     const sm = toolCtx.sessionManager;
