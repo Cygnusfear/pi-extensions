@@ -149,10 +149,10 @@ function createSession(): PersistentSession {
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
 
-    // Process — env access for config resolution, cwd for path building
+    // Process — env, platform, pid are static; cwd is updated per-execution in executeCode()
     process: {
       env: globalThis.process.env,
-      cwd: () => cwd,
+      cwd: () => globalThis.process.cwd(),
       platform: globalThis.process.platform,
       pid: globalThis.process.pid,
     },
@@ -301,6 +301,9 @@ async function executeCode(
   currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
   const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal });
   Object.assign(sess.context, bindings);
+
+  // Update process.cwd to reflect the current session working directory
+  (sess.context as any).process.cwd = () => cwd;
 
   // Inject console.wake — lets background promises trigger a new agent turn.
   // console.log() only writes to the current block's output (gone when block returns).
