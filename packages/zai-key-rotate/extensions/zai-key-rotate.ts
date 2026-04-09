@@ -92,26 +92,26 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Auto-swap on rate limit
-  pi.on("tool_result", async (event, ctx) => {
+  // Auto-swap on rate limit — hooks message_end to catch provider-level 429s
+  pi.on("message_end", async (event, ctx) => {
     if (!config.autoRotate) return;
+    if (config.keys.length < 2) return;
 
-    // Detect rate limit errors from ZAI providers
-    const isZaiError =
-      event.isError &&
-      event.content?.some((c) => {
-        if (c.type !== "text") return false;
-        const text = c.text?.toLowerCase() ?? "";
-        return (
-          text.includes("429") ||
-          text.includes("rate limit") ||
-          text.includes("rate_limit") ||
-          text.includes("too many requests") ||
-          text.includes("quota exceeded")
-        );
-      });
+    const msg = event.message;
+    if (msg.role !== "assistant") return;
+    if (msg.stopReason !== "error") return;
 
-    if (!isZaiError) return;
+    // Check if the error is a rate limit
+    const errorText = (msg.errorMessage ?? "").toLowerCase();
+    const isRateLimit =
+      errorText.includes("429") ||
+      errorText.includes("rate limit") ||
+      errorText.includes("rate_limit") ||
+      errorText.includes("too many requests") ||
+      errorText.includes("quota exceeded") ||
+      errorText.includes("limit exhausted");
+
+    if (!isRateLimit) return;
 
     // Check if the current model is a ZAI provider
     const model = ctx.model;
@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
     const newIndex = swapToNext();
 
     ctx.ui.notify(
-      `Rate limit hit! Auto-swapped ZAI key: key #${prevIndex + 1} → key #${newIndex + 1} (${redactKey(getActiveKey())})`,
+      `Rate limit hit — auto-swapped ZAI key: #${prevIndex + 1} → #${newIndex + 1} (${redactKey(getActiveKey())})`,
       "warning",
     );
   });
