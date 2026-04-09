@@ -725,3 +725,13 @@ declare const $: {
 declare namespace console {
   function wake(...args: unknown[]): void;
 }
+
+/**
+ * Subset of Node.js process object - env vars, cwd, platform info.
+ */
+declare const process: {
+  env: Record<string, string | undefined>;
+  cwd(): string;
+  platform: string;
+  pid: number;
+};

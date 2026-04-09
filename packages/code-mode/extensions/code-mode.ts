@@ -148,6 +148,14 @@ function createSession(): PersistentSession {
     // Timers (needed for sleep and async patterns)
     setTimeout: globalThis.setTimeout.bind(globalThis),
     clearTimeout: globalThis.clearTimeout.bind(globalThis),
+
+    // Process — env access for config resolution, cwd for path building
+    process: {
+      env: globalThis.process.env,
+      cwd: () => cwd,
+      platform: globalThis.process.platform,
+      pid: globalThis.process.pid,
+    },
   };
 
   const context = vm.createContext(sandbox);
@@ -609,7 +617,7 @@ async function executeCode(
   // Agents naturally expect `const x = ...` in call N to be available as bare `x` in call N+1.
   // Without this, they waste 2-3 turns discovering the $. prefix requirement.
   const storeKeys = sess.store.proxy.__keys();
-  const PROTECTED = new Set(["$", "console", "session", "setTimeout", "clearTimeout"]);
+  const PROTECTED = new Set(["$", "console", "session", "setTimeout", "clearTimeout", "process"]);
   for (const key of storeKeys) {
     if (key.startsWith("__") || PROTECTED.has(key)) continue;
     // Never overwrite tool bindings or other functions (tools always win)
