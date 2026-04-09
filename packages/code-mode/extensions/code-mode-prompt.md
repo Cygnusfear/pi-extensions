@@ -66,39 +66,25 @@ Top-level `function` declarations, `const { stdout: mergeBase } = ...` destructu
 
 ### When to use `$`
 
-Use `$` for any data you need across multiple code blocks:
+Top-level declarations auto-persist as bare names, so you don't need to explicitly use `$` for most cases:
 
-- **Multi-step workflows**: reading files in one block, processing in another
-- **Error recovery**: store progress so you can resume after a crash  
-- **Caching**: avoid re-reading or re-computing expensive things
-- **Accumulating results**: building up arrays/maps across iterations
-
-Use `console.log()` for final output you want the user to see. You can do both in one line:
-`$.data = await Read({...}); console.log($.data);` — store AND display.
-
-**Don't** do this (re-reads every call, loses state on errors):
 ```
-// Call 1
+// Call 1 — const auto-persists, available bare in call 2
 const files = await Glob({ pattern: '**/*.ts' });
-const content = await Read({ path: files[0] });
-console.log(content);  // gone after this call
+const config = await Read({ path: 'package.json' });
+console.log(files.length, config.length);
 
-// Call 2
-const content2 = await Read({ path: files[0] });  // re-reading!
-console.log(content2);
+// Call 2 — files and config available bare, no re-reading
+const srcFiles = files.filter(f => f.includes('src/'));
+console.log(srcFiles);
 ```
 
-**Do** this instead (stores once, survives errors):
-```
-// Call 1
-$.files = await Glob({ pattern: '**/*.ts' });
-$.content = await Read({ path: $.files[0] });
-console.log($.content);
+Use explicit `$.` assignment when:
+- **Building incrementally**: `$.results = []` then push across multiple calls
+- **Error recovery**: re-reading after a crash without re-declaring
+- **Overwriting a previous value**: `$.count = $.count + 1`
 
-// Call 2 — $.files and $.content still here, no re-reading
-$.content2 = await Read({ path: $.files[1] });
-console.log($.content, $.content2);
-```
+Use `console.log()` for final output you want the user to see.
 
 ### Async across calls
 

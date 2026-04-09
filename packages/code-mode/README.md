@@ -198,11 +198,13 @@ The LLM can also toggle escape mode programmatically by setting `$.__escaped = t
 
 Code runs in a **persistent** Node.js `vm.Context` — the context object (including `$`, console overrides, and timer bindings) is created once per session and reused for every `execute_code` call. Tool bindings are refreshed on each call (in case `cwd` changed), but state on `$` carries over.
 
-The execution flow has three layers:
+The execution flow has five layers:
 
-1. **Syntax pre-validation** — code is parsed before touching `$`. Syntax errors produce a clear message without affecting stored state.
-2. **Fault-tolerant execution** — code runs in a try/catch. Errors are caught, partial output is preserved, and a recovery hint tells the agent which `$` variables survived.
-3. **Context management** — after execution, if context usage is ≥30%, a footer shows the percentage and cost. At ≥40%, it warns the agent to distill and trim.
+1. **AST-based auto-persist extraction** — the user's code is parsed with acorn. Top-level `const`/`let`/`var` and `function` declarations are collected (handles all destructuring patterns). A suffix is generated to copy each name to `$` after execution.
+2. **Syntax pre-validation** — the wrapped code (user code + auto-persist suffix) is validated with `vm.Script`. Syntax errors produce a clear message without affecting stored state.
+3. **Hydration** — all variables in the `$` store are injected as bare context globals, so `const x = ...` from a previous call is available as bare `x` without the `$.` prefix. Tool bindings and builtins (`$`, `console`, `session`) are protected from shadowing.
+4. **Fault-tolerant execution** — code runs in a try/catch. Errors are caught, partial output is preserved, and a recovery hint tells the agent which `$` variables survived.
+5. **Context management** — after execution, if context usage is ≥30%, a footer shows the percentage and cost. At ≥40%, it warns the agent to distill and trim.
 
 ## Tool exclusivity
 
