@@ -6,7 +6,7 @@ import path from "node:path";
 // Persistent Store ($) with memory-based eviction
 // ===========================================================================
 
-export const MAX_STORE_MEMORY = 50 * 1024 * 1024; // 50MB — eviction threshold
+export const MAX_STORE_MEMORY = 150 * 1024 * 1024; // 150MB — eviction threshold
 const STORE_FILENAME = ".pi/code-mode-store.json";
 const MAX_DISK_SIZE = 5 * 1024 * 1024; // 5MB
 

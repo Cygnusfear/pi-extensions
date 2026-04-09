@@ -41,7 +41,7 @@ for (const f of remaining) {
 }
 ```
 
-Regular `const`/`let` variables are local to each code block. Only `$` persists — with no time limit, only a 50MB memory cap.
+Regular `const`/`let` variables are local to each code block. Only `$` persists — with no time limit, only a 150MB memory cap.
 
 Top-level `const`/`let`/`var` declarations (not inside functions/loops/if-blocks) are automatically persisted to `$` at the end of each call. So `const sm = await Read(...)` makes `$.sm` available in the next call.
 
@@ -49,7 +49,7 @@ Top-level `function` declarations are also auto-persisted. So `function helper()
 
 ### Memory Management
 
-`$` variables persist indefinitely until total memory exceeds 50MB. When the cap is hit, least-recently-used unpinned variables are evicted first. You'll see:
+`$` variables persist indefinitely until total memory exceeds 150MB. When the cap is hit, least-recently-used unpinned variables are evicted first. You'll see:
 ```
 ⏳ $.bigData EVICTED to free memory (was 12.5MB, last used 30 turns ago). Use $.__pin('bigData') to protect.
 ```
