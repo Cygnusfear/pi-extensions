@@ -390,13 +390,13 @@ async function executeCode(
           log("preCompact: stashed outline of " + msgCount + " messages into $.preCompact. Review it, save important context to $, then call session.squash().");
         },
         squash: (options?: { continue?: string }) => {
+          const log = (msg: string) => sess.logs.push(msg);
           if (!toolCtx?.compact) {
-            return "Error: compaction not available in this context";
+            log("ERROR: compact() not available on toolCtx. Available keys: " + Object.keys(toolCtx || {}).join(", "));
+            return;
           }
-          if (squashPhase === "reviewing") {
-            // Phase 2: agent has reviewed, apply compaction
-            squashPhase = "idle";
-            const continueText = options?.continue;
+          const continueText = options?.continue;
+          try {
             toolCtx.compact({
               onComplete: () => {
                 if (continueText && toolCtx?.sendUserMessage) {
@@ -404,33 +404,10 @@ async function executeCode(
                 }
               },
             });
-            return "Squash applied — compaction in progress." + (continueText ? " Continuation message queued." : "");
+            log("squash: compact() called successfully." + (continueText ? " Continuation message queued." : ""));
+          } catch (e: any) {
+            log("squash: compact() THREW: " + (e?.message || e));
           }
-          // Phase 1: build outline from current session, stash for review
-          const branch = sm.getBranch();
-          const outline: string[] = [];
-          let msgCount = 0;
-          for (const entry of branch) {
-            if (entry.type !== "message") continue;
-            const msg = (entry as any).message;
-            if (!msg) continue;
-            msgCount++;
-            if (typeof msg.content === "string") {
-              outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
-            } else if (Array.isArray(msg.content)) {
-              const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-              const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
-              if (text || tools.length) {
-                outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
-              }
-            }
-          }
-          sess.store.proxy.preCompact = {
-            messageCount: msgCount,
-            outline: outline.join("\n"),
-          };
-          squashPhase = "reviewing";
-          return "Squash phase 1 complete — $.preCompact has an outline of " + msgCount + " messages. Review it, extract anything important to $, then call session.squash() again to apply.";
         },
         load: (key: string) => {
           const entries = sm.getEntries();
