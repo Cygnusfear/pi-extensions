@@ -10,6 +10,7 @@ import {
   isGitUnsafeBash,
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
+import { isLocked, lockError } from "./shell-utils";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 import {
   tldrArchAPI,
@@ -68,6 +69,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       timeout?: number;
     }) => {
       throwIfAborted();
+      if (isLocked()) throw new Error(lockError("Bash"));
       // Process-kill broadcast guard — ALWAYS active, not gated by git-lock mode.
       const killResult = isProcessKillBroadcast(command);
       if (killResult) throw new Error(processKillGuardError(killResult.reason));
@@ -134,6 +136,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       timeout?: number;
     }) => {
       throwIfAborted();
+      if (isLocked()) throw new Error(lockError("Python"));
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const tmpFile = path.join(os.tmpdir(), `pi-python-${Date.now()}-${Math.random().toString(36).slice(2)}.py`);
@@ -202,6 +205,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       cwd?: string;
       content: string;
     }) => {
+      if (isLocked()) throw new Error(lockError("Write"));
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
       if (isGitLockActive() && isGitPath(resolved)) {
@@ -231,6 +235,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       oldText: string;
       newText: string;
     }) => {
+      if (isLocked()) throw new Error(lockError("Edit"));
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
       if (isGitLockActive() && isGitPath(resolved)) {
@@ -683,6 +688,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       cwd?: string;
       edits: HashlineEdit[];
     }) => {
+      if (isLocked()) throw new Error(lockError("hashEdit"));
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
       if (isGitLockActive() && isGitPath(resolved)) {
@@ -776,6 +782,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // =====================================================================
 
     applyPatch: async ({ patchText, cwd: explicitCwd }: { patchText: string; cwd?: string }) => {
+      if (isLocked()) throw new Error(lockError("applyPatch"));
       if (!patchText) throw new Error("patchText is required");
 
       const hunks = parsePatchText(patchText);

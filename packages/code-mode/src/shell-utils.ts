@@ -23,6 +23,14 @@ export function isGitLockActive(): boolean {
   return process.env.PI_GIT_LOCK_MODE !== "off";
 }
 
+export function isLocked(): boolean {
+  return process.env.PI_LOCK_MODE === "1";
+}
+
+export function lockError(tool: string): string {
+  return "\u{1F512} " + tool + " is disabled -- session is locked. Use /unlock to restore write access.";
+}
+
 export function gitGuardError(reason: string): string {
   return `❌ BLOCKED: ${reason} 🛡️ GUARD PROTOCOL: HOOMAN MUST CONFIRM WITH [OK]`;
 }
