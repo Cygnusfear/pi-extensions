@@ -222,6 +222,10 @@ export default function (pi: ExtensionAPI) {
           .map((c) => c.text)
           .join("\n");
 
+        if (!explained.trim()) {
+          console.error("[explain] Communicator returned empty response, stopReason:", response.stopReason);
+        }
+
         // Return short confirmation to the LLM — the full glm output is in details
         // and rendered to the user via renderResult (no sendMessage to avoid retriggering)
         return {
@@ -268,8 +272,9 @@ export default function (pi: ExtensionAPI) {
         contextTokensEstimate?: number;
       } | undefined;
 
-      // If no explained text, just show the short confirmation
-      if (!details?.explained) {
+      // If no explained text, try originalText; last resort show confirmation
+      const explainedText = details?.explained || details?.originalText;
+      if (!explainedText) {
         const text = result.content?.[0];
         const content = text?.type === "text" ? text.text : "done";
         return new Text(theme.fg("success", content), 0, 0);
@@ -284,7 +289,7 @@ export default function (pi: ExtensionAPI) {
       container.addChild(new Text(header, 0, 0));
 
       // The explained content as markdown
-      container.addChild(new Markdown(details.explained, 0, 0, mdTheme));
+      container.addChild(new Markdown(explainedText, 0, 0, mdTheme));
 
       // Show original text when expanded
       if (expanded && details.originalText) {
