@@ -84,6 +84,10 @@ export default function (pi: ExtensionAPI) {
   // Apply on startup
   applyActiveKey();
 
+  // Track whether we've already swapped during this agent turn
+  let swappedThisTurn = false;
+  pi.on("agent_start", async () => { swappedThisTurn = false; });
+
   // Re-apply after reload
   pi.on("session_start", async (event) => {
     if (event.reason === "reload") {
@@ -112,6 +116,7 @@ export default function (pi: ExtensionAPI) {
       errorText.includes("limit exhausted");
 
     if (!isRateLimit) return;
+    if (swappedThisTurn) return; // already swapped this turn, don't ping-pong
 
     // Check if the current model is a ZAI provider
     const model = ctx.model;
@@ -120,6 +125,7 @@ export default function (pi: ExtensionAPI) {
     const prevIndex = config.activeIndex;
     const newIndex = swapToNext();
 
+    swappedThisTurn = true;
     ctx.ui.notify(
       `Rate limit hit — auto-swapped ZAI key: #${prevIndex + 1} → #${newIndex + 1} (${redactKey(getActiveKey())})`,
       "warning",
