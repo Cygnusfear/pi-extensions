@@ -158,7 +158,6 @@ let session: PersistentSession | null = null;
 let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
-let squashPhase: "idle" | "reviewing" = "idle";
 let currentOuijaSessionFile: string | null = null;
 
 function getSession(): PersistentSession {
@@ -363,6 +362,32 @@ async function executeCode(
           const size = Math.max(4, Math.abs(Math.round(n)));
           contextSize = size;
           return "Context limited to last " + size + " messages";
+        },
+        preCompact: () => {
+          const log = (msg: string) => sess.logs.push(msg);
+          const branch = sm.getBranch();
+          const outline: string[] = [];
+          let msgCount = 0;
+          for (const entry of branch) {
+            if (entry.type !== "message") continue;
+            const msg = (entry as any).message;
+            if (!msg) continue;
+            msgCount++;
+            if (typeof msg.content === "string") {
+              outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+            } else if (Array.isArray(msg.content)) {
+              const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+              const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+              if (text || tools.length) {
+                outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+              }
+            }
+          }
+          sess.store.proxy.preCompact = {
+            messageCount: msgCount,
+            outline: outline.join("\n"),
+          };
+          log("preCompact: stashed outline of " + msgCount + " messages into $.preCompact. Review it, save important context to $, then call session.squash().");
         },
         squash: (options?: { continue?: string }) => {
           if (!toolCtx?.compact) {

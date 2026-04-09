@@ -560,20 +560,17 @@ declare const session: {
   /** Load previously saved data from the session file */
   load(key: string): unknown;
 
+  /** Build an outline of the current session and stash it in $.preCompact for review.
+   *  Does NOT compact. Use this to review what will be lost before calling session.squash(). */
+  preCompact(): void;
+
   /**
-   * Two-phase compaction. First call builds an outline and stashes it in
-   * $.preCompact for review (compaction is NOT applied). Second call applies
-   * the compaction. This lets you review what's being lost and extract
-   * critical details to $ before the old messages are replaced by the summary.
-   *
-   * Phase 1: session.squash() → $.preCompact = { outline, messageCount }
-   * Phase 2: review $.preCompact, save important stuff to $, then session.squash() again
-   *
-   * Pass { continue: "..." } in phase 2 to auto-continue after compaction.
-   * The continue message is injected as a user message via onComplete, so the agent
-   * automatically picks up where it left off without waiting for user input.
+   * Compact the session immediately. Old messages are replaced by a summary.
+   * $ and session.save() survive compaction.
+   * Pass { continue: "..." } to auto-continue after compaction — the message is
+   * injected as a user message so the agent picks up where it left off.
    */
-  squash(options?: { continue?: string }): string;
+  squash(options?: { continue?: string }): void;
 };
 
 // =====================================================================
