@@ -14,6 +14,7 @@ import { closeSync, openSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
 
 const DEFAULT_LOG_LIMIT = 200;
 const MAX_LOG_LIMIT = 2000;
@@ -637,5 +638,37 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
 			return runBashToolAction(pi, manager, { action: "list" }, signal, ctx);
 		},
+	});
+
+	// --- Sandbox function registrations (available inside execute_code) ---
+	// These share the same BackgroundBashManager instance as the direct tools.
+
+	registerSandboxFn("bashBgStart", async (input: { command: string; cwd?: string }) => {
+		const job = await manager.start({
+			command: input.command,
+			cwd: input.cwd || process.cwd(),
+		});
+		return { id: job.id, pid: job.pid, cwd: job.cwd, logPath: job.logPath, status: job.status };
+	});
+
+	registerSandboxFn("bashBgStatus", async (input: { id: string }) => {
+		const job = manager.getStatus(input.id);
+		if (!job) throw new Error(`Background job not found: ${input.id}`);
+		return { id: job.id, pid: job.pid, status: job.status, command: job.command, cwd: job.cwd, startedAt: job.startedAt, endedAt: job.endedAt, exitCode: job.exitCode, signal: job.signal };
+	});
+
+	registerSandboxFn("bashBgLogs", async (input: { id: string; offset?: number; limit?: number }) => {
+		const result = await manager.readLogs(input.id, { offset: input.offset, limit: input.limit });
+		return result;
+	});
+
+	registerSandboxFn("bashBgStop", async (input: { id: string; signal?: "SIGTERM" | "SIGKILL" }) => {
+		const job = await manager.stop(input.id, input.signal || "SIGTERM");
+		return { id: job.id, pid: job.pid, status: job.status, exitCode: job.exitCode, signal: job.signal };
+	});
+
+	registerSandboxFn("bashBgList", async () => {
+		const jobs = manager.list();
+		return jobs.map(j => ({ id: j.id, pid: j.pid, status: j.status, command: j.command, cwd: j.cwd, startedAt: j.startedAt, endedAt: j.endedAt, exitCode: j.exitCode }));
 	});
 }

@@ -150,3 +150,17 @@ IDs are randomly generated: `bg-` + 8 hex characters (e.g. `bg-a3f2c1b7`).
 ## Setup
 
 No additional configuration required. Background bash tools are available immediately after installation.
+ 
+ ### Sandbox functions (inside execute_code)
+ 
+ These are also available as sandbox functions inside `execute_code`, using camelCase names:
+ 
+ | Sandbox fn | Parameters | Description |
+ |-----------|-----------|-------------|
+ | `bashBgStart` | `{ command, cwd? }` | Start a background job, returns `{ id, pid, cwd, logPath, status }` |
+ | `bashBgStatus` | `{ id }` | Get job status |
+ | `bashBgLogs` | `{ id, offset?, limit? }` | Read paginated logs, returns `{ text, offset, nextOffset, totalLines, hasMore, status }` |
+ | `bashBgStop` | `{ id, signal? }` | Stop a job |
+ | `bashBgList` | *(none)* | List all jobs |
+ 
+ ## Usage

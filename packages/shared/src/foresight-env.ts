@@ -12,7 +12,7 @@ import path from "node:path";
 
 export const FORESIGHT_BIN = process.env.FORESIGHT_BIN || "foresight";
 
-const LOCAL_DEV_DB_URL = "postgresql://totalrecall:totalrecall_dev@localhost:5433/foresight_test";
+const LOCAL_DEV_DB_URL = "postgresql://foresight:foresight_dev@localhost:5432/foresight";
 const RENDERED_ENV_PATH = "/run/secrets/rendered/foresight-env";
 const INTERESTING_KEYS = new Set([
 	"MEMORY_DATABASE_URL",
@@ -101,8 +101,8 @@ function deriveMemoryDatabaseUrl(env: EnvSource): string | undefined {
 
 	const host = env.MEMORY_DATABASE_HOST || "localhost";
 	const port = env.MEMORY_DATABASE_PORT || "5432";
-	const dbName = env.MEMORY_DATABASE_NAME || "totalrecall";
-	const user = env.MEMORY_DATABASE_USER || "totalrecall";
+	const dbName = env.MEMORY_DATABASE_NAME || "foresight";
+	const user = env.MEMORY_DATABASE_USER || "foresight";
 
 	return `postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}/${dbName}`;
 }

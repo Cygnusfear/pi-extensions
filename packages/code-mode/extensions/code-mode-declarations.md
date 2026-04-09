@@ -41,6 +41,52 @@ declare function Bash(input: {
 }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
 
 /**
+ * Start a bash command in the background and return immediately with a job ID.
+ * Use bashBgStatus/bashBgLogs/bashBgStop to manage it.
+ */
+declare function bashBgStart(input: {
+  /** Bash command to run in the background */
+  command: string;
+  /** Working directory (default: current cwd) */
+  cwd?: string;
+}): Promise<{ id: string; pid: number; cwd: string; logPath: string; status: string }>;
+
+/**
+ * Get the status of a background bash job.
+ */
+declare function bashBgStatus(input: {
+  /** Background job ID */
+  id: string;
+}): Promise<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null; signal?: string }>;
+
+/**
+ * Read logs from a background bash job.
+ */
+declare function bashBgLogs(input: {
+  /** Background job ID */
+  id: string;
+  /** 1-indexed log line to start from (default: 1) */
+  offset?: number;
+  /** Maximum lines to return (default: 200, max: 2000) */
+  limit?: number;
+}): Promise<{ text: string; offset: number; limit: number; nextOffset: number; totalLines: number; hasMore: boolean; status: string }>;
+
+/**
+ * Stop a background bash job.
+ */
+declare function bashBgStop(input: {
+  /** Background job ID */
+  id: string;
+  /** Signal to send. Defaults to SIGTERM. */
+  signal?: "SIGTERM" | "SIGKILL";
+}): Promise<{ id: string; pid: number; status: string; exitCode?: number | null; signal?: string }>;
+
+/**
+ * List all background bash jobs started in this session.
+ */
+declare function bashBgList(): Promise<Array<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null }>>;
+
+/**
  * Execute Python code in a subprocess.
  * Writes code to a temp file and runs `python3` on it — no shell quoting issues.
  * Returns stdout, stderr, and exit code.

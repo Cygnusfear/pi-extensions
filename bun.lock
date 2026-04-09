@@ -18,6 +18,9 @@
     "packages/background-bash": {
       "name": "@pi-extensions/background-bash",
       "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
       "peerDependencies": {
         "@mariozechner/pi-coding-agent": ">=0.66.0",
         "@mariozechner/pi-tui": "*",
@@ -421,6 +424,14 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/zai-key-rotate": {
+      "name": "@pi-extensions/zai-key-rotate",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@mariozechner/pi-tui": "*",
+      },
+    },
   },
   "trustedDependencies": [
     "@ff-labs/fff-bun",
@@ -663,6 +674,8 @@
     "@pi-extensions/webfetch": ["@pi-extensions/webfetch@workspace:packages/webfetch"],
 
     "@pi-extensions/worktree-summaries": ["@pi-extensions/worktree-summaries@workspace:packages/worktree-summaries"],
+
+    "@pi-extensions/zai-key-rotate": ["@pi-extensions/zai-key-rotate@workspace:packages/zai-key-rotate"],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
 
