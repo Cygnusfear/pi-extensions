@@ -6,7 +6,7 @@
  * Usage:
  *   /provider                    — show all providers and status
  *   /provider disable openai     — disable a provider (hides its models)
- *   /provider enable openai      — re-enable a provider (restores its models)
+ *   /provider enable openai      — restore a provider's models
  */
 
 import * as fs from "node:fs";
@@ -33,18 +33,34 @@ function saveDisabledProviders(disabled: Set<string>): void {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify([...disabled], null, 2) + "\n", "utf-8");
 }
 
-function applyDisabledProviders(pi: ExtensionAPI, disabled: Set<string>): void {
-  for (const provider of disabled) {
-    try {
-      pi.registerProvider(provider, { models: [] });
-    } catch (err) {
-      console.error(`[provider-filter] Failed to disable ${provider}:`, err);
-    }
+function disableProvider(pi: ExtensionAPI, provider: string): void {
+  try {
+    // Register with a single placeholder model to trigger built-in model removal.
+    // The placeholder uses a bogus API key so it never appears in getAvailable().
+    pi.registerProvider(provider, {
+      baseUrl: "https://disabled.invalid",
+      apiKey: "__DISABLED_PROVIDER_NO_KEY__",
+      api: "openai-responses",
+      models: [
+        {
+          id: "__disabled__",
+          name: "(disabled)",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 1,
+          maxTokens: 1,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(`[provider-filter] Failed to disable ${provider}:`, err);
   }
 }
 
-function restoreProvider(pi: ExtensionAPI, provider: string): void {
+function enableProvider(pi: ExtensionAPI, provider: string): void {
   try {
+    // unregisterProvider triggers refresh() which reloads built-in models
     pi.unregisterProvider(provider);
   } catch (err) {
     console.error(`[provider-filter] Failed to restore ${provider}:`, err);
@@ -55,14 +71,16 @@ export default function (pi: ExtensionAPI) {
   const disabled = loadDisabledProviders();
 
   // Apply on startup
-  if (disabled.size > 0) {
-    applyDisabledProviders(pi, disabled);
+  for (const provider of disabled) {
+    disableProvider(pi, provider);
   }
 
-  // Re-apply after reload (extensions get re-instantiated)
+  // Re-apply after reload
   pi.on("session_start", async (event) => {
-    if (event.reason === "reload" && disabled.size > 0) {
-      applyDisabledProviders(pi, disabled);
+    if (event.reason === "reload") {
+      for (const provider of disabled) {
+        disableProvider(pi, provider);
+      }
     }
   });
 
@@ -75,16 +93,11 @@ export default function (pi: ExtensionAPI) {
 
       // No args — show status
       if (!action) {
-        const all = pi.getAllTools ? null : null; // not useful here
-        // Build provider list from model registry
-        const allModels = ctx.modelRegistry.getModels?.() ?? [];
-
-        // Show disabled providers
         if (disabled.size === 0) {
           ctx.ui.notify("All providers enabled. Use: /provider disable <name>", "info");
         } else {
           const list = [...disabled].join(", ");
-          ctx.ui.notify(`Disabled providers: ${list}`, "info");
+          ctx.ui.notify(`Disabled: ${list}`, "info");
         }
         return;
       }
@@ -94,15 +107,13 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("Usage: /provider disable <provider-name>", "error");
           return;
         }
-
         if (disabled.has(provider)) {
           ctx.ui.notify(`${provider} is already disabled`, "info");
           return;
         }
-
         disabled.add(provider);
         saveDisabledProviders(disabled);
-        applyDisabledProviders(pi, disabled);
+        disableProvider(pi, provider);
         ctx.ui.notify(`Disabled provider: ${provider}`, "success");
         return;
       }
@@ -112,15 +123,13 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("Usage: /provider enable <provider-name>", "error");
           return;
         }
-
         if (!disabled.has(provider)) {
           ctx.ui.notify(`${provider} is not disabled`, "info");
           return;
         }
-
         disabled.delete(provider);
         saveDisabledProviders(disabled);
-        restoreProvider(pi, provider);
+        enableProvider(pi, provider);
         ctx.ui.notify(`Enabled provider: ${provider}`, "success");
         return;
       }
