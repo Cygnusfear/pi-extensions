@@ -18,6 +18,7 @@ import { Type } from "@sinclair/typebox";
 
 let communicatorProvider = "zai";
 let communicatorModelId = "glm-5.1";
+let communicatorEnabled = true;
 
 // ~150k tokens budget for context (leave room for response in 200k window)
 // rough estimate: 1 token ≈ 4 chars
@@ -110,6 +111,14 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      // Bypass communicator when disabled — show raw text directly
+      if (!communicatorEnabled) {
+        return {
+          content: [{ type: "text", text: params.text }],
+          details: { explained: params.text, originalText: params.text, model: "disabled" },
+        };
+      }
+
       // Find the communicator model
       const model = ctx.modelRegistry.find(communicatorProvider, communicatorModelId);
       if (!model) {
@@ -381,18 +390,30 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("communicator", {
     description: "Set the communicator model (e.g. /communicator zai/glm-5.1, /communicator anthropic/claude-opus-4-6)",
     handler: async (args, ctx) => {
-      const input = args.trim();
+      const input = args.trim().toLowerCase();
 
       if (!input) {
-        // Show current model
-        ctx.ui.notify(`Communicator: ${communicatorProvider}/${communicatorModelId}`, "info");
+        const status = communicatorEnabled ? "on" : "off";
+        ctx.ui.notify(`Communicator: ${communicatorProvider}/${communicatorModelId} (${status})`, "info");
+        return;
+      }
+
+      if (input === "off" || input === "disable") {
+        communicatorEnabled = false;
+        ctx.ui.notify("Communicator disabled — explain will pass through raw text", "info");
+        return;
+      }
+
+      if (input === "on" || input === "enable") {
+        communicatorEnabled = true;
+        ctx.ui.notify(`Communicator enabled: ${communicatorProvider}/${communicatorModelId}`, "success");
         return;
       }
 
       // Parse provider/model
       const parts = input.split("/");
       if (parts.length !== 2) {
-        ctx.ui.notify("Usage: /communicator provider/model-id", "error");
+        ctx.ui.notify("Usage: /communicator [provider/model-id | on | off]", "error");
         return;
       }
 
@@ -411,6 +432,7 @@ export default function (pi: ExtensionAPI) {
 
       communicatorProvider = provider;
       communicatorModelId = modelId;
+      communicatorEnabled = true;
       ctx.ui.notify(`Communicator set to ${provider}/${modelId}`, "success");
     },
   });
