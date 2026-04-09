@@ -20,6 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
+import * as acorn from "acorn";
 // Eagerly start Shiki loading via relative path (must match require() in renderCall)
 require("../../shared/src/tui-diff-renderer.ts");
 import { createToolBindings } from "../src/sandbox-tools";
@@ -193,43 +194,72 @@ async function executeCode(
   sess.logs.length = 0;
 
   function extractAutoPersistNames(code: string): string[] {
-    const names: string[] = [];
-    const lines = code.split("\n");
-    let braceDepth = 0;
-    let parenDepth = 0;
+    try {
+      const ast = acorn.parse(code, {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        locations: false,
+        ranges: false,
+      }) as any;
 
-    for (const rawLine of lines) {
-      const trimmed = rawLine.trimStart();
+      const names: string[] = [];
 
-      // Skip empty lines and comments
-      if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/*")) continue;
-
-      // Track scope depth (braces not inside parens are real scope changes)
-      for (const ch of rawLine) {
-        if (ch === "(" || ch === "[") parenDepth++;
-        if (ch === ")" || ch === "]") parenDepth--;
-        if (parenDepth <= 0) {
-          if (ch === "{") braceDepth++;
-          if (ch === "}") braceDepth--;
+      for (const node of ast.body) {
+        if (node.type === "VariableDeclaration") {
+          for (const decl of node.declarations) {
+            collectBindingNames(decl.id, names);
+          }
+        } else if (node.type === "FunctionDeclaration" && node.id) {
+          names.push(node.id.name);
         }
       }
 
-      // Only match at IIFE body level (depth 0-1)
-      if (braceDepth > 1) continue;
-
-      // Match: const/let/var name = (not for...of/in)
-      const m = trimmed.match(/^(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/);
-      // Match: function name(...) or async function name(...)
-      const fm = !m ? trimmed.match(/^(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/) : null;
-      const name = m?.[1] ?? fm?.[1];
-      if (!name) continue;
-      if (m && (trimmed.includes(" of ") || trimmed.includes(" in "))) continue;
-
-
-      names.push(name);
+      return [...new Set(names)];
+    } catch {
+      // Parse failed — fall back to no auto-persist (hydration still works)
+      return [];
     }
+  }
 
-    return [...new Set(names)];
+  /** Recursively collect all binding names from a pattern (handles destructuring). */
+  function collectBindingNames(pattern: any, out: string[]): void {
+    if (!pattern) return;
+    switch (pattern.type) {
+      case "Identifier":
+        out.push(pattern.name);
+        break;
+      case "ObjectPattern":
+        for (const prop of pattern.properties) {
+          if (prop.type === "RestElement") {
+            collectBindingNames(prop.argument, out);
+          } else {
+            // Property: key (static) → value (binding pattern)
+            // { foo } → prop.value is Identifier
+            // { foo: bar } → prop.value is Identifier "bar"
+            // { foo: { baz } } → prop.value is ObjectPattern
+            collectBindingNames(prop.value, out);
+          }
+        }
+        break;
+      case "ArrayPattern":
+        for (const elem of pattern.elements) {
+          if (elem === null) continue; // holes: const [a, , b]
+          if (elem.type === "RestElement") {
+            collectBindingNames(elem.argument, out);
+          } else {
+            collectBindingNames(elem, out);
+          }
+        }
+        break;
+      case "AssignmentPattern":
+        // const { foo = defaultValue } → pattern.left is the binding
+        collectBindingNames(pattern.left, out);
+        break;
+      // RestElement at top level shouldn't happen, but handle defensively
+      case "RestElement":
+        collectBindingNames(pattern.argument, out);
+        break;
+    }
   }
 
   // --- Layer 1: Syntax pre-validation ---

@@ -56,5 +56,8 @@
     "themes": [
       "./packages/lipgloss-theme/themes"
     ]
+  },
+  "dependencies": {
+    "acorn": "^8.16.0"
   }
 }
