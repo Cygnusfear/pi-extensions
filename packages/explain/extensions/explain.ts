@@ -16,8 +16,8 @@ import { convertToLlm, getMarkdownTheme, serializeConversation } from "@mariozec
 import { Box, Markdown, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
-const COMMUNICATOR_PROVIDER = "zai";
-const COMMUNICATOR_MODEL_ID = "glm-5.1";
+let communicatorProvider = "zai";
+let communicatorModelId = "glm-5.1";
 
 // ~150k tokens budget for context (leave room for response in 200k window)
 // rough estimate: 1 token ≈ 4 chars
@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
     const container = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
 
     // Header
-    const modelLabel = details?.model ?? `${COMMUNICATOR_PROVIDER}/${COMMUNICATOR_MODEL_ID}`;
+    const modelLabel = details?.model ?? `${communicatorProvider}/${communicatorModelId}`;
     const header = theme.fg("accent", "💬 ") + theme.fg("dim", `[${modelLabel}]`);
     container.addChild(new Text(header, 0, 0));
 
@@ -111,7 +111,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Find the communicator model
-      const model = ctx.modelRegistry.find(COMMUNICATOR_PROVIDER, COMMUNICATOR_MODEL_ID);
+      const model = ctx.modelRegistry.find(communicatorProvider, communicatorModelId);
       if (!model) {
         // Fallback: show raw text via renderResult
         return {
@@ -195,7 +195,7 @@ export default function (pi: ExtensionAPI) {
           details: {
             explained,
             originalText: params.text,
-            model: `${COMMUNICATOR_PROVIDER}/${COMMUNICATOR_MODEL_ID}`,
+            model: `${communicatorProvider}/${communicatorModelId}`,
             contextTokensEstimate,
           },
         };
@@ -245,7 +245,7 @@ export default function (pi: ExtensionAPI) {
       const container = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
 
       // Header with model label
-      const modelLabel = details.model ?? `${COMMUNICATOR_PROVIDER}/${COMMUNICATOR_MODEL_ID}`;
+      const modelLabel = details.model ?? `${communicatorProvider}/${communicatorModelId}`;
       const header = theme.fg("accent", "💬 ") + theme.fg("dim", `[${modelLabel}]`);
       container.addChild(new Text(header, 0, 0));
 
@@ -301,9 +301,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Find communicator model
-      const model = ctx.modelRegistry.find(COMMUNICATOR_PROVIDER, COMMUNICATOR_MODEL_ID);
+      const model = ctx.modelRegistry.find(communicatorProvider, communicatorModelId);
       if (!model) {
-        ctx.ui.notify(`Communicator model ${COMMUNICATOR_PROVIDER}/${COMMUNICATOR_MODEL_ID} not found`, "error");
+        ctx.ui.notify(`Communicator model ${communicatorProvider}/${communicatorModelId} not found`, "error");
         return;
       }
 
@@ -363,7 +363,7 @@ export default function (pi: ExtensionAPI) {
           display: true,
           details: {
             originalText: lastAssistantText,
-            model: `${COMMUNICATOR_PROVIDER}/${COMMUNICATOR_MODEL_ID}`,
+            model: `${communicatorProvider}/${communicatorModelId}`,
             contextTokensEstimate,
           },
         });
@@ -373,6 +373,45 @@ export default function (pi: ExtensionAPI) {
       } finally {
         ctx.ui.setStatus("rephrase", undefined);
       }
+    },
+  });
+
+
+  // /communicator command — switch the communicator model
+  pi.registerCommand("communicator", {
+    description: "Set the communicator model (e.g. /communicator zai/glm-5.1, /communicator anthropic/claude-opus-4-6)",
+    handler: async (args, ctx) => {
+      const input = args.trim();
+
+      if (!input) {
+        // Show current model
+        ctx.ui.notify(`Communicator: ${communicatorProvider}/${communicatorModelId}`, "info");
+        return;
+      }
+
+      // Parse provider/model
+      const parts = input.split("/");
+      if (parts.length !== 2) {
+        ctx.ui.notify("Usage: /communicator provider/model-id", "error");
+        return;
+      }
+
+      const [provider, modelId] = parts;
+      const model = ctx.modelRegistry.find(provider, modelId);
+      if (!model) {
+        ctx.ui.notify(`Model not found: ${input}`, "error");
+        return;
+      }
+
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok || !auth.apiKey) {
+        ctx.ui.notify(`No API key for ${input}`, "error");
+        return;
+      }
+
+      communicatorProvider = provider;
+      communicatorModelId = modelId;
+      ctx.ui.notify(`Communicator set to ${provider}/${modelId}`, "success");
     },
   });
 
