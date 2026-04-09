@@ -64,13 +64,8 @@ export default function (pi: ExtensionAPI) {
   function applyActiveKey(): void {
     const key = getActiveKey();
     if (!key) return;
-    for (const provider of ZAI_PROVIDERS) {
-      try {
-        pi.registerProvider(provider, { apiKey: key });
-      } catch {
-        // Provider may not exist in current registry — that's fine
-      }
-    }
+    // ZAI_API_KEY env var is read on every request — mutating it is the only reliable override
+    process.env.ZAI_API_KEY = key;
   }
 
   function swapToNext(): number {
