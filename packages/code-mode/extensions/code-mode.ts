@@ -704,9 +704,6 @@ async function executeCode(
 
 const PASSTHROUGH_TOOLS = new Set([
   "execute_code",
-  "apply_patch",
-  // Agent orchestration
-  "teams",
   // Conversation history
   "context_tag",
   "context_log",
@@ -743,6 +740,7 @@ const PASSTHROUGH_TOOLS = new Set([
 // Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
 const CODE_MODE_ONLY_TOOLS = new Set([
   "bash",
+  "teams",
   "read",
   "write",
   "edit",
