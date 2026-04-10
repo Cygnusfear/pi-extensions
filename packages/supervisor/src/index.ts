@@ -6,7 +6,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
+import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 
 let enabled = false;
 

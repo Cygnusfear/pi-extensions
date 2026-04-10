@@ -376,6 +376,13 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/supervisor": {
+      "name": "@pi-extensions/supervisor",
+      "version": "1.0.0",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
+    },
     "packages/teams": {
       "name": "@pi-extensions/teams",
       "version": "0.0.1",
@@ -666,6 +673,8 @@
     "@pi-extensions/shared": ["@pi-extensions/shared@workspace:packages/shared"],
 
     "@pi-extensions/skills": ["@pi-extensions/skills@workspace:packages/skills"],
+
+    "@pi-extensions/supervisor": ["@pi-extensions/supervisor@workspace:packages/supervisor"],
 
     "@pi-extensions/teams": ["@pi-extensions/teams@workspace:packages/teams"],
 
