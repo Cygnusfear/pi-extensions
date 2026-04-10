@@ -741,3 +741,13 @@ declare const process: {
  * when the agent goes idle — no LLM steering, just auto-wake.
  */
 declare function supervise(enabled: boolean): Promise<string>;
+
+/**
+ * Get discovered skill paths. Returns root directories and actual skill directories.
+ */
+declare function getSkillPaths(): Promise<{
+  /** Root skill directories (e.g. ~/.pi/agent/skills/, ./skills/) */
+  roots: string[];
+  /** Actual skill directories where SKILL.md files are located */
+  skills: string[];
+}>;

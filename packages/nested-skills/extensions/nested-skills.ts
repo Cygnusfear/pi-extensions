@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join, resolve } from "path";
+import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 
 /**
  * Nested Skills Discovery
@@ -265,8 +266,20 @@ export default function nestedSkillsExtension(pi: ExtensionAPI) {
   let cachedSkillsXml: string | null = null;
   let cachedCount = 0;
   let cachedSkillPaths: string[] = [];
+  let cachedRootPaths: string[] = [];
+  let currentCwd: string = process.cwd();
+
+  // Expose skill paths to code_mode
+  registerSandboxFn("getSkillPaths", async () => {
+    return {
+      roots: cachedRootPaths,      // Root directories (e.g. ~/.pi/agent/skills/)
+      skills: cachedSkillPaths,    // Actual skill dirs (where SKILL.md lives)
+    };
+  });
 
   function scan(cwd: string, notify: (msg: string, level: "info") => void) {
+    currentCwd = cwd;
+    cachedRootPaths = getSkillPaths(cwd);
     const nested = discoverNestedSkills(cwd);
     if (nested.length === 0) {
       cachedSkillsXml = null;
