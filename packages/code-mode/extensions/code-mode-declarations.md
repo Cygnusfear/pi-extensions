@@ -799,6 +799,42 @@ declare const process: {
 declare function supervise(enabled: boolean): Promise<string>;
 
 /**
+ * Coordinate a team of worker agents.
+ *
+ * @example
+ * // Delegate with auto-created ticket
+ * await teams({ action: "delegate", tasks: [{ text: "Fix the bug", assignee: "fixer" }] });
+ *
+ * // Delegate with pre-created ticket from maiTicket()
+ * const ticket = await maiTicket({ title: "Auth middleware", description: "Add JWT validation", tags: "team" });
+ * await teams({ action: "delegate", tasks: [{ text: "See ticket", ticketId: ticket.id, assignee: "auth" }] });
+ *
+ * // List, view, kill
+ * await teams({ action: "list" });
+ * await teams({ action: "view", name: "fixer" });
+ * await teams({ action: "kill", name: "fixer" });
+ */
+declare function teams(params: {
+  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
+  tasks?: Array<{
+    text: string;
+    ticketId?: string;
+    assignee?: string;
+    model?: string;
+    template?: string;
+    hasTools?: boolean;
+    persistent?: boolean;
+  }>;
+  name?: string;
+  names?: string[];
+  message?: string;
+  start?: number;
+  end?: number;
+  useWorktree?: boolean;
+  baseRef?: string;
+}): Promise<string>;
+
+/**
  * Get discovered skill paths. Returns root directories and actual skill directories.
  */
 declare function getSkillPaths(): Promise<{
