@@ -1,0 +1,27 @@
+packages/foresight/extensions/foresight.ts
+  f82b655cfd989add 23
+packages/teams/tool.ts
+  f82b655cfd989add 3
+packages/code-mode/src/sandbox-tools.ts
+  f82b655cfd989add 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.6",
+  "base_commit_sha": "96bdd35809288130f4a112b69f0f788510579256",
+  "prompts": {
+    "f82b655cfd989add": {
+      "agent_id": {
+        "tool": "Shri Blackhole Bannister",
+        "id": "4a656c28-72e1-40df-8276-d9ff99f396d0",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
