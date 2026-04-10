@@ -988,12 +988,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
     // hash — defined below as namespaced callable
     hash,
-    hashRead: hash.read,
+    hashRead: hash,
     hashEdit: hash.edit,
 
     // context7 — defined below as namespaced callable
     context7,
-    context7Resolve: context7.resolve,
+    context7Resolve: context7,
     context7Docs: context7.docs,
 
     // =====================================================================
@@ -1078,7 +1078,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
     // fff — from namespace above
     fff,
-    fffFind: fff.find,
+    fffFind: fff,
     fffGrep: fff.grep,
     fffMultiGrep: fff.multiGrep,
 
@@ -1089,7 +1089,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
     // tldr — defined below as namespaced callable
     tldr,
-    tldrSemanticSearch: tldr.search,
+    tldrSemanticSearch: tldr,
     tldrStructure: tldr.structure,
     tldrCalls: tldr.calls,
     tldrExtract: tldr.extract,
