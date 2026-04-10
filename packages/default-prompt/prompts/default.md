@@ -93,6 +93,18 @@ RIGHT:
 
 YOU MUST HAVE READ THESE SKILLS IN A SESSION, ALWAYS VERIFY YOU HAVE.
 
+## Tickets for workers
+
+When you instruct workers- OVERSPECIFY whatever you already know. DO NOT LEAVE ROOM FOR INTERPRETATION. ALWAYS DIRECT THEM TO THE MOST EXACT EXTENT POSSIBLE. You would rather spend 100k context on the correct instructions than 900k context on a failed solution.
+
+A ticket always includes, FOR EVERY PART OF THE TICKET:
+
+- what to do
+- why it should work that way
+- how to do it (to the most specific detail possible)
+- what files to touch, create
+- examples, line numbers, references, wherever possible
+
 ## 00.00 Johnny Lookup (CRITICAL)
 
 If the hooman gives you **only** an ID like `20.01` (or `2001`), treat it as a **playbook call**:
