@@ -1076,67 +1076,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       return `Success. Updated the following files:\n${results.join("\n")}`;
     },
 
-    // =====================================================================
-    // FFF — Fast File Finder (fuzzy find + content grep)
-    // =====================================================================
-
-    fffFind: async ({
-      query,
-      maxResults,
-      cwd: explicitCwd,
-    }: {
-      query: string;
-      maxResults?: number;
-      cwd?: string;
-    }) => {
-      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const result = await fffFindAPI(query, { maxResults, cwd: dir });
-      if (result.error) throw new Error(`fffFind error: ${result.error}`);
-      return result.text;
-    },
-
-    fffGrep: async ({
-      query,
-      mode,
-      maxResults,
-      context,
-      cwd: explicitCwd,
-    }: {
-      query: string;
-      mode?: string;
-      maxResults?: number;
-      context?: number;
-      cwd?: string;
-    }) => {
-      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const result = await fffGrepAPI(query, { mode, maxResults, context, cwd: dir });
-      if (result.error) throw new Error(`fffGrep error: ${result.error}`);
-      return result.text;
-    },
-
-    fffMultiGrep: async ({
-      patterns,
-      constraints,
-      maxResults,
-      context,
-      cwd: explicitCwd,
-    }: {
-      patterns: string[];
-      constraints?: string;
-      maxResults?: number;
-      context?: number;
-      cwd?: string;
-    }) => {
-      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const result = await fffMultiGrepAPI(patterns, {
-        constraints,
-        maxResults,
-        context,
-        cwd: dir,
-      });
-      if (result.error) throw new Error(`fffMultiGrep error: ${result.error}`);
-      return result.text;
-    },
+    // fff — from namespace above
+    fff,
+    fffFind: fff.find,
+    fffGrep: fff.grep,
+    fffMultiGrep: fff.multiGrep,
 
     // memory.subscribe/unsubscribe/checkUpdates — from namespace below
     memorySubscribe: memory.subscribe,

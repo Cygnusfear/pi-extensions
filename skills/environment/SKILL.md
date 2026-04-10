@@ -143,7 +143,7 @@ console.log("Worker spawned, supervisor off, monitor armed. Going idle.");
 ```
 
 **Key rules:**
-- Always `supervise(false)` after spawning workers. The supervisor will otherwise inject `[SUPERVISOR] continue, go` every few seconds, eating your context window with useless turns.
+- Always `supervise(false)` after spawning workers. The supervisor will otherwise inject `[SUPERVISOR] continue, go` every few seconds, eating your context window with useless turns. Keep it off while idle between tasks — only re-enable when you're about to start a multi-step work sequence.
 - `console.wake()` is the only way to resume from a background promise. `console.log()` only writes to the current block output — it does not trigger a new turn.
 - Only one `console.wake()` per execute_code block. Fire the monitor onto `$`, return, go idle.
 - Check worker status with `teams({ action: "list" })` or `teams({ action: "view", name: "fixer" })`.
