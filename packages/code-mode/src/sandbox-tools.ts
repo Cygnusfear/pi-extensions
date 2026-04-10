@@ -61,6 +61,127 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     if (signal?.aborted) throw new Error("Aborted");
   };
 
+  // ==========================================================================
+  // mai — callable raw CLI + namespaced helpers for structured operations
+  // ==========================================================================
+
+  const maiResolveDir = (explicitCwd?: string) =>
+    explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+
+  async function maiRun(args: string[], dir: string) {
+    maiDep.guard();
+    const result = await spawnAsync({ cmd: "mai", args, cwd: dir, signal });
+    if (result.error) throw new Error(`mai error: ${result.error.message}`);
+    return result;
+  }
+
+  type MaiFn = (input?: { args?: string; cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+  type MaiNs = MaiFn & {
+    /** Create a structured ticket with optional Goal/AC/Verification body. */
+    ticket: (input: {
+      title: string;
+      description: string;
+      tags: string;
+      type?: string;
+      priority?: number;
+      goal?: string;
+      acceptanceCriteria?: string[];
+      verification?: string[];
+      start?: boolean;
+      cwd?: string;
+    }) => Promise<{ id: string; started: boolean; message: string }>;
+    /** Start a ticket (mai start <id>). */
+    start: (id: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
+    /** Close a ticket (mai close <id>). */
+    close: (id: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
+    /** Show a ticket (mai --json show <id>). Returns parsed JSON. */
+    show: (id: string, opts?: { cwd?: string }) => Promise<unknown>;
+    /** Add an inline note (mai add-note <id> <text>). */
+    note: (id: string, text: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
+    /** Add a note from a file (mai add-note <id> --file <path>). */
+    noteFile: (id: string, filePath: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
+    /** List tickets (mai ls). */
+    ls: (opts?: { cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+  };
+
+  const mai: MaiNs = (async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string } = {}) => {
+    const dir = maiResolveDir(explicitCwd);
+    const result = await maiRun(splitShellArgs(args), dir);
+    const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
+    return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
+  }) as MaiNs;
+
+  mai.ticket = async ({
+    title, description, tags,
+    type = "task", priority = 2,
+    goal, acceptanceCriteria, verification,
+    start = true, cwd: explicitCwd,
+  }) => {
+    const dir = maiResolveDir(explicitCwd);
+    const buildChecklist = (items?: string[]) => {
+      const filtered = (items ?? []).filter((s) => s.trim());
+      const effective = filtered.length > 0 ? filtered : ["TODO"];
+      return effective.map((item) => `- [ ] ${item}`).join("\n");
+    };
+    const goalText = (goal || description).trim();
+    const body = `${description}\n\n## Goal\n${goalText}\n\n## Acceptance Criteria\n${buildChecklist(acceptanceCriteria)}\n\n## Verification\n${buildChecklist(verification)}`;
+
+    const createResult = await maiRun(
+      ["ticket", title, type, "-p", String(priority), "-l", tags, "-d", body],
+      dir,
+    );
+    if (createResult.status !== 0) {
+      throw new Error(`mai ticket failed: ${(createResult.stderr || createResult.stdout || "").trim()}`);
+    }
+    const id = (createResult.stdout || "").trim().split(/\s+/)[0];
+    if (!id) throw new Error("Failed to parse ticket id from mai output");
+
+    let started = false;
+    if (start) {
+      const startResult = await maiRun(["start", id], dir);
+      started = startResult.status === 0;
+    }
+    return { id, started, message: `Created ${id}${started ? " (started)" : ""}.` };
+  };
+
+  mai.start = async (id, opts) => {
+    const result = await maiRun(["start", id], maiResolveDir(opts?.cwd));
+    return { ok: result.status === 0 };
+  };
+
+  mai.close = async (id, opts) => {
+    const result = await maiRun(["close", id], maiResolveDir(opts?.cwd));
+    return { ok: result.status === 0 };
+  };
+
+  mai.show = async (id, opts) => {
+    const result = await maiRun(["--json", "show", id], maiResolveDir(opts?.cwd));
+    if (result.status !== 0) {
+      throw new Error(`mai show failed: ${(result.stderr || result.stdout || "").trim()}`);
+    }
+    try {
+      return JSON.parse(result.stdout || "{}");
+    } catch (e) {
+      throw new Error(`mai show: invalid JSON: ${(e as Error).message}`);
+    }
+  };
+
+  mai.note = async (id, text, opts) => {
+    const result = await maiRun(["add-note", id, text], maiResolveDir(opts?.cwd));
+    return { ok: result.status === 0 };
+  };
+
+  mai.noteFile = async (id, filePath, opts) => {
+    const result = await maiRun(["add-note", id, "--file", filePath], maiResolveDir(opts?.cwd));
+    return { ok: result.status === 0 };
+  };
+
+  mai.ls = async (opts) => {
+    const result = await maiRun(["ls"], maiResolveDir(opts?.cwd));
+    const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
+    return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
+  };
+
   const tools = {
     Bash: async ({
       command,
@@ -356,92 +477,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // Ticket management (mai CLI)
     // =====================================================================
 
-    mai: async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string }) => {
-      maiDep.guard();
-      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const result = await spawnAsync({
-        cmd: "mai",
-        args: splitShellArgs(args),
-        cwd: dir,
-        signal,
-      });
-      if (result.error) throw new Error(`mai error: ${result.error.message}`);
-      const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
-      return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
-    },
-
-    maiTicket: async ({
-      title,
-      description,
-      tags,
-      type = "task",
-      priority = 2,
-      goal,
-      acceptanceCriteria,
-      verification,
-      start = true,
-      cwd: explicitCwd,
-    }: {
-      title: string;
-      description: string;
-      tags: string;
-      type?: string;
-      priority?: number;
-      goal?: string;
-      acceptanceCriteria?: string[];
-      verification?: string[];
-      start?: boolean;
-      cwd?: string;
-    }) => {
-      maiDep.guard();
-      const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-
-      // Build body with Goal/AC/Verification template
-      const buildChecklist = (items?: string[]) => {
-        const filtered = (items ?? []).filter((s) => s.trim());
-        const effective = filtered.length > 0 ? filtered : ["TODO"];
-        return effective.map((item) => `- [ ] ${item}`).join("\n");
-      };
-
-      const goalText = (goal || description).trim();
-      const body = `${description}\n\n## Goal\n${goalText}\n\n## Acceptance Criteria\n${buildChecklist(acceptanceCriteria)}\n\n## Verification\n${buildChecklist(verification)}`;
-
-      // Create ticket: mai ticket "title" type -p priority -l tags -d body
-      const createArgs = ["ticket", title, type, "-p", String(priority), "-l", tags, "-d", body];
-      const createResult = await spawnAsync({
-        cmd: "mai",
-        args: createArgs,
-        cwd: dir,
-        signal,
-      });
-      if (createResult.error) throw new Error(`mai ticket error: ${createResult.error.message}`);
-      if (createResult.status !== 0) {
-        throw new Error(
-          `mai ticket failed: ${(createResult.stderr || createResult.stdout || "").trim()}`,
-        );
-      }
-
-      const id = (createResult.stdout || "").trim().split(/\s+/)[0];
-      if (!id) throw new Error("Failed to parse ticket id from mai output");
-
-      // Start ticket
-      let started = false;
-      if (start) {
-        const startResult = await spawnAsync({
-          cmd: "mai",
-          args: ["start", id],
-          cwd: dir,
-          signal,
-        });
-        started = startResult.status === 0;
-      }
-
-      return {
-        id,
-        started,
-        message: `Created ${id}${started ? " (started)" : ""}.`,
-      };
-    },
+    mai,
+    maiTicket: mai.ticket,  // backward compat — prefer mai.ticket() in new code
 
     // =====================================================================
     // Foresight memory tools

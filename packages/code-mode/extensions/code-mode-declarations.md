@@ -203,30 +203,70 @@ declare function WebFetch(input: {
 declare function sleep(ms: number): Promise<void>;
 
 /**
- * Run mai (maitake) CLI commands.
+ * mai — maitake CLI integration.
+ *
+ * Callable: `mai({ args: "ls" })` runs any mai command raw.
+ * Namespaced methods mirror the mai CLI 1:1 for common operations.
+ *
+ * @example
+ * // Raw passthrough
+ * await mai({ args: "ls" });
+ *
+ * // Create a structured ticket with Goal/AC/Verification
+ * const t = await mai.ticket({
+ *   title: "Fix auth bug",
+ *   description: "JWT validation fails on expired tokens",
+ *   tags: "team,auth",
+ *   goal: "All expired tokens return 401",
+ *   acceptanceCriteria: ["Unit test for expired token", "Integration test"],
+ *   verification: ["Manual test with expired token", "CI passes"],
+ * });
+ *
+ * // Lifecycle
+ * await mai.start(t.id);
+ * await mai.note(t.id, "progress: middleware wired up");
+ * const ticket = await mai.show(t.id);  // parsed JSON
+ * await mai.close(t.id);
  */
-declare function mai(input: {
-  /** Arguments to pass to mai CLI (default: "ls") */
-  args?: string;
-  /** Working directory override */
-  cwd?: string;
-}): Promise<{ stdout: string; exitCode: number }>;
+declare const mai: {
+  /** Run any mai command raw. */
+  (input?: { args?: string; cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
 
-/**
- * Create a mai ticket with Goal/AC/Verification template, optionally start it.
- */
-declare function maiTicket(input: {
-  title: string;
-  description: string;
-  tags: string;
-  type?: string;
-  priority?: number;
-  goal?: string;
-  acceptanceCriteria?: string[];
-  verification?: string[];
-  start?: boolean;
-  cwd?: string;
-}): Promise<{ id: string; started: boolean; message: string }>;
+  /** Create a structured ticket with Goal/AC/Verification template. */
+  ticket(input: {
+    title: string;
+    description: string;
+    tags: string;
+    type?: string;
+    priority?: number;
+    goal?: string;
+    acceptanceCriteria?: string[];
+    verification?: string[];
+    start?: boolean;
+    cwd?: string;
+  }): Promise<{ id: string; started: boolean; message: string }>;
+
+  /** Start a ticket (mai start <id>). */
+  start(id: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
+
+  /** Close a ticket (mai close <id>). */
+  close(id: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
+
+  /** Show a ticket (mai --json show <id>). Returns parsed JSON. */
+  show(id: string, opts?: { cwd?: string }): Promise<unknown>;
+
+  /** Add an inline note to a ticket. */
+  note(id: string, text: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
+
+  /** Add a note from a file. */
+  noteFile(id: string, filePath: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
+
+  /** List tickets (mai ls). */
+  ls(opts?: { cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+};
+
+/** @deprecated Use `mai.ticket()` instead. */
+declare const maiTicket: typeof mai.ticket;
 
 /**
  * Search Foresight semantic memory. Returns JSON string with ranked results.
