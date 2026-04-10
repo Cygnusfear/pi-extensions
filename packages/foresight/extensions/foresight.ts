@@ -19,7 +19,10 @@ import { spawn } from "node:child_process";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 import { foresightRetainFireAndForget, FORESIGHT_FACT_TYPES } from "@pi-extensions/shared/foresight-write";
 import { foresightRecall, foresightUnfold, foresightContext } from "@pi-extensions/shared/foresight-read";
-import { FS_ENV, FORESIGHT_BIN, FORESIGHT_BIN_EXISTS } from "@pi-extensions/shared/foresight-env";
+import { FS_ENV, FORESIGHT_BIN } from "@pi-extensions/shared/foresight-env";
+import { createDep } from "@pi-extensions/shared/tool-availability";
+
+const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
 
 // =============================================================================
 // Config
@@ -98,8 +101,8 @@ interface CheckUpdatesDetails {
 
 /** Run a foresight CLI command and return stdout */
 function foresightRun(args: string[]): Promise<string> {
-	if (!FORESIGHT_BIN_EXISTS) {
-		return Promise.reject(new Error(`Foresight binary '${FORESIGHT_BIN}' not found on PATH`));
+	if (!dep.ok) {
+		dep.guard(); return Promise.reject(new Error("unreachable"));
 	}
 	return new Promise((resolve, reject) => {
 		const child = spawn(FORESIGHT_BIN, args, {
@@ -132,7 +135,7 @@ function foresightRun(args: string[]): Promise<string> {
 
 /** Fire-and-forget foresight CLI call — silent unless spawn itself fails */
 function foresightFireAndForget(args: string[], label: string): void {
-	if (!FORESIGHT_BIN_EXISTS) return;
+	if (!dep.ok) return;
 	try {
 		const child = spawn(FORESIGHT_BIN, args, {
 			stdio: "ignore",
@@ -250,8 +253,8 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	let startupDone = false;
 
 	const startup = (async () => {
-		if (!FORESIGHT_BIN_EXISTS) {
-			console.error(`[foresight] Binary '${FORESIGHT_BIN}' not found on PATH — extension dormant`);
+		if (!dep.ok) {
+			console.error(`[foresight] ${dep.reason}. ${dep.install}`);
 			return;
 		}
 		available = await isForesightAvailable();
@@ -359,6 +362,7 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	const turnContent: string[] = [];
 
 	pi.on("session_start", async (event: any, _ctx: any) => {
+		dep.status(_ctx);
 		if (!available) return;
 		if (!event.previousSessionFile) return;
 		ingestSessionFile(event.previousSessionFile);

@@ -6,7 +6,10 @@
  */
 
 import { spawn } from "node:child_process";
-import { FS_ENV, FORESIGHT_BIN, FORESIGHT_BIN_EXISTS } from "./foresight-env.js";
+import { FS_ENV, FORESIGHT_BIN } from "./foresight-env.js";
+import { createDep } from "./tool-availability";
+
+const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
 import { safeJsonParse } from "./safe-json.js";
 
 /** Foresight's native fact types. */
@@ -45,7 +48,7 @@ function buildRetainText(params: MemoryWriteParams): string {
 /** Run a foresight CLI command, await it, return stdout. */
 function runCli(args: string[]): Promise<string> {
 	return new Promise((resolve, reject) => {
-		if (!FORESIGHT_BIN_EXISTS) {
+		if (!dep.ok) {
 			reject(new Error(`Foresight binary '${FORESIGHT_BIN}' not found on PATH`));
 			return;
 		}
@@ -136,7 +139,7 @@ export function foresightRetainFireAndForget(
 	bankId: string,
 	params: MemoryWriteParams,
 ): void {
-	if (!FORESIGHT_BIN_EXISTS) return;
+	if (!dep.ok) return;
 
 	try {
 		const text = buildRetainText(params);

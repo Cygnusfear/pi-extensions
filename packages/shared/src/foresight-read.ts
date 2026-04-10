@@ -4,13 +4,16 @@
 
 import { spawn } from "node:child_process";
 import { safeJsonParse } from "./safe-json.js";
-import { FS_ENV, FORESIGHT_BIN, FORESIGHT_BIN_EXISTS } from "./foresight-env.js";
+import { FS_ENV, FORESIGHT_BIN } from "./foresight-env.js";
+import { createDep } from "./tool-availability";
+
+const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
 
 const CLI_TIMEOUT_MS = 15_000;
 
 function runCli(args: string[]): Promise<string> {
 	return new Promise((resolve, reject) => {
-		if (!FORESIGHT_BIN_EXISTS) {
+		if (!dep.ok) {
 			reject(new Error(`Foresight binary '${FORESIGHT_BIN}' not found on PATH`));
 			return;
 		}

@@ -1,68 +1,144 @@
 /**
- * Tool availability checks for external CLI dependencies.
- * 
- * Extensions use this to gracefully degrade when tools aren't installed.
+ * Unified dependency checking for pi extensions.
+ *
+ * One pattern for all external deps — CLI binaries and env vars.
+ * Extensions check at init, guard at runtime, show status in footer.
+ *
+ * Usage:
+ *   const dep = createDep({ binary: "mai", install: "bun add -g maitake" });
+ *   dep.guard();           // throws if not available
+ *   dep.status(ctx);       // sets footer ⚠ if missing
+ *   if (dep.ok) { ... }    // check availability
  */
 
 import { execSync } from "node:child_process";
 
-export interface ToolInfo {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface BinaryDep {
+  binary: string;
+  install: string;
+  name?: string;         // human-readable name (defaults to binary name)
+}
+
+interface EnvDep {
+  env: string;
+  install: string;
+  name?: string;         // human-readable name (defaults to env var name)
+}
+
+export type DepSpec = BinaryDep | EnvDep;
+
+export interface Dep {
+  /** Human-readable name */
   name: string;
-  available: boolean;
-  path: string | null;
-  installHint: string;
+  /** Whether the dependency is available right now */
+  ok: boolean;
+  /** Why it's not available (null if ok) */
+  reason: string | null;
+  /** Install instructions */
+  install: string;
+  /** Resolved path (for binaries) or value hint (for env vars) */
+  resolved: string | null;
+  /**
+   * Guard — throws if not available.
+   * Consistent error format across all extensions.
+   */
+  guard(): void;
+  /**
+   * Set footer status if missing. Call in session_start.
+   * Shows "⚠ name" in footer. Clears if available.
+   */
+  status(ctx: { ui: { setStatus(key: string, text: string | undefined): void } }): void;
+  /**
+   * Re-check availability (clears cache).
+   * Use after install or env change.
+   */
+  recheck(): boolean;
 }
 
-const INSTALL_HINTS: Record<string, string> = {
-  mai: "Install maitake: bun add -g maitake",
-  foresight: "Install foresight: bun add -g foresight-memory",
-  "llm-tldr": "Install tldr: uv tool install llm-tldr",
-  rg: "Install ripgrep: brew install ripgrep",
-  fd: "Install fd: brew install fd",
-  git: "Install git: brew install git",
-};
+// ─── Implementation ──────────────────────────────────────────────────────────
 
-const cache = new Map<string, ToolInfo>();
+function isBinaryDep(spec: DepSpec): spec is BinaryDep {
+  return "binary" in spec;
+}
 
-/** Check if a CLI tool is available on PATH. Results are cached. */
-export function checkTool(name: string, customHint?: string): ToolInfo {
-  const cached = cache.get(name);
-  if (cached) return cached;
-
-  let toolPath: string | null = null;
+function checkBinary(name: string): string | null {
   try {
-    toolPath = execSync(`command -v ${name} 2>/dev/null`, { encoding: "utf-8" }).trim() || null;
+    return execSync(`command -v ${name} 2>/dev/null`, { encoding: "utf-8" }).trim() || null;
   } catch {
-    toolPath = null;
+    return null;
   }
-
-  const info: ToolInfo = {
-    name,
-    available: toolPath !== null,
-    path: toolPath,
-    installHint: customHint ?? INSTALL_HINTS[name] ?? `Install ${name} and ensure it's on your PATH`,
-  };
-
-  cache.set(name, info);
-  return info;
 }
 
-/** Clear the cache (e.g. after installation). */
-export function clearToolCache(name?: string) {
-  if (name) cache.delete(name);
-  else cache.clear();
+function checkEnv(name: string): string | null {
+  return process.env[name] || null;
 }
 
 /**
- * Guard wrapper — returns a function that throws with install instructions
- * if the tool isn't available. Use to wrap tool execution functions.
+ * Create a dependency check. Call once at extension init.
+ * The result is cached but can be rechecked with .recheck().
  */
-export function requireTool(name: string, customHint?: string): ToolInfo {
-  const info = checkTool(name, customHint);
-  if (!info.available) {
-    throw new Error(
-      `${name} is not installed.\n${info.installHint}`
-    );
+export function createDep(spec: DepSpec): Dep {
+  const name = spec.name ?? (isBinaryDep(spec) ? spec.binary : spec.env);
+  const statusKey = `dep-${name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
+
+  let ok: boolean;
+  let resolved: string | null;
+  let reason: string | null;
+
+  function check() {
+    if (isBinaryDep(spec)) {
+      resolved = checkBinary(spec.binary);
+      ok = resolved !== null;
+      reason = ok ? null : `${name} is not installed`;
+    } else {
+      resolved = checkEnv(spec.env);
+      ok = resolved !== null;
+      reason = ok ? null : `${spec.env} is not set`;
+    }
   }
-  return info;
+
+  check();
+
+  return {
+    get name() { return name; },
+    get ok() { return ok; },
+    get reason() { return reason; },
+    get install() { return spec.install; },
+    get resolved() { return resolved; },
+
+    guard() {
+      if (!ok) {
+        throw new Error(`${reason}. ${spec.install}`);
+      }
+    },
+
+    status(ctx) {
+      ctx.ui.setStatus(statusKey, ok ? undefined : `⚠ ${name}`);
+    },
+
+    recheck() {
+      check();
+      return ok;
+    },
+  };
+}
+
+// ─── Convenience ─────────────────────────────────────────────────────────────
+
+/** Shorthand for common CLI tools. */
+export const KNOWN_DEPS: Record<string, DepSpec> = {
+  mai:       { binary: "mai", install: "Install: bun add -g maitake", name: "mai" },
+  foresight: { binary: "foresight", install: "Install: bun add -g foresight-memory", name: "foresight" },
+  "llm-tldr":{ binary: "llm-tldr", install: "Install: uv tool install llm-tldr", name: "llm-tldr" },
+  rg:        { binary: "rg", install: "Install: brew install ripgrep", name: "ripgrep" },
+  fd:        { binary: "fd", install: "Install: brew install fd", name: "fd" },
+};
+
+/** Create a dep from a known tool name. */
+export function knownDep(name: keyof typeof KNOWN_DEPS): Dep {
+  const spec = KNOWN_DEPS[name];
+  if (!spec) throw new Error(`Unknown dep: ${name}`);
+  return createDep(spec);
 }

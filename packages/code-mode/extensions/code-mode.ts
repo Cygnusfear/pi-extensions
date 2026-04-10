@@ -27,6 +27,7 @@ import { createToolBindings } from "../src/sandbox-tools";
 import { getSandboxFns } from "../../shared/src/sandbox-registry";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 import { createOuijaExecutor } from "../../shared/src/ouija-core";
+import { loadRunbook } from "../../runbooks/src/runbook-engine";
 import { createPersistentStore } from "../src/persistent-store";
 import {
   buildOutput,
@@ -618,6 +619,13 @@ async function executeCode(
   if (Object.keys(sandboxFns).length > 0) {
     Object.assign(sess.context, sandboxFns);
   }
+
+  // runbookRun — executes a saved runbook in the current VM context
+  (sess.context as any).runbookRun = async (input: { name: string }) => {
+    const { code } = loadRunbook(cwd, input.name);
+    const wrapped = `(async () => {\n${code}\n})()`;
+    return vm.runInContext(wrapped, sess.context, { filename: `runbook:${input.name}` });
+  };
 
   // --- Hydrate persisted $ vars as bare context globals ---
   // Agents naturally expect `const x = ...` in call N to be available as bare `x` in call N+1.

@@ -17,6 +17,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
+import { createDep } from "../../shared/src/tool-availability";
+
+const dep = createDep({ env: "BRAVE_API_KEY", install: "Get a key at https://api-dashboard.search.brave.com/ then: export BRAVE_API_KEY=your-key", name: "Brave API key" });
 
 // =============================================================================
 // Types
@@ -119,7 +122,7 @@ function getApiKey(): string | undefined {
 
 async function braveRequest<T>(url: string, params: Record<string, string>, signal?: AbortSignal): Promise<T> {
 	const apiKey = getApiKey();
-	if (!apiKey) throw new Error("BRAVE_API_KEY not set. Get one at https://api-dashboard.search.brave.com/");
+	if (!apiKey) dep.guard();
 
 	const qs = new URLSearchParams(params).toString();
 	const fullUrl = `${url}?${qs}`;
@@ -238,6 +241,8 @@ async function applyTruncation(
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
+	pi.on("session_start", (_event, ctx) => dep.status(ctx));
+
 	// web_search_brave — primary search tool using LLM Context API
 	pi.registerTool({
 		name: "web_search_brave",

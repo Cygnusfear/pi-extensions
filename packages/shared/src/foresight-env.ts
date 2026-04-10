@@ -186,17 +186,5 @@ export function createForesightEnv(env: EnvSource, fallbackEnv?: EnvSource): Rec
 
 export const FS_ENV: Record<string, string> = createForesightEnv(process.env);
 
-/**
- * Check at load time whether the foresight binary is actually resolvable.
- * Used by spawn sites to bail early instead of crashing on ENOENT.
- */
-function checkBinaryExists(bin: string): boolean {
-	try {
-		const result = spawnSync("which", [bin], { encoding: "utf8", timeout: 2000 });
-		return result.status === 0 && result.stdout.trim().length > 0;
-	} catch {
-		return false;
-	}
-}
-
-export const FORESIGHT_BIN_EXISTS: boolean = checkBinaryExists(FORESIGHT_BIN);
+// Binary availability checking moved to @pi-extensions/shared/tool-availability
+// Use: createDep({ binary: FORESIGHT_BIN, ... }) instead of FORESIGHT_BIN_EXISTS

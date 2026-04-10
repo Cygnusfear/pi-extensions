@@ -689,6 +689,58 @@ declare const $: {
   __turn(): number;
 };
 
+
+// =====================================================================
+// Runbooks (saved reusable code_mode scripts)
+// =====================================================================
+
+/**
+ * Save a reusable code_mode script to .pi/runbooks/<name>.js.
+ * The code is stored with a JSDoc frontmatter header.
+ */
+declare function runbookSave(input: {
+  /** Runbook name (alphanumeric, hyphens, underscores) */
+  name: string;
+  /** What this runbook does */
+  description: string;
+  /** JavaScript code to save */
+  code: string;
+}): Promise<string>;
+
+/**
+ * List all available runbooks in .pi/runbooks/.
+ */
+declare function runbookList(): Promise<Array<{
+  name: string;
+  description: string;
+  file: string;
+}>>;
+
+/**
+ * Run a saved runbook in the current VM context.
+ * The runbook has full access to all sandbox tools, $, and session.
+ */
+declare function runbookRun(input: {
+  /** Runbook name */
+  name: string;
+}): Promise<unknown>;
+
+/**
+ * Load a runbook's code as a string (for review or modification before running).
+ */
+declare function runbookLoad(input: {
+  /** Runbook name */
+  name: string;
+}): Promise<{ name: string; code: string; raw: string }>;
+
+/**
+ * Delete a saved runbook.
+ */
+declare function runbookDelete(input: {
+  /** Runbook name */
+  name: string;
+}): Promise<string>;
+
 // =====================================================================
 // Console Extensions
 // =====================================================================

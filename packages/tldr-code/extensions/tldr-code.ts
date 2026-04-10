@@ -25,6 +25,7 @@ import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createDep } from "../../shared/src/tool-availability";
 
 // =============================================================================
 // Constants
@@ -44,26 +45,15 @@ const TLDR_ENV: Record<string, string> = {
 // Binary resolution
 // =============================================================================
 
-let tldrBinary: string | null = null;
-let binaryError: string | null = null;
+const dep = createDep({ binary: "llm-tldr", install: "Install: uv tool install llm-tldr", name: "llm-tldr" });
 
 function findBinary(): string | null {
-	if (tldrBinary) return tldrBinary;
-	if (binaryError) return null;
-
-	for (const name of ["llm-tldr", "tldr-code"]) {
-		try {
-			const resolved = execSync(`which ${name}`, { encoding: "utf-8", timeout: 5_000 }).trim();
-			if (resolved) {
-				tldrBinary = resolved;
-				return tldrBinary;
-			}
-		} catch {
-			// not found, try next
-		}
-	}
-
-	binaryError = "llm-tldr not found. Install with: uv tool install llm-tldr";
+	if (dep.ok) return dep.resolved;
+	// Also check alias
+	try {
+		const resolved = execSync("which tldr-code", { encoding: "utf-8", timeout: 5_000 }).trim();
+		if (resolved) return resolved;
+	} catch {}
 	return null;
 }
 
@@ -124,7 +114,7 @@ interface TldrResult {
 
 function runTldr(args: string[], cwd: string, timeoutMs = SUBPROCESS_TIMEOUT_MS): Promise<TldrResult> {
 	const bin = findBinary();
-	if (!bin) return Promise.resolve({ stdout: "", stderr: binaryError ?? "llm-tldr not found", exitCode: 1 });
+	if (!bin) { dep.guard(); return Promise.resolve({ stdout: "", stderr: "", exitCode: 1 }); }
 
 	return new Promise((resolve) => {
 		const stdoutChunks: Buffer[] = [];
@@ -327,8 +317,9 @@ export function tldrIndexStatusAPI(projectPath: string): IndexState {
 export default function (pi: ExtensionAPI) {
 	// Warn on session start if not indexed
 	pi.on("session_start", async (_event, ctx) => {
+		dep.status(ctx);
 		const bin = findBinary();
-		if (!bin) return; // silently skip if not installed
+		if (!bin) return;
 
 		const state = checkIndex(ctx.cwd);
 		if (!state.indexed) {
@@ -364,7 +355,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const projectPath = params.path ?? ctx.cwd;
 
@@ -431,7 +422,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const args = ["structure", params.path];
 			if (params.lang) args.push("--lang", params.lang);
@@ -488,7 +479,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const { data, error } = await runTldrJSON(["calls", params.path], ctx.cwd);
 			if (error) throw new Error(error);
@@ -531,7 +522,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const { data, error } = await runTldrJSON(["extract", params.file], ctx.cwd);
 			if (error) throw new Error(error);
@@ -588,7 +579,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const { data, error } = await runTldrJSON(["dead", params.path], ctx.cwd);
 			if (error) throw new Error(error);
@@ -636,7 +627,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const bin = findBinary();
-			if (!bin) throw new Error("llm-tldr not found. Install with: uv tool install llm-tldr");
+			if (!bin) dep.guard();
 
 			const projectPath = params.path ?? ctx.cwd;
 			const language = params.lang ?? detectPrimaryLanguage(projectPath) ?? "all";

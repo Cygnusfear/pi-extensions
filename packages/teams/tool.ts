@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile, unlink } from "node:fs/promises";
-import { checkTool } from "@pi-extensions/shared/tool-availability";
+import { createDep } from "@pi-extensions/shared/tool-availability";
+
+const maiDep = createDep({ binary: "mai", install: "Install: bun add -g maitake", name: "mai" });
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -201,9 +203,8 @@ async function runTeamsAction(
   }
 
   if (action === "delegate") {
-    const mai = checkTool("mai");
-    if (!mai.available) {
-      return { content: [{ type: "text" as const, text: `Cannot delegate: mai (maitake) is not installed. ${mai.installHint}` }], isError: true };
+    if (!maiDep.ok) {
+      return { content: [{ type: "text" as const, text: `${maiDep.reason}. ${maiDep.install}` }], isError: true };
     }
     if (!params.tasks?.length) {
       return { content: [{ type: "text" as const, text: "Provide tasks array." }], isError: true };
