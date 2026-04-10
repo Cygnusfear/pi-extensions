@@ -719,10 +719,14 @@ declare function runbookList(): Promise<Array<{
 /**
  * Run a saved runbook in the current VM context.
  * The runbook has full access to all sandbox tools, $, and session.
+ * Pass args to inject an `args` object the runbook code can read.
+ * The runbook's return value is returned to the caller.
  */
 declare function runbookRun(input: {
   /** Runbook name */
   name: string;
+  /** Arguments passed to the runbook as `args` variable */
+  args?: Record<string, unknown>;
 }): Promise<unknown>;
 
 /**

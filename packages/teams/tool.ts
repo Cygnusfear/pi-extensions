@@ -42,6 +42,7 @@ const TeamsParams = Type.Object({
     Type.Array(
       Type.Object({
         text: Type.String({ description: "Task description" }),
+        ticketId: Type.Optional(Type.String({ description: "Pre-created ticket ID from maiTicket(). Skips ticket creation — worker uses this ticket directly." })),
         assignee: Type.Optional(Type.String({ description: "Worker name" })),
         model: Type.Optional(
           Type.String({
@@ -92,7 +93,7 @@ const TeamsParams = Type.Object({
 
 type TeamsActionParams = {
   action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
-  tasks?: Array<{ text: string; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean }>;
+  tasks?: Array<{ text: string; ticketId?: string; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean }>;
   name?: string;
   names?: string[];
   message?: string;
@@ -240,40 +241,46 @@ async function runTeamsAction(
       }
       if (task.persistent) freeform = true;
 
-      // Determine ticket type and tags based on template
-      const templateName = task.template ?? "";
-      const overrides = TEMPLATE_TICKET_OVERRIDES[templateName];
-      const ticketType = overrides?.type ?? "task";
-      const ticketTags = ["team", ...(overrides?.tags ?? [])].join(",");
+      let ticketId: string;
 
-      // Truncate to first line, max 120 chars — shell arg limits blow up on long task descriptions.
-      const taskTitle = task.text.split("\n")[0].slice(0, 120);
-      const needsBody = task.text.length > taskTitle.length;
+      if (task.ticketId) {
+        // Pre-created ticket — skip creation, just ensure it's started
+        ticketId = task.ticketId;
+        await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+      } else {
+        // Create ticket from task text
+        const templateName = task.template ?? "";
+        const overrides = TEMPLATE_TICKET_OVERRIDES[templateName];
+        const ticketType = overrides?.type ?? "task";
+        const ticketTags = ["team", ...(overrides?.tags ?? [])].join(",");
 
-      const createResult = await pi.exec(
-        "mai",
-        ["ticket", taskTitle, ticketType, "-l", ticketTags, "-a", workerName],
-        { cwd: ctx.cwd, timeout: 5000 },
-      );
+        const taskTitle = task.text.split("\n")[0].slice(0, 120);
+        const needsBody = task.text.length > taskTitle.length;
 
-      const ticketId = (createResult.stdout ?? "").trim().split(/\s+/)[0];
-      if (!ticketId || createResult.code !== 0) {
-        results.push(`Failed to create ticket for "${taskTitle}": ${createResult.stderr}`);
-        continue;
-      }
+        const createResult = await pi.exec(
+          "mai",
+          ["ticket", taskTitle, ticketType, "-l", ticketTags, "-a", workerName],
+          { cwd: ctx.cwd, timeout: 5000 },
+        );
 
-      // Write full task text as a note body — avoids arg length limits.
-      if (needsBody) {
-        const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
-        try {
-          await writeFile(tmp, task.text, "utf8");
-          await pi.exec("mai", ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
-        } finally {
-          await unlink(tmp).catch(() => {});
+        ticketId = (createResult.stdout ?? "").trim().split(/\s+/)[0];
+        if (!ticketId || createResult.code !== 0) {
+          results.push(`Failed to create ticket for "${taskTitle}": ${createResult.stderr}`);
+          continue;
         }
-      }
 
-      await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
+        if (needsBody) {
+          const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
+          try {
+            await writeFile(tmp, task.text, "utf8");
+            await pi.exec("mai", ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
+          } finally {
+            await unlink(tmp).catch(() => {});
+          }
+        }
+
+        await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
+      }
 
       try {
         const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef, task.text);

@@ -29,6 +29,9 @@ const books = await runbookList();
 // Run it
 await runbookRun({ name: "scan-todos" });
 
+// Run with arguments — the runbook receives them as `args`
+await runbookRun({ name: "scan-todos", args: { glob: "*.rs", limit: 10 } });
+
 // Load for review or modification
 const { code } = await runbookLoad({ name: "scan-todos" });
 ```
@@ -57,13 +60,30 @@ Plain JavaScript with a JSDoc frontmatter comment. Human-readable, git-committab
 |---|---|
 | `runbookSave({ name, description, code })` | Save a runbook to `.pi/runbooks/` |
 | `runbookList()` | List available runbooks with names and descriptions |
-| `runbookRun({ name })` | Execute a runbook in the current VM context |
+| `runbookRun({ name, args? })` | Execute a runbook in the current VM context, optionally with arguments |
 | `runbookLoad({ name })` | Load code as string for review/modification |
 | `runbookDelete({ name })` | Delete a runbook |
 
 ## Execution model
 
 `runbookRun()` executes the saved code in the same persistent VM context as `execute_code`. The runbook has access to all sandbox tools (`Read`, `Write`, `Bash`, `rg`, etc.), the `$` store, and the session API.
+
+Runbooks work as functions — they accept arguments via `args` and their return value comes back to the caller:
+
+```javascript
+await runbookSave({
+  name: "count-matches",
+  description: "Count pattern matches in files",
+  code: \`
+const hits = await rg({ args: \\\`-c "\\\${args.pattern}" --glob "\\\${args.glob || '*.ts'}"\\\` });
+return hits.split('\\n').filter(Boolean).length;
+\`
+});
+
+// Use as a composable function
+const count = await runbookRun({ name: "count-matches", args: { pattern: "TODO", glob: "*.ts" } });
+console.log("Found", count, "files with TODOs");
+```
 
 ## Storage
 

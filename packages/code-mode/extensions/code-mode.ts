@@ -621,9 +621,10 @@ async function executeCode(
   }
 
   // runbookRun — executes a saved runbook in the current VM context
-  (sess.context as any).runbookRun = async (input: { name: string }) => {
+  (sess.context as any).runbookRun = async (input: { name: string; args?: Record<string, unknown> }) => {
     const { code } = loadRunbook(cwd, input.name);
-    const wrapped = `(async () => {\n${code}\n})()`;
+    const argsLine = input.args ? `const args = ${JSON.stringify(input.args)};\n` : "const args = {};\n";
+    const wrapped = `(async () => {\n${argsLine}${code}\n})()`;
     return vm.runInContext(wrapped, sess.context, { filename: `runbook:${input.name}` });
   };
 
