@@ -735,3 +735,9 @@ declare const process: {
   platform: string;
   pid: number;
 };
+
+/**
+ * Toggle auto-continue supervisor. When enabled, sends "[SUPERVISOR] continue, go"
+ * when the agent goes idle — no LLM steering, just auto-wake.
+ */
+declare function supervise(enabled: boolean): Promise<string>;
