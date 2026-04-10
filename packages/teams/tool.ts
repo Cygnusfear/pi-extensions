@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { writeFile, unlink } from "node:fs/promises";
 import { createDep } from "../shared/src/tool-availability";
 
-const maiDep = createDep({ binary: "mai", install: "Install: bun add -g maitake", name: "mai" });
+const maiDep = createDep({ binary: "mai", install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest", name: "mai" });
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";

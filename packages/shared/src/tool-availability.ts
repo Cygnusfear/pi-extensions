@@ -6,7 +6,7 @@
  * showMissingDeps(ctx) ONCE to show a single consolidated notification.
  *
  * Usage in any extension:
- *   const dep = createDep({ binary: "mai", install: "bun add -g maitake" });
+ *   const dep = createDep({ binary: "mai", install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest" });
  *   dep.guard();           // throws if not available
  *   if (dep.ok) { ... }    // check availability
  *

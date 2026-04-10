@@ -22,7 +22,7 @@ import { foresightRecall, foresightUnfold, foresightContext } from "@pi-extensio
 import { FS_ENV, FORESIGHT_BIN } from "@pi-extensions/shared/foresight-env";
 import { createDep } from "../../shared/src/tool-availability";
 
-const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
+const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: git clone + cargo install --path . (see github.com/cygnusfear/foresight)", name: "foresight" });
 
 // =============================================================================
 // Config

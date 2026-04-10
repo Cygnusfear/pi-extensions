@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { FS_ENV, FORESIGHT_BIN } from "./foresight-env.js";
 import { createDep } from "./tool-availability";
 
-const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
+const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: git clone + cargo install --path . (see github.com/cygnusfear/foresight)", name: "foresight" });
 import { safeJsonParse } from "./safe-json.js";
 
 /** Foresight's native fact types. */

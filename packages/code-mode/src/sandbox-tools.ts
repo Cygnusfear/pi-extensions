@@ -13,7 +13,7 @@ import {
 import { isLocked, lockError } from "./shell-utils";
 import { createDep } from "../../shared/src/tool-availability";
 
-const maiDep = createDep({ binary: "mai", install: "Install: bun add -g maitake", name: "mai" });
+const maiDep = createDep({ binary: "mai", install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest", name: "mai" });
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 import {
   tldrArchAPI,
