@@ -68,6 +68,9 @@ const CODE_MODE_SYSTEM_PROMPT = fs
 const CODE_PREVIEW_LINES = 8;
 const OUTPUT_PREVIEW_LINES = 15;
 
+// Cache Shiki highlights — code never changes per tool call, avoid re-highlighting on ctrl+O toggle
+const shikiCache = new Map<string, string[]>();
+
 interface CodeModeDetails {
   duration: number;
   error?: string;
@@ -1149,22 +1152,23 @@ export default function (pi: ExtensionAPI) {
     renderCall(args: { code: string }, theme: Theme, context: { expanded: boolean }) {
       const rawLines = (args.code || "").split("\n");
       const showAll = context.expanded;
-      const preview = showAll ? rawLines : rawLines.slice(0, CODE_PREVIEW_LINES);
-      const remaining = showAll ? 0 : rawLines.length - preview.length;
 
-      // Syntax-highlight via Shiki (same instance as core-edit-ui)
-      let highlighted: string[];
-      try {
-        const { highlightCode: hl } = require("../../shared/src/tui-diff-renderer.ts");
-        highlighted = hl(preview.join("\n"), "code-mode.js");
-      } catch {
-        highlighted = preview;
+      // Syntax-highlight via Shiki — cached to avoid re-highlighting on ctrl+O toggle
+      const codeKey = args.code || "";
+      let allHighlighted = shikiCache.get(codeKey);
+      if (!allHighlighted) {
+        try {
+          const { highlightCode: hl } = require("../../shared/src/tui-diff-renderer.ts");
+          const raw = hl(codeKey, "code-mode.js") as string[];
+          const FG_RST = "\x1b[39;22;23;24m";
+          allHighlighted = raw.map((l: string) => l.replace(/\x1b\[0m/g, FG_RST));
+        } catch {
+          allHighlighted = rawLines;
+        }
+        shikiCache.set(codeKey, allHighlighted);
       }
-
-      // Replace full reset (\x1b[0m) with FG-only reset (\x1b[39;22;23;24m)
-      // so Shiki tokens don't kill the tool container's background
-      const FG_RST = "\x1b[39;22;23;24m";
-      const safeLines = highlighted.map((l: string) => l.replace(/\x1b\[0m/g, FG_RST));
+      const safeLines = showAll ? allHighlighted : allHighlighted.slice(0, CODE_PREVIEW_LINES);
+      const remaining = showAll ? 0 : rawLines.length - CODE_PREVIEW_LINES;
 
       let text = theme.fg("toolTitle", theme.bold("execute_code"));
       text += "\n\n" + safeLines.join("\n");
