@@ -15,7 +15,8 @@
     "./tool-ui-utils": "./src/tool-ui-utils.ts",
     "./tui-diff-renderer": "./src/tui-diff-renderer.ts",
     "./foresight-read": "./src/foresight-read.ts",
-    "./foresight-write": "./src/foresight-write.ts"
+    "./foresight-write": "./src/foresight-write.ts",
+    "./tool-availability": "./src/tool-availability.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",

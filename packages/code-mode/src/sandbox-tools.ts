@@ -11,6 +11,7 @@ import {
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
 import { isLocked, lockError } from "./shell-utils";
+import { checkTool } from "@pi-extensions/shared/tool-availability";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 import {
   tldrArchAPI,
@@ -354,6 +355,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // =====================================================================
 
     mai: async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string }) => {
+      const tool = checkTool("mai");
+      if (!tool.available) throw new Error(`mai is not installed. ${tool.installHint}`);
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const result = await spawnAsync({
         cmd: "mai",
@@ -389,6 +392,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       start?: boolean;
       cwd?: string;
     }) => {
+      const tool = checkTool("mai");
+      if (!tool.available) throw new Error(`mai is not installed. ${tool.installHint}`);
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
 
       // Build body with Goal/AC/Verification template
