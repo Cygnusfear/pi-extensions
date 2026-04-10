@@ -2,13 +2,16 @@
  * Unified dependency checking for pi extensions.
  *
  * One pattern for all external deps — CLI binaries and env vars.
- * Extensions check at init, guard at runtime, show status in footer.
+ * All deps register into a shared registry. On session_start, call
+ * showMissingDeps(ctx) ONCE to show a single consolidated notification.
  *
- * Usage:
+ * Usage in any extension:
  *   const dep = createDep({ binary: "mai", install: "bun add -g maitake" });
  *   dep.guard();           // throws if not available
- *   dep.status(ctx);       // sets footer ⚠ if missing
  *   if (dep.ok) { ... }    // check availability
+ *
+ * In ONE place (e.g. defaults or a dedicated extension):
+ *   showMissingDeps(ctx);  // consolidated footer + notification
  */
 
 import { execSync } from "node:child_process";
@@ -18,43 +21,75 @@ import { execSync } from "node:child_process";
 interface BinaryDep {
   binary: string;
   install: string;
-  name?: string;         // human-readable name (defaults to binary name)
+  name?: string;
 }
 
 interface EnvDep {
   env: string;
   install: string;
-  name?: string;         // human-readable name (defaults to env var name)
+  name?: string;
 }
 
 export type DepSpec = BinaryDep | EnvDep;
 
 export interface Dep {
   /** Human-readable name */
-  name: string;
+  readonly name: string;
   /** Whether the dependency is available right now */
-  ok: boolean;
+  readonly ok: boolean;
   /** Why it's not available (null if ok) */
-  reason: string | null;
+  readonly reason: string | null;
   /** Install instructions */
-  install: string;
-  /** Resolved path (for binaries) or value hint (for env vars) */
-  resolved: string | null;
-  /**
-   * Guard — throws if not available.
-   * Consistent error format across all extensions.
-   */
+  readonly install: string;
+  /** Resolved path (for binaries) or "set" (for env vars) */
+  readonly resolved: string | null;
+  /** Guard — throws consistent error if not available. */
   guard(): void;
-  /**
-   * Set footer status if missing. Call in session_start.
-   * Shows "⚠ name" in footer. Clears if available.
-   */
-  status(ctx: { ui: { setStatus(key: string, text: string | undefined): void } }): void;
-  /**
-   * Re-check availability (clears cache).
-   * Use after install or env change.
-   */
+  /** Re-check availability (clears cache). */
   recheck(): boolean;
+}
+
+// ─── Global Registry ─────────────────────────────────────────────────────────
+
+const registry: Dep[] = [];
+
+/** Get all registered deps. */
+export function getAllDeps(): readonly Dep[] {
+  return registry;
+}
+
+/** Get all missing deps. */
+export function getMissingDeps(): readonly Dep[] {
+  return registry.filter(d => !d.ok);
+}
+
+/**
+ * Show ONE consolidated notification + footer status for all missing deps.
+ * Call this once in session_start from a single extension.
+ */
+export function showMissingDeps(ctx: {
+  ui: {
+    setStatus(key: string, text: string | undefined): void;
+    notify(message: string, type?: "info" | "warning" | "error"): void;
+  };
+}) {
+  const missing = getMissingDeps();
+
+  if (missing.length === 0) {
+    ctx.ui.setStatus("deps", undefined);
+    return;
+  }
+
+  // Footer: compact summary
+  const names = missing.map(d => d.name);
+  ctx.ui.setStatus("deps", `⚠ ${names.join(", ")}`);
+
+  // Notification: actionable install instructions
+  const lines = missing.map(d => `  • ${d.name} — ${d.install}`);
+  ctx.ui.notify(
+    `Optional dependencies not found:\n${lines.join("\n")}\n\nRun /deps for details.`,
+    "warning"
+  );
 }
 
 // ─── Implementation ──────────────────────────────────────────────────────────
@@ -76,12 +111,10 @@ function checkEnv(name: string): string | null {
 }
 
 /**
- * Create a dependency check. Call once at extension init.
- * The result is cached but can be rechecked with .recheck().
+ * Create and register a dependency check. Call once at extension init.
  */
 export function createDep(spec: DepSpec): Dep {
   const name = spec.name ?? (isBinaryDep(spec) ? spec.binary : spec.env);
-  const statusKey = `dep-${name.toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
 
   let ok: boolean;
   let resolved: string | null;
@@ -93,7 +126,7 @@ export function createDep(spec: DepSpec): Dep {
       ok = resolved !== null;
       reason = ok ? null : `${name} is not installed`;
     } else {
-      resolved = checkEnv(spec.env);
+      resolved = checkEnv(spec.env) ? "set" : null;
       ok = resolved !== null;
       reason = ok ? null : `${spec.env} is not set`;
     }
@@ -101,7 +134,7 @@ export function createDep(spec: DepSpec): Dep {
 
   check();
 
-  return {
+  const dep: Dep = {
     get name() { return name; },
     get ok() { return ok; },
     get reason() { return reason; },
@@ -114,31 +147,12 @@ export function createDep(spec: DepSpec): Dep {
       }
     },
 
-    status(ctx) {
-      ctx.ui.setStatus(statusKey, ok ? undefined : `⚠ ${name}`);
-    },
-
     recheck() {
       check();
       return ok;
     },
   };
-}
 
-// ─── Convenience ─────────────────────────────────────────────────────────────
-
-/** Shorthand for common CLI tools. */
-export const KNOWN_DEPS: Record<string, DepSpec> = {
-  mai:       { binary: "mai", install: "Install: bun add -g maitake", name: "mai" },
-  foresight: { binary: "foresight", install: "Install: bun add -g foresight-memory", name: "foresight" },
-  "llm-tldr":{ binary: "llm-tldr", install: "Install: uv tool install llm-tldr", name: "llm-tldr" },
-  rg:        { binary: "rg", install: "Install: brew install ripgrep", name: "ripgrep" },
-  fd:        { binary: "fd", install: "Install: brew install fd", name: "fd" },
-};
-
-/** Create a dep from a known tool name. */
-export function knownDep(name: keyof typeof KNOWN_DEPS): Dep {
-  const spec = KNOWN_DEPS[name];
-  if (!spec) throw new Error(`Unknown dep: ${name}`);
-  return createDep(spec);
+  registry.push(dep);
+  return dep;
 }

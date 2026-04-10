@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile, unlink } from "node:fs/promises";
-import { createDep } from "@pi-extensions/shared/tool-availability";
+import { createDep } from "../shared/src/tool-availability";
 
 const maiDep = createDep({ binary: "mai", install: "Install: bun add -g maitake", name: "mai" });
 import { tmpdir } from "node:os";

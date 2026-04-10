@@ -317,7 +317,6 @@ export function tldrIndexStatusAPI(projectPath: string): IndexState {
 export default function (pi: ExtensionAPI) {
 	// Warn on session start if not indexed
 	pi.on("session_start", async (_event, ctx) => {
-		dep.status(ctx);
 		const bin = findBinary();
 		if (!bin) return;
 

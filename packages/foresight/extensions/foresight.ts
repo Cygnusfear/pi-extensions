@@ -20,7 +20,7 @@ import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 import { foresightRetainFireAndForget, FORESIGHT_FACT_TYPES } from "@pi-extensions/shared/foresight-write";
 import { foresightRecall, foresightUnfold, foresightContext } from "@pi-extensions/shared/foresight-read";
 import { FS_ENV, FORESIGHT_BIN } from "@pi-extensions/shared/foresight-env";
-import { createDep } from "@pi-extensions/shared/tool-availability";
+import { createDep } from "../../shared/src/tool-availability";
 
 const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: bun add -g foresight-memory", name: "foresight" });
 
@@ -253,15 +253,9 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	let startupDone = false;
 
 	const startup = (async () => {
-		if (!dep.ok) {
-			console.error(`[foresight] ${dep.reason}. ${dep.install}`);
-			return;
-		}
+		if (!dep.ok) return;
 		available = await isForesightAvailable();
-		if (!available) {
-			console.error("[foresight] Foresight CLI not reachable — extension dormant");
-			return;
-		}
+		if (!available) return;
 		await ensureBank(DEFAULT_BANK);
 		startupDone = true;
 	})();
@@ -362,7 +356,6 @@ export default function foresightExtension(pi: ExtensionAPI) {
 	const turnContent: string[] = [];
 
 	pi.on("session_start", async (event: any, _ctx: any) => {
-		dep.status(_ctx);
 		if (!available) return;
 		if (!event.previousSessionFile) return;
 		ingestSessionFile(event.previousSessionFile);

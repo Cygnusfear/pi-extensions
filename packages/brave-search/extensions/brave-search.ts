@@ -241,8 +241,6 @@ async function applyTruncation(
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_start", (_event, ctx) => dep.status(ctx));
-
 	// web_search_brave — primary search tool using LLM Context API
 	pi.registerTool({
 		name: "web_search_brave",

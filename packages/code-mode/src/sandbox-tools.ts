@@ -11,7 +11,7 @@ import {
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
 import { isLocked, lockError } from "./shell-utils";
-import { createDep } from "@pi-extensions/shared/tool-availability";
+import { createDep } from "../../shared/src/tool-availability";
 
 const maiDep = createDep({ binary: "mai", install: "Install: bun add -g maitake", name: "mai" });
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";

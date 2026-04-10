@@ -24,47 +24,49 @@ import {
 
 export default function register(pi: ExtensionAPI) {
 	// -----------------------------------------------------------------
-	// Resolve project root from cwd (walk up to find .git or package.json)
+	// Track cwd from session_start
 	// -----------------------------------------------------------------
-	function getProjectRoot(): string {
-		return pi.getCwd();
-	}
+	let projectRoot = process.cwd();
+
+	pi.on("session_start", (_event, ctx) => {
+		projectRoot = ctx.cwd;
+	});
 
 	// -----------------------------------------------------------------
 	// Sandbox functions (used inside execute_code)
 	// -----------------------------------------------------------------
 
 	registerSandboxFn("runbookSave", async (input: { name: string; description: string; code: string }) => {
-		const filePath = saveRunbook(getProjectRoot(), input.name, input.description, input.code);
+		const filePath = saveRunbook(projectRoot, input.name, input.description, input.code);
 		return `Runbook "${input.name}" saved to ${filePath}`;
 	});
 
 	registerSandboxFn("runbookList", async () => {
-		return listRunbooks(getProjectRoot());
+		return listRunbooks(projectRoot);
 	});
 
 	registerSandboxFn("runbookLoad", async (input: { name: string }) => {
-		const { code, raw } = loadRunbook(getProjectRoot(), input.name);
+		const { code, raw } = loadRunbook(projectRoot, input.name);
 		return { name: input.name, code, raw };
 	});
 
 	registerSandboxFn("runbookDelete", async (input: { name: string }) => {
-		const deleted = deleteRunbook(getProjectRoot(), input.name);
+		const deleted = deleteRunbook(projectRoot, input.name);
 		return deleted
 			? `Runbook "${input.name}" deleted.`
 			: `Runbook "${input.name}" not found.`;
 	});
 
 	// Note: runbookRun is NOT registered here — it needs access to the VM context
-	// and must be wired in code-mode's sandbox-tools.ts where vm.runInContext is available.
-	// The sandbox-tools will read the code via loadRunbook and eval it in-context.
+	// and must be wired in code-mode where vm.runInContext is available.
 
 	// -----------------------------------------------------------------
-	// Direct pi.tool (for LLM to use outside code-mode)
+	// Direct tool (for LLM to use outside code-mode)
 	// -----------------------------------------------------------------
 
-	pi.tool({
+	pi.registerTool({
 		name: "runbook",
+		label: "runbook",
 		description:
 			"Manage saved code_mode runbooks — reusable scripts stored in .pi/runbooks/.\n" +
 			"Actions: save, list, load, delete. Use 'run' inside execute_code via runbookRun().",
@@ -82,14 +84,14 @@ export default function register(pi: ExtensionAPI) {
 			description: Type.Optional(Type.String({ description: "Description (required for save)" })),
 			code: Type.Optional(Type.String({ description: "JavaScript code (required for save)" })),
 		}),
-		execute: async (input) => {
-			const root = getProjectRoot();
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			const root = ctx?.cwd || projectRoot;
 
-			switch (input.action) {
+			switch (params.action) {
 				case "save": {
-					if (!input.name || !input.code) return "name and code are required for save";
-					const filePath = saveRunbook(root, input.name, input.description || "", input.code);
-					return `Saved runbook "${input.name}" to ${filePath}`;
+					if (!params.name || !params.code) return "name and code are required for save";
+					const filePath = saveRunbook(root, params.name, params.description || "", params.code);
+					return `Saved runbook "${params.name}" to ${filePath}`;
 				}
 				case "list": {
 					const books = listRunbooks(root);
@@ -97,17 +99,17 @@ export default function register(pi: ExtensionAPI) {
 					return books.map((b) => `- **${b.name}**: ${b.description}`).join("\n");
 				}
 				case "load": {
-					if (!input.name) return "name is required for load";
-					const { code } = loadRunbook(root, input.name);
+					if (!params.name) return "name is required for load";
+					const { code } = loadRunbook(root, params.name);
 					return code;
 				}
 				case "delete": {
-					if (!input.name) return "name is required for delete";
-					const deleted = deleteRunbook(root, input.name);
-					return deleted ? `Deleted "${input.name}".` : `"${input.name}" not found.`;
+					if (!params.name) return "name is required for delete";
+					const deleted = deleteRunbook(root, params.name);
+					return deleted ? `Deleted "${params.name}".` : `"${params.name}" not found.`;
 				}
 				default:
-					return `Unknown action: ${input.action}`;
+					return `Unknown action: ${params.action}`;
 			}
 		},
 	});
