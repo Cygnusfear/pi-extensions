@@ -1057,7 +1057,7 @@ export default function (pi: ExtensionAPI) {
       "Background bash: bashBgStart, bashBgStatus, bashBgLogs, bashBgStop, bashBgList. " +
       "Team coordination: teams({ action, tasks?, name?, message?, ... }). " +
       "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
-      "Passthrough wrappers: meshTell, meshAsk, meshPeers, meshView, meshChat, editorOpen, editorState, gitAi. " +
+      "Namespaced callables: mesh.tell/ask/peers/view/broadcast/chat, editorOpen, editorState, gitAi. " +
       "Use console.log() to return results.",
     parameters: Type.Object({
       code: Type.String({

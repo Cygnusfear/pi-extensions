@@ -106,7 +106,48 @@ await teams({
 });
 ```
 
-Workers report back via mesh channels. You get notified when they finish or fail.
+### Waiting for workers
+
+`teams({ action: "delegate" })` returns after spawning, not after workers finish. Workers run in separate sessions. After you spawn workers, you need a plan for waiting.
+
+**The pattern — delegate, sleep, wake:**
+
+1. Spawn workers with `teams({ action: "delegate", tasks })`
+2. Turn off auto-continue: `supervise(false)` — prevents the supervisor from burning your context with `[SUPERVISOR] continue, go` spam while you're idle
+3. Arm a background monitor that calls `console.wake()` when a worker finishes
+4. When woken, collect results, continue your loop, re-enable `supervise(true)` if you need it
+
+```javascript
+// Spawn the worker
+await teams({
+  action: "delegate",
+  tasks: [{ text: "Fix auth bug", assignee: "fixer", model: "openai-codex/gpt-5.4" }]
+});
+
+// Turn off supervisor — don't burn context while waiting
+await supervise(false);
+
+// Arm background monitor — polls every 2 minutes, wakes you when done
+$.monitor = (async () => {
+  for (let i = 0; i < 30; i++) {
+    await sleep(120000); // 2 minutes
+    const status = await teams({ action: "list" });
+    if (status.includes("grace") || status.includes("finished") || status.includes("exit")) {
+      console.wake("Worker finished — collect results.");
+      return;
+    }
+  }
+  console.wake("Monitor timed out — worker never completed.");
+})();
+console.log("Worker spawned, supervisor off, monitor armed. Going idle.");
+```
+
+**Key rules:**
+- Always `supervise(false)` after spawning workers. The supervisor will otherwise inject `[SUPERVISOR] continue, go` every few seconds, eating your context window with useless turns.
+- `console.wake()` is the only way to resume from a background promise. `console.log()` only writes to the current block output — it does not trigger a new turn.
+- Only one `console.wake()` per execute_code block. Fire the monitor onto `$`, return, go idle.
+- Check worker status with `teams({ action: "list" })` or `teams({ action: "view", name: "fixer" })`.
+- For the full orchestration loop (implement → review → gate → next), see the 90-building-with-teams playbook.
 
 ## Context management: don't let the window fill up
 
@@ -169,6 +210,10 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Search long-term memory | `recall({ query })` |
 | Store a learning | `memoryCreate({ factType, oneLiner, summary })` |
 | Spawn a worker | `teams({ action: "delegate", tasks })` — direct tool |
+| Wait for worker to finish | `supervise(false)` → arm `console.wake()` monitor → go idle |
+| Check worker status | `teams({ action: "list" })` or `teams({ action: "view", name })` |
+| Resume from background | `console.wake("message")` in execute_code — triggers a new turn |
+| Control auto-continue | `supervise(true/false)` — turn off while waiting for workers |
 | Analyze code structure | `tldrSemanticSearch({ query })` |
 | Find files fast | `fffFind({ query })` |
 | Check context usage | `session.tokens()` |

@@ -33,29 +33,33 @@ export default function register(pi: ExtensionAPI) {
 	});
 
 	// -----------------------------------------------------------------
-	// Sandbox functions (used inside execute_code)
+	// Sandbox functions (namespaced callable + backward-compat aliases)
 	// -----------------------------------------------------------------
 
-	registerSandboxFn("runbookSave", async (input: { name: string; description: string; code: string }) => {
+	const runbook = async (input: { name: string; description: string; code: string }) => {
 		const filePath = saveRunbook(projectRoot, input.name, input.description, input.code);
 		return `Runbook "${input.name}" saved to ${filePath}`;
-	});
-
-	registerSandboxFn("runbookList", async () => {
-		return listRunbooks(projectRoot);
-	});
-
-	registerSandboxFn("runbookLoad", async (input: { name: string }) => {
+	};
+	(runbook as any).list = async () => listRunbooks(projectRoot);
+	(runbook as any).load = async (input: { name: string }) => {
 		const { code, raw } = loadRunbook(projectRoot, input.name);
 		return { name: input.name, code, raw };
-	});
-
-	registerSandboxFn("runbookDelete", async (input: { name: string }) => {
+	};
+	(runbook as any).run = async (_input: { name: string; args?: Record<string, unknown> }) => {
+		throw new Error("runbook.run() must be called from execute_code context");
+	};
+	(runbook as any).delete = async (input: { name: string }) => {
 		const deleted = deleteRunbook(projectRoot, input.name);
 		return deleted
 			? `Runbook "${input.name}" deleted.`
 			: `Runbook "${input.name}" not found.`;
-	});
+	};
+
+	registerSandboxFn("runbook", runbook);
+	registerSandboxFn("runbookSave", runbook);
+	registerSandboxFn("runbookList", (runbook as any).list);
+	registerSandboxFn("runbookLoad", (runbook as any).load);
+	registerSandboxFn("runbookDelete", (runbook as any).delete);
 
 	// Note: runbookRun is NOT registered here — it needs access to the VM context
 	// and must be wired in code-mode where vm.runInContext is available.

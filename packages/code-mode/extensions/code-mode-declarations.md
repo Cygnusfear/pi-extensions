@@ -719,55 +719,46 @@ declare const $: {
 // =====================================================================
 
 /**
- * Save a reusable code_mode script to .pi/runbooks/<name>.js.
- * The code is stored with a JSDoc frontmatter header.
+ * runbook — reusable code_mode scripts. Callable as save, plus list/load/run/delete.
+ *
+ * @example
+ * await runbook({ name: "lint", description: "Run linter", code: "..." });
+ * const books = await runbook.list();
+ * await runbook.load({ name: "lint" });
+ * await runbook.run({ name: "lint", args: { fix: true } });
+ * await runbook.delete({ name: "lint" });
  */
-declare function runbookSave(input: {
-  /** Runbook name (alphanumeric, hyphens, underscores) */
-  name: string;
-  /** What this runbook does */
-  description: string;
-  /** JavaScript code to save */
-  code: string;
-}): Promise<string>;
+declare const runbook: {
+  /** Save a runbook. */
+  (input: { name: string; description: string; code: string }): Promise<string>;
 
-/**
- * List all available runbooks in .pi/runbooks/.
- */
-declare function runbookList(): Promise<Array<{
-  name: string;
-  description: string;
-  file: string;
-}>>;
+  /** List all available runbooks. */
+  list(): Promise<Array<{ name: string; description: string; file: string }>>;
 
-/**
- * Run a saved runbook in the current VM context.
- * The runbook has full access to all sandbox tools, $, and session.
- * Pass args to inject an `args` object the runbook code can read.
- * The runbook's return value is returned to the caller.
- */
-declare function runbookRun(input: {
-  /** Runbook name */
-  name: string;
-  /** Arguments passed to the runbook as `args` variable */
-  args?: Record<string, unknown>;
-}): Promise<unknown>;
+  /** Load a runbook's code. */
+  load(input: { name: string }): Promise<{ name: string; code: string; raw: string }>;
 
-/**
- * Load a runbook's code as a string (for review or modification before running).
- */
-declare function runbookLoad(input: {
-  /** Runbook name */
-  name: string;
-}): Promise<{ name: string; code: string; raw: string }>;
+  /** Run a saved runbook in the current VM context. */
+  run(input: { name: string; args?: Record<string, unknown> }): Promise<unknown>;
 
-/**
- * Delete a saved runbook.
- */
-declare function runbookDelete(input: {
-  /** Runbook name */
-  name: string;
-}): Promise<string>;
+  /** Delete a saved runbook. */
+  delete(input: { name: string }): Promise<string>;
+};
+
+/** @deprecated Use `runbook()` instead. */
+declare const runbookSave: typeof runbook;
+
+/** @deprecated Use `runbook.list()` instead. */
+declare const runbookList: typeof runbook.list;
+
+/** @deprecated Use `runbook.load()` instead. */
+declare const runbookLoad: typeof runbook.load;
+
+/** @deprecated Use `runbook.run()` instead. */
+declare const runbookRun: typeof runbook.run;
+
+/** @deprecated Use `runbook.delete()` instead. */
+declare const runbookDelete: typeof runbook.delete;
 
 // =====================================================================
 // Console Extensions
@@ -827,36 +818,121 @@ declare function supervise(enabled: boolean): Promise<string>;
  *
  * @example
  * // Delegate with auto-created ticket
- * await teams({ action: "delegate", tasks: [{ text: "Fix the bug", assignee: "fixer" }] });
+ * await teams.delegate([{ text: "Fix the bug", assignee: "fixer" }]);
  *
- * // Delegate with pre-created ticket from maiTicket()
- * const ticket = await maiTicket({ title: "Auth middleware", description: "Add JWT validation", tags: "team" });
- * await teams({ action: "delegate", tasks: [{ text: "See ticket", ticketId: ticket.id, assignee: "auth" }] });
+ * // Delegate with pre-created ticket from mai.ticket()
+ * const ticket = await mai.ticket({ title: "Auth middleware", description: "Add JWT validation", tags: "team" });
+ * await teams.delegate([{ text: "See ticket", ticketId: ticket.id, assignee: "auth" }]);
  *
  * // List, view, kill
- * await teams({ action: "list" });
- * await teams({ action: "view", name: "fixer" });
- * await teams({ action: "kill", name: "fixer" });
+ * await teams.list();
+ * await teams.view("fixer");
+ * await teams.kill("fixer");
+ * await teams.tell("fixer", "check src/auth.ts");
+ *
+ * // Raw action dispatch (backward compat)
+ * await teams({ action: "delegate", tasks: [...] });
  */
-declare function teams(params: {
-  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
-  tasks?: Array<{
-    text: string;
-    ticketId?: string;
-    assignee?: string;
-    model?: string;
-    template?: string;
-    hasTools?: boolean;
-    persistent?: boolean;
-  }>;
-  name?: string;
-  names?: string[];
-  message?: string;
-  start?: number;
-  end?: number;
-  useWorktree?: boolean;
-  baseRef?: string;
-}): Promise<string>;
+declare const teams: {
+  /** Raw action dispatch — backward compat. Prefer specific methods below. */
+  (params: {
+    action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
+    tasks?: Array<{
+      text: string;
+      ticketId?: string;
+      assignee?: string;
+      model?: string;
+      template?: string;
+      hasTools?: boolean;
+      persistent?: boolean;
+    }>;
+    name?: string;
+    names?: string[];
+    message?: string;
+    start?: number;
+    end?: number;
+    useWorktree?: boolean;
+    baseRef?: string;
+  }): Promise<string>;
+
+  /** Spawn workers with tasks. Each task can have ticketId, assignee, model, etc. */
+  delegate(tasks: Array<Record<string, unknown>>, opts?: Record<string, unknown>): Promise<string>;
+
+  /** Show all active workers and their status. */
+  list(): Promise<string>;
+
+  /** Kill a specific worker by name. */
+  kill(name: string): Promise<string>;
+
+  /** Kill all workers. */
+  killAll(): Promise<string>;
+
+  /** Send a message to a specific worker. */
+  tell(name: string, message: string): Promise<string>;
+
+  /** Send a message to all workers. */
+  tellAll(message: string): Promise<string>;
+
+  /** Read recent session entries for a worker. */
+  view(name: string, opts?: { start?: number; end?: number }): Promise<string>;
+
+  /** Show runtime info. */
+  runtime(): Promise<string>;
+};
+
+/**
+ * mesh — inter-session communication. Callable as peers(), plus tell/view/broadcast/chat.
+ *
+ * @example
+ * const peers = await mesh();                        // list peers
+ * const entries = await mesh.view({ sessionId: "worker-1" });
+ * await mesh.tell({ sessionId: "fixer", message: "check auth.ts" });
+ * await mesh.broadcast({ topic: "status", message: "deploying" });
+ * await mesh.chat({ channelId: "team-abc", message: "update" });
+ */
+declare const mesh: {
+  /** List all visible pi sessions. */
+  (): Promise<string>;
+
+  /** Send a direct message to another session. */
+  tell(params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }): Promise<string>;
+
+  /** Read recent entries from another session. */
+  view(params: { sessionId: string; start?: number; end?: number; timeoutMs?: number }): Promise<string>;
+
+  /** Broadcast to all peers on a topic. */
+  broadcast(params: { topic: string; message: unknown }): Promise<string>;
+
+  /** Post a message to a mesh channel. */
+  chat(params: { channelId: string; message: unknown }): Promise<string>;
+
+  /** Join a named channel. */
+  joinChannel(params: { channelId: string }): Promise<string>;
+
+  /** Leave a channel. */
+  leaveChannel(params: { channelId: string }): Promise<string>;
+};
+
+/** @deprecated Use `mesh()` instead. */
+declare const meshPeers: typeof mesh;
+
+/** @deprecated Use `mesh.tell()` instead. */
+declare const meshTell: typeof mesh.tell;
+
+/** @deprecated Use `mesh.view()` instead. */
+declare const meshView: typeof mesh.view;
+
+/** @deprecated Use `mesh.broadcast()` instead. */
+declare const meshBroadcast: typeof mesh.broadcast;
+
+/** @deprecated Use `mesh.chat()` instead. */
+declare const meshChat: typeof mesh.chat;
+
+/** @deprecated Use `mesh.joinChannel()` instead. */
+declare const meshJoinChannel: typeof mesh.joinChannel;
+
+/** @deprecated Use `mesh.leaveChannel()` instead. */
+declare const meshLeaveChannel: typeof mesh.leaveChannel;
 
 /**
  * Get discovered skill paths. Returns root directories and actual skill directories.

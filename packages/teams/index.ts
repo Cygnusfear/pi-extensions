@@ -30,12 +30,28 @@ export default function (pi: ExtensionAPI) {
 
 	// Sandbox function for execute_code — shares same leader instance
 	let sessionCtx: ExtensionContext | null = null;
-	registerSandboxFn("teams", async (params: Record<string, unknown>) => {
+
+	const run = async (params: Record<string, unknown>) => {
 		if (!sessionCtx) throw new Error("Teams not ready — session not started yet");
 		const result = await runTeamsAction(pi, leader, params as any, sessionCtx);
 		if (result.isError) throw new Error(result.content[0]?.text ?? "Teams action failed");
 		return result.details ?? result.content[0]?.text ?? "";
-	});
+	};
+
+	// Build namespaced callable: teams({...}) for raw dispatch, teams.delegate/list/kill/...
+	const teamsFn = async (params: Record<string, unknown>) => run(params);
+	(teamsFn as any).delegate = async (tasks: Array<Record<string, unknown>>, opts?: Record<string, unknown>) =>
+		run({ action: "delegate", tasks, ...opts });
+	(teamsFn as any).list = async () => run({ action: "list" });
+	(teamsFn as any).kill = async (name: string) => run({ action: "kill", names: [name] });
+	(teamsFn as any).killAll = async () => run({ action: "kill_all" });
+	(teamsFn as any).tell = async (name: string, message: string) => run({ action: "tell", name, message });
+	(teamsFn as any).tellAll = async (message: string) => run({ action: "tell_all", message });
+	(teamsFn as any).view = async (name: string, opts?: { start?: number; end?: number }) =>
+		run({ action: "view", name, ...opts });
+	(teamsFn as any).runtime = async () => run({ action: "runtime" });
+
+	registerSandboxFn("teams", teamsFn);
 
 	// Only register the /team command for interactive sessions (not worker-leaders)
 	if (IS_WORKER) {
