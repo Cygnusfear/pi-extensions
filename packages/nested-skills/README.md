@@ -45,6 +45,22 @@ playbook/
 
 Without this extension, pi loads 1 skill. With it, pi loads all 4.
 
+## Sandbox Function
+
+Exposes skill paths to agents via `getSkillPaths()` in code_mode:
+
+```javascript
+const paths = await getSkillPaths();
+console.log(paths.roots);   // Root directories where skills are configured
+console.log(paths.skills);  // Actual skill directories (where SKILL.md lives)
+```
+
+Returns:
+- `roots`: Configured skill directories (e.g. `~/.pi/agent/skills/`, `./skills/`)
+- `skills`: All discovered skill directories with SKILL.md files
+
+Works across all installations — no hardcoded paths.
+
 ## Setup
 
 No setup required. Automatically discovers nested skills in all configured skill directories.
