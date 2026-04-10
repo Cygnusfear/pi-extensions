@@ -1,7 +1,8 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
+import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
 
 function normalizeUiError(text: string): string {
 	return text.replace(/^Error:\s*/i, "");
@@ -26,6 +27,15 @@ export default function (pi: ExtensionAPI) {
 
 	const leader = new TeamLeader(pi);
 	registerTeamsTool(pi, leader);
+
+	// Sandbox function for execute_code — shares same leader instance
+	let sessionCtx: ExtensionContext | null = null;
+	registerSandboxFn("teams", async (params: Record<string, unknown>) => {
+		if (!sessionCtx) throw new Error("Teams not ready — session not started yet");
+		const result = await runTeamsAction(pi, leader, params as any, sessionCtx);
+		if (result.isError) throw new Error(result.content[0]?.text ?? "Teams action failed");
+		return result.details ?? result.content[0]?.text ?? "";
+	});
 
 	// Only register the /team command for interactive sessions (not worker-leaders)
 	if (IS_WORKER) {
@@ -143,6 +153,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		leader.setContext(ctx);
+		sessionCtx = ctx;
 		// Share the pi-mesh extension's mesh instance (avoids duplicate connections)
 		const mesh = (globalThis as any).__piMesh;
 		if (mesh) leader.setMesh(mesh);

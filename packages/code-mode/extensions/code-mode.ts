@@ -1048,6 +1048,7 @@ export default function (pi: ExtensionAPI) {
       "tldrSemanticSearch, tldrStructure, tldrCalls, tldrExtract, tldrDead, tldrArch, tldrImpact, tldrIndexStatus. " +
       "Python code execution via Python({ code, cwd?, timeout? }). " +
       "Background bash: bashBgStart, bashBgStatus, bashBgLogs, bashBgStop, bashBgList. " +
+      "Team coordination: teams({ action, tasks?, name?, message?, ... }). " +
       "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
       "Passthrough wrappers: meshTell, meshAsk, meshPeers, meshView, meshChat, editorOpen, editorState, gitAi. " +
       "Use console.log() to return results.",
