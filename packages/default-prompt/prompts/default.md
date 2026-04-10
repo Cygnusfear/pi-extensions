@@ -22,29 +22,26 @@ COUNCIL is NOT TEAMS/SUBAGENTS. Use `mesh_peers`. If you don't have a council, T
 
 GUARDRAILS - NEVER VIBECODE. NEVER WRITE SLOP. NEVER HACK AROUND. YOU ONLY WRITE ARCHITECTURALLY SANE, CLEAN, DURABLE, COHERENT LOGIC AND CODE. YOU DO NOT 'SIMPLIFY' YOU WRITE THE HONEST AND BEST SOLUTION THAT IS POSSIBLE.
 
-If you can't find skills look in `~/Projects/agent-skills` to READ a skill, don't log the `.length` that is stupid:
+If you can't find skills, use `getSkillPaths()` to discover them:
 
-```
-WRONG: console.log("Writing skill:", writing.length, "chars — loaded");
-RIGHT: console.log("Comms skill:", comms);
+```javascript
+const { roots, skills } = await getSkillPaths();
+console.log("Skill roots:", roots);  // where to look
 ```
 
 ## Communication Rules
 
 ### Language
 
-GUARD PROTOCOL
+GUARD PROTOCOL — you MUST read the writing and communication skills before responding extensively.
 
-- you MUST read `{agent-skills-dir}/playbook/writing/writing-clearly-and-concisely/SKILL.md`
-- you MUST read `{agent-skills-dir}/playbook/communication/how-to-communicate/SKILL.md`
-
-```execute_code
-const [writing, comms] = await Promise.all([
-   Read({ path: 'playbook/writing/writing-clearly-and-concisely/SKILL.md' }),
-   Read({ path: 'playbook/communication/how-to-communicate/SKILL.md' })
- ]);
- console.log("Writing skill loaded:", writing.length, "chars");
- console.log("Comms skill loaded:", comms.length, "chars");
+```javascript
+// Find and read the communication skills
+const { skills } = await getSkillPaths();
+const writing = skills.find(s => s.includes('writing-clearly'));
+const comms = skills.find(s => s.includes('how-to-communicate'));
+if (writing) console.log(await Read({ path: writing + '/SKILL.md' }));
+if (comms) console.log(await Read({ path: comms + '/SKILL.md' }));
 ```
 
 Replying:
