@@ -51,7 +51,8 @@
       "./packages/fork-fixes/extensions/index.ts",
       "./packages/pi-mesh/extension/pi-mesh.ts",
       "./packages/git-ai/extensions/git-ai.ts",
-      "./packages/zai-key-rotate/extensions/zai-key-rotate.ts"
+      "./packages/zai-key-rotate/extensions/zai-key-rotate.ts",
+      "./packages/supervisor/src/index.ts"
     ],
     "prompts": [
       "./packages/prompt-templates/prompts"
