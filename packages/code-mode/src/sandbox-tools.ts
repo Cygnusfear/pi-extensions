@@ -61,7 +61,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     if (signal?.aborted) throw new Error("Aborted");
   };
 
-  return {
+  const tools = {
     Bash: async ({
       command,
       cwd: explicitCwd,
@@ -1071,5 +1071,18 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     man: async (name: string): Promise<string> => {
       return formatManPage(name);
     },
+  };
+
+  // Lowercase aliases — so agents can use either Bash() or bash(), Read() or read(), etc.
+  // camelCase is the "normal" JS convention; PascalCase kept for backwards compat.
+  return {
+    ...tools,
+    bash: tools.Bash,
+    python: tools.Python,
+    read: tools.Read,
+    write: tools.Write,
+    edit: tools.Edit,
+    glob: tools.Glob,
+    webFetch: tools.WebFetch,
   };
 }

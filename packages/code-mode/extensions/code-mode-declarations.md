@@ -1,9 +1,19 @@
 /**
-
-/**
- * Ouija — BM25 search across session JSONL logs. 🔮
- * Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
+ * SANDBOX FUNCTIONS — NAMING CONVENTIONS
+ *
+ * Core I/O tools accept both PascalCase and camelCase/lowercase:
+ *   Bash()  or  bash()
+ *   Read()  or  read()
+ *   Write() or  write()
+ *   Edit()  or  edit()
+ *   Glob()  or  glob()
+ *   Python() or python()
+ *   WebFetch() or webFetch()
+ *
+ * Everything else is camelCase (bashBgStart, braveSearch, hashRead, etc.)
+ * or lowercase for single-word tools (rg, fd, sleep, mai, recall, ouija, teams).
  */
+
 /**
  * Ouija — BM25 search across session JSONL logs. 🔮
  * Search dead sessions, grep the current live session, or pass arbitrary entries for ad-hoc BM25.
