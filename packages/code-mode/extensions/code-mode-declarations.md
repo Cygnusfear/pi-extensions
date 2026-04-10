@@ -269,70 +269,108 @@ declare const mai: {
 declare const maiTicket: typeof mai.ticket;
 
 /**
- * Search Foresight semantic memory. Returns JSON string with ranked results.
+ * memory — Foresight semantic memory. Callable as recall, plus namespaced methods.
+ *
+ * @example
+ * // Search memory (recall)
+ * const results = await memory({ query: "architecture decisions" });
+ * // Same as recall()
+ * const results2 = await recall({ query: "architecture decisions" });
+ * // Context for a task
+ * const ctx = await memory.context({ task: "refactor auth" });
+ * // Create a memory
+ * await memory.create({ factType: "experience", oneLiner: "...", summary: "..." });
+ * // Unfold for detail
+ * await memory.unfold({ nodeId: "fs:abc123" });
+ * // Status
+ * await memory.status();
+ * // Subscribe to updates
+ * await memory.subscribe({ entity: "auth" });
  */
-declare function recall(input: {
-  query: string;
-  limit?: number;
-  factType?: "world" | "experience" | "opinion" | "observation";
-  minScore?: number;
-  bank?: string;
-}): Promise<string>;
+declare const memory: {
+  /** Search memory — same as recall(). */
+  (input: {
+    query: string;
+    limit?: number;
+    factType?: "world" | "experience" | "opinion" | "observation";
+    minScore?: number;
+    bank?: string;
+  }): Promise<string>;
+
+  /** Get relevant memories for a task/topic. */
+  context(input: { task: string; maxNodes?: number; bank?: string }): Promise<string>;
+
+  /** Create a new memory node. */
+  create(input: {
+    factType: "world" | "experience" | "opinion" | "observation";
+    oneLiner: string;
+    summary: string;
+    fullSynthesis?: string;
+    entityName?: string;
+    repo?: string;
+    bank?: string;
+  }): Promise<string>;
+
+  /** Unfold a memory node for more detail. Pass full node ID (e.g. "fs:..."). */
+  unfold(input: { nodeId: string; depth?: "summary" | "full" | "raw"; bank?: string }): Promise<string>;
+
+  /** Get Foresight database status. */
+  status(): Promise<string>;
+
+  /** Subscribe to a memory node, entity, or topic. */
+  subscribe(input: { nodeId?: string; entity?: string; topic?: string; subscriber?: string }): Promise<string>;
+
+  /** Remove a memory subscription. */
+  unsubscribe(input: { subscriptionId: string }): Promise<string>;
+
+  /** Check for new notifications from memory subscriptions. */
+  checkUpdates(input?: { subscriber?: string }): Promise<string>;
+};
+
+/** @deprecated Use `memory()` instead. */
+declare const recall: typeof memory;
+
+/** @deprecated Use `memory.context()` instead. */
+declare const memoryContext: typeof memory.context;
+
+/** @deprecated Use `memory.create()` instead. */
+declare const memoryCreate: typeof memory.create;
+
+/** @deprecated Use `memory.unfold()` instead. */
+declare const memoryUnfold: typeof memory.unfold;
+
+/** @deprecated Use `memory.status()` instead. */
+declare const memoryStatus: typeof memory.status;
+
+/** @deprecated Use `memory.subscribe()` instead. */
+declare const memorySubscribe: typeof memory.subscribe;
+
+/** @deprecated Use `memory.unsubscribe()` instead. */
+declare const memoryUnsubscribe: typeof memory.unsubscribe;
+
+/** @deprecated Use `memory.checkUpdates()` instead. */
+declare const memoryCheckUpdates: typeof memory.checkUpdates;
 
 /**
- * Get relevant memories for a task/topic. Returns JSON string.
+ * brave — web/code search via Brave API. Callable as search, plus codeSearch.
+ *
+ * @example
+ * const results = await brave({ query: "rust async patterns" });
+ * const codeResults = await brave.codeSearch({ query: "tokio spawn" });
  */
-declare function memoryContext(input: {
-  task: string;
-  maxNodes?: number;
-  bank?: string;
-}): Promise<string>;
+declare const brave: {
+  /** Search the web. */
+  (input: { query: string; numResults?: number; type?: "llm_context" | "web" }): Promise<string>;
 
-/**
- * Create a new memory node in Foresight. Returns JSON string.
- */
-declare function memoryCreate(input: {
-  factType: "world" | "experience" | "opinion" | "observation";
-  oneLiner: string;
-  summary: string;
-  fullSynthesis?: string;
-  entityName?: string;
-  repo?: string;
-  bank?: string;
-}): Promise<string>;
+  /** Search for code/docs specifically. */
+  codeSearch(input: { query: string; numResults?: number }): Promise<string>;
+};
 
-/**
- * Unfold a memory node for more detail. Returns JSON string.
- * Pass the full node ID from recall results, usually prefixed as "fs:...".
- * Do NOT truncate the ID.
- */
-declare function memoryUnfold(input: {
-  nodeId: string;
-  depth?: "summary" | "full" | "raw";
-  bank?: string;
-}): Promise<string>;
+/** @deprecated Use `brave()` instead. */
+declare const braveSearch: typeof brave;
 
-/**
- * Get Foresight database status. Returns JSON string.
- */
-declare function memoryStatus(): Promise<string>;
-
-/**
- * Search the web via Brave Search API. Returns formatted text results.
- */
-declare function braveSearch(input: {
-  query: string;
-  numResults?: number;
-  type?: "llm_context" | "web";
-}): Promise<string>;
-
-/**
- * Search for code/docs via Brave Search. Returns formatted text results.
- */
-declare function braveCodeSearch(input: {
-  query: string;
-  numResults?: number;
-}): Promise<string>;
+/** @deprecated Use `brave.codeSearch()` instead. */
+declare const braveCodeSearch: typeof brave.codeSearch;
 
 /**
  * Get the current date and time.
@@ -347,31 +385,33 @@ declare function getCurrentTime(format?: string): Promise<{
 }>;
 
 /**
- * Read a file with hashline anchors (LINENUM:HASH|LINE per line).
- * Use with hashEdit for anchor-verified editing.
+ * hash — hashline tools for anchor-verified file reading/editing.
+ *
+ * @example
+ * const content = await hash({ path: "src/main.ts" });
+ * await hash.edit({ path: "src/main.ts", edits: [...] });
  */
-declare function hashRead(input: {
-  path: string;
-  /** Working directory override */
-  cwd?: string;
-  startLine?: number;
-  endLine?: number;
-}): Promise<string>;
+declare const hash: {
+  /** Read a file with hashline anchors. */
+  (input: { path: string; cwd?: string; startLine?: number; endLine?: number }): Promise<string>;
 
-/**
- * Edit a file using hashline anchors for verification.
- * Rejects if file changed since last hashRead (hash mismatch).
- */
-declare function hashEdit(input: {
-  path: string;
-  /** Working directory override */
-  cwd?: string;
-  edits: Array<
-    | { set_line: { anchor: string; new_text: string } }
-    | { replace_lines: { start_anchor: string; end_anchor: string; new_text: string } }
-    | { insert_after: { anchor: string; text: string } }
-  >;
-}): Promise<{ appliedEdits: number; changed: boolean; summary: string }>;
+  /** Edit using hashline anchors. Rejects if file changed since last read. */
+  edit(input: {
+    path: string;
+    cwd?: string;
+    edits: Array<
+      | { set_line: { anchor: string; new_text: string } }
+      | { replace_lines: { start_anchor: string; end_anchor: string; new_text: string } }
+      | { insert_after: { anchor: string; text: string } }
+    >;
+  }): Promise<{ appliedEdits: number; changed: boolean; summary: string }>;
+};
+
+/** @deprecated Use `hash()` instead. */
+declare const hashRead: typeof hash;
+
+/** @deprecated Use `hash.edit()` instead. */
+declare const hashEdit: typeof hash.edit;
 
 /**
  * Apply a patch in pi's stripped-down diff format.
@@ -384,226 +424,160 @@ declare function applyPatch(input: {
 }): Promise<string>;
 
 /**
- * Resolve a library name to a Context7 library ID.
- * Call this before context7Docs to get the right ID,
- * unless you already have one (like "/vercel/next.js").
+ * context7 — up-to-date library docs. Callable as resolve, plus docs.
+ *
+ * @example
+ * const id = await context7({ query: "auth", libraryName: "next.js" });
+ * const docs = await context7.docs({ libraryId: id, query: "middleware" });
  */
-declare function context7Resolve(input: {
-  /** What you need the library for (ranks results by relevance) */
-  query: string;
-  /** Library or package name to search for */
-  libraryName: string;
-}): Promise<string>;
+declare const context7: {
+  /** Resolve a library name to a Context7 library ID. */
+  (input: { query: string; libraryName: string }): Promise<string>;
+
+  /** Fetch documentation for a resolved library. */
+  docs(input: { libraryId: string; query: string }): Promise<string>;
+};
+
+/** @deprecated Use `context7()` instead. */
+declare const context7Resolve: typeof context7;
+
+/** @deprecated Use `context7.docs()` instead. */
+declare const context7Docs: typeof context7.docs;
 
 /**
- * Fetch up-to-date documentation and code examples for a library from Context7.
- * Requires a Context7 library ID — use context7Resolve first if you don't have one.
+ * fff — fast file finder. Callable as find, plus grep/multiGrep.
+ *
+ * @example
+ * const files = await fff({ query: "auth" });
+ * const matches = await fff.grep({ query: "useAuth" });
+ * const multi = await fff.multiGrep({ patterns: ["useAuth", "AuthContext"] });
  */
-declare function context7Docs(input: {
-  /** Context7 library ID (e.g. "/vercel/next.js", "/mongodb/docs") */
-  libraryId: string;
-  /** Specific question or topic to get documentation for */
-  query: string;
-}): Promise<string>;
+declare const fff: {
+  /** Fuzzy file search by name. */
+  (input: { query: string; maxResults?: number; cwd?: string }): Promise<string>;
 
-/**
- * Fast fuzzy file search by name with frecency ranking.
- * Searches FILE NAMES, not file contents — use fffGrep for content search.
- */
-declare function fffFind(input: {
-  /** Fuzzy search query. Short — 1-2 terms. */
-  query: string;
-  /** Max results (default 20) */
-  maxResults?: number;
-  /** Working directory override */
-  cwd?: string;
-}): Promise<string>;
+  /** Search file contents. */
+  grep(input: { query: string; mode?: string; maxResults?: number; context?: number; cwd?: string }): Promise<string>;
 
-/**
- * Search file contents with frecency-ranked results.
- * Search for BARE IDENTIFIERS only, not code syntax or regex.
- */
-declare function fffGrep(input: {
-  /** Search text with optional constraint prefixes. */
-  query: string;
-  /** Search mode: 'plain' (default), 'regex', or 'fuzzy' */
-  mode?: string;
-  /** Max matching lines (default 30) */
-  maxResults?: number;
-  /** Context lines before/after each match (default 0) */
-  context?: number;
-  /** Working directory override */
-  cwd?: string;
-}): Promise<string>;
+  /** Search for lines matching ANY of multiple patterns (OR logic). */
+  multiGrep(input: { patterns: string[]; constraints?: string; maxResults?: number; context?: number; cwd?: string }): Promise<string>;
+};
 
-/**
- * Search file contents for lines matching ANY of multiple patterns (OR logic).
- * Patterns are literal text — no escaping needed.
- */
-declare function fffMultiGrep(input: {
-  /** Patterns to search for (OR logic). Include all naming variants. */
-  patterns: string[];
-  /** File constraints: '*.rs', 'src/', '!test/'. Separate with spaces. */
-  constraints?: string;
-  /** Max matching lines (default 30) */
-  maxResults?: number;
-  /** Context lines before/after each match (default 0) */
-  context?: number;
-  /** Working directory override */
-  cwd?: string;
-}): Promise<string>;
+/** @deprecated Use `fff()` instead. */
+declare const fffFind: typeof fff;
 
-/**
- * Subscribe to a memory node, entity, or topic.
- * You'll be notified when new related nodes are created.
- */
-declare function memorySubscribe(input: {
-  /** Node UUID to watch */
-  nodeId?: string;
-  /** Entity name to watch */
-  entity?: string;
-  /** Topic/search query to watch */
-  topic?: string;
-  /** Subscriber identifier */
-  subscriber?: string;
-}): Promise<string>;
+/** @deprecated Use `fff.grep()` instead. */
+declare const fffGrep: typeof fff.grep;
 
-/**
- * Remove a memory subscription.
- */
-declare function memoryUnsubscribe(input: {
-  /** Subscription ID to remove */
-  subscriptionId: string;
-}): Promise<string>;
-
-/**
- * Check for new notifications from memory subscriptions.
- */
-declare function memoryCheckUpdates(input?: {
-  /** Subscriber identifier (defaults to all) */
-  subscriber?: string;
-}): Promise<string>;
+/** @deprecated Use `fff.multiGrep()` instead. */
+declare const fffMultiGrep: typeof fff.multiGrep;
 
 // =====================================================================
 // TLDR Code Analysis (semantic search, call graphs, structure)
 // =====================================================================
 
 /**
- * Search code by natural language description.
- * Finds functions/types by what they DO using embedding similarity.
- * Returns ranked results with file paths and optional call graph info.
+ * tldr — code analysis via semantic search, call graphs, structure.
+ *
+ * @example
+ * const results = await tldr({ query: "authentication middleware" });
+ * const struct = await tldr.structure({ path: "src/" });
+ * const calls = await tldr.calls({ path: "src/" });
+ * const dead = await tldr.dead({ path: "src/" });
  */
-declare function tldrSemanticSearch(input: {
-  /** Natural language description of the code to find */
-  query: string;
-  /** Project path (default: cwd) */
-  path?: string;
-  /** Number of results (default: 5) */
-  k?: number;
-  /** Include call graph expansion */
-  expand?: boolean;
-}): Promise<Array<{
-  name: string;
-  file: string;
-  score: number;
-  calls?: string[];
-  called_by?: string[];
-}>>;
+declare const tldr: {
+  /** Semantic code search — find by what it DOES. */
+  (input: {
+    query: string;
+    path?: string;
+    k?: number;
+    expand?: boolean;
+  }): Promise<Array<{
+    name: string;
+    file: string;
+    score: number;
+    calls?: string[];
+    called_by?: string[];
+  }>>;
 
-/**
- * Show code structure (functions, classes, imports) for a file or directory.
- * Uses tree-sitter AST parsing.
- */
-declare function tldrStructure(input: {
-  /** File or directory path */
-  path: string;
-  /** Language (auto-detected if omitted) */
-  lang?: string;
-}): Promise<{
-  files: Array<{
-    path: string;
-    functions?: string[];
-    classes?: string[];
+  /** Show code structure (functions, classes, imports). Uses tree-sitter. */
+  structure(input: { path: string; lang?: string }): Promise<{
+    files: Array<{
+      path: string;
+      functions?: string[];
+      classes?: string[];
+      imports?: Array<{ module: string }>;
+    }>;
+  }>;
+
+  /** Build cross-file call graph. */
+  calls(input: { path: string }): Promise<{
+    edges: Array<{
+      from_file: string;
+      from_func: string;
+      to_file: string;
+      to_func: string;
+    }>;
+  }>;
+
+  /** Extract full analysis of a single file. */
+  extract(input: { file: string }): Promise<{
+    file_path: string;
+    language: string;
     imports?: Array<{ module: string }>;
+    functions?: Array<{ name: string; line_number: number; signature: string }>;
+    classes?: Array<{ name: string; line_number: number }>;
   }>;
-}>;
 
-/**
- * Build cross-file call graph for a directory.
- * Shows which functions call which other functions.
- */
-declare function tldrCalls(input: {
-  /** Directory to analyze */
-  path: string;
-}): Promise<{
-  edges: Array<{
-    from_file: string;
-    from_func: string;
-    to_file: string;
-    to_func: string;
+  /** Find unreachable (dead) functions. */
+  dead(input: { path: string }): Promise<{
+    dead_functions: Array<{ file: string; function: string }>;
   }>;
-}>;
 
-/**
- * Extract full analysis of a single file — signatures, imports, classes with line numbers.
- */
-declare function tldrExtract(input: {
-  /** File path */
-  file: string;
-}): Promise<{
-  file_path: string;
-  language: string;
-  imports?: Array<{ module: string }>;
-  functions?: Array<{ name: string; line_number: number; signature: string }>;
-  classes?: Array<{ name: string; line_number: number }>;
-}>;
+  /** Detect architecture layers. */
+  arch(input: { path: string }): Promise<{
+    entry_layer: Array<{ file: string; function: string }>;
+    internal_layer?: Array<{ file: string; function: string }>;
+    leaf_layer?: Array<{ file: string; function: string }>;
+  }>;
 
-/**
- * Find unreachable (dead) functions in a directory.
- */
-declare function tldrDead(input: {
-  /** Directory to check */
-  path: string;
-}): Promise<{
-  dead_functions: Array<{ file: string; function: string }>;
-}>;
+  /** Find all callers of a function (reverse call graph). */
+  impact(input: { func: string; path: string }): Promise<{
+    callers: Array<{ file: string; function: string }>;
+  }>;
 
-/**
- * Detect architecture layers from call patterns in a directory.
- */
-declare function tldrArch(input: {
-  /** Directory to analyze */
-  path: string;
-}): Promise<{
-  entry_layer: Array<{ file: string; function: string }>;
-  internal_layer?: Array<{ file: string; function: string }>;
-  leaf_layer?: Array<{ file: string; function: string }>;
-}>;
+  /** Check semantic index status. */
+  indexStatus(input?: { path?: string }): Promise<{
+    indexed: boolean;
+    unitCount: number;
+    model: string | null;
+    languages: string[];
+  }>;
+};
 
-/**
- * Find all callers of a function (reverse call graph).
- */
-declare function tldrImpact(input: {
-  /** Function name */
-  func: string;
-  /** Directory to search in */
-  path: string;
-}): Promise<{
-  callers: Array<{ file: string; function: string }>;
-}>;
+/** @deprecated Use `tldr()` instead. */
+declare const tldrSemanticSearch: typeof tldr;
 
-/**
- * Check the tldr semantic index status for a project.
- */
-declare function tldrIndexStatus(input?: {
-  /** Project path (default: cwd) */
-  path?: string;
-}): Promise<{
-  indexed: boolean;
-  unitCount: number;
-  model: string | null;
-  languages: string[];
-}>;
+/** @deprecated Use `tldr.structure()` instead. */
+declare const tldrStructure: typeof tldr.structure;
+
+/** @deprecated Use `tldr.calls()` instead. */
+declare const tldrCalls: typeof tldr.calls;
+
+/** @deprecated Use `tldr.extract()` instead. */
+declare const tldrExtract: typeof tldr.extract;
+
+/** @deprecated Use `tldr.dead()` instead. */
+declare const tldrDead: typeof tldr.dead;
+
+/** @deprecated Use `tldr.arch()` instead. */
+declare const tldrArch: typeof tldr.arch;
+
+/** @deprecated Use `tldr.impact()` instead. */
+declare const tldrImpact: typeof tldr.impact;
+
+/** @deprecated Use `tldr.indexStatus()` instead. */
+declare const tldrIndexStatus: typeof tldr.indexStatus;
 
 /**
  * Get detailed help for a sandbox function — description, guidelines, parameters.

@@ -182,6 +182,457 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
   };
 
+  // ==========================================================================
+  // memory namespace — callable (recall) + methods
+  // ==========================================================================
+
+  const memory = async ({
+    query,
+    limit = 10,
+    factType,
+    minScore,
+    bank,
+  }: {
+    query: string;
+    limit?: number;
+    factType?: string;
+    minScore?: number;
+    bank?: string;
+  }) => {
+    const data = await foresightRecall(bank || FORESIGHT_BANK, query, limit, factType, minScore);
+    return JSON.stringify(data);
+  };
+
+  (memory as any).context = async ({
+    task,
+    maxNodes = 10,
+    bank,
+  }: {
+    task: string;
+    maxNodes?: number;
+    bank?: string;
+  }) => {
+    return foresightContext(bank || FORESIGHT_BANK, task, maxNodes);
+  };
+
+  (memory as any).create = async ({
+    factType,
+    oneLiner,
+    summary,
+    fullSynthesis,
+    entityName,
+    repo,
+    bank,
+  }: {
+    factType: string;
+    oneLiner: string;
+    summary: string;
+    fullSynthesis?: string;
+    entityName?: string;
+    repo?: string;
+    bank?: string;
+  }) => {
+    const result = await foresightRetain(bank || FORESIGHT_BANK, {
+      factType: factType as any,
+      oneLiner,
+      summary,
+      fullSynthesis,
+      entityName,
+      repo,
+    });
+    return JSON.stringify(result);
+  };
+
+  (memory as any).unfold = async ({
+    nodeId,
+    depth = "full",
+    bank,
+  }: {
+    nodeId: string;
+    depth?: string;
+    bank?: string;
+  }) => {
+    const data = await foresightUnfold(bank || FORESIGHT_BANK, nodeId, depth);
+    return JSON.stringify(data);
+  };
+
+  (memory as any).status = async () => {
+    return JSON.stringify({
+      backend: "foresight",
+      bank: FORESIGHT_BANK,
+      status: "ok",
+    });
+  };
+
+  (memory as any).subscribe = async ({
+    nodeId,
+    entity,
+    topic,
+    subscriber,
+  }: {
+    nodeId?: string;
+    entity?: string;
+    topic?: string;
+    subscriber?: string;
+  }) => {
+    const watching = nodeId
+      ? `node:${nodeId.slice(0, 8)}…`
+      : entity
+        ? `entity:${entity}`
+        : `topic:${topic}`;
+    return JSON.stringify({
+      status: "acknowledged",
+      subscriptionId: `stub-${Date.now()}`,
+      watching,
+      note: "Pub/sub not available with Foresight backend",
+    });
+  };
+
+  (memory as any).unsubscribe = async ({ subscriptionId }: { subscriptionId: string }) => {
+    return JSON.stringify({ status: "acknowledged", subscriptionId });
+  };
+
+  (memory as any).checkUpdates = async (input?: { subscriber?: string }) => {
+    return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
+  };
+
+  // ==========================================================================
+  // brave namespace — callable (search) + codeSearch method
+  // ==========================================================================
+
+  const brave = async ({
+    query,
+    numResults = 5,
+    type = "llm_context",
+  }: {
+    query: string;
+    numResults?: number;
+    type?: string;
+  }) => {
+    const apiKey = process.env.BRAVE_API_KEY;
+    if (!apiKey) throw new Error("BRAVE_API_KEY not set");
+
+    const url =
+      type === "web"
+        ? "https://api.search.brave.com/res/v1/web/search"
+        : "https://api.search.brave.com/res/v1/llm/context";
+
+    const params = new URLSearchParams({ q: query, count: String(numResults) });
+    const r = await fetch(`${url}?${params}`, {
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "identity",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
+    });
+
+    if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const data = await safeResponseJson<Record<string, any>>(r);
+
+    if (type !== "web") {
+      const results = (data.grounding?.generic ?? []) as Array<{
+        title: string;
+        url: string;
+        snippets: string[];
+      }>;
+      return (
+        results
+          .map(
+            (res) =>
+              `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
+          )
+          .join("\n\n---\n\n") || "No results."
+      );
+    }
+
+    const results = (data.web?.results ?? []) as Array<{
+      title: string;
+      url: string;
+      description?: string;
+    }>;
+    return (
+      results
+        .map(
+          (res, i) =>
+            `${i + 1}. ${res.title}\n   ${res.url}\n   ${(res.description || "").replace(/<\/?strong>/g, "**")}`,
+        )
+        .join("\n\n") || "No results."
+    );
+  };
+
+  (brave as any).codeSearch = async ({ query, numResults = 5 }: { query: string; numResults?: number }) => {
+    const apiKey = process.env.BRAVE_API_KEY;
+    if (!apiKey) throw new Error("BRAVE_API_KEY not set");
+
+    const params = new URLSearchParams({ q: query, count: String(numResults) });
+    const r = await fetch(`https://api.search.brave.com/res/v1/llm/context?${params}`, {
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "identity",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
+    });
+
+    if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
+    const data = await safeResponseJson<Record<string, any>>(r);
+    const results = (data.grounding?.generic ?? []) as Array<{
+      title: string;
+      url: string;
+      snippets: string[];
+    }>;
+    return (
+      results
+        .map(
+          (res) =>
+            `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
+        )
+        .join("\n\n---\n\n") || "No results."
+    );
+  };
+
+  // ==========================================================================
+  // hash namespace — callable (read) + edit method
+  // ==========================================================================
+
+  const hash = async ({
+    path: filePath,
+    cwd: explicitCwd,
+    startLine,
+    endLine,
+  }: {
+    path: string;
+    cwd?: string;
+    startLine?: number;
+    endLine?: number;
+  }) => {
+    const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+    const resolved = resolvePath(filePath, base);
+    const content = fs.readFileSync(resolved, "utf-8");
+    return formatHashLines(content, startLine ?? 1, endLine);
+  };
+
+  (hash as any).edit = async ({
+    path: filePath,
+    cwd: explicitCwd,
+    edits,
+  }: {
+    path: string;
+    cwd?: string;
+    edits: HashlineEdit[];
+  }) => {
+    if (isLocked()) throw new Error(lockError("hashEdit"));
+    const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+    const resolved = resolvePath(filePath, base);
+    if (isGitLockActive() && isGitPath(resolved)) {
+      const title = "⚠️ .git write detected";
+      const body = `hashEdit ${filePath}\n\nThis can corrupt your repository. Allow?`;
+      if (ctx.confirmFn) {
+        const ok = await ctx.confirmFn(title, body);
+        if (!ok) throw new Error(gitGuardError(`hashEdit ${filePath}`));
+        ctx.logFn?.(`✅ Hooman approved hashEdit ${filePath} [OK]`);
+      } else {
+        throw new Error(gitGuardError(`hashEdit ${filePath}`));
+      }
+    }
+    const before = fs.readFileSync(resolved, "utf-8");
+    const { updated, appliedEdits } = applyHashEdits(before, edits);
+    const changed = updated !== before;
+    if (changed) {
+      fs.writeFileSync(resolved, updated, "utf-8");
+    }
+    return {
+      appliedEdits,
+      changed,
+      summary: `Applied ${appliedEdits} edit(s) to ${filePath}.${changed ? "" : " (no changes)"}`,
+    };
+  };
+
+  // ==========================================================================
+  // context7 namespace — callable (resolve) + docs method
+  // ==========================================================================
+
+  const context7 = async ({ query, libraryName }: { query: string; libraryName: string }) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    const apiKey = process.env.CONTEXT7_API_KEY;
+    if (apiKey) headers["CONTEXT7_API_KEY"] = apiKey;
+
+    const res = await fetch("https://mcp.context7.com/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "resolve-library-id", arguments: { query, libraryName } },
+      }),
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
+    const json = await safeResponseJson<{
+      result?: { content?: Array<{ text?: string }> };
+      error?: { message?: string };
+    }>(res);
+    if (json.error)
+      throw new Error(`Context7 error: ${json.error.message ?? JSON.stringify(json.error)}`);
+    return json.result?.content?.map((c) => c.text).join("\n") ?? "";
+  };
+
+  (context7 as any).docs = async ({ libraryId, query }: { libraryId: string; query: string }) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    };
+    const apiKey = process.env.CONTEXT7_API_KEY;
+    if (apiKey) headers["CONTEXT7_API_KEY"] = apiKey;
+
+    const res = await fetch("https://mcp.context7.com/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "query-docs", arguments: { libraryId, query } },
+      }),
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
+    const json = await safeResponseJson<{
+      result?: { content?: Array<{ text?: string }> };
+      error?: { message?: string };
+    }>(res);
+    if (json.error)
+      throw new Error(`Context7 error: ${json.error.message ?? JSON.stringify(json.error)}`);
+    return json.result?.content?.map((c) => c.text).join("\n") ?? "";
+  };
+
+  // ==========================================================================
+  // fff namespace — callable (find) + grep/multiGrep methods
+  // ==========================================================================
+
+  const fff = async ({
+    query,
+    maxResults,
+    cwd: explicitCwd,
+  }: {
+    query: string;
+    maxResults?: number;
+    cwd?: string;
+  }) => {
+    const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+    const result = await fffFindAPI(query, { maxResults, cwd: dir });
+    if (result.error) throw new Error(`fffFind error: ${result.error}`);
+    return result.text;
+  };
+
+  (fff as any).grep = async ({
+    query,
+    mode,
+    maxResults,
+    context,
+    cwd: explicitCwd,
+  }: {
+    query: string;
+    mode?: string;
+    maxResults?: number;
+    context?: number;
+    cwd?: string;
+  }) => {
+    const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+    const result = await fffGrepAPI(query, { mode, maxResults, context, cwd: dir });
+    if (result.error) throw new Error(`fffGrep error: ${result.error}`);
+    return result.text;
+  };
+
+  (fff as any).multiGrep = async ({
+    patterns,
+    constraints,
+    maxResults,
+    context,
+    cwd: explicitCwd,
+  }: {
+    patterns: string[];
+    constraints?: string;
+    maxResults?: number;
+    context?: number;
+    cwd?: string;
+  }) => {
+    const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+    const result = await fffMultiGrepAPI(patterns, { constraints, maxResults, context, cwd: dir });
+    if (result.error) throw new Error(`fffMultiGrep error: ${result.error}`);
+    return result.text;
+  };
+
+  // ==========================================================================
+  // tldr namespace — callable (search) + structure/calls/extract/dead/arch/impact/indexStatus
+  // ==========================================================================
+
+  const tldr = async ({
+    query,
+    path: projectPath,
+    k,
+    expand,
+  }: {
+    query: string;
+    path?: string;
+    k?: number;
+    expand?: boolean;
+  }) => {
+    const { results, error } = await tldrSemanticSearchAPI(query, {
+      path: projectPath,
+      k,
+      expand,
+      cwd,
+    });
+    if (error) throw new Error(error);
+    return results;
+  };
+
+  (tldr as any).structure = async ({ path: targetPath, lang }: { path: string; lang?: string }) => {
+    const { data, error } = await tldrStructureAPI(targetPath, { lang, cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).calls = async ({ path: targetPath }: { path: string }) => {
+    const { data, error } = await tldrCallsAPI(targetPath, { cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).extract = async ({ file }: { file: string }) => {
+    const { data, error } = await tldrExtractAPI(file, { cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).dead = async ({ path: targetPath }: { path: string }) => {
+    const { data, error } = await tldrDeadAPI(targetPath, { cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).arch = async ({ path: targetPath }: { path: string }) => {
+    const { data, error } = await tldrArchAPI(targetPath, { cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).impact = async ({ func, path: targetPath }: { func: string; path: string }) => {
+    const { data, error } = await tldrImpactAPI(func, targetPath, { cwd });
+    if (error) throw new Error(error);
+    return data;
+  };
+
+  (tldr as any).indexStatus = async (input?: { path?: string }) => {
+    return tldrIndexStatusAPI(input?.path ?? cwd);
+  };
+
   const tools = {
     Bash: async ({
       command,
@@ -480,183 +931,18 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     mai,
     maiTicket: mai.ticket,  // backward compat — prefer mai.ticket() in new code
 
-    // =====================================================================
-    // Foresight memory tools
-    // =====================================================================
+    // memory — defined below as namespaced callable
+    memory,
+    recall: memory,
+    memoryContext: memory.context,
+    memoryCreate: memory.create,
+    memoryUnfold: memory.unfold,
+    memoryStatus: memory.status,
 
-    recall: async ({
-      query,
-      limit = 10,
-      factType,
-      minScore,
-      bank,
-    }: {
-      query: string;
-      limit?: number;
-      factType?: string;
-      minScore?: number;
-      bank?: string;
-    }) => {
-      const data = await foresightRecall(bank || FORESIGHT_BANK, query, limit, factType, minScore);
-      return JSON.stringify(data);
-    },
-
-    memoryContext: async ({
-      task,
-      maxNodes = 10,
-      bank,
-    }: {
-      task: string;
-      maxNodes?: number;
-      bank?: string;
-    }) => {
-      return foresightContext(bank || FORESIGHT_BANK, task, maxNodes);
-    },
-
-    memoryCreate: async ({
-      factType,
-      oneLiner,
-      summary,
-      fullSynthesis,
-      entityName,
-      repo,
-      bank,
-    }: {
-      factType: string;
-      oneLiner: string;
-      summary: string;
-      fullSynthesis?: string;
-      entityName?: string;
-      repo?: string;
-      bank?: string;
-    }) => {
-      const result = await foresightRetain(bank || FORESIGHT_BANK, {
-        factType: factType as any,
-        oneLiner,
-        summary,
-        fullSynthesis,
-        entityName,
-        repo,
-      });
-      return JSON.stringify(result);
-    },
-
-    memoryUnfold: async ({
-      nodeId,
-      depth = "full",
-      bank,
-    }: {
-      nodeId: string;
-      depth?: string;
-      bank?: string;
-    }) => {
-      const data = await foresightUnfold(bank || FORESIGHT_BANK, nodeId, depth);
-      return JSON.stringify(data);
-    },
-
-    memoryStatus: async () => {
-      return JSON.stringify({
-        backend: "foresight",
-        bank: FORESIGHT_BANK,
-        status: "ok",
-      });
-    },
-
-    // =====================================================================
-    // Brave Search
-    // =====================================================================
-
-    braveSearch: async ({
-      query,
-      numResults = 5,
-      type = "llm_context",
-    }: {
-      query: string;
-      numResults?: number;
-      type?: string;
-    }) => {
-      const apiKey = process.env.BRAVE_API_KEY;
-      if (!apiKey) throw new Error("BRAVE_API_KEY not set");
-
-      const url =
-        type === "web"
-          ? "https://api.search.brave.com/res/v1/web/search"
-          : "https://api.search.brave.com/res/v1/llm/context";
-
-      const params = new URLSearchParams({ q: query, count: String(numResults) });
-      const r = await fetch(`${url}?${params}`, {
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "identity",
-          "X-Subscription-Token": apiKey,
-        },
-        signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
-      });
-
-      if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      const data = await safeResponseJson<Record<string, any>>(r);
-
-      if (type !== "web") {
-        const results = (data.grounding?.generic ?? []) as Array<{
-          title: string;
-          url: string;
-          snippets: string[];
-        }>;
-        return (
-          results
-            .map(
-              (res) =>
-                `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
-            )
-            .join("\n\n---\n\n") || "No results."
-        );
-      }
-
-      const results = (data.web?.results ?? []) as Array<{
-        title: string;
-        url: string;
-        description?: string;
-      }>;
-      return (
-        results
-          .map(
-            (res, i) =>
-              `${i + 1}. ${res.title}\n   ${res.url}\n   ${(res.description || "").replace(/<\/?strong>/g, "**")}`,
-          )
-          .join("\n\n") || "No results."
-      );
-    },
-
-    braveCodeSearch: async ({ query, numResults = 5 }: { query: string; numResults?: number }) => {
-      const apiKey = process.env.BRAVE_API_KEY;
-      if (!apiKey) throw new Error("BRAVE_API_KEY not set");
-
-      const params = new URLSearchParams({ q: query, count: String(numResults) });
-      const r = await fetch(`https://api.search.brave.com/res/v1/llm/context?${params}`, {
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "identity",
-          "X-Subscription-Token": apiKey,
-        },
-        signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
-      });
-
-      if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      const data = await safeResponseJson<Record<string, any>>(r);
-      const results = (data.grounding?.generic ?? []) as Array<{
-        title: string;
-        url: string;
-        snippets: string[];
-      }>;
-      return (
-        results
-          .map(
-            (res) =>
-              `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
-          )
-          .join("\n\n---\n\n") || "No results."
-      );
-    },
+    // brave — defined below as namespaced callable
+    brave,
+    braveSearch: brave,
+    braveCodeSearch: brave.codeSearch,
 
     // =====================================================================
     // Time
@@ -700,124 +986,15 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       };
     },
 
-    // =====================================================================
-    // Hashline tools
-    // =====================================================================
+    // hash — defined below as namespaced callable
+    hash,
+    hashRead: hash.read,
+    hashEdit: hash.edit,
 
-    hashRead: async ({
-      path: filePath,
-      cwd: explicitCwd,
-      startLine,
-      endLine,
-    }: {
-      path: string;
-      cwd?: string;
-      startLine?: number;
-      endLine?: number;
-    }) => {
-      const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const resolved = resolvePath(filePath, base);
-      const content = fs.readFileSync(resolved, "utf-8");
-      return formatHashLines(content, startLine ?? 1, endLine);
-    },
-
-    hashEdit: async ({
-      path: filePath,
-      cwd: explicitCwd,
-      edits,
-    }: {
-      path: string;
-      cwd?: string;
-      edits: HashlineEdit[];
-    }) => {
-      if (isLocked()) throw new Error(lockError("hashEdit"));
-      const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
-      const resolved = resolvePath(filePath, base);
-      if (isGitLockActive() && isGitPath(resolved)) {
-        const title = "⚠️ .git write detected";
-        const body = `hashEdit ${filePath}\n\nThis can corrupt your repository. Allow?`;
-        if (ctx.confirmFn) {
-          const ok = await ctx.confirmFn(title, body);
-          if (!ok) throw new Error(gitGuardError(`hashEdit ${filePath}`));
-          ctx.logFn?.(`✅ Hooman approved hashEdit ${filePath} [OK]`);
-        } else {
-          throw new Error(gitGuardError(`hashEdit ${filePath}`));
-        }
-      }
-      const before = fs.readFileSync(resolved, "utf-8");
-      const { updated, appliedEdits } = applyHashEdits(before, edits);
-      const changed = updated !== before;
-      if (changed) {
-        fs.writeFileSync(resolved, updated, "utf-8");
-      }
-      return {
-        appliedEdits,
-        changed,
-        summary: `Applied ${appliedEdits} edit(s) to ${filePath}.${changed ? "" : " (no changes)"}`,
-      };
-    },
-
-    // =====================================================================
-    // Context7 (up-to-date library docs)
-    // =====================================================================
-
-    context7Resolve: async ({ query, libraryName }: { query: string; libraryName: string }) => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      };
-      const apiKey = process.env.CONTEXT7_API_KEY;
-      if (apiKey) headers["CONTEXT7_API_KEY"] = apiKey;
-
-      const res = await fetch("https://mcp.context7.com/mcp", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: { name: "resolve-library-id", arguments: { query, libraryName } },
-        }),
-        signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
-      });
-      if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
-      const json = await safeResponseJson<{
-        result?: { content?: Array<{ text?: string }> };
-        error?: { message?: string };
-      }>(res);
-      if (json.error)
-        throw new Error(`Context7 error: ${json.error.message ?? JSON.stringify(json.error)}`);
-      return json.result?.content?.map((c) => c.text).join("\n") ?? "";
-    },
-
-    context7Docs: async ({ libraryId, query }: { libraryId: string; query: string }) => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      };
-      const apiKey = process.env.CONTEXT7_API_KEY;
-      if (apiKey) headers["CONTEXT7_API_KEY"] = apiKey;
-
-      const res = await fetch("https://mcp.context7.com/mcp", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: { name: "query-docs", arguments: { libraryId, query } },
-        }),
-        signal: signal ? AbortSignal.any([AbortSignal.timeout(30_000), signal]) : AbortSignal.timeout(30_000),
-      });
-      if (!res.ok) throw new Error(`Context7 returned ${res.status}: ${await res.text()}`);
-      const json = await safeResponseJson<{
-        result?: { content?: Array<{ text?: string }> };
-        error?: { message?: string };
-      }>(res);
-      if (json.error)
-        throw new Error(`Context7 error: ${json.error.message ?? JSON.stringify(json.error)}`);
-      return json.result?.content?.map((c) => c.text).join("\n") ?? "";
-    },
+    // context7 — defined below as namespaced callable
+    context7,
+    context7Resolve: context7.resolve,
+    context7Docs: context7.docs,
 
     // =====================================================================
     // Apply Patch
@@ -961,106 +1138,21 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       return result.text;
     },
 
-    // =====================================================================
-    // Foresight subscriptions (stubs — no live pub/sub yet)
-    // =====================================================================
+    // memory.subscribe/unsubscribe/checkUpdates — from namespace below
+    memorySubscribe: memory.subscribe,
+    memoryUnsubscribe: memory.unsubscribe,
+    memoryCheckUpdates: memory.checkUpdates,
 
-    memorySubscribe: async ({
-      nodeId,
-      entity,
-      topic,
-      subscriber,
-    }: {
-      nodeId?: string;
-      entity?: string;
-      topic?: string;
-      subscriber?: string;
-    }) => {
-      const watching = nodeId
-        ? `node:${nodeId.slice(0, 8)}…`
-        : entity
-          ? `entity:${entity}`
-          : `topic:${topic}`;
-      return JSON.stringify({
-        status: "acknowledged",
-        subscriptionId: `stub-${Date.now()}`,
-        watching,
-        note: "Pub/sub not available with Foresight backend",
-      });
-    },
-
-    memoryUnsubscribe: async ({ subscriptionId }: { subscriptionId: string }) => {
-      return JSON.stringify({ status: "acknowledged", subscriptionId });
-    },
-
-    memoryCheckUpdates: async (input?: { subscriber?: string }) => {
-      return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
-    },
-
-    // =====================================================================
-    // TLDR Code Analysis
-    // =====================================================================
-
-    tldrSemanticSearch: async ({
-      query,
-      path: projectPath,
-      k,
-      expand,
-    }: {
-      query: string;
-      path?: string;
-      k?: number;
-      expand?: boolean;
-    }) => {
-      const { results, error } = await tldrSemanticSearchAPI(query, {
-        path: projectPath,
-        k,
-        expand,
-        cwd,
-      });
-      if (error) throw new Error(error);
-      return results;
-    },
-
-    tldrStructure: async ({ path: targetPath, lang }: { path: string; lang?: string }) => {
-      const { data, error } = await tldrStructureAPI(targetPath, { lang, cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrCalls: async ({ path: targetPath }: { path: string }) => {
-      const { data, error } = await tldrCallsAPI(targetPath, { cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrExtract: async ({ file }: { file: string }) => {
-      const { data, error } = await tldrExtractAPI(file, { cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrDead: async ({ path: targetPath }: { path: string }) => {
-      const { data, error } = await tldrDeadAPI(targetPath, { cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrArch: async ({ path: targetPath }: { path: string }) => {
-      const { data, error } = await tldrArchAPI(targetPath, { cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrImpact: async ({ func, path: targetPath }: { func: string; path: string }) => {
-      const { data, error } = await tldrImpactAPI(func, targetPath, { cwd });
-      if (error) throw new Error(error);
-      return data;
-    },
-
-    tldrIndexStatus: async (input?: { path?: string }) => {
-      return tldrIndexStatusAPI(input?.path ?? cwd);
-    },
+    // tldr — defined below as namespaced callable
+    tldr,
+    tldrSemanticSearch: tldr.search,
+    tldrStructure: tldr.structure,
+    tldrCalls: tldr.calls,
+    tldrExtract: tldr.extract,
+    tldrDead: tldr.dead,
+    tldrArch: tldr.arch,
+    tldrImpact: tldr.impact,
+    tldrIndexStatus: tldr.indexStatus,
 
     // =====================================================================
     // readImage() — read image file and include in tool result for LLM
