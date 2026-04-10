@@ -192,11 +192,7 @@ Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specifi
 
 **Quick tools:** `contextTag({ name: "..." })` · `contextLog({ limit: 30 })` · `contextCheckout({ target, message })`
 
-**Thresholds:** 📊 ≥30% tag your position · 🙈 ≥40% write thick `$` vars · 🚨 ≥70% squash now · 💀 ≥90% squash immediatelySome tools are intentionally NOT in the sandbox — use direct tool calls for: context_tag, context_log, context_checkout, editor_*, mesh_*, git-ai, experiments (init/run/log), hotseat_*, start_supervision.
-
-Most passthrough tools are also available as sandbox functions (camelCase): meshTell, meshAsk, meshPeers, meshView, meshChat, meshBroadcast, meshJoinChannel, meshLeaveChannel, editorOpen, editorHighlight, editorReveal, editorState, gitAi, hotseatHandbookUpdate, hotseatHandbookRead, ouija. These call the registered tools directly.
-
-Sandbox-only functions: teams, bashBgStart, bashBgStatus, bashBgLogs, bashBgStop, bashBgList, supervise, getSkillPaths.
+**Thresholds:** 📊 ≥30% tag your position · 🙈 ≥40% write thick `$` vars · 🚨 ≥70% squash now · 💀 ≥90% squash immediately
 
 ### Ouija — session history search 🔮
 
