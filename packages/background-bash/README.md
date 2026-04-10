@@ -37,10 +37,12 @@ Without this, the agent has to wait for every command to complete before doing a
 
 ## Usage
 
+> **Note:** Examples below use snake_case tool names (`bash_bg_start`). Inside `execute_code`, use camelCase (`bashBgStart`).
+
 ### Start a background job
 
 ```typescript
-// Via dedicated tool
+// Via dedicated tool (or bashBgStart in execute_code)
 const result = await bash_bg_start({
   command: "npm run dev",
   cwd: "/path/to/project"

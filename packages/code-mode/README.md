@@ -297,7 +297,11 @@ When code-mode is active, these tools are **sandbox-only** (blocked from direct 
 
 bash, read, write, edit, grep, find, ls, apply_patch, hash_read, hash_edit, web_search_brave, code_search_brave, context7_resolve, context7_docs, recall, memory_*, fff_*, WebFetch, get_current_time, tldr_*
 
-These remain as **direct LLM tools**: execute_code, apply_patch, teams, context_*, start_supervision, init/run/log_experiment, editor_*, mesh_*, git-ai, hotseat_*, bash_bg_*
+These remain as **direct LLM tools**: execute_code, context_*, start_supervision, init/run/log_experiment, editor_*, mesh_*, git-ai, hotseat_*
+
+**Available in both direct tools AND sandbox:** bash_bg_* (as `bashBgStart`, etc.)
+
+**Sandbox-only (moved from direct):** teams, apply_patch
 
 ## Files
 
