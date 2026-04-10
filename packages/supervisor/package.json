@@ -1,0 +1,12 @@
+{
+  "name": "@pi-extensions/supervisor",
+  "version": "1.0.0",
+  "description": "Minimal auto-continue supervisor - sends 'go' when agent idles",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@pi-extensions/shared": "*"
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}
