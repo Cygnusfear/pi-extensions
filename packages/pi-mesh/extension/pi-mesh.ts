@@ -13,7 +13,7 @@ import { dirname, resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, AgentToolResult } from "@mariozechner/pi-coding-agent";
 import { renderToolResult } from "@pi-extensions/shared/tool-ui-utils";
 import {
 	formatSessionViewEntries,
@@ -687,6 +687,7 @@ export class PiMesh {
 
 const MESH_IDENTITY_TYPE = "mesh_identity";
 const MESH_CHANNELS_TYPE = "mesh_channels";
+const MESH_BROADCAST_ALLOWED_TYPE = "mesh_broadcast_allowed";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -723,6 +724,28 @@ function resolveChannelsFromSession(
 			if (Array.isArray(data.channels)) {
 				latest = data.channels.filter((c): c is string => typeof c === "string");
 			}
+		}
+	}
+	return latest;
+}
+
+/**
+ * Scan session entries for the most recent mesh_broadcast_allowed custom entry.
+ *
+ * Broadcasts are globally-visible screams to every peer on the mesh, and by
+ * policy agents are NOT allowed to emit them by default — too easy to spam
+ * every other session on the network with a single publish. The hooman must
+ * explicitly opt-in per session via `/mesh allow-broadcast on`. We persist
+ * the decision so /reload and resume keep the setting.
+ */
+function resolveBroadcastAllowedFromSession(
+	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
+): boolean {
+	let latest = false;
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === MESH_BROADCAST_ALLOWED_TYPE && entry.data) {
+			const data = entry.data as { allowed?: unknown };
+			if (typeof data.allowed === "boolean") latest = data.allowed;
 		}
 	}
 	return latest;
@@ -988,8 +1011,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	// so the TUI stays quiet while you're focused. Toggled via /mesh deafen.
 	// Mute blocks outbound mesh tell/chat/ask from your session so accidental
 	// slash commands don't broadcast anything. Toggled via /mesh mute.
+	// broadcastAllowed gates outbound mesh.broadcast from both the code-mode
+	// sandbox fn and the mesh_broadcast tool. Default OFF — agents must get
+	// explicit hooman approval via /mesh allow-broadcast on before they can
+	// scream at every peer on the network. Persisted per session.
 	let deafened = false;
 	let muted = false;
+	let broadcastAllowed = false;
+	const persistBroadcastAllowed = (): void => {
+		try { pi.appendEntry(MESH_BROADCAST_ALLOWED_TYPE, { allowed: broadcastAllowed }); } catch {}
+	};
 	let ambientChatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 	const pendingAmbientChat: Array<{ channelId: string; senderLabel: string; text: string }> = [];
 	// User-initiated channel subscriptions. Mirrored into session entries so a
@@ -1203,6 +1234,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			mesh.joinChannel(ch);
 		}
 
+		// Load persisted broadcast-allowed flag. Default off (see declaration).
+		broadcastAllowed = resolveBroadcastAllowedFromSession(ctx);
+
 		if (started) {
 			// Already running — handle identity for reload/resume/fork/new transitions
 			mesh.updateSessionId(sessionId);
@@ -1233,6 +1267,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				return JSON.stringify(reply);
 			};
 			(meshPeers as any).broadcast = async (params: { topic: string; message: unknown }) => {
+				if (!broadcastAllowed) {
+					throw new Error(
+						"mesh.broadcast is disabled for this session. Broadcasts reach every peer on the mesh and are off by default. " +
+						"Ask the hooman to run '/mesh allow-broadcast on' if a broadcast is actually warranted — prefer mesh.tell or mesh.chat.",
+					);
+				}
 				mesh.broadcast(params.topic, params.message);
 				return JSON.stringify({ broadcast: true, topic: params.topic });
 			};
@@ -1491,7 +1531,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Error: ${e}` }],
-					details: { sessionId, error: String(e) },
+					details: { sessionId, error: String(e), resolvedSessionId: undefined as string | undefined, sent: undefined as boolean | undefined, deliveryId: undefined as string | undefined, waitFor: undefined as string | undefined, ack: undefined },
 					isError: true,
 				};
 			}
@@ -1506,7 +1546,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const { deliveryId } = mesh.tell(resolved, message);
 				return {
 					content: [{ type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel}\n${rendered}` }],
-					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none" },
+					details: { sessionId, resolvedSessionId: resolved, sent: true, deliveryId, waitFor: "none", error: undefined, ack: undefined as any },
 				};
 			}
 
@@ -1514,12 +1554,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const ack = await mesh.tellAndWaitForReceipt(resolved, message, receiptMode, timeoutMs ?? 10_000);
 				return {
 					content: [{ type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel} (${ack.phase})\n${rendered}` }],
-					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode },
+					details: { sessionId, resolvedSessionId: resolved, sent: true, ack, waitFor: receiptMode, error: undefined, deliveryId: undefined as string | undefined },
 				};
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Error: ${e}` }],
-					details: { sessionId, resolvedSessionId: resolved, error: String(e), waitFor: receiptMode },
+					details: { sessionId, resolvedSessionId: resolved, error: String(e), waitFor: receiptMode, sent: undefined as boolean | undefined, deliveryId: undefined as string | undefined, ack: undefined as any },
 					isError: true,
 				};
 			}
@@ -1544,7 +1584,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Error: ${e}` }],
-					details: { sessionId, error: String(e) },
+					details: { sessionId, error: String(e), resolvedSessionId: undefined as string | undefined, reply: undefined as Record<string, unknown> | undefined },
 					isError: true,
 				};
 			}
@@ -1555,12 +1595,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				const replyText = typeof reply?.text === "string" ? reply.text : formatPayloadForDisplay(reply);
 				return {
 					content: [{ type: "text", text: replyText }],
-					details: { sessionId, resolvedSessionId: resolved, reply },
+					details: { sessionId, resolvedSessionId: resolved, reply, error: undefined as string | undefined },
 				};
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Error: ${e}` }],
-					details: { sessionId, resolvedSessionId: resolved, error: String(e) },
+					details: { sessionId, resolvedSessionId: resolved, error: String(e), reply: undefined as Record<string, unknown> | undefined },
 					isError: true,
 				};
 			}
@@ -1577,10 +1617,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params) {
 			const { topic, message } = params as { topic: string; message: unknown };
+			if (!broadcastAllowed) {
+				const text =
+					"mesh_broadcast is disabled for this session. Broadcasts reach every peer on the mesh and " +
+					"are off by default. Ask the hooman to run '/mesh allow-broadcast on' if a broadcast is " +
+					"actually warranted — otherwise prefer mesh_tell or mesh_chat.";
+				return {
+					content: [{ type: "text", text }],
+					details: { topic, sent: false, reason: "broadcast_disabled" },
+					isError: true,
+				};
+			}
 			mesh.broadcast(topic, message);
 			return {
 				content: [{ type: "text", text: `${MI.broadcast} ${MI.sep} ${topic}\n${formatPayloadForDisplay(message)}` }],
-				details: { topic, sent: true },
+				details: { topic, sent: true, reason: undefined as string | undefined },
 			};
 		},
 	});
@@ -1668,15 +1719,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	// Done in session_start (async context) to use dynamic ESM import
 	// and capture live mesh/socket state. See session_start handler.
 
-	pi.registerMessageRenderer("mesh-list", (msg, expanded, theme) =>
-		renderToolResult(msg, expanded, theme),
+	pi.registerMessageRenderer("mesh-list", (msg, options, theme) =>
+		renderToolResult(msg, options.expanded, theme),
 	);
 
 	// ── /mesh command ─────────────────────────────────────────────────────────
 
 	pi.registerCommand("mesh", {
 		description:
-			"Mesh. Usage: /mesh [list] | /mesh tell <peer> <msg> [--visible|--no-wait] | /mesh view <peer> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg> | /mesh mute [on|off] | /mesh deafen [on|off] | /mesh status",
+			"Mesh. Usage: /mesh [list] | /mesh tell <peer> <msg> [--visible|--no-wait] | /mesh view <peer> [start] [end] | /mesh join <channel> | /mesh leave <channel> | /mesh chat <channel> <msg> | /mesh mute [on|off] | /mesh deafen [on|off] | /mesh allow-broadcast [on|off] | /mesh status",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/);
 			const sub = parts[0] ?? "list";
@@ -1695,8 +1746,19 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				deafened = parseToggle(deafened, parts[1]);
 				ctx.ui.notify(`mesh deafen: ${deafened ? "ON (inbound chat/tells silenced)" : "off"}`, "info");
 				return;
+			} else if (sub === "allow-broadcast" || sub === "allow_broadcast" || sub === "broadcast") {
+				broadcastAllowed = parseToggle(broadcastAllowed, parts[1]);
+				persistBroadcastAllowed();
+				ctx.ui.notify(
+					`mesh broadcast: ${broadcastAllowed ? "ALLOWED (agent may publish to all peers)" : "blocked (default — agent cannot broadcast)"}`,
+					broadcastAllowed ? "warning" : "info",
+				);
+				return;
 			} else if (sub === "status") {
-				ctx.ui.notify(`mute=${muted ? "ON" : "off"} | deafen=${deafened ? "ON" : "off"}`, "info");
+				ctx.ui.notify(
+					`mute=${muted ? "ON" : "off"} | deafen=${deafened ? "ON" : "off"} | broadcast=${broadcastAllowed ? "ALLOWED" : "blocked"}`,
+					"info",
+				);
 				return;
 			} else if (sub === "join") {
 				const channelId = parts[1];
@@ -1733,8 +1795,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(output.join("\n\n"), "info");
 			} else if (sub === "tell") {
 				const targetId = parts[1];
-				const tellFlags = new Set(parts.filter((part) => part === "--visible" || part === "--no-wait"));
-				const message = parts.slice(2).filter((part) => !tellFlags.has(part)).join(" ");
+				const tellFlags = new Set<"--visible" | "--no-wait">(parts.filter((part): part is "--visible" | "--no-wait" => part === "--visible" || part === "--no-wait"));
+				const message = parts.slice(2).filter((part) => !tellFlags.has(part as "--visible" | "--no-wait")).join(" ");
 				if (!targetId || !message) { ctx.ui.notify("Usage: /mesh tell <sessionId> <message>", "warning"); return; }
 				if (muted) { ctx.ui.notify("mesh is muted — /mesh mute off to send", "warning"); return; }
 				let resolved: string;
