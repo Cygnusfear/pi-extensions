@@ -112,7 +112,8 @@ function buildContextFooter(ctx: {
     const context = maxK > 0 ? `${usedK}k/${maxK}k CONTEXT` : `${pct}% CONTEXT`;
 
     if (usage.percent >= 90) {
-      return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.squash() or contextCheckout() to reclaim context`;
+      const guard = isContextGuardActive(getUsage) ? " \u{1F6AB} CONTEXT GUARD ACTIVE \u2014 only session.*/contextTag/contextLog/contextCheckout/Read allowed" : "";
+      return `\u{1F480} ${pct}% (${context}) MAINTENANCE NOW \u2014 session.squash() or contextCheckout() to reclaim context${guard}`;
     }
     if (usage.percent >= 70) {
       return `🚨 ${pct}% (${context}) URGENT — session.squash() to compact, or contextCheckout() to squash a segment`;
@@ -172,6 +173,69 @@ let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 let currentOuijaSessionFile: string | null = null;
 
+// ── Context Guard ─────────────────────────────────────────────────────────────
+// When context usage exceeds the threshold (default 94%), only context-management
+// tools are allowed. The guard auto-disarms when usage drops back below threshold.
+let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
+const CONTEXT_GUARD_THRESHOLD = 0.94;
+
+/** Tools allowed through the context guard (context management + safe reads). */
+const CONTEXT_GUARD_ALLOWED = new Set([
+  // These are NOT from createToolBindings — they're injected by executeCode() itself
+  // into the VM context. The guard only wraps createToolBindings keys, so these
+  // naturally pass through since they're assigned after wrapping.
+  // But we list them for documentation:
+  // session, contextTag, contextLog, contextCheckout, $, console, process, setTimeout, clearTimeout
+  //
+  // From createToolBindings — allowed:
+  "Read", "read",
+  "sleep",
+  "man",
+]);
+
+/** Check if context usage exceeds the guard threshold. */
+function isContextGuardActive(getUsage?: (() => any) | undefined): boolean {
+  if (!contextGuardEnabled) return false;
+  if (!getUsage) return false;
+  try {
+    const usage = getUsage();
+    if (!usage || usage.percent === null) return false;
+    return usage.percent >= CONTEXT_GUARD_THRESHOLD * 100;
+  } catch {
+    return false;
+  }
+}
+
+/** Wrap tool bindings so blocked tools throw when the guard is active. */
+function wrapWithContextGuard(
+  bindings: Record<string, unknown>,
+  getUsage?: (() => any) | undefined,
+): Record<string, unknown> {
+  if (!getUsage) return bindings; // no usage info → can't guard
+
+  const wrapped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(bindings)) {
+    if (CONTEXT_GUARD_ALLOWED.has(key)) {
+      wrapped[key] = value; // pass through
+    } else if (typeof value === "function") {
+      wrapped[key] = (...args: unknown[]) => {
+        if (isContextGuardActive(getUsage)) {
+          const pct = (() => { try { return getUsage().percent.toFixed(1); } catch { return "?"; } })();
+          throw new Error(
+            `Context guard active (${pct}% used, threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). ` +
+            `Only context-management tools allowed. Run session.squash() or contextCheckout() to free context. ` +
+            `Toggle: /context-guard off`
+          );
+        }
+        return (value as Function)(...args);
+      };
+    } else {
+      wrapped[key] = value; // non-function values (shouldn't exist, but defensive)
+    }
+  }
+  return wrapped;
+}
+
 function getSession(): PersistentSession {
   if (!session) session = createSession();
   return session;
@@ -193,6 +257,10 @@ async function executeCode(
     model?: any;
     modelRegistry?: any;
     sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
+    sendMessage?: (
+      message: { customType: string; content: string; display?: boolean },
+      options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
+    ) => void;
   },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
@@ -303,7 +371,8 @@ async function executeCode(
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
   currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
-  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
+  const rawBindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
+  const bindings = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
   Object.assign(sess.context, bindings);
 
   // Update process.cwd to reflect the current session working directory
@@ -321,16 +390,29 @@ async function executeCode(
   // No one-wake-per-block limit anymore: every call goes through. Pi's own message
   // queue serializes followUp messages correctly, so multiple subscriptions firing
   // in close succession each land as their own follow-up turn trigger.
-  if (toolCtx?.sendUserMessage) {
-    const send = toolCtx.sendUserMessage;
+  if (toolCtx?.sendMessage || toolCtx?.sendUserMessage) {
+    const sendMsg = toolCtx.sendMessage;
+    const sendUser = toolCtx.sendUserMessage;
     (sess.context as any).console.wake = (...args: unknown[]) => {
       const message = args.map(formatArg).join(" ");
       try {
-        send(message, { deliverAs: "followUp" });
+        if (sendMsg) {
+          // Deliver as a custom-typed entry so the renderer can distinguish
+          // background wakes from hooman user messages. Carries display:true so
+          // it still shows up in the TUI, and deliverAs:"followUp" so it lands
+          // safely whether the agent is idle or mid-turn.
+          sendMsg(
+            { customType: "console-wake", content: "[CONSOLE.WAKE] " + message, display: true },
+            { deliverAs: "followUp" },
+          );
+        } else if (sendUser) {
+          // Fallback for older host versions that don't expose sendMessage.
+          sendUser(message, { deliverAs: "followUp" });
+        }
       } catch (err) {
         // Last-ditch: log the wake content to the block output so it isn't totally
         // lost. The caller will still see it the next time they inspect the block.
-        console.warn("[console.wake] sendUserMessage failed:", err instanceof Error ? err.message : String(err));
+        console.warn("[console.wake] send failed:", err instanceof Error ? err.message : String(err));
         console.warn("[console.wake] wake content:", message.slice(0, 400));
       }
     };
@@ -1044,6 +1126,30 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // ── /context-guard command ────────────────────────────────────────────────
+  pi.registerCommand("context-guard", {
+    description: "Toggle context guard: at >94% context, block all non-essential tools. Usage: /context-guard on|off|status",
+    handler: async (args, ctx) => {
+      const sub = (args ?? "").trim().toLowerCase();
+      const getUsage = (ctx as any).getContextUsage as (() => any) | undefined;
+      const usage = getUsage ? getUsage() : null;
+      const pct = usage?.percent?.toFixed(1) ?? "?";
+
+      if (sub === "on") {
+        contextGuardEnabled = true;
+        ctx.ui.notify(`Context guard ENABLED (threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). Current: ${pct}%`, "info");
+      } else if (sub === "off") {
+        contextGuardEnabled = false;
+        ctx.ui.notify(`Context guard DISABLED. Current: ${pct}%`, "info");
+      } else {
+        // status (default)
+        const state = contextGuardEnabled ? "ON" : "OFF";
+        const active = isContextGuardActive(getUsage) ? " 🚫 ACTIVE (context critical)" : "";
+        ctx.ui.notify(`Context guard: ${state} (threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). Current: ${pct}%${active}`, "info");
+      }
+    },
+  });
+
   // Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
   pi.on("tool_call", async (event) => {
     if (!escaped && CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
@@ -1132,6 +1238,10 @@ export default function (pi: ExtensionAPI) {
           modelRegistry: (ctx as any).modelRegistry,
           sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) =>
             pi.sendUserMessage(content, options),
+          sendMessage: (
+            message: { customType: string; content: string; display?: boolean },
+            options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
+          ) => (pi as any).sendMessage?.(message, options),
         },
       );
 
