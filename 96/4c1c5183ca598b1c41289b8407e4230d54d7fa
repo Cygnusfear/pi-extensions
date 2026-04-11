@@ -1,0 +1,39 @@
+packages/shared/src/mai-binary.ts
+  07ed175674a9262f 1-44
+packages/shared/package.json
+  07ed175674a9262f 20-21
+packages/teams/destruction.test.ts
+  07ed175674a9262f 96,113,177
+packages/teams/worker.ts
+  07ed175674a9262f 2,118-119,274
+packages/code-mode/src/sandbox-tools.ts
+  07ed175674a9262f 15
+packages/teams/tool.runtime.test.ts
+  07ed175674a9262f 2,37
+packages/teams/worker.lifecycle.test.ts
+  07ed175674a9262f 2,89-90,103-104,117-118
+packages/teams/leader.retry.test.ts
+  07ed175674a9262f 54,652,722,783,786,896,899
+packages/teams/tool.ts
+  07ed175674a9262f 3,247,259,274,280,294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "964c1c5183ca598b1c41289b8407e4230d54d7fa",
+  "prompts": {
+    "07ed175674a9262f": {
+      "agent_id": {
+        "tool": "Eleanor Jupiter Corsi",
+        "id": "afc15beb-2d97-44c4-ae8b-0314859bb95c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 76,
+      "overriden_lines": 0
+    }
+  }
+}
