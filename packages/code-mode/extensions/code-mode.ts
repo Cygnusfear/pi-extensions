@@ -403,7 +403,7 @@ async function executeCode(
           // safely whether the agent is idle or mid-turn.
           sendMsg(
             { customType: "console-wake", content: "[CONSOLE.WAKE] " + message, display: true },
-            { deliverAs: "followUp" },
+            { deliverAs: "followUp", triggerTurn: true },
           );
         } else if (sendUser) {
           // Fallback for older host versions that don't expose sendMessage.
