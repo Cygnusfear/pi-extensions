@@ -211,13 +211,14 @@ function buildAgentV1Payload(params: {
 	eventName: "PreToolUse" | "PostToolUse";
 	repoDir: string;
 	sessionId: string;
+	sessionName: string | null;
 	toolName: string;
 	toolInput: Record<string, unknown>;
 	model: string | null;
 	sessionFile: string | null;
 	filePaths: string[];
 }): string {
-	const { eventName, repoDir, sessionId, toolName, toolInput, model, sessionFile, filePaths } = params;
+	const { eventName, repoDir, sessionId, sessionName, toolName, toolInput, model, sessionFile, filePaths } = params;
 
 	if (eventName === "PreToolUse") {
 		return JSON.stringify({
@@ -230,7 +231,9 @@ function buildAgentV1Payload(params: {
 	// PostToolUse — build full transcript
 	const { transcript, model: transcriptModel, meshNickname } = parseSessionTranscript(sessionFile ?? "");
 	const effectiveModel = model ?? transcriptModel ?? "unknown";
-	const agentName = meshNickname ?? "pi";
+	// Prefer mesh-assigned nickname (e.g. "Alycia Europa Pandya"), fall back to
+	// the user-set session name, then a generic "pi" marker.
+	const agentName = meshNickname ?? sessionName ?? "pi";
 
 	const messages = transcript.map((m) => {
 		const ts = m.timestamp ?? undefined;
@@ -317,63 +320,95 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// ── PreToolUse: mark state before AI edit ──
+	// ── Shared checkpoint emitter ──
+	// Used by both the direct pi tool_* event handlers (non-code-mode edits) and
+	// the edit-hooks registry (code-mode sandbox edits). One path for both.
+	async function emitCheckpoint(params: {
+		phase: "PreToolUse" | "PostToolUse";
+		toolName: string;
+		toolInput: Record<string, unknown>;
+		filePaths: string[];
+		toolCwd: string;
+		sessionManager: any;
+	}): Promise<void> {
+		if (!gitAiAvailable) return;
+		const repoDir = await findGitRepo(params.toolCwd);
+		if (!repoDir) return;
+
+		const sessionFile = params.sessionManager?.getSessionFile?.() ?? null;
+		const sessionId = params.sessionManager?.getSessionId?.() ?? "unknown";
+		const sessionName = params.sessionManager?.getSessionName?.() ?? null;
+
+		const payload = buildAgentV1Payload({
+			eventName: params.phase,
+			repoDir,
+			sessionId,
+			sessionName,
+			toolName: params.toolName,
+			toolInput: params.toolInput,
+			model: null, // parsed from session JSONL transcript
+			sessionFile,
+			filePaths: params.filePaths,
+		});
+
+		await runCheckpoint(gitAiBin, payload);
+	}
+
+	// ── PreToolUse: mark state before AI edit (direct tool calls) ──
 	pi.on("tool_call", async (event, ctx) => {
-		if (!gitAiAvailable) return;
 		if (!EDIT_TOOLS.has(event.toolName)) return;
-
 		const input = event.input as Record<string, unknown>;
 		const filePaths = extractFilePaths(event.toolName, input);
 		const toolCwd = (input.cwd ?? input.workdir ?? ctx.cwd) as string;
-		const repoDir = await findGitRepo(toolCwd);
-		if (!repoDir) return;
-
-		const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
-		const sessionId = ctx.sessionManager.getSessionId();
-
-		const payload = buildAgentV1Payload({
-			eventName: "PreToolUse",
-			repoDir,
-			sessionId,
+		await emitCheckpoint({
+			phase: "PreToolUse",
 			toolName: event.toolName,
 			toolInput: input,
-			model: null,
-			sessionFile,
 			filePaths,
+			toolCwd,
+			sessionManager: ctx.sessionManager,
 		});
-
-		// Await — checkpoint must complete before the edit tool executes
-		await runCheckpoint(gitAiBin, payload);
 	});
 
-	// ── PostToolUse: mark AI-authored edits ──
+	// ── PostToolUse: mark AI-authored edits (direct tool calls) ──
 	pi.on("tool_result", async (event, ctx) => {
-		if (!gitAiAvailable) return;
 		if (!EDIT_TOOLS.has(event.toolName)) return;
-
 		const input = event.input as Record<string, unknown>;
 		const filePaths = extractFilePaths(event.toolName, input);
 		const toolCwd = (input.cwd ?? input.workdir ?? ctx.cwd) as string;
-		const repoDir = await findGitRepo(toolCwd);
-		if (!repoDir) return;
-
-		const sessionFile = ctx.sessionManager.getSessionFile() ?? null;
-		const sessionId = ctx.sessionManager.getSessionId();
-
-		const payload = buildAgentV1Payload({
-			eventName: "PostToolUse",
-			repoDir,
-			sessionId,
+		await emitCheckpoint({
+			phase: "PostToolUse",
 			toolName: event.toolName,
 			toolInput: input,
-			model: null, // model is extracted from session JSONL transcript
-			sessionFile,
 			filePaths,
+			toolCwd,
+			sessionManager: ctx.sessionManager,
 		});
-
-		// Await — checkpoint must complete to record attribution
-		await runCheckpoint(gitAiBin, payload);
 	});
+
+	// ── Sandbox edit hook: catches code-mode Write/Edit/hashEdit/applyPatch ──
+	// Code-mode runs under a single execute_code tool_call and performs
+	// fs.writeFileSync directly inside the sandbox, which never emits
+	// pi tool_call / tool_result events. The edit-hooks registry is how
+	// code-mode surfaces those edits to extensions like this one.
+	(async () => {
+		try {
+			const { registerEditHook } = await import("@pi-extensions/shared/edit-hooks");
+			registerEditHook(async (e) => {
+				if (e.filePaths.length === 0) return;
+				await emitCheckpoint({
+					phase: e.phase === "pre" ? "PreToolUse" : "PostToolUse",
+					toolName: e.toolName,
+					toolInput: { paths: e.filePaths },
+					filePaths: e.filePaths,
+					toolCwd: e.cwd,
+					sessionManager: e.sessionManager,
+				});
+			});
+		} catch (err) {
+			console.warn("[git-ai] Failed to register edit hook:", err);
+		}
+	})();
 
 	// ── git-ai custom tool ──
 	pi.registerTool({

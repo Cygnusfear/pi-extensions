@@ -303,7 +303,7 @@ async function executeCode(
   // Refresh tool bindings (cwd may have changed)
   sess.images.length = 0; // clear stashed images for this execution
   currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
-  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal });
+  const bindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
   Object.assign(sess.context, bindings);
 
   // Update process.cwd to reflect the current session working directory

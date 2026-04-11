@@ -2,9 +2,22 @@
   "name": "@pi-extensions/git-ai",
   "version": "0.0.1",
   "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
     "extensions": [
       "./extensions/git-ai.ts"
     ]
-  }
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.66.0",
+    "@sinclair/typebox": "*"
+  },
+  "dependencies": {
+    "@pi-extensions/shared": "*"
+  },
+  "files": [
+    "extensions"
+  ]
 }

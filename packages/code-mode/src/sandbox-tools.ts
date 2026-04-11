@@ -4,6 +4,7 @@ import {
   foresightRecall,
   foresightUnfold,
 } from "@pi-extensions/shared/foresight-read";
+import { runEditHooks } from "@pi-extensions/shared/edit-hooks";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import {
   isGitPath,
@@ -46,7 +47,7 @@ import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
 
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
-  const { cwd, images, signal } = ctx;
+  const { cwd, images, signal, sessionManager } = ctx;
   const turndown = new TurndownService({
     headingStyle: "atx",
     hr: "---",
@@ -436,12 +437,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         throw new Error(gitGuardError(`hashEdit ${filePath}`));
       }
     }
+    await runEditHooks({ phase: "pre", toolName: "hashEdit", filePaths: [resolved], cwd, sessionManager, signal });
     const before = fs.readFileSync(resolved, "utf-8");
     const { updated, appliedEdits } = applyHashEdits(before, edits);
     const changed = updated !== before;
     if (changed) {
       fs.writeFileSync(resolved, updated, "utf-8");
     }
+    await runEditHooks({ phase: "post", toolName: "hashEdit", filePaths: [resolved], cwd, sessionManager, signal });
     return {
       appliedEdits,
       changed,
@@ -794,9 +797,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           throw new Error(gitGuardError(`write to ${filePath}`));
         }
       }
+      await runEditHooks({ phase: "pre", toolName: "Write", filePaths: [resolved], cwd, sessionManager, signal });
       const dir = path.dirname(resolved);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(resolved, content, "utf-8");
+      await runEditHooks({ phase: "post", toolName: "Write", filePaths: [resolved], cwd, sessionManager, signal });
     },
 
     Edit: async ({
@@ -830,7 +835,9 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       }
       // Replace first occurrence only
       const updated = content.replace(oldText, () => newText);
+      await runEditHooks({ phase: "pre", toolName: "Edit", filePaths: [resolved], cwd, sessionManager, signal });
       fs.writeFileSync(resolved, updated, "utf-8");
+      await runEditHooks({ phase: "post", toolName: "Edit", filePaths: [resolved], cwd, sessionManager, signal });
       return { matched: true };
     },
 
@@ -1035,10 +1042,24 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         }
       }
 
+      // Collect all absolute paths this patch will touch (including moves)
+      const patchBaseDir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+      const touchedPaths = new Set<string>();
+      for (const hunk of hunks) {
+        touchedPaths.add(path.resolve(patchBaseDir, hunk.path));
+        if (hunk.type === "update" && hunk.move_path) {
+          // NB: matches the existing inner resolve which uses raw cwd, not patchBaseDir.
+          touchedPaths.add(path.resolve(cwd, hunk.move_path));
+        }
+      }
+      const touchedPathsArr = [...touchedPaths];
+
+      await runEditHooks({ phase: "pre", toolName: "applyPatch", filePaths: touchedPathsArr, cwd, sessionManager, signal });
+
       const results: string[] = [];
 
       for (const hunk of hunks) {
-        const filePath = path.resolve(explicitCwd ? resolvePath(explicitCwd, cwd) : cwd, hunk.path);
+        const filePath = path.resolve(patchBaseDir, hunk.path);
 
         switch (hunk.type) {
           case "add": {
@@ -1072,6 +1093,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
           }
         }
       }
+
+      await runEditHooks({ phase: "post", toolName: "applyPatch", filePaths: touchedPathsArr, cwd, sessionManager, signal });
 
       return `Success. Updated the following files:\n${results.join("\n")}`;
     },

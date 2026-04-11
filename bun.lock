@@ -195,6 +195,13 @@
     "packages/git-ai": {
       "name": "@pi-extensions/git-ai",
       "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@sinclair/typebox": "*",
+      },
     },
     "packages/git-safety": {
       "name": "@pi-extensions/git-safety",
@@ -344,6 +351,14 @@
       "version": "0.1.1",
       "dependencies": {
         "@mariozechner/pi-coding-agent": ">=0.66.0",
+      },
+    },
+    "packages/runbooks": {
+      "name": "@pi-extensions/runbooks",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@sinclair/typebox": "*",
       },
     },
     "packages/session-tab-title": {
@@ -667,6 +682,8 @@
     "@pi-extensions/prompt-templates": ["@pi-extensions/prompt-templates@workspace:packages/prompt-templates"],
 
     "@pi-extensions/provider-filter": ["@pi-extensions/provider-filter@workspace:packages/provider-filter"],
+
+    "@pi-extensions/runbooks": ["@pi-extensions/runbooks@workspace:packages/runbooks"],
 
     "@pi-extensions/session-tab-title": ["@pi-extensions/session-tab-title@workspace:packages/session-tab-title"],
 

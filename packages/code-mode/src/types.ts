@@ -12,6 +12,9 @@ export interface SandboxContext {
   logFn?: (msg: string) => void;
   /** Optional abort signal — when provided, sandbox tools check it and abort early */
   signal?: AbortSignal;
+  /** Optional read-only SessionManager — passed through to edit hooks so extensions
+   *  (git-ai, etc.) can attribute edits to the current session/agent. */
+  sessionManager?: any;
 }
 
 /**
