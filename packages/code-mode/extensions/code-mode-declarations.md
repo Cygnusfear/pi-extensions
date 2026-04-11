@@ -840,8 +840,14 @@ declare function supervise(enabled: boolean): Promise<string>;
  *
  * // Background wake — trigger a turn when the event fires, even after this
  * // execute_code block returns. Works like console.wake but event-driven.
- * teams.on("fixer", "completed").wake();
- * teams.on("oracle", "completed").wake(e => `Oracle finished: ${e.result.slice(0, 500)}`);
+ * //
+ * // Pair .wake() with .preventDefault() to suppress the leader's duplicate
+ * // default batch wake (DOM-style — .wake() is YOUR handler, .preventDefault()
+ * // tells the leader "I've got this, no fallback turn please").
+ * teams.on("fixer", "completed").wake().preventDefault();
+ * teams.on("oracle", "completed")
+ *   .wake(e => `Oracle finished: ${e.result.slice(0, 500)}`)
+ *   .preventDefault();
  *
  * // Streaming: react to every matching event until unsubscribed
  * const sub = teams.on({ name: "oracle", type: "comment" }).each(e => {
@@ -954,7 +960,7 @@ interface TeamsWorkerHandle {
   [key: string]: unknown;
 }
 
-type TeamsPollEvent =
+type TeamsPollEventBase =
   | { type: "completed"; worker: TeamsWorkerHandle; result: string }
   | { type: "turn_finished"; worker: TeamsWorkerHandle; result: string }
   | { type: "warning"; worker: TeamsWorkerHandle; reason: string }
@@ -964,18 +970,76 @@ type TeamsPollEvent =
   | { type: "alive"; worker: TeamsWorkerHandle };
 
 /**
- * Subscription returned by teams.on(). Thenable + chainable. Auto-unsubscribes
- * after the first match UNLESS .each() has been attached (then it keeps streaming).
+ * DOM-style wrapped event dispatched to subscription listeners. Mirrors the
+ * browser Event API:
+ *
+ *   - preventDefault()        — suppress the leader's default notifyLLM batch
+ *                               (no duplicate coordinator wake from leader side)
+ *   - stopPropagation()       — stop later subscription listeners from seeing
+ *                               this event in the same dispatch pass
+ *   - stopImmediatePropagation() — alias (subscriptions dispatch in a single pass)
+ *   - defaultPrevented        — read-only flag, true if any handler preventDefault'd
+ *   - propagationStopped      — read-only flag, true if any handler stopPropagation'd
+ *
+ * Must be called SYNCHRONOUSLY inside a handler callback (.each / .wake message
+ * builder). Calling preventDefault() on an awaited value is a no-op — by the
+ * time your code resumes, the dispatch loop has already decided.
+ *
+ * For "I'm awaiting and I want the default suppressed" use the chain shortcut:
+ *   teams.on(...).preventDefault().then(e => ...)
+ */
+type TeamsPollEvent = TeamsPollEventBase & {
+  preventDefault(): void;
+  stopPropagation(): void;
+  stopImmediatePropagation(): void;
+  readonly defaultPrevented: boolean;
+  readonly propagationStopped: boolean;
+};
+
+/**
+ * Subscription returned by teams.on(). Thenable + chainable.
+ * Auto-unsubscribes after the first match UNLESS .each() has been attached
+ * (then it keeps streaming until .unsubscribe()).
+ *
+ * DOM-style chain shortcuts — `.preventDefault()` / `.stopPropagation()` —
+ * pre-register a handler that calls the corresponding method on every matched
+ * event. Useful when you're using `.wake()` or `.then()` and want to suppress
+ * the leader's duplicate default notification without writing an `.each(e => ...)`.
  */
 interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
   /** Streaming callback. Fires on every matching event until unsubscribed. */
   each(callback: (event: TeamsPollEvent) => void): this;
 
-  /** Trigger a coordinator turn when the event fires. Background-safe. */
+  /**
+   * Trigger a coordinator turn when the event fires. Background-safe —
+   * works even from a promise that settles after the enclosing execute_code
+   * block has returned. Message builder receives the wrapped event.
+   *
+   * NOTE: .wake() does NOT auto-suppress the leader's default batch notify.
+   * Chain .preventDefault() if you want wake to be the ONLY turn trigger:
+   *   teams.on("fixer", "completed").wake().preventDefault();
+   */
   wake(message?: string | ((event: TeamsPollEvent) => string)): this;
 
   /** Reject with a timeout error if no matching event arrives within ms. */
   timeout(ms: number): this;
+
+  /**
+   * Pre-register preventDefault() on every matched event. Suppresses the
+   * leader's default notifyLLM batch wake, so you won't get a duplicate
+   * team-event turn trigger on top of your .each/.wake/.then handler.
+   *
+   * Equivalent to `.each(e => e.preventDefault())` but chainable with .wake/.then.
+   */
+  preventDefault(): this;
+
+  /**
+   * Pre-register stopPropagation() on every matched event. Prevents later
+   * subscription listeners from seeing the event in the same dispatch pass.
+   *
+   * Equivalent to `.each(e => e.stopPropagation())`.
+   */
+  stopPropagation(): this;
 
   /** Manually stop receiving events. Idempotent. */
   unsubscribe(): void;

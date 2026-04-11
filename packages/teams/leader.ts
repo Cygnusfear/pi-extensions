@@ -18,6 +18,7 @@ import { LEASE_HEARTBEAT_INTERVAL_MS, buildLeaderLeasePath, writeLeaderLease } f
 import { cleanupWorker } from "./cleanup.js";
 import { isProcessAlive, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
+import { wrapPollEvent, type TeamsEvent } from "./subscription.js";
 import type { PollEvent, SpawnConfig, WorkerAttempt, WorkerHandle } from "./types.js";
 import {
   ACTIVITY_POLL_INTERVAL_MS,
@@ -715,8 +716,11 @@ export class TeamLeader {
   );
   private notifiedTerminal = new Set<string>();
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
-  /** External subscribers to PollEvent stream (teams.on). */
-  private eventListeners = new Set<(event: PollEvent) => void>();
+  /** External subscribers to the PollEvent stream (teams.on).
+   *  Listeners receive a wrapped TeamsEvent — they can call preventDefault()
+   *  to suppress the leader's default notifyLLM batch, or stopPropagation()
+   *  to prevent later listeners from seeing the event. */
+  private eventListeners = new Set<(event: TeamsEvent) => void>();
   private notifyDraining = false;
   private stateHydrated = false;
   private lastSavedStateSignature: string | null = null;
@@ -2204,16 +2208,23 @@ export class TeamLeader {
   }
 
   /**
-   * Subscribe to raw PollEvent stream. Listener runs synchronously inside
-   * notifyLLM, before the existing filter/queue/turn-trigger logic. This is
-   * the substrate for `teams.on(...)` in the sandbox API.
+   * Subscribe to the PollEvent stream. Listener receives a wrapped TeamsEvent
+   * carrying DOM-style preventDefault() / stopPropagation() methods. Runs
+   * synchronously inside notifyLLM, BEFORE the existing dedupe/queue/turn-trigger
+   * logic, so subscribers see every event.
+   *
+   * Listener contract:
+   *   - Call event.preventDefault() to suppress the leader's default
+   *     notifyLLM batch for this event (no coordinator turn trigger).
+   *   - Call event.stopPropagation() to stop later subscription listeners
+   *     from seeing the event in the same dispatch pass.
    *
    * Listener errors are isolated — a throwing listener cannot break the event
    * pipeline for other listeners or for notifyLLM itself.
    *
    * Returns an unsubscribe function. Always call it when done to avoid leaks.
    */
-  subscribeToEvents(listener: (event: PollEvent) => void): () => void {
+  subscribeToEvents(listener: (event: TeamsEvent) => void): () => void {
     this.eventListeners.add(listener);
     return () => {
       this.eventListeners.delete(listener);
@@ -2226,17 +2237,26 @@ export class TeamLeader {
   }
 
   private notifyLLM(event: PollEvent) {
-    // Fan out to external subscribers first — they see every event,
-    // regardless of whether it dedupes or triggers a coordinator turn.
+    // Wrap once so every listener shares the same preventDefault/stopPropagation
+    // state. Listeners run synchronously, in insertion order, before the
+    // default dedupe/queue/turn-trigger path.
+    const wrapped = wrapPollEvent(event);
     if (this.eventListeners.size > 0) {
       for (const listener of this.eventListeners) {
         try {
-          listener(event);
+          listener(wrapped);
         } catch (err) {
           console.warn("[teams] event listener threw:", err instanceof Error ? err.message : String(err));
         }
+        if (wrapped.propagationStopped) break;
       }
     }
+
+    // DOM-style: any listener that called preventDefault() suppresses the
+    // leader's entire default action for this event (no dedupe recording,
+    // no notify queue push, no coordinator wake). The listeners have taken
+    // responsibility for the event.
+    if (wrapped.defaultPrevented) return;
 
     if (event.type === "completed" || event.type === "warning" || event.type === "failed") {
       const key = `${event.worker.name}:terminal`;

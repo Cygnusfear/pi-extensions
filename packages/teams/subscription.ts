@@ -18,6 +18,52 @@ import type { PollEvent, WorkerHandle } from "./types.js";
 
 export type PollEventType = PollEvent["type"];
 
+/**
+ * DOM-style event wrapper dispatched to subscription listeners.
+ *
+ * Mirrors the browser Event API:
+ *   - preventDefault()        — suppress the leader's default notifyLLM batch
+ *                               (i.e. don't also wake the coordinator for this event)
+ *   - stopPropagation()       — stop later subscription listeners from seeing it
+ *   - stopImmediatePropagation() — alias (subscriptions run in a single pass, no
+ *                                  capture/bubble distinction)
+ *   - defaultPrevented        — read-only flag, true after any handler called preventDefault
+ *   - propagationStopped      — read-only flag, true after any handler called stopPropagation
+ *
+ * Must be called SYNCHRONOUSLY inside a handler callback. Calling preventDefault()
+ * on an awaited-value AFTER the dispatch loop has finished is a no-op.
+ */
+export type TeamsEvent = PollEvent & {
+	preventDefault(): void;
+	stopPropagation(): void;
+	stopImmediatePropagation(): void;
+	readonly defaultPrevented: boolean;
+	readonly propagationStopped: boolean;
+};
+
+/** Mint a wrapped event that carries DOM-style flags + methods. */
+export function wrapPollEvent(event: PollEvent): TeamsEvent {
+	let defaultPrevented = false;
+	let propagationStopped = false;
+	return Object.assign({}, event, {
+		preventDefault(): void {
+			defaultPrevented = true;
+		},
+		stopPropagation(): void {
+			propagationStopped = true;
+		},
+		stopImmediatePropagation(): void {
+			propagationStopped = true;
+		},
+		get defaultPrevented() {
+			return defaultPrevented;
+		},
+		get propagationStopped() {
+			return propagationStopped;
+		},
+	}) as TeamsEvent;
+}
+
 /** Full filter object for teams.on({...}). */
 export interface EventFilter {
 	/** Match a specific worker by name. */
@@ -37,11 +83,11 @@ export interface EventFilter {
 	matchCurrent?: boolean;
 }
 
-/** Callback signature — receives the full typed PollEvent. */
-export type EventCallback = (event: PollEvent) => void;
+/** Callback signature — receives the wrapped TeamsEvent (PollEvent + DOM methods). */
+export type EventCallback = (event: TeamsEvent) => void;
 
 /** Wake message builder — called when event fires. */
-export type WakeMessage = string | ((event: PollEvent) => string);
+export type WakeMessage = string | ((event: TeamsEvent) => string);
 
 /**
  * TeamsSubscription — returned by teams.on(...). Thenable + chainable helpers.
@@ -52,17 +98,21 @@ export type WakeMessage = string | ((event: PollEvent) => string);
  *   - If .each() attached → keeps running until unsubscribe() / timeout / abort.
  *   - If .each() NOT attached → auto-unsubscribes after first match.
  */
-export class TeamsSubscription implements PromiseLike<PollEvent> {
+export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	private unsub: () => void;
 	private settled = false;
-	private settledValue: PollEvent | null = null;
+	private settledValue: TeamsEvent | null = null;
 	private settledError: Error | null = null;
-	private resolvers: Array<(event: PollEvent) => void> = [];
+	private resolvers: Array<(event: TeamsEvent) => void> = [];
 	private rejecters: Array<(err: Error) => void> = [];
 	private eachCallbacks: EventCallback[] = [];
 	private wakeMessage: WakeMessage | null = null;
 	private timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
+	/** Pre-registered: call preventDefault() on every matched event. */
+	private autoPreventDefault = false;
+	/** Pre-registered: call stopPropagation() on every matched event. */
+	private autoStopPropagation = false;
 
 	constructor(
 		private readonly leader: TeamLeader,
@@ -71,7 +121,9 @@ export class TeamsSubscription implements PromiseLike<PollEvent> {
 		private readonly sendUserMessage: ((content: string) => void) | null,
 		abortSignal?: AbortSignal,
 	) {
-		this.unsub = leader.subscribeToEvents((event) => this.handle(event));
+		// Leader hands us pre-wrapped TeamsEvents so preventDefault/stopPropagation
+		// calls from any listener affect the single shared wrapper.
+		this.unsub = leader.subscribeToEvents((event) => this.handle(event as TeamsEvent));
 
 		// Abort → reject + cleanup. Listener is leak-free because we unsubscribe.
 		if (abortSignal) {
@@ -98,14 +150,21 @@ export class TeamsSubscription implements PromiseLike<PollEvent> {
 		const synthetic = synthesizeFromWorker(worker, type);
 		if (synthetic) {
 			// Fire asynchronously so callers have a chance to attach .then/.each/.wake
-			// before the event arrives.
-			queueMicrotask(() => this.handle(synthetic));
+			// before the event arrives. Synthetic events are freshly wrapped — since
+			// they don't go through the leader's dispatch loop, preventDefault() on
+			// them is purely informational (there's no default action to suppress).
+			queueMicrotask(() => this.handle(wrapPollEvent(synthetic)));
 		}
 	}
 
-	private handle(event: PollEvent): void {
+	private handle(event: TeamsEvent): void {
 		if (this.disposed) return;
 		if (!this.predicate(event)) return;
+
+		// Pre-registered DOM-style suppressions fire first so .each() callbacks
+		// see defaultPrevented / propagationStopped already set.
+		if (this.autoPreventDefault) event.preventDefault();
+		if (this.autoStopPropagation) event.stopPropagation();
 
 		// Fire each callbacks every match.
 		for (const cb of this.eachCallbacks) {
@@ -162,11 +221,11 @@ export class TeamsSubscription implements PromiseLike<PollEvent> {
 
 	// ─── Thenable protocol ───
 
-	then<TResult1 = PollEvent, TResult2 = never>(
-		onfulfilled?: ((value: PollEvent) => TResult1 | PromiseLike<TResult1>) | null,
+	then<TResult1 = TeamsEvent, TResult2 = never>(
+		onfulfilled?: ((value: TeamsEvent) => TResult1 | PromiseLike<TResult1>) | null,
 		onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
 	): Promise<TResult1 | TResult2> {
-		const p = new Promise<PollEvent>((resolve, reject) => {
+		const p = new Promise<TeamsEvent>((resolve, reject) => {
 			if (this.settled) {
 				// Already settled — replay the resolved/rejected state.
 				if (this.settledError) reject(this.settledError);
@@ -204,6 +263,34 @@ export class TeamsSubscription implements PromiseLike<PollEvent> {
 		this.timeoutHandle = setTimeout(() => {
 			this.rejectWith(new Error(`teams.on timeout after ${ms}ms`));
 		}, ms);
+		return this;
+	}
+
+	/**
+	 * DOM-style: pre-register preventDefault() on every matched event.
+	 * Suppresses the leader's default notifyLLM batch wake for this event,
+	 * so the coordinator is NOT triggered again from the leader side.
+	 *
+	 * Ergonomic for: "I'm handling this event via .wake() / .each() and I
+	 * don't want a duplicate turn from the leader's batch queue".
+	 *
+	 * Equivalent to:
+	 *   teams.on(...).each(e => e.preventDefault())
+	 */
+	preventDefault(): this {
+		this.autoPreventDefault = true;
+		return this;
+	}
+
+	/**
+	 * DOM-style: pre-register stopPropagation() on every matched event.
+	 * Prevents later subscription listeners from seeing the event.
+	 *
+	 * Equivalent to:
+	 *   teams.on(...).each(e => e.stopPropagation())
+	 */
+	stopPropagation(): this {
+		this.autoStopPropagation = true;
 		return this;
 	}
 
