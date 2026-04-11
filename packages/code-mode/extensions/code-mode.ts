@@ -192,7 +192,7 @@ async function executeCode(
     abort?: () => void;
     model?: any;
     modelRegistry?: any;
-    sendUserMessage?: (content: string) => void;
+    sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
   },
 ): Promise<{ output: string; error?: string; duration: number }> {
   const sess = getSession();
@@ -311,15 +311,28 @@ async function executeCode(
 
   // Inject console.wake — lets background promises trigger a new agent turn.
   // console.log() only writes to the current block's output (gone when block returns).
-  // console.wake() queues a user message that triggers a turn after this block finishes.
+  // console.wake(message) queues a user message via deliverAs:"followUp" so it lands
+  // safely whether the agent is idle OR currently streaming a response. Without the
+  // explicit deliverAs, pi throws "Agent is already processing. Specify
+  // streamingBehavior ('steer' or 'followUp') to queue the message." and the wake
+  // is lost — which is exactly what was happening to background teams.on callbacks
+  // that fired mid-turn.
+  //
+  // No one-wake-per-block limit anymore: every call goes through. Pi's own message
+  // queue serializes followUp messages correctly, so multiple subscriptions firing
+  // in close succession each land as their own follow-up turn trigger.
   if (toolCtx?.sendUserMessage) {
     const send = toolCtx.sendUserMessage;
-    let wakeFired = false;
     (sess.context as any).console.wake = (...args: unknown[]) => {
-      if (wakeFired) return;
-      wakeFired = true;
       const message = args.map(formatArg).join(" ");
-      send(message);
+      try {
+        send(message, { deliverAs: "followUp" });
+      } catch (err) {
+        // Last-ditch: log the wake content to the block output so it isn't totally
+        // lost. The caller will still see it the next time they inspect the block.
+        console.warn("[console.wake] sendUserMessage failed:", err instanceof Error ? err.message : String(err));
+        console.warn("[console.wake] wake content:", message.slice(0, 400));
+      }
     };
   }
 
@@ -428,7 +441,7 @@ async function executeCode(
           toolCtx.compact({
             onComplete: () => {
               if (continueText && toolCtx?.sendUserMessage) {
-                toolCtx.sendUserMessage(continueText);
+                toolCtx.sendUserMessage(continueText, { deliverAs: "followUp" });
               }
             },
           });
@@ -1117,7 +1130,8 @@ export default function (pi: ExtensionAPI) {
           abort: () => ctx.abort(),
           model: (ctx as any).model,
           modelRegistry: (ctx as any).modelRegistry,
-          sendUserMessage: (content: string) => pi.sendUserMessage(content),
+          sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) =>
+            pi.sendUserMessage(content, options),
         },
       );
 

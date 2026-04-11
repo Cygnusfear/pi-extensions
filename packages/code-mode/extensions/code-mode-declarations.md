@@ -771,7 +771,9 @@ declare const runbookDelete: typeof runbook.delete;
  * finishes), console.wake() sends a message that wakes the agent up — even from a background
  * promise that fires minutes later.
  *
- * Only ONE wake per execute_code block. Subsequent calls are silently ignored.
+ * Every wake goes through with deliverAs: "followUp" — safe whether the agent is idle or
+ * currently streaming a response. Pi queues them in order so multiple wakes from multiple
+ * background callbacks all land as sequential follow-up turn triggers.
  *
  * Use cases:
  * - Background monitoring: fire a polling promise onto $, wake yourself when something changes

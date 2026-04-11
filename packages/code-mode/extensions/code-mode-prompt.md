@@ -127,9 +127,9 @@ console.log("Monitor started — will wake me when the deploy finishes.");
 ```
 
 **Rules:**
-- Only ONE wake per execute_code block. Subsequent calls are silently ignored.
 - If the agent is idle → triggers a turn immediately.
-- If the agent is busy → queued and delivered when it finishes.
+- If the agent is currently streaming a response → `console.wake` passes `deliverAs: "followUp"` to `pi.sendUserMessage`, which queues the wake safely. The wake lands as the next turn when the current one finishes. **Do NOT** call `pi.sendUserMessage` directly — it requires the explicit `deliverAs` option and throws `"Agent is already processing"` otherwise, silently losing your wake.
+- Multiple wakes from the same block are ALL delivered (each becomes its own follow-up turn trigger). There's no one-wake-per-block limit anymore — pi's own queue serializes them correctly.
 - For **team workers**, always prefer `teams.on(name, type)` over sleep-polling `teams.list()`. It's event-driven, faster, and the canonical pattern.
 - For non-event sources (file tails, generic command output, mesh broadcasts without a typed channel), the polling-loop pattern above is fine.
 
