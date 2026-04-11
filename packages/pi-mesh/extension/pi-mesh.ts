@@ -688,6 +688,7 @@ export class PiMesh {
 const MESH_IDENTITY_TYPE = "mesh_identity";
 const MESH_CHANNELS_TYPE = "mesh_channels";
 const MESH_BROADCAST_ALLOWED_TYPE = "mesh_broadcast_allowed";
+const MESH_REGENESIS_TYPE = "mesh_regenesis";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -738,6 +739,17 @@ function resolveChannelsFromSession(
  * explicitly opt-in per session via `/mesh allow-broadcast on`. We persist
  * the decision so /reload and resume keep the setting.
  */
+// Check whether the session contains a regenesis marker (set by /regenesis)
+// to signal that this "new" session should inherit the old mesh identity.
+function hasRegenesisMarker(
+	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
+): boolean {
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === MESH_REGENESIS_TYPE) return true;
+	}
+	return false;
+}
+
 function resolveBroadcastAllowedFromSession(
 	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
 ): boolean {
@@ -802,13 +814,19 @@ function resolveAndSetIdentity(
 			setStableId(existing.id);
 			return;
 		}
+	} else if (reason === "new" && hasRegenesisMarker(ctx) && existing) {
+		// REGENESIS: new session created by /regenesis — reuse old identity
+		// so peers on the mesh still recognise this agent.
+		mesh.setIdentity(existing);
+		setStableId(existing.id);
+		return;
 	} else if (reason !== "fork" && reason !== "new" && existing) {
 		// Unknown reason with existing identity — reuse
 		mesh.setIdentity(existing);
 		setStableId(existing.id);
 		return;
 	}
-	// fork, new, missing identity, or double-resume → generate fresh identity below
+	// fork, new (non-regenesis), missing identity, or double-resume → generate fresh identity below
 
 	// Generate fresh identity
 	const id = randomUUID();
@@ -1842,6 +1860,90 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				}
 			} else {
 				ctx.ui.notify("Unknown. Use: /mesh list | /mesh tell <id> <msg> | /mesh view <id> [start] [end] | /mesh join/leave/chat <channel>", "warning");
+			}
+		},
+	});
+
+
+	// ── /regenesis command ──────────────────────────────────────────────────────────────
+
+	pi.registerCommand("regenesis", {
+		description: "Regenesis: nuke conversation history, inject a TPV handoff into a fresh session, keep mesh identity so peers still know you.",
+		handler: async (args, ctx) => {
+			const entries = ctx.sessionManager.getEntries();
+			const sessionId = ctx.sessionManager.getSessionId();
+			const sessionName = ctx.sessionManager.getSessionName();
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			const cwd = ctx.sessionManager.getCwd();
+
+			if (entries.length === 0) {
+				ctx.ui.notify("Cannot regenesis: current session has no entries.", "warning");
+				return;
+			}
+
+			const meaningful = projectMeaningfulSessionEntries(entries);
+			const tail = meaningful.slice(-50);
+			const handoffLines: string[] = [
+				"# Regenesis Handoff (TPV)",
+				"",
+				"Previous session: " + (sessionName ?? sessionId.slice(0, 8)),
+				"Session ID: " + sessionId,
+				"CWD: " + cwd,
+				"Timestamp: " + new Date().toISOString(),
+				"",
+				"--- Last " + tail.length + " meaningful entries from previous session ---",
+				"",
+			];
+			for (const entry of tail) {
+				const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() + " " : "";
+				handoffLines.push("[" + ts + entry.label + "] " + entry.text.split("\n").join("\n  "));
+				handoffLines.push("");
+			}
+			handoffLines.push("--- End of regenesis handoff ---");
+			handoffLines.push("");
+			handoffLines.push("You are the continuation of the previous session. Your mesh identity is preserved. Peers still know you.");
+			handoffLines.push("Review the handoff above, orient yourself, and continue where the previous session left off.");
+			const handoffText = handoffLines.join("\n");
+
+			const identity = resolveIdentityFromSession(ctx);
+			const channels = resolveChannelsFromSession(ctx);
+			const broadcastSetting = resolveBroadcastAllowedFromSession(ctx);
+
+			if (!identity) {
+				ctx.ui.notify("Cannot regenesis: no mesh identity found in current session.", "warning");
+				return;
+			}
+
+			ctx.ui.notify("Regenesis: creating fresh session with handoff...", "info");
+
+			const result = await ctx.newSession({
+				parentSession: sessionFile ?? undefined,
+				setup: async (sm) => {
+					sm.appendCustomMessageEntry("regenesis-handoff", handoffText, false, {
+						parentSessionId: sessionId,
+						parentSessionName: sessionName,
+						transferedAt: new Date().toISOString(),
+					});
+
+					sm.appendCustomEntry(MESH_REGENESIS_TYPE, {
+						fromSession: sessionId,
+						transferedAt: new Date().toISOString(),
+					});
+
+					sm.appendCustomEntry(MESH_IDENTITY_TYPE, identity);
+
+					if (channels.length > 0) {
+						sm.appendCustomEntry(MESH_CHANNELS_TYPE, { channels });
+					}
+
+					if (broadcastSetting) {
+						sm.appendCustomEntry(MESH_BROADCAST_ALLOWED_TYPE, { allowed: true });
+					}
+				},
+			});
+
+			if (result.cancelled) {
+				ctx.ui.notify("Regenesis cancelled.", "info");
 			}
 		},
 	});
