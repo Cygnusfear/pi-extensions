@@ -59,7 +59,7 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 }
 
 export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
-	const leaseFile = buildLeaderLeasePath(config.repoRoot, config.leaderSessionFile);
+	const leaseFile = buildLeaderLeasePath(config.leaderSessionFile);
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
 		PI_TEAMS_WORKER: "1",

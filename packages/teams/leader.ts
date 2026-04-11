@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { getMaiBin } from "../shared/src/mai-binary.js";
 import type { ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -14,7 +15,13 @@ import {
   formatRuntimeSummary,
   sampleWorkerProcessSnapshotAsync,
 } from "./activity.js";
-import { LEASE_HEARTBEAT_INTERVAL_MS, buildLeaderLeasePath, writeLeaderLease } from "./lease.js";
+import {
+  LEASE_HEARTBEAT_INTERVAL_MS,
+  buildLeaderLeasePath,
+  pruneStaleLeases,
+  unlinkLeaderLease,
+  writeLeaderLease,
+} from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
 import { isProcessAlive, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
@@ -761,20 +768,36 @@ export class TeamLeader {
     const leaderSessionFile = this.ctx.sessionManager.getSessionFile();
     if (!leaderSessionFile) return;
 
-    const leaseFile = buildLeaderLeasePath(this.ctx.cwd, leaderSessionFile);
+    // Opportunistic: prune any stale lease files left behind by long-dead
+    // coordinators. Best-effort, never blocks startup.
+    try {
+      const removed = pruneStaleLeases();
+      if (removed > 0) console.log(`[teams] pruned ${removed} stale lease file(s)`);
+    } catch { /* swallow — housekeeping */ }
+
+    const leaseFile = buildLeaderLeasePath(leaderSessionFile);
     this.leaseFilePath = leaseFile;
-    writeLeaderLease(leaseFile, { leaderSessionFile, cwd: this.ctx.cwd });
+    // First write creates the empty marker. Subsequent timer calls just bump mtime.
+    writeLeaderLease(leaseFile);
 
     if (this.leaseTimer) clearInterval(this.leaseTimer);
     this.leaseTimer = setInterval(() => {
       if (!this.leaseFilePath) return;
-      writeLeaderLease(this.leaseFilePath, { leaderSessionFile, cwd: this.ctx?.cwd });
+      writeLeaderLease(this.leaseFilePath);
     }, LEASE_HEARTBEAT_INTERVAL_MS);
   }
 
-  private stopLeaseHeartbeat() {    if (this.leaseTimer) {
+  private stopLeaseHeartbeat() {
+    if (this.leaseTimer) {
       clearInterval(this.leaseTimer);
       this.leaseTimer = null;
+    }
+    // Graceful fast-path: unlink the lease so workers exit immediately on the
+    // next tick instead of waiting for the staleness timeout. Hard crashes
+    // skip this entirely — that's what the passive mtime timeout is for.
+    if (this.leaseFilePath) {
+      unlinkLeaderLease(this.leaseFilePath);
+      this.leaseFilePath = null;
     }
   }
 
@@ -1593,7 +1616,7 @@ export class TeamLeader {
     if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(worker.name))) return;
 
     try {
-      const maiResult = await this.pi.exec("mai", ["--json", "show", worker.ticketId], {
+      const maiResult = await this.pi.exec(getMaiBin(), ["--json", "show", worker.ticketId], {
         cwd: this.ctx.cwd,
         timeout: 5000,
       });
@@ -1657,7 +1680,7 @@ export class TeamLeader {
     let lastNote = "(no notes left by worker)";
     let ticketClosed = false;
     try {
-      const maiExitResult = await this.pi.exec("mai", ["--json", "show", worker.ticketId], {
+      const maiExitResult = await this.pi.exec(getMaiBin(), ["--json", "show", worker.ticketId], {
         cwd: this.ctx.cwd,
         timeout: 5000,
       });
@@ -1692,7 +1715,7 @@ export class TeamLeader {
           this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
 
           await this.pi.exec(
-            "mai",
+            getMaiBin(),
             [
               "add-note",
               worker.ticketId,
@@ -1795,7 +1818,7 @@ export class TeamLeader {
         this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
 
         await this.pi.exec(
-          "mai",
+          getMaiBin(),
           ["add-note", worker.ticketId, `AUTO-RESPAWN: ${reason}. Respawning once.`],
           { cwd: this.ctx.cwd, timeout: 5000 },
         ).catch(() => {});
@@ -2060,7 +2083,7 @@ export class TeamLeader {
     worker.killedAt = Date.now();
     this.unwatchWorker(workerName);
     if (this.ctx) {
-      await this.pi.exec("mai", ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 }).catch(() => {});
+      await this.pi.exec(getMaiBin(), ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 }).catch(() => {});
       await cleanupWorker(this.ctx.cwd, worker, true /* always preserve branch on kill */);
     }
     this.workers.delete(workerName);

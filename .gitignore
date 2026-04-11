@@ -21,3 +21,4 @@ package-lock.json
 
 # Config overrides
 packages/brave-search/extensions/brave-search.config.json
+.pi/teams/
