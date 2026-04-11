@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import path from "node:path";
 
 function makeFakePi() {
 	const handlers = new Map<string, Array<(...args: any[]) => any>>();
@@ -85,8 +86,8 @@ describe("teams worker lifecycle", () => {
 
 		await fake.emit("session_shutdown", {}, { cwd: "/tmp/repo" });
 
-		const addNote = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "add-note");
-		const close = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "close");
+		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
+		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote).toBeUndefined();
 		expect(close).toBeUndefined();
 	});
@@ -99,8 +100,8 @@ describe("teams worker lifecycle", () => {
 
 		await fake.tools.get("team_finish").execute("id", { status: "done", summary: "all good" }, null, null, { cwd: "/tmp/repo" });
 
-		const addNote = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "add-note");
-		const close = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "close");
+		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
+		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote?.args.at(-1)).toBe("DONE: all good");
 		expect(close?.args[1]).toBe("tk-1");
 	});
@@ -113,8 +114,8 @@ describe("teams worker lifecycle", () => {
 
 		await fake.tools.get("team_finish").execute("id", { status: "quit", summary: "blocked by missing data" }, null, null, { cwd: "/tmp/repo" });
 
-		const addNote = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "add-note");
-		const close = fake.execCalls.find((c) => c.cmd === "mai" && c.args[0] === "close");
+		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
+		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote?.args.at(-1)).toBe("QUIT: blocked by missing data");
 		expect(close?.args[1]).toBe("tk-1");
 	});

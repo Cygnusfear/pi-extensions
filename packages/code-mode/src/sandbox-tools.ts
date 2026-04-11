@@ -12,19 +12,7 @@ import {
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
 import { isLocked, lockError } from "./shell-utils";
-import { createDep } from "../../shared/src/tool-availability";
-
-const maiDep = createDep({
-  binary: "mai",
-  install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest",
-  name: "mai",
-  envOverride: "MAI_BIN",
-  fallbacks: [
-    path.join(os.homedir(), "go", "bin", "mai"),
-    "/opt/homebrew/bin/mai",
-    "/usr/local/bin/mai",
-  ],
-});
+import { maiDep } from "../../shared/src/mai-binary";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 import {
   tldrArchAPI,

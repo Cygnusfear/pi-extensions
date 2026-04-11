@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { runTeamsAction } from "./tool.ts";
 
 describe("teams tool runtime action", () => {
@@ -33,7 +34,7 @@ describe("teams tool runtime action", () => {
 		} as any;
 		const pi = {
 			exec: async (cmd: string, args: string[]) => {
-				if (cmd === 'mai' && args[0] === 'ticket') return { stdout: 'pe-new\n', code: 0 };
+				if (path.basename(cmd) === 'mai' && args[0] === 'ticket') return { stdout: 'pe-new\n', code: 0 };
 				return { stdout: '', code: 0 };
 			},
 		} as any;

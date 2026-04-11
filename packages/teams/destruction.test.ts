@@ -93,7 +93,7 @@ describe("kill() performance under hostile mai", () => {
 	test.skip("kill() returns in <100ms even when mai close hangs at the 5s timeout", async () => {
 		// mai close takes the full timeout window (worst case: mai hung, SIGTERM'd after 5s)
 		const slowMai = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "close") {
+			if (path.basename(cmd) === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 5000));
 				return { stdout: "", stderr: "", code: 143, killed: true };
 			}
@@ -110,7 +110,7 @@ describe("kill() performance under hostile mai", () => {
 
 	test.skip("killAll() of 10 workers returns in <200ms even if every mai close times out", async () => {
 		const slowMai = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "close") {
+			if (path.basename(cmd) === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 5000));
 				return { stdout: "", stderr: "", code: 143, killed: true };
 			}
@@ -174,7 +174,7 @@ describe("delegate() after kill() races", () => {
 
 		// Make mai close take 200ms then succeed, so cleanup has measurable duration.
 		const slowMai = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "close") {
+			if (path.basename(cmd) === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 200));
 			}
 			return { stdout: "", stderr: "", code: 0 };

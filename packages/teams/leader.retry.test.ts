@@ -51,7 +51,7 @@ function makeLeaderHarness(baseDir: string) {
 	const sendMessageLog = path.join(baseDir, "send-message.log");
 	const fakePi = {
 		exec: async (cmd: string, args: string[]) => {
-			if (cmd !== "mai") throw new Error(`unexpected command: ${cmd}`);
+			if (path.basename(cmd) !== "mai") throw new Error(`unexpected command: ${cmd}`);
 			if (args[0] === "--json" && args[1] === "show") {
 				return { stdout: JSON.stringify({ id: args[2], status: "open", comments: [] }) };
 			}
@@ -649,7 +649,7 @@ describe("TeamLeader lifecycle regression", () => {
 		const events: any[] = [];
 		leader.notifyLLM = (event: any) => { events.push(event); };
 		leader.pi.exec = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "--json" && args[1] === "show") {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
 				return { stdout: JSON.stringify({ id: args[2], status: "closed", comments: [{ body: "DONE: turn summary", timestamp: new Date().toISOString() }] }) };
 			}
 			return { stdout: "" };
@@ -719,7 +719,7 @@ describe("TeamLeader lifecycle regression", () => {
 		const events: any[] = [];
 		leader.notifyLLM = (event: any) => { events.push(event); };
 		leader.pi.exec = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "--json" && args[1] === "show") {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
 				return { stdout: JSON.stringify({ id: args[2], status: "closed", comments: [{ body: "DONE: useful summary", timestamp: new Date().toISOString() }] }) };
 			}
 			return { stdout: "" };
@@ -780,10 +780,10 @@ describe("TeamLeader lifecycle regression", () => {
 		const events: any[] = [];
 		leader.notifyLLM = (event: any) => { events.push(event); };
 		leader.pi.exec = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "--json" && args[1] === "show") {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
 				return { stdout: JSON.stringify({ id: args[2], status: "open", comments: [] }) };
 			}
-			if (cmd === "mai" && args[0] === "close") return { stdout: "" };
+			if (path.basename(cmd) === "mai" && args[0] === "close") return { stdout: "" };
 			return { stdout: "" };
 		};
 
@@ -893,10 +893,10 @@ describe("TeamLeader lifecycle regression", () => {
 		const events: any[] = [];
 		leader.notifyLLM = (event: any) => { events.push(event); };
 		leader.pi.exec = async (cmd: string, args: string[]) => {
-			if (cmd === "mai" && args[0] === "--json" && args[1] === "show") {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
 				return { stdout: JSON.stringify({ id: args[2], status: "open", comments: [{ body: "EXITED: Worker process ended before completing work", timestamp: new Date().toISOString() }] }) };
 			}
-			if (cmd === "mai" && args[0] === "close") return { stdout: "" };
+			if (path.basename(cmd) === "mai" && args[0] === "close") return { stdout: "" };
 			return { stdout: "" };
 		};
 

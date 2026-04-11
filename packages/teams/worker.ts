@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getMaiBin } from "../shared/src/mai-binary.js";
 import { Type } from "@sinclair/typebox";
 import { existsSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
@@ -114,8 +115,8 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		);
 		try {
 			const effectiveCwd = getTicketCwd(cwd);
-			await pi.exec("mai", ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
-			await pi.exec("mai", ["close", ticketId], { cwd: effectiveCwd, timeout: 5000 });
+			await pi.exec(getMaiBin(), ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
+			await pi.exec(getMaiBin(), ["close", ticketId], { cwd: effectiveCwd, timeout: 5000 });
 		} catch {
 			// best effort
 		}
@@ -270,7 +271,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
 		parameters: CommentParams,
 		async execute(_id, params: { message: string }, _signal, _onUpdate, ctx) {
-			const result = await pi.exec("mai", ["add-note", ticketId, params.message], {
+			const result = await pi.exec(getMaiBin(), ["add-note", ticketId, params.message], {
 				cwd: getTicketCwd(ctx.cwd),
 				timeout: 5000,
 			});

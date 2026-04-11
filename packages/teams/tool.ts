@@ -1,8 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { writeFile, unlink } from "node:fs/promises";
-import { createDep } from "../shared/src/tool-availability";
-
-const maiDep = createDep({ binary: "mai", install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest", name: "mai" });
+import { getMaiBin, maiDep } from "../shared/src/mai-binary.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -246,7 +244,7 @@ async function runTeamsAction(
       if (task.ticketId) {
         // Pre-created ticket — skip creation, just ensure it's started
         ticketId = task.ticketId;
-        await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+        await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
       } else {
         // Create ticket from task text
         const templateName = task.template ?? "";
@@ -258,7 +256,7 @@ async function runTeamsAction(
         const needsBody = task.text.length > taskTitle.length;
 
         const createResult = await pi.exec(
-          "mai",
+          getMaiBin(),
           ["ticket", taskTitle, ticketType, "-l", ticketTags, "-a", workerName],
           { cwd: ctx.cwd, timeout: 5000 },
         );
@@ -273,13 +271,13 @@ async function runTeamsAction(
           const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
           try {
             await writeFile(tmp, task.text, "utf8");
-            await pi.exec("mai", ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
+            await pi.exec(getMaiBin(), ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
           } finally {
             await unlink(tmp).catch(() => {});
           }
         }
 
-        await pi.exec("mai", ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
+        await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
       }
 
       try {
@@ -293,7 +291,7 @@ async function runTeamsAction(
         );
       } catch (err) {
         // Pre-flight auth failure or other spawn error — clean up the ticket
-        await pi.exec("mai", ["close", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+        await pi.exec(getMaiBin(), ["close", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
         results.push(`Failed to spawn "${workerName}": ${err}`);
       }
     }

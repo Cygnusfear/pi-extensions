@@ -17,7 +17,8 @@
     "./tui-diff-renderer": "./src/tui-diff-renderer.ts",
     "./foresight-read": "./src/foresight-read.ts",
     "./foresight-write": "./src/foresight-write.ts",
-    "./tool-availability": "./src/tool-availability.ts"
+    "./tool-availability": "./src/tool-availability.ts",
+    "./mai-binary": "./src/mai-binary.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",
