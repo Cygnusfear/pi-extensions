@@ -1,0 +1,31 @@
+skills/environment/SKILL.md
+  c74893e35f864293 109,111,113,115-119,123-125,127,130-156,158-161,165-172,235-237
+packages/teams/README.md
+  c74893e35f864293 165-302
+packages/code-mode/extensions/code-mode-prompt.md
+  c74893e35f864293 94-112,118-120,126,133-134
+docs/walkthrough.md
+  c74893e35f864293 85-96
+docs/demo-script.md
+  c74893e35f864293 219-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "0fd9cfc922b2c7b6cd6787ced75568e888948be4",
+  "prompts": {
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 257,
+      "total_deletions": 37,
+      "accepted_lines": 257,
+      "overriden_lines": 0
+    }
+  }
+}
