@@ -14,7 +14,17 @@ import {
 import { isLocked, lockError } from "./shell-utils";
 import { createDep } from "../../shared/src/tool-availability";
 
-const maiDep = createDep({ binary: "mai", install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest", name: "mai" });
+const maiDep = createDep({
+  binary: "mai",
+  install: "Install: go install github.com/cygnusfear/maitake/cmd/mai@latest",
+  name: "mai",
+  envOverride: "MAI_BIN",
+  fallbacks: [
+    path.join(os.homedir(), "go", "bin", "mai"),
+    "/opt/homebrew/bin/mai",
+    "/usr/local/bin/mai",
+  ],
+});
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 import {
   tldrArchAPI,
@@ -71,7 +81,19 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
   async function maiRun(args: string[], dir: string) {
     maiDep.guard();
-    const result = await spawnAsync({ cmd: "mai", args, cwd: dir, signal });
+    // Spawn by ABSOLUTE path so we never depend on PATH at spawn time.
+    // This is the fix for posix_spawn 'mai' ENOENT failures in sessions
+    // where the child process inherits a stripped or stale PATH even though
+    // the binary resolved fine at extension init time.
+    const cmd = maiDep.resolved ?? "mai";
+    let result = await spawnAsync({ cmd, args, cwd: dir, signal });
+    // ENOENT recovery: cached path may be stale (binary moved/reinstalled
+    // mid-session). Re-probe once and retry with the fresh absolute path.
+    if (result.error && /ENOENT/i.test(result.error.message)) {
+      if (maiDep.recheck() && maiDep.resolved && maiDep.resolved !== cmd) {
+        result = await spawnAsync({ cmd: maiDep.resolved, args, cwd: dir, signal });
+      }
+    }
     if (result.error) throw new Error(`mai error: ${result.error.message}`);
     return result;
   }

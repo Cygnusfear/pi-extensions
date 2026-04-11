@@ -15,6 +15,8 @@
  */
 
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +24,10 @@ interface BinaryDep {
   binary: string;
   install: string;
   name?: string;
+  /** Env var that may hold an absolute override path (e.g. "MAI_BIN"). */
+  envOverride?: string;
+  /** Absolute fallback paths probed if PATH lookup fails. */
+  fallbacks?: string[];
 }
 
 interface EnvDep {
@@ -98,12 +104,37 @@ function isBinaryDep(spec: DepSpec): spec is BinaryDep {
   return "binary" in spec;
 }
 
-function checkBinary(name: string): string | null {
-  try {
-    return execSync(`command -v ${name} 2>/dev/null`, { encoding: "utf-8" }).trim() || null;
-  } catch {
-    return null;
+/**
+ * Resolve a binary to an ABSOLUTE existing path.
+ * Resolution order:
+ *   1. envOverride (if set and points to an absolute existing file)
+ *   2. `command -v <binary>` in current PATH (must be absolute + exist)
+ *   3. explicit absolute fallback candidates
+ * Never returns a bare binary name — callers can safely `spawn(resolved)`
+ * without relying on PATH at spawn time. This is what stops posix_spawn ENOENT
+ * failures when the child inherits a stripped PATH.
+ */
+function checkBinary(spec: BinaryDep): string | null {
+  if (spec.envOverride) {
+    const override = process.env[spec.envOverride];
+    if (override && path.isAbsolute(override) && existsSync(override)) {
+      return override;
+    }
   }
+  try {
+    const out = execSync(`command -v ${spec.binary} 2>/dev/null`, { encoding: "utf-8" }).trim();
+    if (out && path.isAbsolute(out) && existsSync(out)) {
+      return out;
+    }
+  } catch {
+    // fall through to fallbacks
+  }
+  for (const candidate of spec.fallbacks ?? []) {
+    if (candidate && path.isAbsolute(candidate) && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function checkEnv(name: string): string | null {
@@ -122,7 +153,7 @@ export function createDep(spec: DepSpec): Dep {
 
   function check() {
     if (isBinaryDep(spec)) {
-      resolved = checkBinary(spec.binary);
+      resolved = checkBinary(spec);
       ok = resolved !== null;
       reason = ok ? null : `${name} is not installed`;
     } else {
