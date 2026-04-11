@@ -1,0 +1,27 @@
+packages/git-ai/hooks/prepare-commit-msg
+  c74893e35f864293 1-71
+packages/git-ai/extensions/git-ai.ts
+  c74893e35f864293 17,20,264-311,338-371,379-381,383-386,447-452
+packages/git-ai/package.json
+  c74893e35f864293 21-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "2b4dec2b69b05a2dd313bbe7d5148bf7ed745dbf",
+  "prompts": {
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 171,
+      "total_deletions": 3,
+      "accepted_lines": 171,
+      "overriden_lines": 0
+    }
+  }
+}
