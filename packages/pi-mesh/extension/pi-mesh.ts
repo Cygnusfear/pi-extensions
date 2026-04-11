@@ -13,7 +13,7 @@ import { dirname, resolve, join } from "node:path";
 import { spawn } from "node:child_process";
 import { createConnection, type Socket } from "node:net";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, AgentToolResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, AgentToolResult } from "@mariozechner/pi-coding-agent";
 import { renderToolResult } from "@pi-extensions/shared/tool-ui-utils";
 import {
 	formatSessionViewEntries,
@@ -1024,6 +1024,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	const mesh = new PiMesh();
 	let started = false;
 	let currentCtx: { sessionManager: { getBranch: () => unknown[]; getSessionId: () => string } } | null = null;
+	let regenesisStash: {
+		ctx: ExtensionCommandContext;
+		sessionId: string;
+		sessionName: string | null;
+		sessionFile: string | undefined;
+		cwd: string;
+		identity: MeshIdentity;
+		channels: string[];
+		broadcastAllowed: boolean;
+	} | null = null;
 	let agentBusy = false;
 	// Deafen silences incoming mesh messages (both direct tells and channel chat)
 	// so the TUI stays quiet while you're focused. Toggled via /mesh deafen.
@@ -1316,6 +1326,54 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			registerSandboxFn("meshChat", (meshPeers as any).chat);
 			registerSandboxFn("meshJoinChannel", (meshPeers as any).joinChannel);
 			registerSandboxFn("meshLeaveChannel", (meshPeers as any).leaveChannel);
+
+			// regenesis: creates a fresh session with the agent-written TPV handoff.
+			// Called from execute_code after the agent writes a TPV into $ vars.
+			registerSandboxFn("regenesis", async (params: { tpv: string }) => {
+				if (!regenesisStash) {
+					throw new Error("regenesis() called without /regenesis — run /regenesis first.");
+				}
+				const stash = regenesisStash;
+				regenesisStash = null; // one-shot
+
+				const tpvText = params.tpv;
+				if (!tpvText || typeof tpvText !== "string" || tpvText.trim().length === 0) {
+					throw new Error("regenesis() requires a non-empty tpv string — write the TPV first.");
+				}
+
+				const result = await stash.ctx.newSession({
+					parentSession: stash.sessionFile ?? undefined,
+					setup: async (sm) => {
+						// Inject the agent-written TPV as a custom_message entry (participates in LLM context)
+						sm.appendCustomMessageEntry("regenesis-handoff", tpvText, false, {
+							parentSessionId: stash.sessionId,
+							parentSessionName: stash.sessionName,
+							transferedAt: new Date().toISOString(),
+						});
+
+						// Regenesis marker so session_start knows to reuse identity
+						sm.appendCustomEntry(MESH_REGENESIS_TYPE, {
+							fromSession: stash.sessionId,
+							transferedAt: new Date().toISOString(),
+						});
+
+						// Transfer mesh identity
+						sm.appendCustomEntry(MESH_IDENTITY_TYPE, stash.identity);
+
+						// Transfer channel subscriptions
+						if (stash.channels.length > 0) {
+							sm.appendCustomEntry(MESH_CHANNELS_TYPE, { channels: stash.channels });
+						}
+
+						// Transfer broadcast setting
+						if (stash.broadcastAllowed) {
+							sm.appendCustomEntry(MESH_BROADCAST_ALLOWED_TYPE, { allowed: true });
+						}
+					},
+				});
+
+				return JSON.stringify({ ok: !result.cancelled, cancelled: result.cancelled });
+			});
 		} catch (err) {
 			console.warn("[pi-mesh] Failed to register sandbox functions:", err);
 		}
@@ -1866,44 +1924,17 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
 
 	// ── /regenesis command ──────────────────────────────────────────────────────────────
+	// Phase 1: stash session metadata, then steer the agent to write a TPV.
+	// The agent calls regenesis() from execute_code with the synthesized TPV text.
+	// Phase 2 is the regenesis sandbox fn (registered in session_start).
 
 	pi.registerCommand("regenesis", {
-		description: "Regenesis: nuke conversation history, inject a TPV handoff into a fresh session, keep mesh identity so peers still know you.",
+		description: "Regenesis: steer the agent to write a TPV, then rebirth into a fresh session with identity preserved.",
 		handler: async (args, ctx) => {
-			const entries = ctx.sessionManager.getEntries();
 			const sessionId = ctx.sessionManager.getSessionId();
 			const sessionName = ctx.sessionManager.getSessionName();
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			const cwd = ctx.sessionManager.getCwd();
-
-			if (entries.length === 0) {
-				ctx.ui.notify("Cannot regenesis: current session has no entries.", "warning");
-				return;
-			}
-
-			const meaningful = projectMeaningfulSessionEntries(entries);
-			const tail = meaningful.slice(-50);
-			const handoffLines: string[] = [
-				"# Regenesis Handoff (TPV)",
-				"",
-				"Previous session: " + (sessionName ?? sessionId.slice(0, 8)),
-				"Session ID: " + sessionId,
-				"CWD: " + cwd,
-				"Timestamp: " + new Date().toISOString(),
-				"",
-				"--- Last " + tail.length + " meaningful entries from previous session ---",
-				"",
-			];
-			for (const entry of tail) {
-				const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() + " " : "";
-				handoffLines.push("[" + ts + entry.label + "] " + entry.text.split("\n").join("\n  "));
-				handoffLines.push("");
-			}
-			handoffLines.push("--- End of regenesis handoff ---");
-			handoffLines.push("");
-			handoffLines.push("You are the continuation of the previous session. Your mesh identity is preserved. Peers still know you.");
-			handoffLines.push("Review the handoff above, orient yourself, and continue where the previous session left off.");
-			const handoffText = handoffLines.join("\n");
 
 			const identity = resolveIdentityFromSession(ctx);
 			const channels = resolveChannelsFromSession(ctx);
@@ -1914,37 +1945,39 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			ctx.ui.notify("Regenesis: creating fresh session with handoff...", "info");
+			// Stash everything the sandbox fn needs
+			regenesisStash = {
+				ctx,
+				sessionId,
+				sessionName,
+				sessionFile,
+				cwd,
+				identity,
+				channels,
+				broadcastAllowed: broadcastSetting,
+			};
 
-			const result = await ctx.newSession({
-				parentSession: sessionFile ?? undefined,
-				setup: async (sm) => {
-					sm.appendCustomMessageEntry("regenesis-handoff", handoffText, false, {
-						parentSessionId: sessionId,
-						parentSessionName: sessionName,
-						transferedAt: new Date().toISOString(),
-					});
+			ctx.ui.notify("Regenesis initiated — writing TPV handoff...", "info");
 
-					sm.appendCustomEntry(MESH_REGENESIS_TYPE, {
-						fromSession: sessionId,
-						transferedAt: new Date().toISOString(),
-					});
-
-					sm.appendCustomEntry(MESH_IDENTITY_TYPE, identity);
-
-					if (channels.length > 0) {
-						sm.appendCustomEntry(MESH_CHANNELS_TYPE, { channels });
-					}
-
-					if (broadcastSetting) {
-						sm.appendCustomEntry(MESH_BROADCAST_ALLOWED_TYPE, { allowed: true });
-					}
-				},
-			});
-
-			if (result.cancelled) {
-				ctx.ui.notify("Regenesis cancelled.", "info");
-			}
+			// Steer the agent: write a TPV, then call regenesis()
+			pi.sendUserMessage([
+				{ type: "text", text: "REGENESIS — Write a Total Perspective Vortex (TPV) handoff for your next self, then call regenesis() to rebirth.\n\n" +
+					"## What to do\n\n" +
+					"1. Review everything that happened in this session — decisions, dead ends, gotchas, files touched, line numbers, tickets, ADRs, next steps.\n" +
+					"2. Write a thick TPV handoff into $.tpv — include:\n" +
+					"   - Session context: what was the goal, what was accomplished\n" +
+					"   - Key decisions and why (ADRs if any)\n" +
+					"   - Dead ends and what was wrong about them\n" +
+					"   - Files modified with line numbers for important bits\n" +
+					"   - Tickets created/updated (IDs, status)\n" +
+					"   - Unfinished work and exact next steps\n" +
+					"   - Lessons learned, things to improve\n" +
+					"   - Any warnings or gotchas for the continuation\n" +
+					"3. Call: regenesis({ tpv: $.tpv })\n\n" +
+					"Your mesh identity will be preserved — peers will still recognise you.\n" +
+					"Session ID: " + sessionId + "\n" +
+					"CWD: " + cwd },
+			]);
 		},
 	});
 }
