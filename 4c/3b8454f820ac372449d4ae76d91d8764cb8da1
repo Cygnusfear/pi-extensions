@@ -1,0 +1,53 @@
+packages/shared/src/tool-availability.ts
+  07ed175674a9262f 18-19,27-30,107-123,125-128,130-135,137,156
+packages/code-mode/src/sandbox-tools.ts
+  07ed175674a9262f 17-27,84-96
+packages/shared/src/tool-availability.test.ts
+  07ed175674a9262f 1-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "4c3b8454f820ac372449d4ae76d91d8764cb8da1",
+  "prompts": {
+    "07ed175674a9262f": {
+      "agent_id": {
+        "tool": "Eleanor Jupiter Corsi",
+        "id": "afc15beb-2d97-44c4-ae8b-0314859bb95c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 189,
+      "overriden_lines": 0
+    },
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 257,
+      "total_deletions": 37,
+      "accepted_lines": 257,
+      "overriden_lines": 0
+    },
+    "f82b655cfd989add": {
+      "agent_id": {
+        "tool": "Shri Blackhole Bannister",
+        "id": "4a656c28-72e1-40df-8276-d9ff99f396d0",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 3,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
