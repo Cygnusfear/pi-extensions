@@ -832,6 +832,34 @@ declare function supervise(enabled: boolean): Promise<string>;
  *
  * // Raw action dispatch (backward compat)
  * await teams({ action: "delegate", tasks: [...] });
+ *
+ * // Subscribe to worker events — no polling, no hard sleeps
+ * // One-shot await: block until fixer completes (or errors)
+ * const event = await teams.on("fixer", "completed").timeout(600_000);
+ * console.log("fixer done:", event.result);
+ *
+ * // Background wake — trigger a turn when the event fires, even after this
+ * // execute_code block returns. Works like console.wake but event-driven.
+ * teams.on("fixer", "completed").wake();
+ * teams.on("oracle", "completed").wake(e => `Oracle finished: ${e.result.slice(0, 500)}`);
+ *
+ * // Streaming: react to every matching event until unsubscribed
+ * const sub = teams.on({ name: "oracle", type: "comment" }).each(e => {
+ *   console.log("oracle note:", e.comment.slice(0, 200));
+ * });
+ * // later: sub.unsubscribe();
+ *
+ * // Comment/note body regex
+ * await teams.on({ name: "oracle", comment: /DONE:|FINAL:/ }).timeout(300_000);
+ *
+ * // Full predicate escape hatch
+ * await teams.on({ predicate: e => e.type === "stuck" && e.idleSeconds > 300 });
+ *
+ * // Parallel race — whichever finishes first wins
+ * const first = await Promise.race([
+ *   teams.on("fixer", "completed"),
+ *   teams.on("oracle", "completed"),
+ * ]);
  */
 declare const teams: {
   /** Raw action dispatch — backward compat. Prefer specific methods below. */
@@ -878,7 +906,83 @@ declare const teams: {
 
   /** Show runtime info. */
   runtime(): Promise<string>;
+
+  /**
+   * Subscribe to the leader's PollEvent stream. Returns a TeamsSubscription that is
+   * thenable (so `await teams.on(...)` resolves on the next match) and chainable
+   * via .each(), .wake(), .timeout(), .unsubscribe().
+   *
+   * Event types: "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive"
+   *
+   * - One-shot form: awaiting the subscription resolves on the first matching event
+   *   and auto-unsubscribes.
+   * - Streaming form: .each(cb) keeps firing until .unsubscribe() is called.
+   * - Background wake: .wake(msg?) triggers a coordinator turn when the event fires,
+   *   works from background promises after the execute_code block has returned.
+   * - Terminal state short-circuit: if the target worker is already in the requested
+   *   terminal state at subscribe time, the subscription resolves immediately from
+   *   the current WorkerHandle rather than hanging forever.
+   */
+  on(name: string): TeamsSubscription;
+  on(name: string, type: TeamsEventType): TeamsSubscription;
+  on(name: string, type: TeamsEventType, callback: (event: TeamsPollEvent) => void): TeamsSubscription;
+  on(filter: TeamsEventFilter): TeamsSubscription;
+  on(filter: TeamsEventFilter, callback: (event: TeamsPollEvent) => void): TeamsSubscription;
 };
+
+type TeamsEventType = "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive";
+
+interface TeamsEventFilter {
+  name?: string;
+  type?: TeamsEventType;
+  /** Only meaningful for comment events. String → substring, RegExp → test(). */
+  comment?: string | RegExp;
+  /** Full custom predicate — runs after all other filters. */
+  predicate?: (event: TeamsPollEvent) => boolean;
+  /** Default true. If false, skip synthesizing an immediate event for workers
+   *  already in a terminal state matching the filter. */
+  matchCurrent?: boolean;
+}
+
+interface TeamsWorkerHandle {
+  name: string;
+  ticketId: string;
+  status: string;
+  nickname?: string;
+  pid: number;
+  lastNote?: string;
+  [key: string]: unknown;
+}
+
+type TeamsPollEvent =
+  | { type: "completed"; worker: TeamsWorkerHandle; result: string }
+  | { type: "turn_finished"; worker: TeamsWorkerHandle; result: string }
+  | { type: "warning"; worker: TeamsWorkerHandle; reason: string }
+  | { type: "failed"; worker: TeamsWorkerHandle; reason: string }
+  | { type: "stuck"; worker: TeamsWorkerHandle; idleSeconds: number }
+  | { type: "comment"; worker: TeamsWorkerHandle; comment: string }
+  | { type: "alive"; worker: TeamsWorkerHandle };
+
+/**
+ * Subscription returned by teams.on(). Thenable + chainable. Auto-unsubscribes
+ * after the first match UNLESS .each() has been attached (then it keeps streaming).
+ */
+interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
+  /** Streaming callback. Fires on every matching event until unsubscribed. */
+  each(callback: (event: TeamsPollEvent) => void): this;
+
+  /** Trigger a coordinator turn when the event fires. Background-safe. */
+  wake(message?: string | ((event: TeamsPollEvent) => string)): this;
+
+  /** Reject with a timeout error if no matching event arrives within ms. */
+  timeout(ms: number): this;
+
+  /** Manually stop receiving events. Idempotent. */
+  unsubscribe(): void;
+
+  /** Alias for unsubscribe. */
+  cancel(): void;
+}
 
 /**
  * mesh — inter-session communication. Callable as peers(), plus tell/view/broadcast/chat.

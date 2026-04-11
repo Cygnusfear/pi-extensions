@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
+import { buildPredicate, TeamsSubscription, type EventFilter, type PollEventType } from "./subscription.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
 import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
@@ -50,6 +51,50 @@ export default function (pi: ExtensionAPI) {
 	(teamsFn as any).view = async (name: string, opts?: { start?: number; end?: number }) =>
 		run({ action: "view", name, ...opts });
 	(teamsFn as any).runtime = async () => run({ action: "runtime" });
+
+	// teams.on — subscribe to the leader's PollEvent stream with a predicate.
+	// Returns a thenable TeamsSubscription you can `await`, chain with .each(),
+	// .wake(), .timeout(), or .unsubscribe(). No polling, no sleeps.
+	//
+	// Supported signatures (all return TeamsSubscription):
+	//   teams.on("fixer")
+	//   teams.on("fixer", "completed")
+	//   teams.on({ name: "oracle", comment: /DONE:/ })
+	//   teams.on({ predicate: e => ... })
+	//   teams.on("fixer", "completed", (event) => { ... })    // shorthand for .each()
+	//   teams.on({ name: "oracle" }, (event) => { ... })
+	const sendUserMessage = (msg: string) => {
+		try { pi.sendUserMessage(msg); } catch (err) {
+			console.warn("[teams.on] sendUserMessage failed:", err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	(teamsFn as any).on = (
+		targetOrFilter: string | EventFilter,
+		typeOrCallback?: PollEventType | ((event: unknown) => void),
+		callback?: (event: unknown) => void,
+	): TeamsSubscription => {
+		// Disambiguate overloads. Rule: first arg string + second arg is a poll-event-type string
+		// → two-positional form. Anything else with second-arg function → streaming callback.
+		let eventType: PollEventType | undefined;
+		let eachCb: ((event: unknown) => void) | undefined;
+
+		if (typeof targetOrFilter === "string") {
+			if (typeof typeOrCallback === "string") {
+				eventType = typeOrCallback;
+				eachCb = callback;
+			} else if (typeof typeOrCallback === "function") {
+				eachCb = typeOrCallback;
+			}
+		} else if (typeof typeOrCallback === "function") {
+			eachCb = typeOrCallback;
+		}
+
+		const { filter, predicate } = buildPredicate(targetOrFilter, eventType);
+		const sub = new TeamsSubscription(leader, filter, predicate, sendUserMessage);
+		if (eachCb) sub.each(eachCb as (event: unknown) => void);
+		return sub;
+	};
 
 	registerSandboxFn("teams", teamsFn);
 

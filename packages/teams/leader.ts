@@ -715,6 +715,8 @@ export class TeamLeader {
   );
   private notifiedTerminal = new Set<string>();
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
+  /** External subscribers to PollEvent stream (teams.on). */
+  private eventListeners = new Set<(event: PollEvent) => void>();
   private notifyDraining = false;
   private stateHydrated = false;
   private lastSavedStateSignature: string | null = null;
@@ -2201,7 +2203,41 @@ export class TeamLeader {
     this.ctx.ui.setWidget("pi-teams", this.widgetFactory);
   }
 
+  /**
+   * Subscribe to raw PollEvent stream. Listener runs synchronously inside
+   * notifyLLM, before the existing filter/queue/turn-trigger logic. This is
+   * the substrate for `teams.on(...)` in the sandbox API.
+   *
+   * Listener errors are isolated — a throwing listener cannot break the event
+   * pipeline for other listeners or for notifyLLM itself.
+   *
+   * Returns an unsubscribe function. Always call it when done to avoid leaks.
+   */
+  subscribeToEvents(listener: (event: PollEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  }
+
+  /** Current live workers — used by teams.on to check for already-terminal targets. */
+  getWorker(name: string): WorkerHandle | undefined {
+    return this.workers.get(name);
+  }
+
   private notifyLLM(event: PollEvent) {
+    // Fan out to external subscribers first — they see every event,
+    // regardless of whether it dedupes or triggers a coordinator turn.
+    if (this.eventListeners.size > 0) {
+      for (const listener of this.eventListeners) {
+        try {
+          listener(event);
+        } catch (err) {
+          console.warn("[teams] event listener threw:", err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+
     if (event.type === "completed" || event.type === "warning" || event.type === "failed") {
       const key = `${event.worker.name}:terminal`;
       if (this.notifiedTerminal.has(key)) return;
