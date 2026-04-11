@@ -1,0 +1,27 @@
+packages/shared/src/tool-availability.ts
+  07ed175674a9262f 18-19,27-30,107-123,125-128,130-135,137,156
+packages/shared/src/tool-availability.test.ts
+  07ed175674a9262f 1-130
+packages/code-mode/src/sandbox-tools.ts
+  07ed175674a9262f 17-27,84-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "ee334cbd2e73668f68f3e89682b7ad256120e19d",
+  "prompts": {
+    "07ed175674a9262f": {
+      "agent_id": {
+        "tool": "Eleanor Jupiter Corsi",
+        "id": "afc15beb-2d97-44c4-ae8b-0314859bb95c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 189,
+      "overriden_lines": 0
+    }
+  }
+}
