@@ -393,7 +393,7 @@ export default function (pi: ExtensionAPI) {
 	// code-mode surfaces those edits to extensions like this one.
 	(async () => {
 		try {
-			const { registerEditHook } = await import("@pi-extensions/shared/edit-hooks");
+			const { registerEditHook } = await import("../../shared/src/edit-hooks");
 			registerEditHook(async (e) => {
 				if (e.filePaths.length === 0) return;
 				await emitCheckpoint({

@@ -4,7 +4,7 @@ import {
   foresightRecall,
   foresightUnfold,
 } from "@pi-extensions/shared/foresight-read";
-import { runEditHooks } from "@pi-extensions/shared/edit-hooks";
+import { runEditHooks } from "../../shared/src/edit-hooks";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import {
   isGitPath,
