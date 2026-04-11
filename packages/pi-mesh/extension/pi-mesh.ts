@@ -688,7 +688,7 @@ export class PiMesh {
 const MESH_IDENTITY_TYPE = "mesh_identity";
 const MESH_CHANNELS_TYPE = "mesh_channels";
 const MESH_BROADCAST_ALLOWED_TYPE = "mesh_broadcast_allowed";
-const MESH_REGENESIS_TYPE = "mesh_regenesis";
+const MESH_REBIRTH_TYPE = "mesh_rebirth";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -739,13 +739,13 @@ function resolveChannelsFromSession(
  * explicitly opt-in per session via `/mesh allow-broadcast on`. We persist
  * the decision so /reload and resume keep the setting.
  */
-// Check whether the session contains a regenesis marker (set by /regenesis)
+// Check whether the session contains a rebirth marker (set by /rebirth)
 // to signal that this "new" session should inherit the old mesh identity.
-function hasRegenesisMarker(
+function hasRebirthMarker(
 	ctx: { sessionManager: { getEntries: () => Array<{ type: string; customType?: string; data?: unknown }> } },
 ): boolean {
 	for (const entry of ctx.sessionManager.getEntries()) {
-		if (entry.type === "custom" && entry.customType === MESH_REGENESIS_TYPE) return true;
+		if (entry.type === "custom" && entry.customType === MESH_REBIRTH_TYPE) return true;
 	}
 	return false;
 }
@@ -814,8 +814,8 @@ function resolveAndSetIdentity(
 			setStableId(existing.id);
 			return;
 		}
-	} else if (reason === "new" && hasRegenesisMarker(ctx) && existing) {
-		// REGENESIS: new session created by /regenesis — reuse old identity
+	} else if (reason === "new" && hasRebirthMarker(ctx) && existing) {
+		// REBIRTH: new session created by /rebirth — reuse old identity
 		// so peers on the mesh still recognise this agent.
 		mesh.setIdentity(existing);
 		setStableId(existing.id);
@@ -826,7 +826,7 @@ function resolveAndSetIdentity(
 		setStableId(existing.id);
 		return;
 	}
-	// fork, new (non-regenesis), missing identity, or double-resume → generate fresh identity below
+	// fork, new (non-rebirth), missing identity, or double-resume → generate fresh identity below
 
 	// Generate fresh identity
 	const id = randomUUID();
@@ -1024,7 +1024,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	const mesh = new PiMesh();
 	let started = false;
 	let currentCtx: { sessionManager: { getBranch: () => unknown[]; getSessionId: () => string } } | null = null;
-	let regenesisStash: {
+	let rebirthStash: {
 		ctx: ExtensionCommandContext;
 		sessionId: string;
 		sessionName: string | null;
@@ -1327,32 +1327,32 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			registerSandboxFn("meshJoinChannel", (meshPeers as any).joinChannel);
 			registerSandboxFn("meshLeaveChannel", (meshPeers as any).leaveChannel);
 
-			// regenesis: creates a fresh session with the agent-written TPV handoff.
+			// rebirth: creates a fresh session with the agent-written TPV handoff.
 			// Called from execute_code after the agent writes a TPV into $ vars.
-			registerSandboxFn("regenesis", async (params: { tpv: string }) => {
-				if (!regenesisStash) {
-					throw new Error("regenesis() called without /regenesis — run /regenesis first.");
+			registerSandboxFn("rebirth", async (params: { tpv: string }) => {
+				if (!rebirthStash) {
+					throw new Error("rebirth() called without /rebirth — run /rebirth first.");
 				}
-				const stash = regenesisStash;
-				regenesisStash = null; // one-shot
+				const stash = rebirthStash;
+				rebirthStash = null; // one-shot
 
 				const tpvText = params.tpv;
 				if (!tpvText || typeof tpvText !== "string" || tpvText.trim().length === 0) {
-					throw new Error("regenesis() requires a non-empty tpv string — write the TPV first.");
+					throw new Error("rebirth() requires a non-empty tpv string — write the TPV first.");
 				}
 
 				const result = await stash.ctx.newSession({
 					parentSession: stash.sessionFile ?? undefined,
 					setup: async (sm) => {
 						// Inject the agent-written TPV as a custom_message entry (participates in LLM context)
-						sm.appendCustomMessageEntry("regenesis-handoff", tpvText, false, {
+						sm.appendCustomMessageEntry("rebirth-handoff", tpvText, false, {
 							parentSessionId: stash.sessionId,
 							parentSessionName: stash.sessionName,
 							transferedAt: new Date().toISOString(),
 						});
 
-						// Regenesis marker so session_start knows to reuse identity
-						sm.appendCustomEntry(MESH_REGENESIS_TYPE, {
+						// Rebirth marker so session_start knows to reuse identity
+						sm.appendCustomEntry(MESH_REBIRTH_TYPE, {
 							fromSession: stash.sessionId,
 							transferedAt: new Date().toISOString(),
 						});
@@ -1923,13 +1923,13 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 	});
 
 
-	// ── /regenesis command ──────────────────────────────────────────────────────────────
+	// ── /rebirth command ──────────────────────────────────────────────────────────────
 	// Phase 1: stash session metadata, then steer the agent to write a TPV.
-	// The agent calls regenesis() from execute_code with the synthesized TPV text.
-	// Phase 2 is the regenesis sandbox fn (registered in session_start).
+	// The agent calls rebirth() from execute_code with the synthesized TPV text.
+	// Phase 2 is the rebirth sandbox fn (registered in session_start).
 
-	pi.registerCommand("regenesis", {
-		description: "Regenesis: steer the agent to write a TPV, then rebirth into a fresh session with identity preserved.",
+	pi.registerCommand("rebirth", {
+		description: "Rebirth: steer the agent to write a TPV, then rebirth into a fresh session with identity preserved.",
 		handler: async (args, ctx) => {
 			const sessionId = ctx.sessionManager.getSessionId();
 			const sessionName = ctx.sessionManager.getSessionName();
@@ -1941,12 +1941,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 			const broadcastSetting = resolveBroadcastAllowedFromSession(ctx);
 
 			if (!identity) {
-				ctx.ui.notify("Cannot regenesis: no mesh identity found in current session.", "warning");
+				ctx.ui.notify("Cannot rebirth: no mesh identity found in current session.", "warning");
 				return;
 			}
 
 			// Stash everything the sandbox fn needs
-			regenesisStash = {
+			rebirthStash = {
 				ctx,
 				sessionId,
 				sessionName,
@@ -1957,11 +1957,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 				broadcastAllowed: broadcastSetting,
 			};
 
-			ctx.ui.notify("Regenesis initiated — writing TPV handoff...", "info");
+			ctx.ui.notify("Rebirth initiated — writing TPV handoff...", "info");
 
-			// Steer the agent: write a TPV, then call regenesis()
+			// Steer the agent: write a TPV, then call rebirth()
 			pi.sendUserMessage([
-				{ type: "text", text: "REGENESIS — Write a Total Perspective Vortex (TPV) handoff for your next self, then call regenesis() to rebirth.\n\n" +
+				{ type: "text", text: "REBIRTH — Write a Total Perspective Vortex (TPV) handoff for your next self, then call rebirth() to be reborn into a fresh session.\n\n" +
 					"## What to do\n\n" +
 					"1. Review everything that happened in this session — decisions, dead ends, gotchas, files touched, line numbers, tickets, ADRs, next steps.\n" +
 					"2. Write a thick TPV handoff into $.tpv — include:\n" +
@@ -1973,7 +1973,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 					"   - Unfinished work and exact next steps\n" +
 					"   - Lessons learned, things to improve\n" +
 					"   - Any warnings or gotchas for the continuation\n" +
-					"3. Call: regenesis({ tpv: $.tpv })\n\n" +
+					"3. Call: rebirth({ tpv: $.tpv })\n\n" +
 					"Your mesh identity will be preserved — peers will still recognise you.\n" +
 					"Session ID: " + sessionId + "\n" +
 					"CWD: " + cwd },
