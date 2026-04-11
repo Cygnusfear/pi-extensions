@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# prepare-commit-msg — injects AI agent trailers into commit messages
+# when invoked inside a pi-spawned process.
+#
+# pi's git-ai extension sets:
+#   core.hooksPath = <this dir>        (via GIT_CONFIG_COUNT env override)
+#   PI_AGENT_NAME, PI_AGENT_EMAIL      (required — else no-op)
+#   PI_AGENT_MODEL                     (optional)
+#   PI_SESSION_ID, PI_SESSION_NAME     (optional)
+#   PI_REAL_HOOKS_DIR                  (optional — chained repo hook dir)
+#
+# Behavior:
+#   1. If PI_AGENT_NAME unset → no-op, exec the chained hook if any.
+#   2. Skip merge/squash/commit-source commit messages (git calls the hook
+#      multiple times; we only want to amend fresh message sources).
+#   3. Append trailers via `git interpret-trailers --in-place --if-exists
+#      addIfDifferent` so re-amends don't duplicate lines.
+#   4. Chain to a user-supplied prepare-commit-msg in PI_REAL_HOOKS_DIR
+#      so repo-local hooks still run.
+
+set -e
+
+MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+SHA="${3:-}"
+
+chain_real_hook() {
+	if [ -n "${PI_REAL_HOOKS_DIR:-}" ] && [ -x "${PI_REAL_HOOKS_DIR}/prepare-commit-msg" ]; then
+		exec "${PI_REAL_HOOKS_DIR}/prepare-commit-msg" "$MSG_FILE" "$COMMIT_SOURCE" "$SHA"
+	fi
+}
+
+# No agent identity → no-op, pass through.
+if [ -z "${PI_AGENT_NAME:-}" ]; then
+	chain_real_hook
+	exit 0
+fi
+
+# Don't touch merge/squash/template/existing commits being amended via -C.
+case "$COMMIT_SOURCE" in
+	merge|squash|commit)
+		chain_real_hook
+		exit 0
+		;;
+esac
+
+AGENT_EMAIL="${PI_AGENT_EMAIL:-pi-agent@localhost}"
+
+# Build trailer args. Each trailer is only added if the exact key+value isn't
+# already present (addIfDifferent), so repeated amends don't dup lines.
+TRAILER_ARGS=(
+	--in-place
+	--if-exists addIfDifferent
+	--trailer "Co-Authored-By: ${PI_AGENT_NAME} <${AGENT_EMAIL}>"
+	--trailer "AI-Agent: ${PI_AGENT_NAME}"
+)
+
+if [ -n "${PI_AGENT_MODEL:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Model: ${PI_AGENT_MODEL}")
+fi
+if [ -n "${PI_SESSION_ID:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Session-Id: ${PI_SESSION_ID}")
+fi
+if [ -n "${PI_SESSION_NAME:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Session-Name: ${PI_SESSION_NAME}")
+fi
+
+git interpret-trailers "${TRAILER_ARGS[@]}" "$MSG_FILE"
+
+chain_real_hook
+exit 0

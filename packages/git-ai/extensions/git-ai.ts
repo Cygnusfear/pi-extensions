@@ -14,9 +14,10 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { execFile, spawn } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -260,6 +261,54 @@ function buildAgentV1Payload(params: {
 	});
 }
 
+// ── Agent identity helpers ──
+
+/** Slugify a mesh nickname into a stable email local-part. */
+function slugifyNickname(name: string): string {
+	return name
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "") || "pi-agent";
+}
+
+/** Parse a session file for the current mesh nickname. */
+function readMeshNicknameFromSession(sessionFile: string | null): string | null {
+	if (!sessionFile || !existsSync(sessionFile)) return null;
+	try {
+		const lines = readFileSync(sessionFile, "utf-8").split("\n").filter(Boolean);
+		// Scan newest first — most recent mesh_identity wins if renicknamed mid-session.
+		for (let i = lines.length - 1; i >= 0; i--) {
+			try {
+				const obj = JSON.parse(lines[i]);
+				if (obj.type === "custom" && obj.customType === "mesh_identity") {
+					const data = obj.data as Record<string, unknown> | undefined;
+					if (data && typeof data.nickname === "string") return data.nickname;
+				}
+			} catch { /* skip malformed line */ }
+		}
+	} catch { /* ignore */ }
+	return null;
+}
+
+/** Parse a session file for the most recent model_change. */
+function readModelFromSession(sessionFile: string | null): string | null {
+	if (!sessionFile || !existsSync(sessionFile)) return null;
+	try {
+		const lines = readFileSync(sessionFile, "utf-8").split("\n").filter(Boolean);
+		for (let i = lines.length - 1; i >= 0; i--) {
+			try {
+				const obj = JSON.parse(lines[i]);
+				if (obj.type === "model_change") {
+					const provider = obj.provider as string | undefined;
+					const modelId = obj.modelId as string | undefined;
+					if (provider && modelId) return `${provider}/${modelId}`;
+				}
+			} catch { /* skip */ }
+		}
+	} catch { /* ignore */ }
+	return null;
+}
+
 // ── Checkpoint runner ──
 
 async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
@@ -286,13 +335,54 @@ export default function (pi: ExtensionAPI) {
 	const gitAiBin = resolveGitAiBin();
 	let gitAiAvailable = false;
 
-	pi.on("session_start", async () => {
+	// ── Commit trailer env vars ──
+	// Point core.hooksPath at our bundled prepare-commit-msg via GIT_CONFIG_*
+	// env override, and publish agent identity for that hook to read.
+	// Only affects git processes spawned under pi's env — user terminal commits
+	// are untouched.
+	const hooksDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "hooks");
+	let sessionManagerRef: any = null;
+
+	function refreshCommitEnv(): void {
+		if (!sessionManagerRef) return;
+		const sessionFile = sessionManagerRef.getSessionFile?.() ?? null;
+		const sessionId = sessionManagerRef.getSessionId?.() ?? "";
+		const sessionName = sessionManagerRef.getSessionName?.() ?? "";
+		const meshNickname = readMeshNicknameFromSession(sessionFile);
+		const agentName = meshNickname ?? sessionName ?? "pi";
+		const agentEmail = `${slugifyNickname(agentName)}@pi-agent.local`;
+		const model = readModelFromSession(sessionFile) ?? "";
+
+		// core.hooksPath via GIT_CONFIG_* env override
+		process.env.GIT_CONFIG_COUNT = "1";
+		process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+		process.env.GIT_CONFIG_VALUE_0 = hooksDir;
+
+		process.env.PI_AGENT_NAME = agentName;
+		process.env.PI_AGENT_EMAIL = agentEmail;
+		if (model) process.env.PI_AGENT_MODEL = model;
+		if (sessionId) process.env.PI_SESSION_ID = sessionId;
+		if (sessionName) process.env.PI_SESSION_NAME = sessionName;
+		// PI_REAL_HOOKS_DIR is left unset by default; the hook is a shell script
+		// that no-ops the chain if not provided. Users who want repo-local hook
+		// chaining can set it themselves.
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
 		try {
 			await execFileAsync(gitAiBin, ["--version"], { timeout: 2000, windowsHide: true });
 			gitAiAvailable = true;
 		} catch {
 			gitAiAvailable = false;
 		}
+
+		// Capture sessionManager for later refreshes + prime commit env.
+		sessionManagerRef = (ctx as any)?.sessionManager ?? null;
+		refreshCommitEnv();
+
+		// Clean up model/session env if we were previously set for a different
+		// session — refreshCommitEnv writes the fresh set but doesn't clear stale keys.
+		// (session-start is fired for /new, /resume, /fork — so always re-prime.)
 
 		// Register sandbox-callable function for code-mode (ESM import to share module instance)
 		try {
@@ -353,6 +443,12 @@ export default function (pi: ExtensionAPI) {
 
 		await runCheckpoint(gitAiBin, payload);
 	}
+
+	// ── Refresh commit env on every turn (picks up /model changes, mesh rename) ──
+	pi.on("turn_start", async (_event, ctx) => {
+		sessionManagerRef = (ctx as any)?.sessionManager ?? sessionManagerRef;
+		refreshCommitEnv();
+	});
 
 	// ── PreToolUse: mark state before AI edit (direct tool calls) ──
 	pi.on("tool_call", async (event, ctx) => {
