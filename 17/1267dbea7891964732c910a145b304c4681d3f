@@ -1,0 +1,27 @@
+packages/teams/subscription.ts
+  c74893e35f864293 21-66,86-87,90,101,104,106,112-115,124-126,153-156,160,164-167,224-225,228,269-296
+packages/teams/leader.ts
+  c74893e35f864293 21,719-723,2211-2214,2216-2220,2227,2240-2243,2247,2251,2255-2259
+packages/code-mode/extensions/code-mode-declarations.md
+  c74893e35f864293 843-850,963,973-989,991-1007,1013-1021,1027-1042
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "171267dbea7891964732c910a145b304c4681d3f",
+  "prompts": {
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 199,
+      "total_deletions": 28,
+      "accepted_lines": 199,
+      "overriden_lines": 0
+    }
+  }
+}
