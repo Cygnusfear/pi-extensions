@@ -91,26 +91,47 @@ Use `console.log()` for final output you want the user to see.
 `console.log()` only writes to the current block output — gone when the block returns.
 `console.wake(message)` queues a message that **triggers a new agent turn** after this block finishes. It works from background promises that fire minutes later.
 
+`console.wake` is the **single canonical wake primitive**. Event sources (team workers, file watchers, timers, polling loops) all funnel into it via their own callbacks. Do not reinvent the wake API per tool.
+
+**Pattern 1 — wait for a team worker (`teams.on`):**
+
+```javascript
+// Event-driven — no polling, rides the leader's PollEvent stream.
+// .preventDefault() suppresses the leader's duplicate default batch wake.
+teams.on("fixer", "completed")
+  .preventDefault()
+  .timeout(30 * 60 * 1000)
+  .then(
+    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
+    (err) => console.wake(`fixer errored or timed out: ${err.message}`),
+  );
+console.log("Subscription armed — going idle until fixer completes.");
+```
+
+**Pattern 2 — watch a mesh peer or anything non-event-driven (polling loop):**
+
 ```javascript
 // Fire a monitor, wake yourself when something changes
 $.monitor = (async () => {
   for (let i = 0; i < 20; i++) {
     await sleep(240000); // 4 minutes
-    const view = await meshView({ sessionId: 'worker-1', start: -2, end: 0 });
-    if (view.includes('completed')) {
-      console.wake("Worker finished! Results: " + view.slice(0, 500));
+    const view = await meshView({ sessionId: 'deploy-worker', start: -2, end: 0 });
+    if (view.includes('deployed')) {
+      console.wake("Deploy finished: " + view.slice(0, 500));
       return;
     }
   }
   console.wake("Monitor timed out after 80 minutes.");
 })();
-console.log("Monitor started — will wake me when the worker finishes.");
+console.log("Monitor started — will wake me when the deploy finishes.");
 ```
 
 **Rules:**
 - Only ONE wake per execute_code block. Subsequent calls are silently ignored.
 - If the agent is idle → triggers a turn immediately.
 - If the agent is busy → queued and delivered when it finishes.
+- For **team workers**, always prefer `teams.on(name, type)` over sleep-polling `teams.list()`. It's event-driven, faster, and the canonical pattern.
+- For non-event sources (file tails, generic command output, mesh broadcasts without a typed channel), the polling-loop pattern above is fine.
 
 ### Async across calls
 

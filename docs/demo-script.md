@@ -216,6 +216,32 @@ console.log("Monitor running — I'll wake up when deploy finishes.");
 Twenty minutes later, the deploy finishes, and the agent wakes itself up. 
 No polling. No human intervention. It just... handles it."
 
+### Demo 5.1b: Event-driven worker wait
+
+For team workers the same pattern becomes zero-polling via `teams.on`:
+
+```javascript
+// Spawn three workers in parallel
+await teams.delegate([
+  { text: "Implement the feature", assignee: "impl" },
+  { text: "Write tests", assignee: "tests" },
+  { text: "Review everything", assignee: "review" },
+]);
+
+// Race them — whoever finishes first wakes the coordinator
+teams.on({ type: "completed" })
+  .preventDefault()
+  .timeout(30 * 60 * 1000)
+  .then(e => console.wake(`${e.worker.name} finished first: ${e.result.slice(0, 300)}`));
+
+console.log("Three workers running, event subscription armed. Going idle.");
+```
+
+**Narration:** "No polling loop. No sleep interval. The coordinator subscribes
+to the worker event stream and goes idle. The first worker to finish wakes
+it up. DOM-style `.preventDefault()` suppresses the duplicate leader notify.
+This is event-driven multi-agent orchestration."
+
 ### Demo 5.2: Full Pipeline in One Block
 
 ```javascript

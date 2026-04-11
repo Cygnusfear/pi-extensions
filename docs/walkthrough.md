@@ -82,6 +82,18 @@ $.monitor = (async () => {
 console.log("Monitoring — I'll wake up when it's done.");
 ```
 
+For **team workers** specifically there's a cleaner, event-driven path — `teams.on(name, type)` rides the leader's typed `PollEvent` stream, so you never poll:
+
+```javascript
+teams.on("fixer", "completed")
+  .preventDefault()
+  .timeout(30 * 60 * 1000)
+  .then(
+    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
+    (err) => console.wake(`fixer timed out: ${err.message}`),
+  );
+```
+
 No polling by a human. No keeping the terminal open. **The agent monitors itself.**
 
 ### Parallel I/O — stop waiting around

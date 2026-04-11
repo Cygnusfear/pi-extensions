@@ -106,47 +106,70 @@ await teams({
 });
 ```
 
-### Waiting for workers
+### Waiting for workers — `teams.on(...)`
 
-`teams({ action: "delegate" })` returns after spawning, not after workers finish. Workers run in separate sessions. After you spawn workers, you need a plan for waiting.
+`teams.delegate(...)` returns after spawning, not after workers finish. Workers run in separate sessions. To wait for one, **do not sleep-poll** — subscribe to the worker's event stream with `teams.on()`.
 
-**The pattern — delegate, sleep, wake:**
+**The pattern — delegate, subscribe, wake:**
 
-1. Spawn workers with `teams({ action: "delegate", tasks })`
-2. Turn off auto-continue: `supervise(false)` — prevents the supervisor from burning your context with `[SUPERVISOR] continue, go` spam while you're idle
-3. Arm a background monitor that calls `console.wake()` when a worker finishes
-4. When woken, collect results, continue your loop, re-enable `supervise(true)` if you need it
+1. Spawn workers with `teams.delegate([...])`
+2. Turn off auto-continue: `supervise(false)` — prevents `[SUPERVISOR] continue, go` spam while you're idle
+3. Arm a `teams.on(name, type)` subscription that calls `console.wake()` inside its `.then()` callback — no polling, no hard sleeps
+4. Chain `.preventDefault()` to suppress the leader's duplicate batch wake (DOM-style — you're handling the event yourself)
+5. When woken, collect results, continue your loop
 
 ```javascript
 // Spawn the worker
-await teams({
-  action: "delegate",
-  tasks: [{ text: "Fix auth bug", assignee: "fixer", model: "openai-codex/gpt-5.4" }]
-});
+await teams.delegate([
+  { text: "Fix auth bug", assignee: "fixer", model: "openai-codex/gpt-5.4" }
+]);
 
-// Turn off supervisor — don't burn context while waiting
+// Don't burn context while idle
 await supervise(false);
 
-// Arm background monitor — polls every 2 minutes, wakes you when done
-$.monitor = (async () => {
-  for (let i = 0; i < 30; i++) {
-    await sleep(120000); // 2 minutes
-    const status = await teams({ action: "list" });
-    if (status.includes("grace") || status.includes("finished") || status.includes("exit")) {
-      console.wake("Worker finished — collect results.");
-      return;
-    }
-  }
-  console.wake("Monitor timed out — worker never completed.");
-})();
-console.log("Worker spawned, supervisor off, monitor armed. Going idle.");
+// Subscribe to the worker's "completed" event. No polling — rides the leader's
+// PollEvent stream. `.preventDefault()` suppresses the leader's duplicate batch
+// notify. `.timeout()` makes failures loud instead of silent hangs.
+teams.on("fixer", "completed")
+  .preventDefault()
+  .timeout(30 * 60 * 1000) // 30 minutes
+  .then(
+    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
+    (err) => console.wake(`fixer errored or timed out: ${err.message}`),
+  );
+
+console.log("Worker spawned, supervisor off, event subscription armed. Going idle.");
+```
+
+**Other subscription shapes:**
+
+```javascript
+// Race multiple workers — whoever finishes first wins
+const first = await Promise.race([
+  teams.on("impl", "completed").preventDefault(),
+  teams.on("review", "completed").preventDefault(),
+]);
+
+// Stream every comment/note from a worker as it arrives (not one-shot)
+teams.on({ name: "oracle", type: "comment" })
+  .preventDefault()
+  .each(e => console.log("oracle note:", e.comment.slice(0, 200)));
+
+// Wait on a regex match against worker note bodies
+await teams.on({ name: "oracle", comment: /DONE:|FINAL:/ })
+  .preventDefault()
+  .timeout(300_000);
 ```
 
 **Key rules:**
-- Always `supervise(false)` after spawning workers. The supervisor will otherwise inject `[SUPERVISOR] continue, go` every few seconds, eating your context window with useless turns. Keep it off while idle between tasks — only re-enable when you're about to start a multi-step work sequence.
-- `console.wake()` is the only way to resume from a background promise. `console.log()` only writes to the current block output — it does not trigger a new turn.
-- Only one `console.wake()` per execute_code block. Fire the monitor onto `$`, return, go idle.
-- Check worker status with `teams({ action: "list" })` or `teams({ action: "view", name: "fixer" })`.
+- `teams.on(name, type)` is **the** way to wait for a worker lifecycle event. Don't sleep-poll `teams.list()`.
+- `console.wake()` is the canonical wake primitive. Call it from inside your `.then()` or `.each()` callback — it works even after the enclosing `execute_code` block has returned.
+- Chain `.preventDefault()` when you're handling the event yourself. Otherwise the leader's default batch-wake fires too and you get a duplicate team-event turn.
+- Chain `.timeout(ms)` on every subscription. Silent hangs are much worse than a loud timeout.
+- Always `supervise(false)` after spawning workers so the supervisor doesn't burn context with `[SUPERVISOR] continue, go` while you're idle.
+- Only one `console.wake()` per execute_code block. Arm the subscription, log, return, go idle.
+- Event types: `completed | turn_finished | warning | failed | stuck | comment | alive`.
+- Filter shapes: `teams.on("name")` · `teams.on("name", "type")` · `teams.on({ name, type, comment: /regex/ })` · `teams.on({ predicate: e => ... })`.
 - For the full orchestration loop (implement → review → gate → next), see the 90-building-with-teams playbook.
 
 ## Context management: don't let the window fill up
@@ -209,9 +232,9 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Search session history | `ouija({ action: "search", query })` |
 | Search long-term memory | `recall({ query })` |
 | Store a learning | `memoryCreate({ factType, oneLiner, summary })` |
-| Spawn a worker | `teams({ action: "delegate", tasks })` — direct tool |
-| Wait for worker to finish | `supervise(false)` → arm `console.wake()` monitor → go idle |
-| Check worker status | `teams({ action: "list" })` or `teams({ action: "view", name })` |
+| Spawn a worker | `teams.delegate([{ text, assignee, model }])` |
+| Wait for worker to finish | `teams.on(name, "completed").preventDefault().then(e => console.wake(...))` — no polling |
+| Check worker status | `teams.list()` or `teams.view(name)` |
 | Resume from background | `console.wake("message")` in execute_code — triggers a new turn |
 | Control auto-continue | `supervise(true/false)` — turn off while waiting for workers |
 | Analyze code structure | `tldrSemanticSearch({ query })` |
