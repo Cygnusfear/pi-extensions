@@ -1,0 +1,43 @@
+packages/teams/lease.test.ts
+  c74893e35f864293 5-13,26,29-58,64-94,97-138
+packages/teams/spawner.ts
+  c74893e35f864293 62
+packages/teams/lease.ts
+  c74893e35f864293 1-29,32,35-36,38-43,46-52,54-55,57,60-64,66-85,88,91,97-101,111-141
+packages/teams/leader.ts
+  c74893e35f864293 18-24,771-778,780-781,786,790-791,795-800
+  07ed175674a9262f 2,1619,1683,1718,1821,2086
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "be6bbc603af1c4c996efa5878d5afdd632746403",
+  "prompts": {
+    "07ed175674a9262f": {
+      "agent_id": {
+        "tool": "Eleanor Jupiter Corsi",
+        "id": "afc15beb-2d97-44c4-ae8b-0314859bb95c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 88,
+      "total_deletions": 53,
+      "accepted_lines": 82,
+      "overriden_lines": 0
+    },
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 266,
+      "total_deletions": 34,
+      "accepted_lines": 259,
+      "overriden_lines": 0
+    }
+  }
+}
