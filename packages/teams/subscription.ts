@@ -83,11 +83,17 @@ export interface EventFilter {
 	matchCurrent?: boolean;
 }
 
-/** Callback signature — receives the wrapped TeamsEvent (PollEvent + DOM methods). */
+/** Callback signature — receives the wrapped TeamsEvent (PollEvent + DOM methods).
+ *
+ * Inside a callback you have access to all sandbox globals, so the canonical
+ * way to trigger a coordinator turn from a background event is:
+ *
+ *   teams.on("fixer", "completed")
+ *     .preventDefault()
+ *     .each(e => console.wake(`fixer done: ${e.result.slice(0, 500)}`));
+ *
+ * console.wake is the single wake primitive. Do not reinvent it per tool. */
 export type EventCallback = (event: TeamsEvent) => void;
-
-/** Wake message builder — called when event fires. */
-export type WakeMessage = string | ((event: TeamsEvent) => string);
 
 /**
  * TeamsSubscription — returned by teams.on(...). Thenable + chainable helpers.
@@ -106,7 +112,6 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	private resolvers: Array<(event: TeamsEvent) => void> = [];
 	private rejecters: Array<(err: Error) => void> = [];
 	private eachCallbacks: EventCallback[] = [];
-	private wakeMessage: WakeMessage | null = null;
 	private timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
 	/** Pre-registered: call preventDefault() on every matched event. */
@@ -118,7 +123,6 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		private readonly leader: TeamLeader,
 		private readonly filter: EventFilter,
 		private readonly predicate: (event: PollEvent) => boolean,
-		private readonly sendUserMessage: ((content: string) => void) | null,
 		abortSignal?: AbortSignal,
 	) {
 		// Leader hands us pre-wrapped TeamsEvents so preventDefault/stopPropagation
@@ -190,18 +194,7 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 			}
 		}
 
-		// Wake coordinator turn if configured.
-		if (this.wakeMessage !== null && this.sendUserMessage) {
-			const msg =
-				typeof this.wakeMessage === "function" ? this.wakeMessage(event) : this.wakeMessage;
-			try {
-				this.sendUserMessage(msg);
-			} catch (err) {
-				console.warn("[teams.on] wake send failed:", err instanceof Error ? err.message : String(err));
-			}
-		}
-
-		// If nobody wants a stream, clean up.
+		// If nobody wants a stream, clean up after first match.
 		if (this.eachCallbacks.length === 0) {
 			this.dispose();
 		}
@@ -244,16 +237,6 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	/** Register a streaming callback. Fires on every matching event until unsubscribed. */
 	each(callback: EventCallback): this {
 		this.eachCallbacks.push(callback);
-		return this;
-	}
-
-	/**
-	 * When an event matches, also trigger a coordinator turn with the given
-	 * message (or a default). Works even after the enclosing execute_code block
-	 * has returned — this is the "background-wake" pattern.
-	 */
-	wake(message?: WakeMessage): this {
-		this.wakeMessage = message ?? defaultWakeMessage(this.filter);
 		return this;
 	}
 
@@ -316,12 +299,6 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 }
 
 // ─── Helpers ───
-
-function defaultWakeMessage(filter: EventFilter): string {
-	const who = filter.name ? `worker "${filter.name}"` : "a worker";
-	const what = filter.type ? `fired "${filter.type}"` : "produced an event";
-	return `[teams.on] ${who} ${what} — resuming.`;
-}
 
 /**
  * Build a predicate from the overloaded teams.on() arguments.

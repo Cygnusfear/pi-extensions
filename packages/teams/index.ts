@@ -54,7 +54,12 @@ export default function (pi: ExtensionAPI) {
 
 	// teams.on — subscribe to the leader's PollEvent stream with a predicate.
 	// Returns a thenable TeamsSubscription you can `await`, chain with .each(),
-	// .wake(), .timeout(), or .unsubscribe(). No polling, no sleeps.
+	// .timeout(), .preventDefault(), .stopPropagation(), or .unsubscribe().
+	// No polling, no sleeps.
+	//
+	// To trigger a coordinator turn from a background event, call console.wake()
+	// from inside your .each() or .then() callback — console.wake is the single
+	// canonical wake primitive. Do not reinvent it per-subscription.
 	//
 	// Supported signatures (all return TeamsSubscription):
 	//   teams.on("fixer")
@@ -63,12 +68,6 @@ export default function (pi: ExtensionAPI) {
 	//   teams.on({ predicate: e => ... })
 	//   teams.on("fixer", "completed", (event) => { ... })    // shorthand for .each()
 	//   teams.on({ name: "oracle" }, (event) => { ... })
-	const sendUserMessage = (msg: string) => {
-		try { pi.sendUserMessage(msg); } catch (err) {
-			console.warn("[teams.on] sendUserMessage failed:", err instanceof Error ? err.message : String(err));
-		}
-	};
-
 	(teamsFn as any).on = (
 		targetOrFilter: string | EventFilter,
 		typeOrCallback?: PollEventType | ((event: unknown) => void),
@@ -91,7 +90,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const { filter, predicate } = buildPredicate(targetOrFilter, eventType);
-		const sub = new TeamsSubscription(leader, filter, predicate, sendUserMessage);
+		const sub = new TeamsSubscription(leader, filter, predicate);
 		if (eachCb) sub.each(eachCb as (event: unknown) => void);
 		return sub;
 	};
