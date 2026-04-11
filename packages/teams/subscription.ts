@@ -41,27 +41,42 @@ export type TeamsEvent = PollEvent & {
 	readonly propagationStopped: boolean;
 };
 
-/** Mint a wrapped event that carries DOM-style flags + methods. */
+/** Mint a wrapped event that carries DOM-style flags + methods.
+ *
+ * Implementation note: we MUST use Object.defineProperty for the flag getters.
+ * A getter defined inline on an object literal passed to Object.assign gets
+ * EVALUATED at copy time and stored as a static data property — the accessor
+ * is lost. Use defineProperty so the getter actually runs on every read and
+ * reflects the current closure state. */
 export function wrapPollEvent(event: PollEvent): TeamsEvent {
 	let defaultPrevented = false;
 	let propagationStopped = false;
-	return Object.assign({}, event, {
-		preventDefault(): void {
-			defaultPrevented = true;
-		},
-		stopPropagation(): void {
-			propagationStopped = true;
-		},
-		stopImmediatePropagation(): void {
-			propagationStopped = true;
-		},
-		get defaultPrevented() {
-			return defaultPrevented;
-		},
-		get propagationStopped() {
-			return propagationStopped;
-		},
-	}) as TeamsEvent;
+
+	// Shallow copy the PollEvent fields so the wrapper has type, worker, etc.
+	const wrapper = { ...event } as TeamsEvent & Record<string, unknown>;
+
+	wrapper.preventDefault = () => {
+		defaultPrevented = true;
+	};
+	wrapper.stopPropagation = () => {
+		propagationStopped = true;
+	};
+	wrapper.stopImmediatePropagation = () => {
+		propagationStopped = true;
+	};
+
+	Object.defineProperty(wrapper, "defaultPrevented", {
+		get: () => defaultPrevented,
+		enumerable: true,
+		configurable: false,
+	});
+	Object.defineProperty(wrapper, "propagationStopped", {
+		get: () => propagationStopped,
+		enumerable: true,
+		configurable: false,
+	});
+
+	return wrapper;
 }
 
 /** Full filter object for teams.on({...}). */
