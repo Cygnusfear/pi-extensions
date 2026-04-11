@@ -1,0 +1,36 @@
+packages/pi-mesh/extension/pi-mesh.ts
+  e628a44aee61b5f6 16,1027-1036,1329-1376,1927-1929,1932,1948-1958,1960-1980
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "4f1e3147a3782e0e66b3733c82d7e25b6a6b7a59",
+  "prompts": {
+    "07ed175674a9262f": {
+      "agent_id": {
+        "tool": "Eleanor Jupiter Corsi",
+        "id": "afc15beb-2d97-44c4-ae8b-0314859bb95c",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 189,
+      "total_deletions": 6,
+      "accepted_lines": 189,
+      "overriden_lines": 0
+    },
+    "e628a44aee61b5f6": {
+      "agent_id": {
+        "tool": "Annie Pioneer Copernicus",
+        "id": "6aeb3fc1-d88a-4dfe-8e98-edf19c9a7430",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 98,
+      "total_deletions": 65,
+      "accepted_lines": 96,
+      "overriden_lines": 0
+    }
+  }
+}
