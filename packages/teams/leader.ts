@@ -2240,9 +2240,18 @@ export class TeamLeader {
     // Wrap once so every listener shares the same preventDefault/stopPropagation
     // state. Listeners run synchronously, in insertion order, before the
     // default dedupe/queue/turn-trigger path.
+    //
+    // DOM-style dispatch semantics:
+    //   - Snapshot the listener set before iterating so listeners added mid-dispatch
+    //     do NOT fire on the current event (they'll see the NEXT one).
+    //   - Re-check each listener is still in the live set before invoking, so a
+    //     listener that unsubscribes another (not-yet-visited) listener correctly
+    //     prevents that listener from firing on this event.
     const wrapped = wrapPollEvent(event);
     if (this.eventListeners.size > 0) {
-      for (const listener of this.eventListeners) {
+      const snapshot = [...this.eventListeners];
+      for (const listener of snapshot) {
+        if (!this.eventListeners.has(listener)) continue; // unsubscribed mid-dispatch
         try {
           listener(wrapped);
         } catch (err) {
