@@ -32,6 +32,11 @@ function padRight(s: string, w: number): string {
   return s + " ".repeat(n);
 }
 
+/** Workers in grace status are hidden from the TUI widget once their last
+ *  output was more than this many milliseconds ago. They remain visible to
+ *  the agent via teams.list / getWorkers(). */
+const GRACE_TUI_HIDE_MS = 120_000; // 2 minutes
+
 export function createTeamsWidget(
   getWorkers: () => WorkerHandle[],
   getV2Lifecycle?: (workerName: string) => WorkerLifecycleState | null,
@@ -39,7 +44,16 @@ export function createTeamsWidget(
 ) {
   return (_tui: TUI, theme: Theme): Component => ({
     render(width: number): string[] {
-      const workers = getWorkers();
+      const allWorkers = getWorkers();
+      if (!allWorkers.length) return [];
+      const now = Date.now();
+      // Hide grace workers whose last output was > 2min ago.
+      // They're still visible to the agent — just not cluttering the TUI.
+      const workers = allWorkers.filter((w) => {
+        if (w.status !== "grace") return true;
+        if (!w.lastOutputAt) return true; // no output timestamp → keep visible
+        return now - w.lastOutputAt < GRACE_TUI_HIDE_MS;
+      });
       if (!workers.length) return [];
 
       const lines: string[] = [];
