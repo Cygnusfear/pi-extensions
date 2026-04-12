@@ -1,0 +1,27 @@
+packages/runbooks/README.md
+  c74893e35f864293 9-14
+skills/environment/SKILL.md
+  c74893e35f864293 113,115,117-152,156,159-160,163-165,167,169-170,173-174,177,179,181,184-188,202-213,217-220
+packages/runbooks/src/runbook-engine.ts
+  c74893e35f864293 2,20,95-96,98-111,113-117,119-123,126-127,129-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "8d2e2d0e1300cddc40287d91a5604f70713e0e33",
+  "prompts": {
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-sonnet-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 120,
+      "total_deletions": 47,
+      "accepted_lines": 120,
+      "overriden_lines": 0
+    }
+  }
+}
