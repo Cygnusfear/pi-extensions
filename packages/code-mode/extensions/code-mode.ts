@@ -112,7 +112,7 @@ function buildContextFooter(ctx: {
     const context = maxK > 0 ? `${usedK}k/${maxK}k CONTEXT` : `${pct}% CONTEXT`;
 
     if (usage.percent >= 90) {
-      const guard = isContextGuardActive(getUsage) ? " \u{1F6AB} CONTEXT GUARD ACTIVE \u2014 only session.*/contextTag/contextLog/contextCheckout/Read allowed" : "";
+      const guard = isContextGuardActive(getUsage) ? " \u{1F6AB} CONTEXT GUARD ACTIVE — save thick context to $.ctx FIRST, then session.squash()" : "";
       return `\u{1F480} ${pct}% (${context}) MAINTENANCE NOW \u2014 session.squash() or contextCheckout() to reclaim context${guard}`;
     }
     if (usage.percent >= 70) {
@@ -222,9 +222,13 @@ function wrapWithContextGuard(
         if (isContextGuardActive(getUsage)) {
           const pct = (() => { try { return getUsage().percent.toFixed(1); } catch { return "?"; } })();
           throw new Error(
-            `Context guard active (${pct}% used, threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). ` +
-            `Only context-management tools allowed. Run session.squash() or contextCheckout() to free context. ` +
-            `Toggle: /context-guard off`
+            `🚫 Context guard active (${pct}% used, threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). ` +
+            `Most tools blocked — only context management allowed.\n\n` +
+            `BEFORE squashing, save thick context to $ (survives compaction):\n` +
+            `$.ctx = \`TASK — mid-stream\nDone: ...\nGotcha: ...\nNext: ...\`;\n\n` +
+            `Then squash with continuation:\n` +
+            `session.squash({ continue: \"Squash done. Continue with [next step].\" });\n\n` +
+            `Toggle guard: /context-guard off`
           );
         }
         return (value as Function)(...args);
@@ -372,7 +376,20 @@ async function executeCode(
   sess.images.length = 0; // clear stashed images for this execution
   currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
   const rawBindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
-  const bindings = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
+  const guarded = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
+  // Bun's vm.Context proxy strips function own-properties, so namespace methods
+  // like memory.context, mai.ticket etc. become undefined inside the VM.
+  // Wrap any function that has own properties in a Proxy to preserve them.
+  const bindings: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(guarded)) {
+    if (typeof value === "function" && Object.getOwnPropertyNames(value).some(k => k !== "length" && k !== "name" && k !== "prototype")) {
+      bindings[key] = new Proxy(value as Function, {
+        get(target, prop) { return (target as any)[prop]; },
+      });
+    } else {
+      bindings[key] = value;
+    }
+  }
   Object.assign(sess.context, bindings);
 
   // Update process.cwd to reflect the current session working directory
