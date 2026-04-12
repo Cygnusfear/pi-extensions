@@ -232,7 +232,8 @@ All of these are available inside `execute_code` as typed async functions:
 | `sleep(ms)` | Pause execution |
 | `man(name)` | Get help for any sandbox function |
 | `readImage({ path })` | Read image files (png, jpg, gif, webp) |
-| `mai({ args? })` | Run mai CLI commands |
+| `maiCall({ args? })` | Run mai CLI commands (raw passthrough) |
+| `mai.ticket/start/close/show/note/ls` | Structured mai operations |
 | `maiTicket({...})` | Create tickets |
 | `recall({...})` | Search Foresight memory |
 | `memoryCreate({...})` | Create memory nodes |

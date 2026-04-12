@@ -202,15 +202,16 @@ declare function WebFetch(input: {
 /** Pause execution for the given number of milliseconds. */
 declare function sleep(ms: number): Promise<void>;
 
+/** Run any mai command raw. */
+declare function maiCall(input?: { args?: string; cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+
 /**
- * mai — maitake CLI integration.
- *
- * Callable: `mai({ args: "ls" })` runs any mai command raw.
- * Namespaced methods mirror the mai CLI 1:1 for common operations.
+ * mai — maitake CLI integration. Methods for common operations.
+ * For raw CLI passthrough, use maiCall({ args: "ls" }).
  *
  * @example
  * // Raw passthrough
- * await mai({ args: "ls" });
+ * await maiCall({ args: "ls" });
  *
  * // Create a structured ticket with Goal/AC/Verification
  * const t = await mai.ticket({
@@ -229,9 +230,6 @@ declare function sleep(ms: number): Promise<void>;
  * await mai.close(t.id);
  */
 declare const mai: {
-  /** Run any mai command raw. */
-  (input?: { args?: string; cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
-
   /** Create a structured ticket with Goal/AC/Verification template. */
   ticket(input: {
     title: string;
@@ -268,14 +266,22 @@ declare const mai: {
 /** @deprecated Use `mai.ticket()` instead. */
 declare const maiTicket: typeof mai.ticket;
 
+/** Search memory — use this for recall queries. */
+declare function recall(input: {
+  query: string;
+  limit?: number;
+  factType?: "world" | "experience" | "opinion" | "observation";
+  minScore?: number;
+  bank?: string;
+}): Promise<string>;
+
 /**
- * memory — Foresight semantic memory. Callable as recall, plus namespaced methods.
+ * memory — Foresight semantic memory. Methods for context, create, unfold, etc.
+ * Use recall() for search queries.
  *
  * @example
- * // Search memory (recall)
- * const results = await memory({ query: "architecture decisions" });
- * // Same as recall()
- * const results2 = await recall({ query: "architecture decisions" });
+ * // Search memory
+ * const results = await recall({ query: "architecture decisions" });
  * // Context for a task
  * const ctx = await memory.context({ task: "refactor auth" });
  * // Create a memory
@@ -288,15 +294,6 @@ declare const maiTicket: typeof mai.ticket;
  * await memory.subscribe({ entity: "auth" });
  */
 declare const memory: {
-  /** Search memory — same as recall(). */
-  (input: {
-    query: string;
-    limit?: number;
-    factType?: "world" | "experience" | "opinion" | "observation";
-    minScore?: number;
-    bank?: string;
-  }): Promise<string>;
-
   /** Get relevant memories for a task/topic. */
   context(input: { task: string; maxNodes?: number; bank?: string }): Promise<string>;
 
@@ -327,49 +324,38 @@ declare const memory: {
   checkUpdates(input?: { subscriber?: string }): Promise<string>;
 };
 
-/** @deprecated Use `memory()` instead. */
-declare const recall: typeof memory;
+/** recall is the primary way to search memory. memory object holds methods only. */
 
-/** @deprecated Use `memory.context()` instead. */
+/** @deprecated Use memory.context() */
 declare const memoryContext: typeof memory.context;
-
-/** @deprecated Use `memory.create()` instead. */
+/** @deprecated Use memory.create() */
 declare const memoryCreate: typeof memory.create;
-
-/** @deprecated Use `memory.unfold()` instead. */
+/** @deprecated Use memory.unfold() */
 declare const memoryUnfold: typeof memory.unfold;
-
-/** @deprecated Use `memory.status()` instead. */
+/** @deprecated Use memory.status() */
 declare const memoryStatus: typeof memory.status;
-
-/** @deprecated Use `memory.subscribe()` instead. */
+/** @deprecated Use memory.subscribe() */
 declare const memorySubscribe: typeof memory.subscribe;
-
-/** @deprecated Use `memory.unsubscribe()` instead. */
+/** @deprecated Use memory.unsubscribe() */
 declare const memoryUnsubscribe: typeof memory.unsubscribe;
-
-/** @deprecated Use `memory.checkUpdates()` instead. */
+/** @deprecated Use memory.checkUpdates() */
 declare const memoryCheckUpdates: typeof memory.checkUpdates;
 
+/** Search the web via Brave API. */
+declare function braveSearch(input: { query: string; numResults?: number; type?: "llm_context" | "web" }): Promise<string>;
+
 /**
- * brave — web/code search via Brave API. Callable as search, plus codeSearch.
+ * brave — web/code search. Methods only. Use braveSearch() for web search.
  *
  * @example
- * const results = await brave({ query: "rust async patterns" });
+ * const results = await braveSearch({ query: "rust async patterns" });
  * const codeResults = await brave.codeSearch({ query: "tokio spawn" });
  */
 declare const brave: {
-  /** Search the web. */
-  (input: { query: string; numResults?: number; type?: "llm_context" | "web" }): Promise<string>;
-
   /** Search for code/docs specifically. */
   codeSearch(input: { query: string; numResults?: number }): Promise<string>;
 };
 
-/** @deprecated Use `brave()` instead. */
-declare const braveSearch: typeof brave;
-
-/** @deprecated Use `brave.codeSearch()` instead. */
 declare const braveCodeSearch: typeof brave.codeSearch;
 
 /**
@@ -384,16 +370,17 @@ declare function getCurrentTime(format?: string): Promise<{
   unix: number;
 }>;
 
+/** Read a file with hashline anchors. */
+declare function hashRead(input: { path: string; cwd?: string; startLine?: number; endLine?: number }): Promise<string>;
+
 /**
- * hash — hashline tools for anchor-verified file reading/editing.
+ * hash — hashline tools. Methods only. Use hashRead() for reading.
  *
  * @example
- * const content = await hash({ path: "src/main.ts" });
+ * const content = await hashRead({ path: "src/main.ts" });
  * await hash.edit({ path: "src/main.ts", edits: [...] });
  */
 declare const hash: {
-  /** Read a file with hashline anchors. */
-  (input: { path: string; cwd?: string; startLine?: number; endLine?: number }): Promise<string>;
 
   /** Edit using hashline anchors. Rejects if file changed since last read. */
   edit(input: {
@@ -407,10 +394,6 @@ declare const hash: {
   }): Promise<{ appliedEdits: number; changed: boolean; summary: string }>;
 };
 
-/** @deprecated Use `hash()` instead. */
-declare const hashRead: typeof hash;
-
-/** @deprecated Use `hash.edit()` instead. */
 declare const hashEdit: typeof hash.edit;
 
 /**
@@ -423,39 +406,35 @@ declare function applyPatch(input: {
   cwd?: string;
 }): Promise<string>;
 
+/** Resolve a library name to a Context7 library ID. */
+declare function context7Resolve(input: { query: string; libraryName: string }): Promise<string>;
+
 /**
- * context7 — up-to-date library docs. Callable as resolve, plus docs.
+ * context7 — up-to-date library docs. Methods only. Use context7Resolve() to resolve IDs.
  *
  * @example
- * const id = await context7({ query: "auth", libraryName: "next.js" });
+ * const id = await context7Resolve({ query: "auth", libraryName: "next.js" });
  * const docs = await context7.docs({ libraryId: id, query: "middleware" });
  */
 declare const context7: {
-  /** Resolve a library name to a Context7 library ID. */
-  (input: { query: string; libraryName: string }): Promise<string>;
-
   /** Fetch documentation for a resolved library. */
   docs(input: { libraryId: string; query: string }): Promise<string>;
 };
 
-/** @deprecated Use `context7()` instead. */
-declare const context7Resolve: typeof context7;
-
-/** @deprecated Use `context7.docs()` instead. */
 declare const context7Docs: typeof context7.docs;
 
+/** Fuzzy file search by name. */
+declare function fffFind(input: { query: string; maxResults?: number; cwd?: string }): Promise<string>;
+
 /**
- * fff — fast file finder. Callable as find, plus grep/multiGrep.
+ * fff — fast file finder. Methods only. Use fffFind() for file search.
  *
  * @example
- * const files = await fff({ query: "auth" });
+ * const files = await fffFind({ query: "auth" });
  * const matches = await fff.grep({ query: "useAuth" });
  * const multi = await fff.multiGrep({ patterns: ["useAuth", "AuthContext"] });
  */
 declare const fff: {
-  /** Fuzzy file search by name. */
-  (input: { query: string; maxResults?: number; cwd?: string }): Promise<string>;
-
   /** Search file contents. */
   grep(input: { query: string; mode?: string; maxResults?: number; context?: number; cwd?: string }): Promise<string>;
 
@@ -463,43 +442,37 @@ declare const fff: {
   multiGrep(input: { patterns: string[]; constraints?: string; maxResults?: number; context?: number; cwd?: string }): Promise<string>;
 };
 
-/** @deprecated Use `fff()` instead. */
-declare const fffFind: typeof fff;
-
-/** @deprecated Use `fff.grep()` instead. */
 declare const fffGrep: typeof fff.grep;
-
-/** @deprecated Use `fff.multiGrep()` instead. */
 declare const fffMultiGrep: typeof fff.multiGrep;
 
 // =====================================================================
 // TLDR Code Analysis (semantic search, call graphs, structure)
 // =====================================================================
 
+/** Semantic code search — find by what it DOES. */
+declare function tldrSemanticSearch(input: {
+  query: string;
+  path?: string;
+  k?: number;
+  expand?: boolean;
+}): Promise<Array<{
+  name: string;
+  file: string;
+  score: number;
+  calls?: string[];
+  called_by?: string[];
+}>>;
+
 /**
- * tldr — code analysis via semantic search, call graphs, structure.
+ * tldr — code analysis. Methods only. Use tldrSemanticSearch() for search.
  *
  * @example
- * const results = await tldr({ query: "authentication middleware" });
+ * const results = await tldrSemanticSearch({ query: "authentication middleware" });
  * const struct = await tldr.structure({ path: "src/" });
  * const calls = await tldr.calls({ path: "src/" });
  * const dead = await tldr.dead({ path: "src/" });
  */
 declare const tldr: {
-  /** Semantic code search — find by what it DOES. */
-  (input: {
-    query: string;
-    path?: string;
-    k?: number;
-    expand?: boolean;
-  }): Promise<Array<{
-    name: string;
-    file: string;
-    score: number;
-    calls?: string[];
-    called_by?: string[];
-  }>>;
-
   /** Show code structure (functions, classes, imports). Uses tree-sitter. */
   structure(input: { path: string; lang?: string }): Promise<{
     files: Array<{
@@ -555,28 +528,12 @@ declare const tldr: {
   }>;
 };
 
-/** @deprecated Use `tldr()` instead. */
-declare const tldrSemanticSearch: typeof tldr;
-
-/** @deprecated Use `tldr.structure()` instead. */
 declare const tldrStructure: typeof tldr.structure;
-
-/** @deprecated Use `tldr.calls()` instead. */
 declare const tldrCalls: typeof tldr.calls;
-
-/** @deprecated Use `tldr.extract()` instead. */
 declare const tldrExtract: typeof tldr.extract;
-
-/** @deprecated Use `tldr.dead()` instead. */
 declare const tldrDead: typeof tldr.dead;
-
-/** @deprecated Use `tldr.arch()` instead. */
 declare const tldrArch: typeof tldr.arch;
-
-/** @deprecated Use `tldr.impact()` instead. */
 declare const tldrImpact: typeof tldr.impact;
-
-/** @deprecated Use `tldr.indexStatus()` instead. */
 declare const tldrIndexStatus: typeof tldr.indexStatus;
 
 /**
