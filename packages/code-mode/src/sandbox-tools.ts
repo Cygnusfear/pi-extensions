@@ -44,6 +44,26 @@ import {
 import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
 
+/** Wrap a namespace callable so its methods survive the VM context boundary.
+ *  Bun's vm.createContext proxy strips function own-properties, so
+ *  fn.method = ... disappears when fn is accessed inside the VM.
+ *  This Proxy re-exposes them via get/getOwnPropertyDescriptor traps. */
+function vmSafe<T extends Function>(fn: T): T {
+  return new Proxy(fn, {
+    get(target, prop) {
+      if (prop in target) return (target as any)[prop];
+      return undefined;
+    },
+    ownKeys(target) {
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop in target) return { configurable: true, enumerable: true, value: (target as any)[prop] };
+      return undefined;
+    },
+  }) as T;
+}
+
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
   const { cwd, images, signal, sessionManager } = ctx;
   const turndown = new TurndownService({
@@ -306,6 +326,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   (memory as any).checkUpdates = async (input?: { subscriber?: string }) => {
     return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
   };
+  const _memory = vmSafe(memory);
 
   // ==========================================================================
   // brave namespace — callable (search) + codeSearch method
@@ -461,6 +482,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       summary: `Applied ${appliedEdits} edit(s) to ${filePath}.${changed ? "" : " (no changes)"}`,
     };
   };
+  const _hash = vmSafe(hash);
 
   // ==========================================================================
   // context7 namespace — callable (resolve) + docs method
@@ -523,6 +545,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       throw new Error(`Context7 error: ${json.error.message ?? JSON.stringify(json.error)}`);
     return json.result?.content?.map((c) => c.text).join("\n") ?? "";
   };
+  const _context7 = vmSafe(context7);
 
   // ==========================================================================
   // fff namespace — callable (find) + grep/multiGrep methods
@@ -580,6 +603,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     if (result.error) throw new Error(`fffMultiGrep error: ${result.error}`);
     return result.text;
   };
+  const _fff = vmSafe(fff);
 
   // ==========================================================================
   // tldr namespace — callable (search) + structure/calls/extract/dead/arch/impact/indexStatus
@@ -645,6 +669,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   (tldr as any).indexStatus = async (input?: { path?: string }) => {
     return tldrIndexStatusAPI(input?.path ?? cwd);
   };
+  const _tldr = vmSafe(tldr);
 
   const tools = {
     Bash: async ({
@@ -945,21 +970,21 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // Ticket management (mai CLI)
     // =====================================================================
 
-    mai,
-    maiTicket: mai.ticket,  // backward compat — prefer mai.ticket() in new code
+    mai: _mai,
+    maiTicket: _mai.ticket,  // backward compat — prefer mai.ticket() in new code
 
     // memory — defined below as namespaced callable
-    memory,
-    recall: memory,
-    memoryContext: memory.context,
-    memoryCreate: memory.create,
-    memoryUnfold: memory.unfold,
-    memoryStatus: memory.status,
+    memory: _memory,
+    recall: _memory,
+    memoryContext: _memory.context,
+    memoryCreate: _memory.create,
+    memoryUnfold: _memory.unfold,
+    memoryStatus: _memory.status,
 
     // brave — defined below as namespaced callable
-    brave,
-    braveSearch: brave,
-    braveCodeSearch: brave.codeSearch,
+    brave: _brave,
+    braveSearch: _brave,
+    braveCodeSearch: _brave.codeSearch,
 
     // =====================================================================
     // Time
@@ -1004,14 +1029,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     },
 
     // hash — defined below as namespaced callable
-    hash,
-    hashRead: hash,
-    hashEdit: hash.edit,
+    hash: _hash,
+    hashRead: _hash,
+    hashEdit: _hash.edit,
 
     // context7 — defined below as namespaced callable
-    context7,
-    context7Resolve: context7,
-    context7Docs: context7.docs,
+    context7: _context7,
+    context7Resolve: _context7,
+    context7Docs: _context7.docs,
 
     // =====================================================================
     // Apply Patch
@@ -1110,26 +1135,26 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     },
 
     // fff — from namespace above
-    fff,
-    fffFind: fff,
-    fffGrep: fff.grep,
-    fffMultiGrep: fff.multiGrep,
+    fff: _fff,
+    fffFind: _fff,
+    fffGrep: _fff.grep,
+    fffMultiGrep: _fff.multiGrep,
 
     // memory.subscribe/unsubscribe/checkUpdates — from namespace below
-    memorySubscribe: memory.subscribe,
-    memoryUnsubscribe: memory.unsubscribe,
-    memoryCheckUpdates: memory.checkUpdates,
+    memorySubscribe: _memory.subscribe,
+    memoryUnsubscribe: _memory.unsubscribe,
+    memoryCheckUpdates: _memory.checkUpdates,
 
     // tldr — defined below as namespaced callable
-    tldr,
-    tldrSemanticSearch: tldr,
-    tldrStructure: tldr.structure,
-    tldrCalls: tldr.calls,
-    tldrExtract: tldr.extract,
-    tldrDead: tldr.dead,
-    tldrArch: tldr.arch,
-    tldrImpact: tldr.impact,
-    tldrIndexStatus: tldr.indexStatus,
+    tldr: _tldr,
+    tldrSemanticSearch: _tldr,
+    tldrStructure: _tldr.structure,
+    tldrCalls: _tldr.calls,
+    tldrExtract: _tldr.extract,
+    tldrDead: _tldr.dead,
+    tldrArch: _tldr.arch,
+    tldrImpact: _tldr.impact,
+    tldrIndexStatus: _tldr.indexStatus,
 
     // =====================================================================
     // readImage() — read image file and include in tool result for LLM
