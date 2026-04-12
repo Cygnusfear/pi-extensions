@@ -945,21 +945,36 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // Ticket management (mai CLI)
     // =====================================================================
 
-    mai,
-    maiTicket: mai.ticket,  // backward compat — prefer mai.ticket() in new code
+    mai: {
+      ticket: mai.ticket,
+      start: mai.start,
+      close: mai.close,
+      show: mai.show,
+      note: mai.note,
+      noteFile: mai.noteFile,
+      ls: mai.ls,
+    },
+    maiCall: mai,  // callable: mai({ args: "ls" }) → use maiCall({ args: "ls" }) or mai.ls()
+    maiTicket: mai.ticket,  // backward compat
 
     // memory — defined below as namespaced callable
-    memory,
-    recall: memory,
-    memoryContext: memory.context,
-    memoryCreate: memory.create,
-    memoryUnfold: memory.unfold,
-    memoryStatus: memory.status,
+    memory: {
+      context: memory.context,
+      create: memory.create,
+      unfold: memory.unfold,
+      status: memory.status,
+      subscribe: memory.subscribe,
+      unsubscribe: memory.unsubscribe,
+      checkUpdates: memory.checkUpdates,
+    },
+    recall: memory,  // callable: recall({ query }) or memory.query if we add it
 
     // brave — defined below as namespaced callable
-    brave,
-    braveSearch: brave,
-    braveCodeSearch: brave.codeSearch,
+    brave: {
+      codeSearch: brave.codeSearch,
+    },
+    braveSearch: brave,  // callable: brave({ query })
+    braveCodeSearch: brave.codeSearch,  // backward compat
 
     // =====================================================================
     // Time
@@ -1004,14 +1019,18 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     },
 
     // hash — defined below as namespaced callable
-    hash,
-    hashRead: hash,
-    hashEdit: hash.edit,
+    hash: {
+      edit: (hash as any).edit,
+    },
+    hashRead: hash,  // callable: hash({ path })
+    hashEdit: (hash as any).edit,  // backward compat
 
     // context7 — defined below as namespaced callable
-    context7,
-    context7Resolve: context7,
-    context7Docs: context7.docs,
+    context7: {
+      docs: (context7 as any).docs,
+    },
+    context7Resolve: context7,  // callable: context7({ query, libraryName })
+    context7Docs: (context7 as any).docs,  // backward compat
 
     // =====================================================================
     // Apply Patch
@@ -1110,26 +1129,37 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     },
 
     // fff — from namespace above
-    fff,
-    fffFind: fff,
-    fffGrep: fff.grep,
-    fffMultiGrep: fff.multiGrep,
+    fff: {
+      grep: (fff as any).grep,
+      multiGrep: (fff as any).multiGrep,
+    },
+    fffFind: fff,  // callable: fff({ query })
+    fffGrep: (fff as any).grep,  // backward compat
+    fffMultiGrep: (fff as any).multiGrep,  // backward compat
 
     // memory.subscribe/unsubscribe/checkUpdates — from namespace below
-    memorySubscribe: memory.subscribe,
-    memoryUnsubscribe: memory.unsubscribe,
-    memoryCheckUpdates: memory.checkUpdates,
+    memorySubscribe: memory.subscribe,  // backward compat
+    memoryUnsubscribe: memory.unsubscribe,  // backward compat
+    memoryCheckUpdates: memory.checkUpdates,  // backward compat
 
     // tldr — defined below as namespaced callable
-    tldr,
-    tldrSemanticSearch: tldr,
-    tldrStructure: tldr.structure,
-    tldrCalls: tldr.calls,
-    tldrExtract: tldr.extract,
-    tldrDead: tldr.dead,
-    tldrArch: tldr.arch,
-    tldrImpact: tldr.impact,
-    tldrIndexStatus: tldr.indexStatus,
+    tldr: {
+      structure: (tldr as any).structure,
+      calls: (tldr as any).calls,
+      extract: (tldr as any).extract,
+      dead: (tldr as any).dead,
+      arch: (tldr as any).arch,
+      impact: (tldr as any).impact,
+      indexStatus: (tldr as any).indexStatus,
+    },
+    tldrSemanticSearch: tldr,  // callable: tldr({ query })
+    tldrStructure: (tldr as any).structure,  // backward compat
+    tldrCalls: (tldr as any).calls,
+    tldrExtract: (tldr as any).extract,
+    tldrDead: (tldr as any).dead,
+    tldrArch: (tldr as any).arch,
+    tldrImpact: (tldr as any).impact,
+    tldrIndexStatus: (tldr as any).indexStatus,
 
     // =====================================================================
     // readImage() — read image file and include in tool result for LLM

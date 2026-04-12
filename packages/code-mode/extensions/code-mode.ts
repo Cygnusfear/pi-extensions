@@ -376,20 +376,7 @@ async function executeCode(
   sess.images.length = 0; // clear stashed images for this execution
   currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
   const rawBindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
-  const guarded = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
-  // Bun's vm.Context proxy strips function own-properties, so namespace methods
-  // like memory.context, mai.ticket etc. become undefined inside the VM.
-  // Wrap any function that has own properties in a Proxy to preserve them.
-  const bindings: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(guarded)) {
-    if (typeof value === "function" && Object.getOwnPropertyNames(value).some(k => k !== "length" && k !== "name" && k !== "prototype")) {
-      bindings[key] = new Proxy(value as Function, {
-        get(target, prop) { return (target as any)[prop]; },
-      });
-    } else {
-      bindings[key] = value;
-    }
-  }
+  const bindings = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
   Object.assign(sess.context, bindings);
 
   // Update process.cwd to reflect the current session working directory
