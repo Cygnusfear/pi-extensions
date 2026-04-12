@@ -1,0 +1,23 @@
+packages/teams/spawner.ts
+  c74893e35f864293 16-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "84bf38880a7225daf40f7e5f87df1c50f6e37e0a",
+  "prompts": {
+    "c74893e35f864293": {
+      "agent_id": {
+        "tool": "Alycia Europa Pandya",
+        "id": "1f35b478-2add-4e0d-bdc7-b7fb94aa7228",
+        "model": "anthropic/claude-sonnet-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
