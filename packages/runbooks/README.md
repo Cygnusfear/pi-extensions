@@ -6,6 +6,12 @@ Saved, reusable code_mode scripts. Repo-local executable knowledge.
 
 Agents develop useful multi-step flows in `execute_code` — scanning TODOs, reviewing changed files, deploying, setting up monitoring. Runbooks save those flows as `.pi/runbooks/<name>.js` files so they persist across sessions and can be shared via git.
 
+Runbooks are discovered from two locations:
+- **Project-local**: `.pi/runbooks/` — committed to the repo, shared with the team.
+- **Global**: `~/.pi/runbooks/` — personal to the user, available in every project.
+
+Local runbooks override global ones on name collision. `runbook.save()` always writes to project-local.
+
 ## Usage
 
 Inside `execute_code`:

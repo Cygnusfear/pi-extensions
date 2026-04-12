@@ -110,44 +110,82 @@ await teams({
 
 `teams.delegate(...)` returns after spawning, not after workers finish. Workers run in separate sessions. To wait for one, **do not sleep-poll** — subscribe to the worker's event stream with `teams.on()`.
 
-**The pattern — delegate, subscribe, wake:**
+Two patterns depending on how long you expect to wait.
 
-1. Spawn workers with `teams.delegate([...])`
-2. Turn off auto-continue: `supervise(false)` — prevents `[SUPERVISOR] continue, go` spam while you're idle
-3. Arm a `teams.on(name, type)` subscription that calls `console.wake()` inside its `.then()` callback — no polling, no hard sleeps
-4. Chain `.preventDefault()` to suppress the leader's duplicate batch wake (DOM-style — you're handling the event yourself)
-5. When woken, collect results, continue your loop
+---
+
+#### Pattern A: In-turn await (preferred for < 30 min waits)
+
+**`await` inside `execute_code`.** The agent stays "busy" in the tool call until the event fires. No supervisor management needed — the supervisor only fires when the agent goes idle between turns.
 
 ```javascript
-// Spawn the worker
+// Spawn three workers
 await teams.delegate([
-  { text: "Fix auth bug", assignee: "fixer", model: "openai-codex/gpt-5.4" }
+  { text: "Implement feature A", assignee: "impl-a", model: "anthropic/claude-sonnet-4-6" },
+  { text: "Implement feature B", assignee: "impl-b", model: "openai-codex/gpt-5.4" },
+  { text: "Review architecture", assignee: "review", model: "anthropic/claude-opus-4-6" },
 ]);
 
-// Don't burn context while idle
-await supervise(false);
+// Race — first worker to complete wakes us up, still inside this block
+const first = await Promise.race([
+  teams.on("impl-a", "completed").preventDefault().timeout(15 * 60 * 1000),
+  teams.on("impl-b", "completed").preventDefault().timeout(15 * 60 * 1000),
+  teams.on("review", "completed").preventDefault().timeout(15 * 60 * 1000),
+]);
 
-// Subscribe to the worker's "completed" event. No polling — rides the leader's
-// PollEvent stream. `.preventDefault()` suppresses the leader's duplicate batch
-// notify. `.timeout()` makes failures loud instead of silent hangs.
-teams.on("fixer", "completed")
-  .preventDefault()
-  .timeout(30 * 60 * 1000) // 30 minutes
-  .then(
-    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
-    (err) => console.wake(`fixer errored or timed out: ${err.message}`),
-  );
-
-console.log("Worker spawned, supervisor off, event subscription armed. Going idle.");
+console.log(`${first.worker.name} finished first:`, first.result.slice(0, 500));
+// Agent is still in-turn — can immediately act on the result, merge, spawn next wave, etc.
 ```
 
-**Other subscription shapes:**
+**Why this is better than the background-wake pattern for short/medium waits:**
+- No `supervise(false)` needed — agent never goes idle, supervisor never fires.
+- No `console.wake` needed — result is inline, available immediately.
+- Composable — `Promise.all`, `Promise.race`, `Promise.allSettled` all Just Work.
+- Agent can act on the result immediately in the same block (merge, spawn reviewers, read results, etc.) without burning a turn boundary.
+
+**When NOT to use it:** if you expect to wait 30+ minutes, blocking a tool call for that long is wasteful — context is "in flight" and the user can't interact with the agent. Use pattern B instead.
+
+---
+
+#### Pattern B: Background wake (for long waits or fire-and-forget)
+
+**Arm a subscription, end the block, go idle.** Agent yields the turn. When the event fires, `console.wake()` triggers a fresh turn.
 
 ```javascript
-// Race multiple workers — whoever finishes first wins
-const first = await Promise.race([
-  teams.on("impl", "completed").preventDefault(),
-  teams.on("review", "completed").preventDefault(),
+await teams.delegate([
+  { text: "Big refactor job", assignee: "refactor", model: "openai-codex/gpt-5.4" },
+]);
+
+// CRITICAL: turn off supervisor before going idle, otherwise it spams
+// "[SUPERVISOR] continue, go" every few seconds, eating context.
+await supervise(false);
+
+// Arm the subscription — fires console.wake when the worker completes.
+// Works even after this execute_code block returns.
+teams.on("refactor", "completed")
+  .preventDefault()
+  .timeout(60 * 60 * 1000)
+  .then(
+    (e) => console.wake(`refactor done: ${e.result.slice(0, 500)}`),
+    (err) => console.wake(`refactor timed out: ${err.message}`),
+  );
+
+console.log("Worker spawned, supervisor off, subscription armed. Going idle.");
+// Block ends here. Agent goes idle. console.wake triggers a new turn later.
+```
+
+**`supervise(false)` is MANDATORY for pattern B.** Without it, the supervisor injects `[SUPERVISOR] continue, go` every few seconds while the agent is idle, burning context with empty turns. Turn it off before going idle, turn it back on when you resume working.
+
+---
+
+#### Other subscription shapes
+
+```javascript
+// Wait for ALL workers (pattern A style)
+const [a, b, c] = await Promise.all([
+  teams.on("impl-a", "completed").preventDefault().timeout(30 * 60 * 1000),
+  teams.on("impl-b", "completed").preventDefault().timeout(30 * 60 * 1000),
+  teams.on("review", "completed").preventDefault().timeout(30 * 60 * 1000),
 ]);
 
 // Stream every comment/note from a worker as it arrives (not one-shot)
@@ -161,13 +199,25 @@ await teams.on({ name: "oracle", comment: /DONE:|FINAL:/ })
   .timeout(300_000);
 ```
 
+---
+
+#### Quick reference: which pattern?
+
+| Situation | Pattern | Supervisor |
+|---|---|---|
+| Short wait (< 10 min), need result immediately | **A** — `await` in-turn | Leave on (agent stays busy) |
+| Multiple workers, race for first result | **A** — `Promise.race([teams.on(...), ...])` | Leave on |
+| Long wait (30+ min), fire-and-forget | **B** — `.then(e => console.wake(...))` | **`supervise(false)` before going idle** |
+| Babysitting (stream notes as they arrive) | **A** or **B** with `.each()` | Depends on whether you're blocking |
+
+---
+
 **Key rules:**
 - `teams.on(name, type)` is **the** way to wait for a worker lifecycle event. Don't sleep-poll `teams.list()`.
-- `console.wake()` is the canonical wake primitive. Call it from inside your `.then()` or `.each()` callback — it works even after the enclosing `execute_code` block has returned.
-- Chain `.preventDefault()` when you're handling the event yourself. Otherwise the leader's default batch-wake fires too and you get a duplicate team-event turn.
-- Chain `.timeout(ms)` on every subscription. Silent hangs are much worse than a loud timeout.
-- Always `supervise(false)` after spawning workers so the supervisor doesn't burn context with `[SUPERVISOR] continue, go` while you're idle.
-- Only one `console.wake()` per execute_code block. Arm the subscription, log, return, go idle.
+- `console.wake()` is the canonical wake primitive for background wakes. Call it from inside `.then()` or `.each()` — it queues via `deliverAs: "followUp"` and works even when the agent is mid-turn.
+- Chain `.preventDefault()` when you're handling the event yourself — avoids duplicate leader batch wakes.
+- Chain `.timeout(ms)` on every subscription. Silent hangs are worse than a loud timeout.
+- `supervise(false)` is only needed for pattern B (background wake). Pattern A (in-turn await) doesn't need it.
 - Event types: `completed | turn_finished | warning | failed | stuck | comment | alive`.
 - Filter shapes: `teams.on("name")` · `teams.on("name", "type")` · `teams.on({ name, type, comment: /regex/ })` · `teams.on({ predicate: e => ... })`.
 - For the full orchestration loop (implement → review → gate → next), see the 90-building-with-teams playbook.

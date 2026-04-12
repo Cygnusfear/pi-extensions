@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +17,7 @@ export interface RunbookMeta {
 // ---------------------------------------------------------------------------
 
 const RUNBOOK_DIR = ".pi/runbooks";
+const GLOBAL_RUNBOOK_DIR = path.join(os.homedir(), ".pi", "runbooks");
 
 /** Sanitise a runbook name — alphanumeric, hyphens, underscores only. */
 function validateName(name: string): string {
@@ -90,33 +92,48 @@ export function saveRunbook(
 	return filePath;
 }
 
-/** List all runbooks in .pi/runbooks/ */
-export function listRunbooks(projectRoot: string): RunbookMeta[] {
-	const dir = runbookDir(projectRoot);
+/** Scan a directory for runbook .js files and return their metadata. */
+function scanRunbookDir(dir: string): RunbookMeta[] {
 	if (!fs.existsSync(dir)) return [];
-
-	const files = fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort();
-	return files.map((file) => {
-		const filePath = path.join(dir, file);
-		const code = fs.readFileSync(filePath, "utf-8");
-		const meta = parseFrontmatter(code);
-		return {
-			name: meta.name || file.replace(/\.js$/, ""),
-			description: meta.description || "(no description)",
-			file: filePath,
-		};
-	});
+	return fs.readdirSync(dir)
+		.filter((f) => f.endsWith(".js"))
+		.sort()
+		.map((file) => {
+			const filePath = path.join(dir, file);
+			const code = fs.readFileSync(filePath, "utf-8");
+			const meta = parseFrontmatter(code);
+			return {
+				name: meta.name || file.replace(/\.js$/, ""),
+				description: meta.description || "(no description)",
+				file: filePath,
+			};
+		});
 }
 
-/** Load a runbook's code (without frontmatter). */
+/** List all runbooks — global (~/.pi/runbooks/) + project-local (.pi/runbooks/).
+ *  Local runbooks override global ones on name collision. */
+export function listRunbooks(projectRoot: string): RunbookMeta[] {
+	const globalBooks = scanRunbookDir(GLOBAL_RUNBOOK_DIR);
+	const localBooks = scanRunbookDir(runbookDir(projectRoot));
+
+	// Merge: local wins on name collision
+	const byName = new Map<string, RunbookMeta>();
+	for (const b of globalBooks) byName.set(b.name, b);
+	for (const b of localBooks) byName.set(b.name, b); // override
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Load a runbook's code (without frontmatter).
+ *  Checks project-local first, then global. */
 export function loadRunbook(projectRoot: string, name: string): { code: string; raw: string } {
-	const filePath = runbookPath(projectRoot, name);
-	if (!fs.existsSync(filePath)) {
-		throw new Error(`Runbook "${name}" not found at ${filePath}`);
+	const localPath = runbookPath(projectRoot, name);
+	const globalPath = path.join(GLOBAL_RUNBOOK_DIR, `${validateName(name)}.js`);
+
+	const filePath = fs.existsSync(localPath) ? localPath : fs.existsSync(globalPath) ? globalPath : null;
+	if (!filePath) {
+		throw new Error(`Runbook "${name}" not found in .pi/runbooks/ or ~/.pi/runbooks/`);
 	}
 	const raw = fs.readFileSync(filePath, "utf-8");
-
-	// Strip the leading JSDoc frontmatter block if present
 	const code = raw.replace(/^\/\*\*[\s\S]*?\*\/\n?/, "").trim();
 	return { code, raw };
 }
