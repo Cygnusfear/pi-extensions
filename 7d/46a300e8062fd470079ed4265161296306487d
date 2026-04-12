@@ -1,0 +1,25 @@
+packages/code-mode/extensions/code-mode.ts
+  9403a44a521a3c81 379
+packages/code-mode/src/sandbox-tools.ts
+  9403a44a521a3c81 948-958,961-970,973-977,1022-1026,1029-1033,1132-1138,1141-1143,1146-1162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "7d46a300e8062fd470079ed4265161296306487d",
+  "prompts": {
+    "9403a44a521a3c81": {
+      "agent_id": {
+        "tool": "Jeremy Graviton Sagan",
+        "id": "4e88d6a9-831a-497d-9734-207457ebc102",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 64,
+      "total_deletions": 47,
+      "accepted_lines": 64,
+      "overriden_lines": 0
+    }
+  }
+}
