@@ -1,0 +1,23 @@
+packages/code-mode/extensions/code-mode.ts
+  9403a44a521a3c81 379-392
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "662c02dc1c48f330562bd66f0f95fb4b92da10f4",
+  "prompts": {
+    "9403a44a521a3c81": {
+      "agent_id": {
+        "tool": "Jeremy Graviton Sagan",
+        "id": "4e88d6a9-831a-497d-9734-207457ebc102",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 1,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    }
+  }
+}
