@@ -1,0 +1,36 @@
+packages/code-mode/src/sandbox-tools.ts
+  9403a44a521a3c81 47-66,329,485,548,606,672,973-974,977-982,985-987,1032-1034,1037-1039,1138-1141,1144-1146,1149-1157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "75eb3beb8da14b0cb94bbdcaeeec1d0afa625681",
+  "prompts": {
+    "446bd4909f309f77": {
+      "agent_id": {
+        "tool": "Annie Pioneer Copernicus",
+        "id": "56d77ea8-2d41-4ba9-9d96-6633723f9513",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 4,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    },
+    "9403a44a521a3c81": {
+      "agent_id": {
+        "tool": "Jeremy Graviton Sagan",
+        "id": "4e88d6a9-831a-497d-9734-207457ebc102",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 58,
+      "total_deletions": 33,
+      "accepted_lines": 58,
+      "overriden_lines": 0
+    }
+  }
+}
