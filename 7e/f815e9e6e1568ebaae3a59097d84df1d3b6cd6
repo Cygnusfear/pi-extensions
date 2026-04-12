@@ -1,0 +1,23 @@
+packages/teams/widget.ts
+  9403a44a521a3c81 35-39,47-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "7ef815e9e6e1568ebaae3a59097d84df1d3b6cd6",
+  "prompts": {
+    "9403a44a521a3c81": {
+      "agent_id": {
+        "tool": "Jeremy Graviton Sagan",
+        "id": "4e88d6a9-831a-497d-9734-207457ebc102",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 1,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
