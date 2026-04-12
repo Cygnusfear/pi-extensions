@@ -13,7 +13,10 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 
 	if (coordinatorMeshId) {
 		lines.push(
-			`Your coordinator's mesh ID is "${coordinatorMeshId}". If you use mesh_tell, send ONLY to this ID — do not broadcast to other peers.`,
+			`Your coordinator's mesh ID is "${coordinatorMeshId}" — FYI only.`,
+			`To talk to the coordinator, use \`team_comment\` (progress, questions, acknowledgements, blockers) and \`team_finish\` (terminal status).`,
+			`\`team_comment\` writes to the ticket AND broadcasts on the team's mesh channel — the coordinator sees it immediately, plus a durable note is kept.`,
+			`Do NOT use raw \`mesh_tell\` to the coordinator id — direct point-to-point has a peer-discovery race at spawn time and will fail for the first few seconds of worker life. \`team_comment\` uses the team channel, which bypasses that race entirely.`,
 			"",
 		);
 	}
