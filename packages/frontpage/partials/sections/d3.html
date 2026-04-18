@@ -1,0 +1,14 @@
+<section class="section section--d3 diagram-shell animate" data-id="{{id}}" style="--i:{{i}}">
+{{label_block}}
+  <div class="d3-wrap">
+    <div class="zoom-controls">
+      <button type="button" data-action="zoom-fit" title="Smart fit">&#8634;</button>
+      <button type="button" data-action="zoom-expand" title="Open full size">&#x26F6;</button>
+      <span class="zoom-label">Loading...</span>
+    </div>
+    <div class="mermaid-viewport" style="min-height:{{height}}px">
+      <div class="mermaid-canvas d3-target" id="{{id}}-target"></div>
+    </div>
+  </div>
+  <script type="application/json" id="{{id}}-data">{{data_json}}</script>
+</section>

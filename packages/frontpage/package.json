@@ -1,0 +1,22 @@
+{
+  "name": "@pi-extensions/frontpage",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/frontpage.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.66.0",
+    "@sinclair/typebox": "*"
+  },
+  "files": [
+    "extensions",
+    "partials",
+    "skills"
+  ]
+}

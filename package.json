@@ -33,6 +33,7 @@
       "./packages/fff/extensions/fff.ts",
       "./packages/file-tools/extensions/file-tools.ts",
       "./packages/foresight/extensions/foresight.ts",
+      "./packages/frontpage/extensions/frontpage.ts",
       "./packages/git-safety/extensions/git-safety.ts",
       "./packages/hashline-tools/extensions/hashline-tools.ts",
       "./packages/lock-mode/extensions/lock-mode.ts",
@@ -60,6 +61,9 @@
     ],
     "themes": [
       "./packages/lipgloss-theme/themes"
+    ],
+    "skills": [
+      "./packages/frontpage/skills"
     ]
   },
   "dependencies": {

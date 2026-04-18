@@ -1,0 +1,11 @@
+/* register: magazine-monograph */
+:root {
+  --font-display: 'Instrument Serif', 'Georgia', serif;
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'Fragment Mono', 'SF Mono', monospace;
+  --max-width: 920px;
+  --measure: 62ch;
+  --gap-lg: 56px;
+}
+.page-head h1 { font-weight: 400; font-size: clamp(36px, 5vw, 56px); }
+.lead { font-family: var(--font-display); font-size: 24px; line-height: 1.35; }

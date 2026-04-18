@@ -1,0 +1,9 @@
+/* register: nyt-editorial */
+:root {
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
+}
+.page-head h1 { font-style: italic; font-weight: 500; }
+.lead { font-style: italic; }
+.pull-quote { font-style: italic; }

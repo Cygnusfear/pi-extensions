@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{title}}</title>
+  {{fonts}}
+  <style>
+{{base_css}}
+{{palette_css}}
+{{register_css}}
+  </style>
+  {{extra_head}}
+</head>
+<body>
+  <div class="container">
+    <header class="page-head animate" style="--i:0">
+      <h1>{{title}}</h1>
+      <p class="thesis">{{thesis}}</p>
+    </header>
+    <main class="sections">
+{{sections}}
+    </main>
+  </div>
+{{scripts}}
+</body>
+</html>

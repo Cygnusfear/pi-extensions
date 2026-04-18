@@ -1,0 +1,20 @@
+<section class="section section--mermaid diagram-shell animate" data-id="{{id}}" style="--i:{{i}}" data-font-size="{{fontSize}}" data-initial-zoom="{{initialZoom}}">
+{{label_block}}
+  <p class="diagram-shell__hint">Ctrl/Cmd + wheel to zoom. Drag to pan. Double-click to fit.</p>
+  <div class="mermaid-wrap">
+    <div class="zoom-controls">
+      <button type="button" data-action="zoom-in" title="Zoom in">+</button>
+      <button type="button" data-action="zoom-out" title="Zoom out">&minus;</button>
+      <button type="button" data-action="zoom-fit" title="Smart fit">&#8634;</button>
+      <button type="button" data-action="zoom-one" title="1:1 zoom">1:1</button>
+      <button type="button" data-action="zoom-expand" title="Open full size">&#x26F6;</button>
+      <span class="zoom-label">Loading...</span>
+    </div>
+    <div class="mermaid-viewport">
+      <div class="mermaid mermaid-canvas"></div>
+    </div>
+  </div>
+  <script type="text/plain" class="diagram-source">
+{{source}}
+  </script>
+</section>

@@ -1,0 +1,8 @@
+/* register: working-newspaper */
+:root {
+  --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+}
+.page-head h1 { font-weight: 700; letter-spacing: -0.02em; }
+.sections > * + * { margin-top: 40px; }

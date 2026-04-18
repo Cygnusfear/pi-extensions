@@ -1,0 +1,17 @@
+{
+  "nyt-editorial": [
+    "Fraunces:opsz,ital,wght@9..144,0,500;9..144,0,600;9..144,1,500",
+    "IBM+Plex+Sans:wght@400;500;600",
+    "IBM+Plex+Mono:wght@400;500"
+  ],
+  "working-newspaper": [
+    "Bricolage+Grotesque:wght@500;600;700",
+    "IBM+Plex+Sans:wght@400;500",
+    "JetBrains+Mono:wght@400;500"
+  ],
+  "magazine-monograph": [
+    "Instrument+Serif:ital@0;1",
+    "DM+Sans:wght@400;500;600",
+    "Fragment+Mono"
+  ]
+}
