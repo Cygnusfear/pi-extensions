@@ -1,0 +1,110 @@
+packages/frontpage/partials/sections/annotation-chart.html
+  9f51c60f8118f5bf 1-10
+packages/frontpage/partials/css/palettes/rust.css
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/css/registers/working-newspaper.css
+  9f51c60f8118f5bf 1-8
+packages/frontpage/partials/css/registers/_fonts.json
+  9f51c60f8118f5bf 1-17
+packages/frontpage/partials/sections/pull-quote.html
+  9f51c60f8118f5bf 1-6
+packages/frontpage/partials/css/palettes/teal.css
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/js/zoom-pan.js
+  9f51c60f8118f5bf 1-187
+packages/frontpage/partials/js/d3.frag.js
+  9f51c60f8118f5bf 1-13
+packages/frontpage/extensions/render.ts
+  9f51c60f8118f5bf 1-361
+packages/frontpage/partials/js/chartjs.frag.js
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/sections/timeline.html
+  9f51c60f8118f5bf 1-6
+packages/frontpage/partials/sections/timeline-entry.html
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/css/palettes/navy.css
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/sections/d3.html
+  9f51c60f8118f5bf 1-14
+packages/frontpage/partials/css/registers/magazine-monograph.css
+  9f51c60f8118f5bf 1-11
+packages/frontpage/partials/sections/kpi-item.html
+  9f51c60f8118f5bf 1-5
+packages/frontpage/skills/frontpage/SKILL.md
+  9f51c60f8118f5bf 1-175
+packages/frontpage/partials/sections/svg.html
+  9f51c60f8118f5bf 1-14
+packages/frontpage/scripts/smoketest.ts
+  9f51c60f8118f5bf 1-101
+packages/frontpage/partials/js/annotation-chart.frag.js
+  9f51c60f8118f5bf 1-34
+packages/frontpage/partials/sections/raw-html.html
+  9f51c60f8118f5bf 1-3
+packages/frontpage/partials/sections/lead.html
+  9f51c60f8118f5bf 1-3
+packages/frontpage/partials/sections/kpi-grid.html
+  9f51c60f8118f5bf 1-6
+packages/frontpage/partials/sections/card-grid.html
+  9f51c60f8118f5bf 1-6
+packages/frontpage/partials/css/palettes/crimson.css
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/css/registers/nyt-editorial.css
+  9f51c60f8118f5bf 1-9
+packages/frontpage/partials/css/base.css
+  9f51c60f8118f5bf 1-403
+packages/frontpage/partials/sections/card.html
+  9f51c60f8118f5bf 1-4
+packages/frontpage/partials/sections/prose.html
+  9f51c60f8118f5bf 1-4
+packages/frontpage/partials/sections/callout.html
+  9f51c60f8118f5bf 1-3
+packages/frontpage/partials/css/palettes/gold.css
+  9f51c60f8118f5bf 1-5
+packages/frontpage/partials/sections/mermaid.html
+  9f51c60f8118f5bf 1-20
+packages/frontpage/partials/js/svg.frag.js
+  9f51c60f8118f5bf 1-6
+packages/frontpage/partials/js/mermaid.frag.js
+  9f51c60f8118f5bf 1-21
+packages/frontpage/partials/css/palettes/_mermaid-themes.json
+  9f51c60f8118f5bf 1-47
+packages/frontpage/partials/sections/table.html
+  9f51c60f8118f5bf 1-12
+packages/frontpage/partials/sections/chartjs.html
+  9f51c60f8118f5bf 1-7
+packages/frontpage/extensions/frontpage.ts
+  9f51c60f8118f5bf 1-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "d5394fdf102dba5cd482cad3d1412c3c7ba0fa39",
+  "prompts": {
+    "9f51c60f8118f5bf": {
+      "agent_id": {
+        "tool": "Uroš Horizon Spergel",
+        "id": "019d9cd0-45de-7253-8eaa-da5c4202030a",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 2063,
+      "total_deletions": 63,
+      "accepted_lines": 1959,
+      "overriden_lines": 0
+    },
+    "b00f474c0bb21df5": {
+      "agent_id": {
+        "tool": "Shri Heliopause Jayawardhana",
+        "id": "39029062-50b8-441e-90a4-4144b920bfa2",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 4,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
