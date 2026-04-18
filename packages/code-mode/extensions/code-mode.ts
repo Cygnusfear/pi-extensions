@@ -501,13 +501,14 @@ async function executeCode(
             const msg = (entry as any).message;
             if (!msg) continue;
             msgCount++;
+            const idTag = entry.id ? entry.id + " · " : "";
             if (typeof msg.content === "string") {
-              outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
+              outline.push("[" + idTag + msg.role + "] " + msg.content.slice(0, 200));
             } else if (Array.isArray(msg.content)) {
               const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
               const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
               if (text || tools.length) {
-                outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
+                outline.push("[" + idTag + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
               }
             }
           }
@@ -515,7 +516,55 @@ async function executeCode(
             messageCount: msgCount,
             outline: outline.join("\n"),
           };
-          log("preCompact: stashed outline of " + msgCount + " messages into $.preCompact. Review it, save important context to $, then call session.squash().");
+          log("preCompact: stashed outline of " + msgCount + " messages into $.preCompact. Review it, pin important messages by ID with session.pin([...]), then call session.squash().");
+        },
+        pin: (ids: string[]) => {
+          const log = (msg: string) => sess.logs.push(msg);
+          if (!Array.isArray(ids) || ids.length === 0) {
+            log("session.pin(): pass an array of message IDs (get them from $.preCompact.outline or session.messages())");
+            return "No IDs provided";
+          }
+          const want = new Set(ids.filter((x) => typeof x === "string" && x.length > 0));
+          if (want.size === 0) {
+            log("session.pin(): no valid string IDs in input");
+            return "No valid IDs";
+          }
+          const branch = sm.getBranch();
+          const byId = new Map<string, any>();
+          for (const e of branch) {
+            if (e.type === "message" && e.id && want.has(e.id)) byId.set(e.id, e);
+          }
+          const missing = [...want].filter((id) => !byId.has(id));
+          const proxy = sess.store.proxy;
+          const existing = Array.isArray(proxy.pinned) ? (proxy.pinned as any[]) : [];
+          const seenIds = new Set(existing.map((m: any) => m?.id).filter(Boolean));
+          let added = 0;
+          let chars = 0;
+          // Preserve order-of-pin for new additions; keep prior pins where they were.
+          for (const id of ids) {
+            if (!byId.has(id)) continue;
+            if (seenIds.has(id)) continue;
+            const entry = byId.get(id);
+            const msg = entry.message;
+            const content = typeof msg.content === "string"
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? msg.content
+                    .filter((p: any) => p.type === "text")
+                    .map((p: any) => p.text)
+                    .join("\n")
+                : "";
+            existing.push({ id: entry.id, role: msg.role, content, timestamp: entry.timestamp });
+            seenIds.add(id);
+            added++;
+            chars += content.length;
+          }
+          proxy.pinned = existing;
+          const parts = ["session.pin(): pinned " + added + " message(s) into $.pinned (total: " + existing.length + ", " + chars + " new chars)"];
+          if (missing.length > 0) parts.push("skipped unknown IDs: " + missing.join(", "));
+          const msg = parts.join("; ");
+          log(msg);
+          return msg;
         },
         squash: (options?: { continue?: string }) => {
           const log = (msg: string) => sess.logs.push(msg);

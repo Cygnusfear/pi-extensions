@@ -190,23 +190,33 @@ const ctx = session.load("ctx");       // restore after reload
 
 ### Context Management
 
-Your context window is finite. Squash proactively at natural boundaries — after finishing research, completing a milestone, or when context feels heavy. The two-phase flow lets you review before committing.
+Your context window is finite. Squash proactively at natural boundaries — after finishing research, completing a milestone, or when context feels heavy. The three-phase flow lets you review what's about to be lost, preserve what matters, and then compact.
+
+**Two preservation modes — use both when they apply:**
+
+1. **Pin by reference (default, zero output-token cost).** Pick messages from the outline by ID and drop them into `$.pinned` verbatim. No paraphrasing.
+2. **Narrative synthesis (only when you need to compress).** Write a thick `$.ctx` string — gotchas, dead ends, line numbers. Use when 40 messages collapse to one takeaway.
 
 ```javascript
-// Phase 1 — outline only, no compaction yet
-session.squash();
-// → $.preCompact = { outline, messageCount }
+// Phase 1 — review what's about to be lost
+session.preCompact();
+// → $.preCompact = { outline: "[id123 · user] ...", messageCount: 42 }
 
-// Write thick context — the LLM summary will miss your gotchas, dead ends, and line numbers
+// Phase 2a — REFERENCE: pin specific messages by ID (verbatim, no rewrite)
+session.pin(["id5", "id12", "id18"]);
+// → $.pinned = [{ id, role, content, timestamp }, ...]  survives squash
+
+// Phase 2b — NARRATIVE: synthesize only what reference can't express
 $.ctx = `DB MIGRATION — mid-stream
-Done: schema v3 migrated, users + sessions tables updated (src/db/migrate.ts)
 Gotcha: sessions.token_hash column — NOT token — migration uses wrong column name, see line 47
 Dead end: tried batching inserts — FK constraint violation on sessions.user_id
 Next: fix column name at migrate.ts:47, then run test suite`;
 
-// Phase 2 — compact and auto-continue
-session.squash({ continue: "Squash done. Fix token_hash column at src/db/migrate.ts:47." });
+// Phase 3 — compact and auto-continue
+session.squash({ continue: "Squash done. Fix token_hash column at migrate.ts:47. Pinned refs in $.pinned." });
 ```
+
+**Rule of thumb:** pin first (cheap, verbatim), narrative only for the delta your pins can't carry.
 
 Bad `$.ctx` loses everything: `{ goal: "migration", progress: "50%" }`
 Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specific line numbers, and what to do next.

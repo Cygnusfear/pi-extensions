@@ -190,30 +190,38 @@ session.save("ctx", { goal: "...", decisions: [...] });  // survives reload
 const ctx = session.load("ctx");     // restore
 
 session.entries();                   // all session entries (messages, tags, compactions, custom)
-session.squash();                    // two-phase context compaction (see below)
+session.preCompact();                // build outline for review (no compaction)
+session.pin(["id5", "id12"]);        // pin messages verbatim into $.pinned
+session.squash();                    // compact — $ (including $.pinned, $.ctx) survives
 ```
 
-### Context management — two-phase squash
+### Context management — three-phase squash
 
-When context fills up, model quality degrades. Use `session.squash()` — a two-phase compaction that lets you review before committing.
+When context fills up, model quality degrades. Squash proactively. You have two preservation modes — use both when they apply.
+
+1. **Pin by reference (default).** Pick messages from the outline by ID. They land in `$.pinned` verbatim. Zero output-token cost.
+2. **Narrative synthesis (when needed).** Write a thick `$.ctx` string for things reference can't express — dead ends, synthesized takeaways, next-step instructions.
 
 ```javascript
-// Phase 1 — build outline, stash for review (no compaction yet)
-session.squash();
-// $.preCompact = { outline, messageCount }
+// Phase 1 — review what's about to be lost
+session.preCompact();
+// $.preCompact = { outline: "[id123 · user] ...", messageCount: 42 }
 
-// Review and preserve thick context in $
+// Phase 2a — REFERENCE: pin specific messages by ID (no rewrite)
+session.pin(["id5", "id12", "id18"]);
+// $.pinned = [{ id, role, content, timestamp }, ...]  survives squash
+
+// Phase 2b — NARRATIVE: synthesize only the delta pins can't carry
 $.ctx = `AUTH REFACTOR — mid-stream
-Done: JWT signing works, login/logout updated
 Gotcha: refreshTokens.token_hash — NOT token — wasted 20 min on this
+Dead end: tried session-based approach, FK violations; back to JWT.
 Next: Write rotation logic at src/auth.ts:142`;
 
-// Phase 2 — apply compaction + auto-continue
-session.squash({ continue: "Squash done. Continue at src/auth.ts:142." });
-// Agent automatically picks up where it left off
+// Phase 3 — apply compaction + auto-continue
+session.squash({ continue: "Squash done. Continue at src/auth.ts:142. Pinned refs in $.pinned." });
 ```
 
-`$` and `session.save()` survive compaction. Write thick narrative context — gotchas, dead ends, line numbers — not shallow metadata.
+`$` (including `$.pinned`, `$.ctx`) and `session.save()` all survive compaction. Pin first — it's verbatim and free. Use narrative only for the delta.
 
 ## Available sandbox functions
 
