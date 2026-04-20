@@ -171,6 +171,7 @@ let session: PersistentSession | null = null;
 let escaped = false;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
+let pendingSquash: { continue?: string } | null = null;
 let currentOuijaSessionFile: string | null = null;
 
 // ── Context Guard ─────────────────────────────────────────────────────────────
@@ -572,14 +573,8 @@ async function executeCode(
             log("session.squash(): compaction not available in this context");
             return;
           }
-          const continueText = options?.continue;
-          toolCtx.compact({
-            onComplete: () => {
-              if (continueText && toolCtx?.sendUserMessage) {
-                toolCtx.sendUserMessage(continueText, { deliverAs: "followUp" });
-              }
-            },
-          });
+          pendingSquash = { continue: options?.continue };
+          log("session.squash(): compaction scheduled for after this turn completes");
         },
         load: (key: string) => {
           const entries = sm.getEntries();
@@ -1463,7 +1458,7 @@ export default function (pi: ExtensionAPI) {
 
   // Deferred context checkout — navigate after the current turn completes
   pi.on("turn_end", async (_event, ctx) => {
-    if (!pendingCheckout) return;
+    if (!pendingCheckout && !pendingSquash) return;
     ctx.abort();
   });
 
@@ -1475,6 +1470,23 @@ export default function (pi: ExtensionAPI) {
         const cmdCtx = ctx as any;
         if (cmdCtx.navigateTree) {
           await cmdCtx.navigateTree(checkout.targetId, { summarize: false });
+        }
+      } catch {}
+    }
+
+    if (pendingSquash) {
+      const squash = pendingSquash;
+      pendingSquash = null;
+      try {
+        const cmdCtx = ctx as any;
+        if (cmdCtx.compact) {
+          cmdCtx.compact({
+            onComplete: () => {
+              if (squash.continue) {
+                pi.sendUserMessage(squash.continue, { deliverAs: "followUp" });
+              }
+            },
+          });
         }
       } catch {}
     }
