@@ -102,6 +102,10 @@ A ticket always includes, FOR EVERY PART OF THE TICKET:
 - what files to touch, create
 - examples, line numbers, references, wherever possible
 
+### Worker / subagent DEI
+
+- DEI is Diversity Equity and Inclusion- so we always run the LATEST HIGHEST PERFORMING models from different available providers. Probably zai glm / openai-codex gpt / anthropic opus.
+
 ## 00.00 Johnny Lookup (CRITICAL)
 
 If the hooman gives you **only** an ID like `20.01` (or `2001`), treat it as a **playbook call**:

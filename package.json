@@ -9,10 +9,10 @@
     "list": "bun pm ls"
   },
   "devDependencies": {
-    "@mariozechner/pi-agent-core": "0.66.0",
-    "@mariozechner/pi-ai": "0.66.0",
-    "@mariozechner/pi-coding-agent": "0.66.0",
-    "@mariozechner/pi-tui": "0.66.0",
+    "@mariozechner/pi-agent-core": "0.67.4",
+    "@mariozechner/pi-ai": "0.67.4",
+    "@mariozechner/pi-coding-agent": "0.67.4",
+    "@mariozechner/pi-tui": "0.67.4",
     "@sinclair/typebox": "^0.34.41"
   },
   "pi": {
