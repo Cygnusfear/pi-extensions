@@ -66,6 +66,14 @@ const status = await bash_bg_status({ id: "bg-a3f2c1b7" });
 // → { id: "bg-a3f2c1b7", status: "running", pid: 12345, runtime: "45s", cwd: "/path/to/project" }
 ```
 
+```typescript
+// Sandbox helpers also accept the job object returned by bashBgStart()
+const job = await bashBgStart({ command: "npm run dev" });
+const status = await bashBgStatus(job);
+const logs = await bashBgLogs({ id: job, limit: 50 });
+await bashBgStop({ id: job, signal: "SIGTERM" });
+```
+
 ### Read logs (paginated)
 
 ```typescript
@@ -159,10 +167,10 @@ No additional configuration required. Background bash tools are available immedi
  
  | Sandbox fn | Parameters | Description |
  |-----------|-----------|-------------|
- | `bashBgStart` | `{ command, cwd? }` | Start a background job, returns `{ id, pid, cwd, logPath, status }` |
- | `bashBgStatus` | `{ id }` | Get job status |
- | `bashBgLogs` | `{ id, offset?, limit? }` | Read paginated logs, returns `{ text, offset, nextOffset, totalLines, hasMore, status }` |
- | `bashBgStop` | `{ id, signal? }` | Stop a job |
- | `bashBgList` | *(none)* | List all jobs |
+| `bashBgStart` | `{ command, cwd? }` | Start a background job, returns `{ id, pid, cwd, logPath, status }` |
+| `bashBgStatus` | `jobId` or `{ id }` | Get job status |
+| `bashBgLogs` | `{ id: jobIdOrJob, offset?, limit? }` | Read paginated logs, returns `{ text, offset, nextOffset, totalLines, hasMore, status }` |
+| `bashBgStop` | `{ id: jobIdOrJob, signal? }` | Stop a job |
+| `bashBgList` | *(none)* | List all jobs |
  
  ## Usage

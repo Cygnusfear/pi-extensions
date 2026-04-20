@@ -934,10 +934,23 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
     sleep: (ms: number) => {
       if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
-      return new Promise((resolve, reject) => {
-        if (signal.aborted) { reject(new Error("Aborted")); return; }
-        const timer = setTimeout(resolve, ms);
-        signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("Aborted")); }, { once: true });
+      return new Promise((resolve) => {
+        if (signal.aborted) { resolve(); return; }
+        // Resolve early on abort instead of rejecting. The outer execute_code
+        // runner already races the whole VM against the abort signal and returns
+        // `Aborted` for the active turn. Rejecting here is redundant for normal
+        // foreground aborts and dangerous for detached background promises
+        // (e.g. $.monitor loops) because an interrupt can turn into an
+        // unhandled rejection that crashes Bun.
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        }, ms);
+        signal.addEventListener("abort", onAbort, { once: true });
       });
     },
 

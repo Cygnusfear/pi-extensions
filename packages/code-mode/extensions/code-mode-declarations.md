@@ -61,20 +61,19 @@ declare function bashBgStart(input: {
   cwd?: string;
 }): Promise<{ id: string; pid: number; cwd: string; logPath: string; status: string }>;
 
+type BackgroundJobRef = string | { id: string } | { id: { id: string } };
+
 /**
  * Get the status of a background bash job.
  */
-declare function bashBgStatus(input: {
-  /** Background job ID */
-  id: string;
-}): Promise<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null; signal?: string }>;
+declare function bashBgStatus(input: BackgroundJobRef): Promise<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null; signal?: string }>;
 
 /**
  * Read logs from a background bash job.
  */
 declare function bashBgLogs(input: {
-  /** Background job ID */
-  id: string;
+  /** Background job ID or a job object returned by bashBgStart */
+  id: BackgroundJobRef;
   /** 1-indexed log line to start from (default: 1) */
   offset?: number;
   /** Maximum lines to return (default: 200, max: 2000) */
@@ -85,8 +84,8 @@ declare function bashBgLogs(input: {
  * Stop a background bash job.
  */
 declare function bashBgStop(input: {
-  /** Background job ID */
-  id: string;
+  /** Background job ID or a job object returned by bashBgStart */
+  id: BackgroundJobRef;
   /** Signal to send. Defaults to SIGTERM. */
   signal?: "SIGTERM" | "SIGKILL";
 }): Promise<{ id: string; pid: number; status: string; exitCode?: number | null; signal?: string }>;

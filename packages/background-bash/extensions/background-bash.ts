@@ -392,8 +392,34 @@ const requireCommand = (params: BashCompatParamsType): string | null => {
 };
 
 const requireJobId = (params: BashCompatParamsType): string | null => {
-	const id = params.id?.trim();
+	const id = coerceJobId(params.id);
 	return id && id.length > 0 ? id : null;
+};
+
+const coerceJobId = (value: unknown): string | null => {
+	if (typeof value === "string") {
+		const id = value.trim();
+		return id.length > 0 ? id : null;
+	}
+
+	if (value && typeof value === "object") {
+		const nested = (value as { id?: unknown }).id;
+		return nested === value ? null : coerceJobId(nested);
+	}
+
+	return null;
+};
+
+const requireSandboxJobId = (toolName: string, input: unknown): string => {
+	const candidate =
+		input && typeof input === "object" && "id" in (input as Record<string, unknown>)
+			? (input as { id?: unknown }).id
+			: input;
+	const id = coerceJobId(candidate);
+	if (!id) {
+		throw new Error(toolName + " requires a background job id string or a job object with an id field.");
+	}
+	return id;
 };
 
 async function runForegroundCommand(
@@ -651,19 +677,28 @@ export default function (pi: ExtensionAPI) {
 		return { id: job.id, pid: job.pid, cwd: job.cwd, logPath: job.logPath, status: job.status };
 	});
 
-	registerSandboxFn("bashBgStatus", async (input: { id: string }) => {
-		const job = manager.getStatus(input.id);
-		if (!job) throw new Error(`Background job not found: ${input.id}`);
+	registerSandboxFn("bashBgStatus", async (input: { id: string } | string | { id: { id: string } }) => {
+		const id = requireSandboxJobId("bashBgStatus", input);
+		const job = manager.getStatus(id);
+		if (!job) throw new Error(`Background job not found: ${id}`);
 		return { id: job.id, pid: job.pid, status: job.status, command: job.command, cwd: job.cwd, startedAt: job.startedAt, endedAt: job.endedAt, exitCode: job.exitCode, signal: job.signal };
 	});
 
-	registerSandboxFn("bashBgLogs", async (input: { id: string; offset?: number; limit?: number }) => {
-		const result = await manager.readLogs(input.id, { offset: input.offset, limit: input.limit });
+	registerSandboxFn("bashBgLogs", async (input: { id: string | { id: string }; offset?: number; limit?: number } | string) => {
+		const id = requireSandboxJobId("bashBgLogs", input);
+		const options = input && typeof input === "object"
+			? { offset: (input as { offset?: number }).offset, limit: (input as { limit?: number }).limit }
+			: undefined;
+		const result = await manager.readLogs(id, options);
 		return result;
 	});
 
-	registerSandboxFn("bashBgStop", async (input: { id: string; signal?: "SIGTERM" | "SIGKILL" }) => {
-		const job = await manager.stop(input.id, input.signal || "SIGTERM");
+	registerSandboxFn("bashBgStop", async (input: { id: string | { id: string }; signal?: "SIGTERM" | "SIGKILL" } | string) => {
+		const id = requireSandboxJobId("bashBgStop", input);
+		const stopSignal = input && typeof input === "object" && "signal" in (input as Record<string, unknown>)
+			? ((input as { signal?: "SIGTERM" | "SIGKILL" }).signal || "SIGTERM")
+			: "SIGTERM";
+		const job = await manager.stop(id, stopSignal);
 		return { id: job.id, pid: job.pid, status: job.status, exitCode: job.exitCode, signal: job.signal };
 	});
 
