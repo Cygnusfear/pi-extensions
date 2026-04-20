@@ -1,0 +1,36 @@
+package.json
+  b00f474c0bb21df5 12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "4595f134ed2600e91ee212a58fafadc4f7140016",
+  "prompts": {
+    "9f51c60f8118f5bf": {
+      "agent_id": {
+        "tool": "Uroš Horizon Spergel",
+        "id": "019d9cd0-45de-7253-8eaa-da5c4202030a",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "b00f474c0bb21df5": {
+      "agent_id": {
+        "tool": "Shri Heliopause Jayawardhana",
+        "id": "39029062-50b8-441e-90a4-4144b920bfa2",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
