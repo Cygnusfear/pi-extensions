@@ -756,7 +756,9 @@ describe("TeamLeader lifecycle regression", () => {
 	test("plain exit code 0 without explicit terminal signal is warning", async () => {
 		const baseDir = makeTempDir("teams-exit0-no-agent-end-");
 		const sessionDir = path.join(baseDir, "session");
+		const worktreePath = path.join(baseDir, "worktree");
 		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.mkdirSync(worktreePath, { recursive: true });
 		const sessionFile = path.join(sessionDir, "worker.jsonl");
 		fs.writeFileSync(
 			sessionFile,
@@ -796,7 +798,7 @@ describe("TeamLeader lifecycle regression", () => {
 			lastNote: undefined,
 			sessionDir,
 			sessionFile,
-			worktreePath: null,
+			worktreePath,
 			hasTools: false,
 			status: "running",
 			spawnedAt: Date.now() - 1000,
@@ -813,6 +815,8 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
 		expect(events[0].type).toBe("warning");
+		expect(events[0].reason).toContain("worker exited without explicit team_finish");
+		expect(events[0].reason).toContain(`Worktree preserved for inspection: ${worktreePath}`);
 	});
 
 	test("crash report should prefer earlier informative attempt over later empty respawn dir", async () => {

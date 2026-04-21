@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import fs from "node:fs";
 import path from "node:path";
 
 function makeFakePi() {
@@ -47,7 +48,6 @@ async function importRunWorker() {
 			self() { return { id: "mesh-self" }; }
 		},
 	}));
-	mock.module("./types.js", () => ({ GRACE_PERIOD_MS: 0 }));
 	const mod = await import(`./worker.ts?test=${Date.now()}-${Math.random()}`);
 	return mod.runWorker;
 }
@@ -118,5 +118,22 @@ describe("teams worker lifecycle", () => {
 		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote?.args.at(-1)).toBe("QUIT: blocked by missing data");
 		expect(close?.args[1]).toBe("tk-1");
+	});
+
+	test("team_comment can post a file-backed markdown note", async () => {
+		setWorkerEnv();
+		const fake = makeFakePi();
+		const runWorker = await importRunWorker();
+		runWorker(fake.pi, { autoCloseOnAgentEnd: true, autoCloseOnSessionShutdown: true });
+
+		const repoDir = fs.mkdtempSync(path.join(process.cwd(), "teams-worker-comment-"));
+		const notePath = path.join(repoDir, "review.md");
+		fs.writeFileSync(notePath, "# Review\n\n- keeps code fences safe\n", "utf-8");
+
+		await fake.tools.get("team_comment").execute("id", { filePath: notePath }, null, null, { cwd: repoDir });
+
+		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
+		expect(addNote?.args).toEqual(["add-note", "tk-1", "--file", notePath]);
+		fs.rmSync(repoDir, { recursive: true, force: true });
 	});
 });

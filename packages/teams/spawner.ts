@@ -48,6 +48,7 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 			ticketReadHint,
 			"Do the work described in the ticket body above.",
 			`Use team_comment to report progress while you work.`,
+			"If you need to post a long review/note with markdown, code fences, or backticks, write it to a file and send it with team_comment { filePath } instead of inlining it in shell commands or JS template literals.",
 			`When done, call team_finish with status=done and a concise summary.`,
 			`If you are quitting or blocked, call team_finish with status=quit and explain why.`,
 			"",

@@ -69,6 +69,7 @@ See [WORKER_LIFECYCLE.md](./WORKER_LIFECYCLE.md) for full details.
 - **`team_finish(done)`** = authoritative success signal from the worker
 - **`team_finish(quit)`** = intentional non-success
 - **Ambiguous exit** after real work = `warning` (not done)
+- **Long markdown/code-heavy worker notes should be file-backed** (write a file, then use `team_comment { filePath }`)
 - **Startup failure** = `failed`
 - Workers **never** close tickets themselves — the coordinator owns ticket lifecycle
 - Workers **never** guess the coordinator's identity — it's injected at spawn time

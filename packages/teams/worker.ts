@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getMaiBin } from "../shared/src/mai-binary.js";
 import { Type } from "@sinclair/typebox";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve, join } from "node:path";
 import { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
 import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
@@ -258,7 +259,8 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	});
 
 	const CommentParams = Type.Object({
-		message: Type.String({ description: "Your comment" }),
+		message: Type.Optional(Type.String({ description: "Inline comment text" })),
+		filePath: Type.Optional(Type.String({ description: "Path to a UTF-8 text/markdown file whose contents should be posted as the comment" })),
 	});
 	const FinishParams = Type.Object({
 		status: Type.Union([Type.Literal("done"), Type.Literal("quit")]),
@@ -268,13 +270,42 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	pi.registerTool({
 		name: "team_comment",
 		label: "Team Comment",
-		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers.`,
+		description: `Comment on your assigned ticket (${ticketId}). Use this to report progress, ask questions, or flag blockers. For long markdown/code-heavy notes, prefer { filePath } so the note is posted from a file instead of inline escaping.`,
 		parameters: CommentParams,
-		async execute(_id, params: { message: string }, _signal, _onUpdate, ctx) {
-			const result = await pi.exec(getMaiBin(), ["add-note", ticketId, params.message], {
-				cwd: getTicketCwd(ctx.cwd),
-				timeout: 5000,
-			});
+		async execute(_id, params: { message?: string; filePath?: string }, _signal, _onUpdate, ctx) {
+			const hasMessage = typeof params.message === "string" && params.message.length > 0;
+			const hasFilePath = typeof params.filePath === "string" && params.filePath.length > 0;
+			if (hasMessage === hasFilePath) {
+				return {
+					content: [{ type: "text" as const, text: "Provide exactly one of { message } or { filePath }." }],
+					isError: true,
+				};
+			}
+
+			const effectiveCwd = getTicketCwd(ctx.cwd);
+			let result;
+			let commentText: string;
+			if (hasFilePath) {
+				const resolvedPath = resolve(ctx.cwd, params.filePath!);
+				try {
+					commentText = await readFile(resolvedPath, "utf-8");
+				} catch (error) {
+					return {
+						content: [{ type: "text" as const, text: `Failed to read comment file: ${error}` }],
+						isError: true,
+					};
+				}
+				result = await pi.exec(getMaiBin(), ["add-note", ticketId, "--file", resolvedPath], {
+					cwd: effectiveCwd,
+					timeout: 5000,
+				});
+			} else {
+				commentText = params.message!;
+				result = await pi.exec(getMaiBin(), ["add-note", ticketId, commentText], {
+					cwd: effectiveCwd,
+					timeout: 5000,
+				});
+			}
 			if (result.code !== 0) {
 				return {
 					content: [{ type: "text" as const, text: `Failed to comment: ${result.stderr}` }],
@@ -288,7 +319,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					workerId: workerName,
 					attemptId: workerInstanceId,
 					seq: nextSeq(),
-					text: params.message,
+					text: commentText,
 				}),
 			);
 			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }] };

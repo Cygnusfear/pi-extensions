@@ -1873,15 +1873,19 @@ export class TeamLeader {
       return;
     }
 
-    // Build crash report BEFORE cleanup — cleanup deletes the session directory
+    // Build crash report BEFORE cleanup — cleanup may remove the worker worktree
     const crashReport = classification === "failed" ? buildWorkerCrashReport(worker, exitCode) : "";
     this.projectV2WorkerRuntime(name);
     worker.routeState = "dead";
     worker.meshClientId = undefined;
 
-    // Cleanup: auto-commit dirty files, remove worktree, rename branch to .done
+    // Cleanup: auto-commit dirty files, preserve success/warning branches, and
+    // keep ambiguous warning worktrees on disk so failed terminal signaling does
+    // not destroy post-mortem evidence.
+    const explicitTerminal = assessment.lifecycle.lastTerminalStatus;
     const preserveBranch = (classification === "success" || classification === "warning") && worker.worktreePath !== null;
-    const cleanupResult = await cleanupWorker(this.ctx.cwd, worker, preserveBranch).catch(() => undefined);
+    const preserveWorktree = classification === "warning" && !explicitTerminal && worker.worktreePath !== null;
+    const cleanupResult = await cleanupWorker(this.ctx.cwd, worker, { preserveBranch, preserveWorktree }).catch(() => undefined);
 
     if (classification === "success") {
       const branch = `teams/${worker.name}/${worker.ticketId}`;
@@ -1895,10 +1899,13 @@ export class TeamLeader {
         worker: { ...worker },        result: `${lastNote}${mergeHint}`,
       });
     } else if (classification === "warning") {
+      const warningHint = cleanupResult?.worktreePreserved && worker.worktreePath
+        ? `\n📌 Worktree preserved for inspection: ${worker.worktreePath}`
+        : "";
       this.notifyLLM({
         type: "warning",
         worker: { ...worker },
-        reason: lastNote,
+        reason: `${lastNote}${warningHint}`,
       });
     } else {
       // If the worker left no ticket notes, put a short diagnostic in lastNote
@@ -2084,7 +2091,7 @@ export class TeamLeader {
     this.unwatchWorker(workerName);
     if (this.ctx) {
       await this.pi.exec(getMaiBin(), ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 }).catch(() => {});
-      await cleanupWorker(this.ctx.cwd, worker, true /* always preserve branch on kill */);
+      await cleanupWorker(this.ctx.cwd, worker, { preserveBranch: true } /* always preserve branch on kill */);
     }
     this.workers.delete(workerName);
     this.childProcesses.delete(workerName);

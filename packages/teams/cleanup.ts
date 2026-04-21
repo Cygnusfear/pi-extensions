@@ -1,11 +1,18 @@
-import { rm } from "node:fs/promises";
-import { isProcessAlive, killWorker } from "./spawner.js";
 import type { WorkerHandle } from "./types.js";
 import { autoCommitWorktreeChanges, branchHasNewCommits, renameBranch, removeWorktree, worktreeBranchName } from "./worktree.js";
 
 export interface CleanupResult {
   /** True by default */
   branchPreserved: boolean;
+  /** False by default; true when the worktree is intentionally left in place for inspection. */
+  worktreePreserved: boolean;
+}
+
+export interface CleanupOptions {
+  /** Auto-commit dirty files and keep the branch instead of deleting it. */
+  preserveBranch?: boolean;
+  /** Keep the worktree on disk for post-mortem inspection instead of removing it. */
+  preserveWorktree?: boolean;
 }
 
 /**
@@ -19,7 +26,7 @@ export interface CleanupResult {
 export async function cleanupWorker(
   repoDir: string,
   worker: WorkerHandle,
-  preserveBranch = true,
+  options: CleanupOptions = {},
 ): Promise<CleanupResult> {
   // Only kill if the caller explicitly requested it (e.g. user /team kill).
   // Do NOT auto-kill here on normal exit assessment — Bun has a bug where
@@ -31,7 +38,10 @@ export async function cleanupWorker(
   //   killWorker(worker.pid);
   // }
 
+  const { preserveBranch = true, preserveWorktree = false } = options;
+
   let branchPreserved = false;
+  let worktreePreserved = false;
 
   if (worker.worktreePath) {
     const branch = worktreeBranchName(worker.name, worker.ticketId);
@@ -40,10 +50,16 @@ export async function cleanupWorker(
       await autoCommitWorktreeChanges(worker.worktreePath);
       const hasWork = await branchHasNewCommits(repoDir, branch);
       branchPreserved = hasWork;
-      await removeWorktree(repoDir, worker.worktreePath, branch, hasWork);
-      if (hasWork) {
+      if (preserveWorktree) {
+        worktreePreserved = true;
+      } else {
+        await removeWorktree(repoDir, worker.worktreePath, branch, hasWork);
+      }
+      if (hasWork && !preserveWorktree) {
         await renameBranch(repoDir, branch, `${branch}.done`);
       }
+    } else if (preserveWorktree) {
+      worktreePreserved = true;
     } else {
       await removeWorktree(repoDir, worker.worktreePath, branch);
     }
@@ -53,7 +69,7 @@ export async function cleanupWorker(
   // Previously these were deleted by default, making it impossible
   // to diagnose tool failures, lost tickets, or hallucinated IDs.
 
-  return { branchPreserved };
+  return { branchPreserved, worktreePreserved };
 }
 
 export async function cleanupAllWorkers(
@@ -61,5 +77,5 @@ export async function cleanupAllWorkers(
   workers: WorkerHandle[],
   preserveBranches = true,
 ): Promise<CleanupResult[]> {
-  return Promise.all(workers.map((w) => cleanupWorker(repoDir, w, preserveBranches)));
+  return Promise.all(workers.map((w) => cleanupWorker(repoDir, w, { preserveBranch: preserveBranches })));
 }
