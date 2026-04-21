@@ -30,8 +30,8 @@ export async function resolveGitToplevel(dir: string): Promise<string> {
   }
 }
 
-export function workerWorktreePath(repoToplevel: string, workerName: string): string {
-  return path.join(repoToplevel, ".worktrees", "teams", workerName);
+export function workerWorktreePath(repoToplevel: string, workerName: string, timestamp: number | string): string {
+  return path.join(repoToplevel, ".worktrees", "teams", `${timestamp}-${workerName}`);
 }
 
 /**

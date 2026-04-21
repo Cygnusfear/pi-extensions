@@ -114,8 +114,8 @@ describe("worktree adversarial cases", () => {
     const sharedSha = headSha(repoDir);
     git(["checkout", "main"], repoDir);
 
-    const wtA = workerWorktreePath(repoDir, "parallel-a");
-    const wtB = workerWorktreePath(repoDir, "parallel-b");
+    const wtA = workerWorktreePath(repoDir, "parallel-a", 1776720000101);
+    const wtB = workerWorktreePath(repoDir, "parallel-b", 1776720000102);
 
     const [a, b] = await Promise.all([
       createWorktree(repoDir, "parallel-a", "ticket-a", wtA, "shared-base"),

@@ -147,18 +147,26 @@ describe("resolveGitToplevel", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("workerWorktreePath", () => {
-  test("places worktree under .worktrees/teams/<name>", () => {
-    const p = workerWorktreePath("/Projects/repo", "impl-auth");
-    expect(p).toBe("/Projects/repo/.worktrees/teams/impl-auth");
+  test("places worktree under .worktrees/teams/<timestamp>-<name>", () => {
+    const p = workerWorktreePath("/Projects/repo", "impl-auth", 1776720000000);
+    expect(p).toBe("/Projects/repo/.worktrees/teams/1776720000000-impl-auth");
   });
 
   test("uses toplevel, not worktree path", () => {
     // If someone accidentally passed a worktree path, the result would be nested.
     // The caller should pass the resolved toplevel.
     const toplevel = "/Projects/repo";
-    const p = workerWorktreePath(toplevel, "worker-1");
-    expect(p).toBe("/Projects/repo/.worktrees/teams/worker-1");
+    const p = workerWorktreePath(toplevel, "worker-1", 1776720000123);
+    expect(p).toBe("/Projects/repo/.worktrees/teams/1776720000123-worker-1");
     expect(p).not.toContain(".worktrees/.worktrees"); // no nesting
+  });
+
+  test("same worker name gets different paths when timestamps differ", () => {
+    const a = workerWorktreePath("/Projects/repo", "impl-gpt54", 1776720000000);
+    const b = workerWorktreePath("/Projects/repo", "impl-gpt54", 1776720001000);
+    expect(a).toBe("/Projects/repo/.worktrees/teams/1776720000000-impl-gpt54");
+    expect(b).toBe("/Projects/repo/.worktrees/teams/1776720001000-impl-gpt54");
+    expect(a).not.toBe(b);
   });
 });
 
@@ -295,7 +303,7 @@ describe("production scenario: coordinator in worktree, workers branch correctly
 
     // FIX: pass baseRef = "cleanroom-fix"
     const toplevel = await resolveGitToplevel(repoDir);
-    const wtPath = workerWorktreePath(toplevel, "worker-fixed");
+    const wtPath = workerWorktreePath(toplevel, "worker-fixed", 1776720000003);
     const result = await createWorktree(toplevel, "worker-fixed", "ticket-fix", wtPath, "cleanroom-fix");
 
     expect(result.success).toBe(true);
@@ -320,8 +328,8 @@ describe("production scenario: coordinator in worktree, workers branch correctly
     expect(toplevel).toBe(repoDir);
 
     // Step 2: create worker worktree at the toplevel (not nested)
-    const wtPath = workerWorktreePath(toplevel, "worker-nested");
-    expect(wtPath).toBe(path.join(repoDir, ".worktrees", "teams", "worker-nested"));
+    const wtPath = workerWorktreePath(toplevel, "worker-nested", 1776720000004);
+    expect(wtPath).toBe(path.join(repoDir, ".worktrees", "teams", "1776720000004-worker-nested"));
     expect(wtPath).not.toContain("cleanroom-full"); // NOT nested inside the coordinator's worktree
 
     // Step 3: branch from cleanroom-full
@@ -566,7 +574,7 @@ describe("integration: simulated leader.delegate() flow", () => {
     const toplevel = await resolveGitToplevel(ctxCwd);
 
     // 4. Leader creates worker worktree with baseRef
-    const wtPath = workerWorktreePath(toplevel, "impl-1");
+    const wtPath = workerWorktreePath(toplevel, "impl-1", 1776720000001);
     const result = await createWorktree(toplevel, "impl-1", "mai-abc1", wtPath, "my-feature");
 
     // 5. Verify worker has the right state
@@ -608,7 +616,7 @@ describe("integration: simulated leader.delegate() flow", () => {
     expect(toplevel).toBe(repoDir);
 
     // 4. Worker worktree path is under repoDir, not nested in featureWt
-    const wtPath = workerWorktreePath(toplevel, "impl-deep");
+    const wtPath = workerWorktreePath(toplevel, "impl-deep", 1776720000002);
     expect(wtPath.startsWith(repoDir)).toBe(true);
     expect(wtPath).not.toContain("deep-feature");
 

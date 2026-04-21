@@ -1535,7 +1535,12 @@ export class TeamLeader {
       // Resolve the real repo root so worker worktrees are never nested inside
       // another worktree. If ctx.cwd is already the repo root this is a no-op.
       const toplevel = await resolveGitToplevel(repoDir);
-      const wtPath = workerWorktreePath(toplevel, workerName);
+      let worktreeTimestamp = Date.now();
+      let wtPath = workerWorktreePath(toplevel, workerName, worktreeTimestamp);
+      while (fs.existsSync(wtPath)) {
+        worktreeTimestamp += 1;
+        wtPath = workerWorktreePath(toplevel, workerName, worktreeTimestamp);
+      }
       const result = await createWorktree(toplevel, workerName, ticketId, wtPath, baseRef);
       if (!result.success) throw new Error(`Worktree creation failed: ${result.error}`);
       cwd = wtPath;
