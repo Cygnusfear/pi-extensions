@@ -1,6 +1,13 @@
 import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import {
   bashToolDefinition,
+  createBashToolDefinition,
+  createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
+  createLsToolDefinition,
+  createReadToolDefinition,
+  createWriteToolDefinition,
   editToolDefinition,
   findToolDefinition,
   grepToolDefinition,
@@ -75,17 +82,19 @@ export function buildToolRef(name: string, def: ToolDefinition): SandboxToolRef 
 }
 
 export function initBuiltinToolRefs(): void {
-  const builtinDefs: [string, ToolDefinition][] = [
-    ["bash", bashToolDefinition],
-    ["read", readToolDefinition],
-    ["write", writeToolDefinition],
-    ["edit", editToolDefinition],
-    ["grep", grepToolDefinition],
-    ["find", findToolDefinition],
-    ["ls", lsToolDefinition],
+  const cwd = process.cwd();
+  const builtinDefs: Array<[string, ToolDefinition | undefined]> = [
+    ["bash", bashToolDefinition ?? createBashToolDefinition(cwd)],
+    ["read", readToolDefinition ?? createReadToolDefinition(cwd)],
+    ["write", writeToolDefinition ?? createWriteToolDefinition(cwd)],
+    ["edit", editToolDefinition ?? createEditToolDefinition(cwd)],
+    ["grep", grepToolDefinition ?? createGrepToolDefinition(cwd)],
+    ["find", findToolDefinition ?? createFindToolDefinition(cwd)],
+    ["ls", lsToolDefinition ?? createLsToolDefinition(cwd)],
   ];
 
   for (const [name, def] of builtinDefs) {
+    if (!def) continue;
     const ref = buildToolRef(name, def);
     toolRefMap.set(name, ref);
     for (const [sandbox, tool] of Object.entries(SANDBOX_TO_TOOL_NAME)) {

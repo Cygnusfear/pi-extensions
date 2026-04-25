@@ -144,6 +144,15 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		// calls from any listener affect the single shared wrapper.
 		this.unsub = leader.subscribeToEvents((event) => this.handle(event as TeamsEvent));
 
+		// If targeting a specific worker, register a disposal callback so the
+		// subscription silently self-destructs when the worker is killed —
+		// prevents stale timeouts from firing spammy console.wake rejections.
+		if (filter.name && typeof leader.subscribeToWorkerDisposal === "function") {
+			const disposeUnsub = leader.subscribeToWorkerDisposal(filter.name, () => this.dispose());
+			const origUnsub = this.unsub;
+			this.unsub = () => { disposeUnsub(); origUnsub(); };
+		}
+
 		// Abort → reject + cleanup. Listener is leak-free because we unsubscribe.
 		if (abortSignal) {
 			const onAbort = () => {
@@ -367,6 +376,9 @@ function synthesizeFromWorker(worker: WorkerHandle, type: PollEventType): PollEv
 		case "failed":
 			if (worker.status === "failed") {
 				return { type: "failed", worker: { ...worker }, reason: worker.spawnError ?? "failed" };
+			}
+			if (worker.status === "killed") {
+				return { type: "failed", worker: { ...worker }, reason: "worker killed" };
 			}
 			return null;
 		case "warning":

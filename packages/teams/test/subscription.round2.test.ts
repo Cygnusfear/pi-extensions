@@ -26,6 +26,17 @@ class FakeLeader {
 		this.listeners.add(listener);
 		return () => { this.listeners.delete(listener); };
 	}
+	private disposalCallbacks = new Map<string, Set<() => void>>();
+	subscribeToWorkerDisposal(workerName: string, cb: () => void): () => void {
+		let set = this.disposalCallbacks.get(workerName);
+		if (!set) { set = new Set(); this.disposalCallbacks.set(workerName, set); }
+		set.add(cb);
+		return () => { set!.delete(cb); if (set!.size === 0) this.disposalCallbacks.delete(workerName); };
+	}
+	killWorker(workerName: string) {
+		const cbs = this.disposalCallbacks.get(workerName);
+		if (cbs) { for (const cb of cbs) cb(); this.disposalCallbacks.delete(workerName); }
+	}
 	getWorker(name: string): WorkerHandle | undefined { return this.workers.get(name); }
 	setWorker(w: WorkerHandle) { this.workers.set(w.name, w); }
 
@@ -222,6 +233,46 @@ async function run() {
 		const sub = newSub(leader, "dead", "failed");
 		const event = await sub;
 		assert("resolved synthetically on failed status", event.type === "failed");
+	}
+
+	// ─── Worker disposal kills subscriptions silently ────────────────
+	{
+		const leader = new FakeLeader();
+		leader.setWorker(makeWorker("w1", "running"));
+		const { filter, predicate } = buildPredicate("w1", "completed");
+		const sub = new TeamsSubscription(leader, filter, predicate);
+		sub.timeout(5000);
+
+		// Kill the worker — should dispose the subscription without rejection
+		leader.killWorker("w1");
+
+		// The subscription should be disposed; no more listeners
+		assert("disposal: no listeners remain", leader.listeners.size === 0);
+		assert("disposal: no disposal callbacks remain", leader.disposalCallbacks.size === 0);
+
+		// The promise should never resolve or reject (silently gone)
+		let settled = false;
+		sub.then(() => { settled = true; }, () => { settled = true; });
+		await new Promise(r => setTimeout(r, 50));
+		assert("disposal: promise did not settle after kill", !settled);
+	}
+
+	// ─── Disposal + timeout: disposal wins, no timeout spam ──────────
+	{
+		const leader = new FakeLeader();
+		leader.setWorker(makeWorker("w2", "running"));
+		const { filter, predicate } = buildPredicate("w2", "completed");
+		const sub = new TeamsSubscription(leader, filter, predicate);
+		sub.timeout(100);
+
+		// Kill the worker before timeout fires
+		leader.killWorker("w2");
+
+		// Wait past the timeout — should NOT reject
+		let rejected = false;
+		sub.then(() => {}, () => { rejected = true; });
+		await new Promise(r => setTimeout(r, 150));
+		assert("disposal beats timeout: no rejection", !rejected);
 	}
 
 	console.log("\n" + "━".repeat(60));

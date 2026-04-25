@@ -1,1 +1,1 @@
-GUARD PROTOCOL - All remaining phases / slices / steps are now one single UOW- don't talk to me or report inbetween, just continue autonomously, go
+GUARD PROTOCOL - All remaining phases / slices / steps are now one single UOW- don't talk to me or report inbetween until UOW is complete, continue autonomously, go. If supervisor is on. You will DISABLE the supervisor on completion.

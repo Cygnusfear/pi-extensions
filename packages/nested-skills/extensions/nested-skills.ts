@@ -304,8 +304,15 @@ export default function nestedSkillsExtension(pi: ExtensionAPI) {
   // Scan on session start and on reload (session_start fires for both)
   pi.on("session_start", (_event, ctx) => {
     scan(ctx.cwd, (msg, level) => {
-      // Delay so our message appears after pi's own "Loaded X skills..." output
-      setTimeout(() => ctx.ui.notify(msg, level), 100);
+      // Delay so our message appears after pi's own "Loaded X skills..." output.
+      // Ignore stale-session errors during reload/session replacement.
+      setTimeout(() => {
+        try {
+          ctx.ui.notify(msg, level);
+        } catch {
+          // stale replacement-session context; safe to ignore
+        }
+      }, 100);
     });
   });
 }

@@ -728,6 +728,9 @@ export class TeamLeader {
    *  to suppress the leader's default notifyLLM batch, or stopPropagation()
    *  to prevent later listeners from seeing the event. */
   private eventListeners = new Set<(event: TeamsEvent) => void>();
+  /** Per-worker disposal callbacks — subscriptions register these to clean up
+   *  when the target worker is killed, avoiding stale timeout spam. */
+  private workerDisposalCallbacks = new Map<string, Set<() => void>>();
   private notifyDraining = false;
   private stateHydrated = false;
   private lastSavedStateSignature: string | null = null;
@@ -2094,6 +2097,11 @@ export class TeamLeader {
     worker.meshClientId = undefined;
     worker.killedAt = Date.now();
     this.unwatchWorker(workerName);
+
+    // Signal worker disposal to active subscriptions so they clean up
+    // without waiting for their timeout to fire (which produces spammy wakes).
+    this.disposeSubscriptionsForWorker(workerName);
+
     if (this.ctx) {
       await this.pi.exec(getMaiBin(), ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 }).catch(() => {});
       await cleanupWorker(this.ctx.cwd, worker, { preserveBranch: true } /* always preserve branch on kill */);
@@ -2264,6 +2272,31 @@ export class TeamLeader {
     return () => {
       this.eventListeners.delete(listener);
     };
+  }
+
+  /** Register a disposal callback for a specific worker. Called when the worker
+   *  is killed, so subscriptions can clean up without waiting for timeout. */
+  subscribeToWorkerDisposal(workerName: string, cb: () => void): () => void {
+    let set = this.workerDisposalCallbacks.get(workerName);
+    if (!set) {
+      set = new Set();
+      this.workerDisposalCallbacks.set(workerName, set);
+    }
+    set.add(cb);
+    return () => {
+      set!.delete(cb);
+      if (set!.size === 0) this.workerDisposalCallbacks.delete(workerName);
+    };
+  }
+
+  /** Fire all disposal callbacks for a worker (called from kill()). */
+  private disposeSubscriptionsForWorker(workerName: string): void {
+    const callbacks = this.workerDisposalCallbacks.get(workerName);
+    if (!callbacks) return;
+    for (const cb of callbacks) {
+      try { cb(); } catch { /* best effort */ }
+    }
+    this.workerDisposalCallbacks.delete(workerName);
   }
 
   /** Current live workers — used by teams.on to check for already-terminal targets. */

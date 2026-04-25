@@ -50,6 +50,22 @@ const _usageCache: UsageCache = {
   lastAssistant: undefined, thinkingLevel: "off",
 };
 
+function isStaleExtensionContextError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("This extension instance is stale after session replacement or reload");
+}
+
+function safeContextRead<T>(read: () => T, fallback: T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (isStaleExtensionContextError(error)) {
+      return fallback;
+    }
+    throw error;
+  }
+}
+
 function computeUsageIncremental(sessionEvents: any[]): UsageCache {
   const len = sessionEvents.length;
 
@@ -201,6 +217,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     sessionStartTime = Date.now();
     currentCtx = ctx;
+    lastLayoutResult = null;
     
     // Store thinking level getter if available
     if (typeof pi.getThinkingLevel === 'function') {
@@ -223,6 +240,14 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, _ctx) => {
     isStreaming = false;
+  });
+
+  pi.on("session_shutdown", async () => {
+    currentCtx = null;
+    footerDataRef = null;
+    tuiRef = null;
+    isStreaming = false;
+    lastLayoutResult = null;
   });
 
   // Command to toggle/configure
@@ -279,17 +304,26 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
     // Build usage stats and get thinking level from session — incremental.
     // Only iterates events added since the last render, not the entire history.
-    const sessionEvents = ctx.sessionManager?.getBranch?.() ?? [];
+    const sessionEvents = safeContextRead(() => ctx?.sessionManager?.getBranch?.() ?? [], [] as any[]);
     const usage = computeUsageIncremental(sessionEvents);
     const { input, output, cacheRead, cacheWrite, cost, lastAssistant } = usage;
     const thinkingLevelFromSession = usage.thinkingLevel;
 
+    const model = safeContextRead(() => ctx?.model, undefined);
+    const sessionId = safeContextRead(() => ctx?.sessionManager?.getSessionId?.(), undefined);
+    const autoCompactEnabled = safeContextRead(
+      () => ctx?.settingsManager?.getCompactionSettings?.()?.enabled ?? true,
+      true,
+    );
+
     // Prefer live estimated context usage from runtime. Fall back to last assistant usage if unavailable.
     let usageContext;
     try {
-      usageContext = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
-    } catch {
-      // estimateTokens can crash on malformed messages
+      usageContext = typeof ctx?.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
+    } catch (error) {
+      if (!isStaleExtensionContextError(error)) {
+        // estimateTokens can crash on malformed messages
+      }
     }
     const fallbackContextTokens = lastAssistant
       ? lastAssistant.usage.input +
@@ -298,7 +332,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
         lastAssistant.usage.cacheWrite
       : 0;
     const contextTokens = typeof usageContext?.tokens === "number" ? usageContext.tokens : fallbackContextTokens;
-    const contextWindow = usageContext?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+    const contextWindow = usageContext?.contextWindow ?? safeContextRead(() => model?.contextWindow ?? 0, 0);
     const contextPercent =
       typeof usageContext?.percent === "number"
         ? usageContext.percent
@@ -310,20 +344,20 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     const gitBranch = footerDataRef?.getGitBranch() ?? null;
 
     // Check if using OAuth subscription
-    const usingSubscription = ctx.model
-      ? ctx.modelRegistry?.isUsingOAuth?.(ctx.model) ?? false
+    const usingSubscription = model
+      ? safeContextRead(() => ctx?.modelRegistry?.isUsingOAuth?.(model) ?? false, false)
       : false;
 
     return {
-      model: ctx.model,
-      thinkingLevel: thinkingLevelFromSession || getThinkingLevelFn?.() || "off",
-      sessionId: ctx.sessionManager?.getSessionId?.(),
+      model,
+      thinkingLevel: thinkingLevelFromSession || safeContextRead(() => getThinkingLevelFn?.() || "off", "off"),
+      sessionId,
       sessionName: pi.getSessionName(),
       usageStats: { input, output, cacheRead, cacheWrite, cost },
       contextTokens,
       contextPercent,
       contextWindow,
-      autoCompactEnabled: ctx.settingsManager?.getCompactionSettings?.()?.enabled ?? true,
+      autoCompactEnabled,
       usingSubscription,
       sessionStartTime,
       git: { branch: gitBranch, staged: 0, unstaged: 0, untracked: 0 },

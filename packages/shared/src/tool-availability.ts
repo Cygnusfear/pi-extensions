@@ -82,20 +82,36 @@ export function showMissingDeps(ctx: {
   const missing = getMissingDeps();
 
   if (missing.length === 0) {
-    ctx.ui.setStatus("deps", undefined);
+    try {
+      ctx.ui.setStatus("deps", undefined);
+    } catch {
+      // stale replacement-session context during reload; ignore
+    }
     return;
   }
 
   // Footer: compact summary
   const names = missing.map(d => d.name);
-  ctx.ui.setStatus("deps", `⚠ ${names.join(", ")}`);
+  try {
+    ctx.ui.setStatus("deps", `\u26a0 ${names.join(", ")}`);
+  } catch {
+    // stale replacement-session context during reload; ignore
+    return;
+  }
 
   // Notification: actionable install instructions
   const lines = missing.map(d => `  • ${d.name} — ${d.install}`);
-  ctx.ui.notify(
-    `Optional dependencies not found:\n${lines.join("\n")}\n\nRun /deps for details.`,
-    "warning"
-  );
+  try {
+    ctx.ui.notify(
+      `Optional dependencies not found:
+${lines.join("\n")}
+
+Run /deps for details.`,
+      "warning"
+    );
+  } catch {
+    // stale replacement-session context during reload; ignore
+  }
 }
 
 // ─── Implementation ──────────────────────────────────────────────────────────
