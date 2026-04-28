@@ -173,6 +173,8 @@ declare function rg(input: {
   args: string;
   /** Working directory override */
   cwd?: string;
+  /** Follow symlinks. Defaults to true. Set false for native ripgrep no-follow behavior. */
+  follow?: boolean;
 }): Promise<string>;
 
 /**
@@ -184,6 +186,8 @@ declare function fd(input: {
   args: string;
   /** Working directory override */
   cwd?: string;
+  /** Follow symlinks. Defaults to true. Set false for native fd no-follow behavior. */
+  follow?: boolean;
 }): Promise<string>;
 
 /**

@@ -313,3 +313,38 @@ describe("executeInSession — session squash continuation hook", () => {
 		expect(called).toBe(false);
 	});
 });
+
+
+describe("executeInSession — rg/fd symlink following", () => {
+	test("rg/fd follow symlinks by default, opt out with follow=false", async () => {
+		const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "code-mode-follow-"));
+		try {
+			fs.mkdirSync(path.join(tmp, "target"));
+			fs.writeFileSync(path.join(tmp, "target", "needle.txt"), "needle\n", "utf-8");
+			fs.symlinkSync(path.join(tmp, "target"), path.join(tmp, "link"), "dir");
+
+			const sess = createCodeModeSession();
+			const res = await executeInSession(
+				sess,
+				[
+					"const rgDefault = await rg({ args: 'needle .' });",
+					"const rgNoFollow = await rg({ args: 'needle .', follow: false });",
+					"const fdDefault = await fd({ args: 'needle.txt .' });",
+					"const fdNoFollow = await fd({ args: 'needle.txt .', follow: false });",
+					"console.log(JSON.stringify({ rgDefault, rgNoFollow, fdDefault, fdNoFollow }));",
+				].join("\n"),
+				makeDeps({ cwd: tmp, allowedTools: new Set(["rg", "fd"]) }),
+			);
+
+			const parsed = JSON.parse(res.output.trim());
+			expect(parsed.rgDefault).toContain("link/needle.txt");
+			expect(parsed.fdDefault).toContain("link/needle.txt");
+			expect(parsed.rgNoFollow).not.toContain("link/needle.txt");
+			expect(parsed.fdNoFollow).not.toContain("link/needle.txt");
+			expect(parsed.rgNoFollow).toContain("target/needle.txt");
+			expect(parsed.fdNoFollow).toContain("target/needle.txt");
+		} finally {
+			fs.rmSync(tmp, { recursive: true, force: true });
+		}
+	});
+});

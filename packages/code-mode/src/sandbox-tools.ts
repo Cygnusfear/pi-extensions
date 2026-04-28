@@ -865,11 +865,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       return (result.stdout || "").trim().split("\n").filter(Boolean);
     },
 
-    rg: async ({ args, cwd: explicitCwd }: { args: string; cwd?: string }) => {
+    rg: async ({ args, cwd: explicitCwd, follow = true }: { args: string; cwd?: string; follow?: boolean }) => {
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+      const parsedArgs = splitShellArgs(args);
+      const effectiveArgs = follow && !parsedArgs.includes("--follow") && !parsedArgs.includes("-L") ? ["--follow", ...parsedArgs] : parsedArgs;
       const result = await spawnAsync({
         cmd: "rg",
-        args: splitShellArgs(args),
+        args: effectiveArgs,
         cwd: dir,
         signal,
       });
@@ -880,11 +882,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       return result.stdout || result.stderr || "";
     },
 
-    fd: async ({ args, cwd: explicitCwd }: { args: string; cwd?: string }) => {
+    fd: async ({ args, cwd: explicitCwd, follow = true }: { args: string; cwd?: string; follow?: boolean }) => {
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+      const parsedArgs = splitShellArgs(args);
+      const effectiveArgs = follow && !parsedArgs.includes("--follow") && !parsedArgs.includes("-L") ? ["--follow", ...parsedArgs] : parsedArgs;
       const result = await spawnAsync({
         cmd: "fd",
-        args: splitShellArgs(args),
+        args: effectiveArgs,
         cwd: dir,
         signal,
       });
