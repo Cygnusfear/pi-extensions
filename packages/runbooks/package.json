@@ -18,5 +18,8 @@
     "extensions",
     "src"
   ],
+  "exports": {
+    "./engine": "./src/runbook-engine.ts"
+  },
   "dependencies": {}
 }

@@ -9,12 +9,7 @@
     "skipLibCheck": true,
     "jsx": "preserve",
     "allowJs": true,
-    "baseUrl": "../..",
-    "paths": {
-      "@pi-extensions/shared/sandbox-registry": [
-        "packages/shared/src/sandbox-registry.ts"
-      ]
-    }
+    "ignoreDeprecations": "5.0"
   },
   "include": [
     "src/sandbox-registry.ts"

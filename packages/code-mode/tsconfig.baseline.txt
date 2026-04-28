@@ -1,0 +1,161 @@
+# code-mode-tsconfig TypeScript baseline
+
+Generated: 2026-04-28T03:22:40.444Z
+Command: bunx tsc --noEmit --strict --skipLibCheck -p packages/code-mode/tsconfig.json
+TypeScript: Version 5.9.3
+Exit: 2
+Error count: 40
+
+This honest typecheck intentionally includes `packages/code-mode/extensions/code-mode.ts` and `packages/code-mode/src/**/*.ts`. The errors below are the documented pre-existing baseline (OuijaArgs / AgentMessage.content / sandbox-tools and imported API typing debt). pe-tk4s changes must not add new errors beyond this list.
+
+## Baseline errors (file:line:column code message)
+- packages/code-mode/extensions/code-mode.ts:339:33 TS2345 Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'OuijaArgs'.
+- packages/code-mode/extensions/code-mode.ts:374:28 TS2345 Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'OuijaArgs'.
+- packages/code-mode/extensions/code-mode.ts:752:24 TS2339 Property 'content' does not exist on type 'AgentMessage'.
+- packages/code-mode/extensions/code-mode.ts:753:52 TS2339 Property 'content' does not exist on type 'AgentMessage'.
+- packages/code-mode/extensions/code-mode.ts:754:38 TS2339 Property 'content' does not exist on type 'AgentMessage'.
+- packages/code-mode/extensions/code-mode.ts:755:29 TS2339 Property 'content' does not exist on type 'AgentMessage'.
+- packages/code-mode/extensions/code-mode.ts:756:30 TS2339 Property 'content' does not exist on type 'AgentMessage'.
+- packages/code-mode/src/sandbox-tools.ts:30:29 TS7016 Could not find a declaration file for module 'turndown'. '/Users/alexander/Projects/pi-extensions/.worktrees/teams/1777346249066-rlm-fix-r3/node_modules/.bun/turndown@7.2.4/node_modules/turndown/lib/turndown.cjs.js' implicitly has an 'any' type.
+- packages/code-mode/src/sandbox-tools.ts:938:31 TS2794 Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+- packages/code-mode/src/sandbox-tools.ts:947:11 TS2794 Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+- packages/code-mode/src/sandbox-tools.ts:951:11 TS2794 Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+- packages/code-mode/src/sandbox-tools.ts:975:23 TS2339 Property 'context' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:976:22 TS2339 Property 'create' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:977:22 TS2339 Property 'unfold' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:978:22 TS2339 Property 'status' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:979:25 TS2339 Property 'subscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:980:27 TS2339 Property 'unsubscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:981:28 TS2339 Property 'checkUpdates' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:987:25 TS2339 Property 'codeSearch' does not exist on type '({ query, numResults, type, }: { query: string; numResults?: number | undefined; type?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:990:28 TS2339 Property 'codeSearch' does not exist on type '({ query, numResults, type, }: { query: string; numResults?: number | undefined; type?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:1154:29 TS2339 Property 'subscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:1155:31 TS2339 Property 'unsubscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/sandbox-tools.ts:1156:32 TS2339 Property 'checkUpdates' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+- packages/code-mode/src/tool-reference.ts:87:14 TS2322 Type 'ToolDefinition<TObject<{ command: TString; timeout: TOptional<TNumber>; }>, BashToolDetails | undefined, BashRenderState>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:88:14 TS2322 Type 'ToolDefinition<TObject<{ path: TString; offset: TOptional<TNumber>; limit: TOptional<TNumber>; }>, ReadToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:89:15 TS2322 Type 'ToolDefinition<TObject<{ path: TString; content: TString; }>, undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:90:14 TS2322 Type 'ToolDefinition<TObject<{ path: TString; edits: TArray<TObject<{ oldText: TString; newText: TString; }>>; }>, EditToolDetails | undefined, EditRenderState>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:91:14 TS2322 Type 'ToolDefinition<TObject<{ pattern: TString; path: TOptional<TString>; glob: TOptional<TString>; ignoreCase: TOptional<TBoolean>; literal: TOptional<...>; context: TOptional<...>; limit: TOptional<...>; }>, GrepToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:92:14 TS2322 Type 'ToolDefinition<TObject<{ pattern: TString; path: TOptional<TString>; limit: TOptional<TNumber>; }>, FindToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/code-mode/src/tool-reference.ts:93:12 TS2322 Type 'ToolDefinition<TObject<{ path: TOptional<TString>; limit: TOptional<TNumber>; }>, LsToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+- packages/fff/extensions/fff.ts:48:22 TS7006 Parameter 'err' implicitly has an 'any' type.
+- packages/fff/extensions/fff.ts:54:21 TS7006 Parameter '_code' implicitly has an 'any' type.
+- packages/fff/extensions/fff.ts:372:9 TS2322 Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; maxResults?: number | undefined; query: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/fff/extensions/fff.ts:442:9 TS2322 Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; maxResults?: number | undefined; mode?: string | undefined; context?: number | undefined; query: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/fff/extensions/fff.ts:517:9 TS2322 Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; constraints?: string | undefined; maxResults?: number | undefined; context?: number | undefined; patterns: string[]; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/shared/src/ouija-core.ts:295:34 TS2345 Argument of type 'OuijaArgs' is not assignable to parameter of type '{ query: string; project?: string | undefined; since?: string | undefined; limit?: number | undefined; }'.
+- packages/shared/src/ouija-core.ts:299:32 TS2345 Argument of type 'OuijaArgs' is not assignable to parameter of type '{ session?: string | undefined; query: string; limit?: number | undefined; entries?: AdhocEntry[] | undefined; }'.
+- packages/shared/src/ouija-core.ts:303:32 TS2345 Argument of type 'OuijaArgs' is not assignable to parameter of type '{ query: string; limit?: number | undefined; }'.
+- packages/tldr-code/extensions/tldr-code.ts:364:16 TS2345 Argument of type '{ content: { type: "text"; text: string; }[]; }' is not assignable to parameter of type 'AgentToolResult<unknown>'.
+- packages/tldr-code/extensions/tldr-code.ts:634:15 TS2345 Argument of type '{ content: { type: "text"; text: string; }[]; }' is not assignable to parameter of type 'AgentToolResult<unknown>'.
+
+## Raw output
+```
+packages/code-mode/extensions/code-mode.ts(339,33): error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'OuijaArgs'.
+  Property 'action' is missing in type 'Record<string, unknown>' but required in type 'OuijaArgs'.
+packages/code-mode/extensions/code-mode.ts(374,28): error TS2345: Argument of type 'Record<string, unknown>' is not assignable to parameter of type 'OuijaArgs'.
+  Property 'action' is missing in type 'Record<string, unknown>' but required in type 'OuijaArgs'.
+packages/code-mode/extensions/code-mode.ts(752,24): error TS2339: Property 'content' does not exist on type 'AgentMessage'.
+  Property 'content' does not exist on type 'BashExecutionMessage'.
+packages/code-mode/extensions/code-mode.ts(753,52): error TS2339: Property 'content' does not exist on type 'AgentMessage'.
+  Property 'content' does not exist on type 'BashExecutionMessage'.
+packages/code-mode/extensions/code-mode.ts(754,38): error TS2339: Property 'content' does not exist on type 'AgentMessage'.
+  Property 'content' does not exist on type 'BashExecutionMessage'.
+packages/code-mode/extensions/code-mode.ts(755,29): error TS2339: Property 'content' does not exist on type 'AgentMessage'.
+  Property 'content' does not exist on type 'BashExecutionMessage'.
+packages/code-mode/extensions/code-mode.ts(756,30): error TS2339: Property 'content' does not exist on type 'AgentMessage'.
+  Property 'content' does not exist on type 'BashExecutionMessage'.
+packages/code-mode/src/sandbox-tools.ts(30,29): error TS7016: Could not find a declaration file for module 'turndown'. '/Users/alexander/Projects/pi-extensions/.worktrees/teams/1777346249066-rlm-fix-r3/node_modules/.bun/turndown@7.2.4/node_modules/turndown/lib/turndown.cjs.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/turndown` if it exists or add a new declaration (.d.ts) file containing `declare module 'turndown';`
+packages/code-mode/src/sandbox-tools.ts(938,31): error TS2794: Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+packages/code-mode/src/sandbox-tools.ts(947,11): error TS2794: Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+packages/code-mode/src/sandbox-tools.ts(951,11): error TS2794: Expected 1 arguments, but got 0. Did you forget to include 'void' in your type argument to 'Promise'?
+packages/code-mode/src/sandbox-tools.ts(975,23): error TS2339: Property 'context' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(976,22): error TS2339: Property 'create' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(977,22): error TS2339: Property 'unfold' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(978,22): error TS2339: Property 'status' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(979,25): error TS2339: Property 'subscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(980,27): error TS2339: Property 'unsubscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(981,28): error TS2339: Property 'checkUpdates' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(987,25): error TS2339: Property 'codeSearch' does not exist on type '({ query, numResults, type, }: { query: string; numResults?: number | undefined; type?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(990,28): error TS2339: Property 'codeSearch' does not exist on type '({ query, numResults, type, }: { query: string; numResults?: number | undefined; type?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(1154,29): error TS2339: Property 'subscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(1155,31): error TS2339: Property 'unsubscribe' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/sandbox-tools.ts(1156,32): error TS2339: Property 'checkUpdates' does not exist on type '({ query, limit, factType, minScore, bank, }: { query: string; limit?: number | undefined; factType?: string | undefined; minScore?: number | undefined; bank?: string | undefined; }) => Promise<string>'.
+packages/code-mode/src/tool-reference.ts(87,14): error TS2322: Type 'ToolDefinition<TObject<{ command: TString; timeout: TOptional<TNumber>; }>, BashToolDetails | undefined, BashRenderState>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { timeout?: number | undefined; command: string; }, theme: Theme, context: ToolRenderContext<BashRenderState, { timeout?: number | undefined; command: string; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { timeout?: number | undefined; command: string; }, theme: Theme, context: ToolRenderContext<BashRenderState, { timeout?: number | undefined; command: string; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ timeout?: number | undefined; command: string; }'.
+packages/code-mode/src/tool-reference.ts(88,14): error TS2322: Type 'ToolDefinition<TObject<{ path: TString; offset: TOptional<TNumber>; limit: TOptional<TNumber>; }>, ReadToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { limit?: number | undefined; offset?: number | undefined; path: string; }, theme: Theme, context: ToolRenderContext<any, { limit?: number | undefined; offset?: number | undefined; path: string; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { limit?: number | undefined; offset?: number | undefined; path: string; }, theme: Theme, context: ToolRenderContext<any, { limit?: number | undefined; offset?: number | undefined; path: string; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ limit?: number | undefined; offset?: number | undefined; path: string; }'.
+packages/code-mode/src/tool-reference.ts(89,15): error TS2322: Type 'ToolDefinition<TObject<{ path: TString; content: TString; }>, undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { content: string; path: string; }, theme: Theme, context: ToolRenderContext<any, { content: string; path: string; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { content: string; path: string; }, theme: Theme, context: ToolRenderContext<any, { content: string; path: string; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ content: string; path: string; }'.
+packages/code-mode/src/tool-reference.ts(90,14): error TS2322: Type 'ToolDefinition<TObject<{ path: TString; edits: TArray<TObject<{ oldText: TString; newText: TString; }>>; }>, EditToolDetails | undefined, EditRenderState>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { path: string; edits: { oldText: string; newText: string; }[]; }, theme: Theme, context: ToolRenderContext<EditRenderState, { path: string; edits: { oldText: string; newText: string; }[]; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { path: string; edits: { oldText: string; newText: string; }[]; }, theme: Theme, context: ToolRenderContext<EditRenderState, { path: string; edits: { oldText: string; newText: string; }[]; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ path: string; edits: { oldText: string; newText: string; }[]; }'.
+packages/code-mode/src/tool-reference.ts(91,14): error TS2322: Type 'ToolDefinition<TObject<{ pattern: TString; path: TOptional<TString>; glob: TOptional<TString>; ignoreCase: TOptional<TBoolean>; literal: TOptional<...>; context: TOptional<...>; limit: TOptional<...>; }>, GrepToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { context?: number | undefined; path?: string | undefined; limit?: number | undefined; glob?: string | undefined; ignoreCase?: boolean | undefined; literal?: boolean | undefined; pattern: string; }, theme: Theme, context: ToolRenderContext<...>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { context?: number | undefined; path?: string | undefined; limit?: number | undefined; glob?: string | undefined; ignoreCase?: boolean | undefined; literal?: boolean | undefined; pattern: string; }, theme: Theme, context: ToolRenderContext<...>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ context?: number | undefined; path?: string | undefined; limit?: number | undefined; glob?: string | undefined; ignoreCase?: boolean | undefined; literal?: boolean | undefined; pattern: string; }'.
+packages/code-mode/src/tool-reference.ts(92,14): error TS2322: Type 'ToolDefinition<TObject<{ pattern: TString; path: TOptional<TString>; limit: TOptional<TNumber>; }>, FindToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { path?: string | undefined; limit?: number | undefined; pattern: string; }, theme: Theme, context: ToolRenderContext<any, { path?: string | undefined; limit?: number | undefined; pattern: string; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { path?: string | undefined; limit?: number | undefined; pattern: string; }, theme: Theme, context: ToolRenderContext<any, { path?: string | undefined; limit?: number | undefined; pattern: string; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ path?: string | undefined; limit?: number | undefined; pattern: string; }'.
+packages/code-mode/src/tool-reference.ts(93,12): error TS2322: Type 'ToolDefinition<TObject<{ path: TOptional<TString>; limit: TOptional<TNumber>; }>, LsToolDetails | undefined, any>' is not assignable to type 'ToolDefinition<TSchema, unknown, any>'.
+  Types of property 'renderCall' are incompatible.
+    Type '((args: { path?: string | undefined; limit?: number | undefined; }, theme: Theme, context: ToolRenderContext<any, { path?: string | undefined; limit?: number | undefined; }>) => Component) | undefined' is not assignable to type '((args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component) | undefined'.
+      Type '(args: { path?: string | undefined; limit?: number | undefined; }, theme: Theme, context: ToolRenderContext<any, { path?: string | undefined; limit?: number | undefined; }>) => Component' is not assignable to type '(args: unknown, theme: Theme, context: ToolRenderContext<any, unknown>) => Component'.
+        Types of parameters 'args' and 'args' are incompatible.
+          Type 'unknown' is not assignable to type '{ path?: string | undefined; limit?: number | undefined; }'.
+packages/fff/extensions/fff.ts(48,22): error TS7006: Parameter 'err' implicitly has an 'any' type.
+packages/fff/extensions/fff.ts(54,21): error TS7006: Parameter '_code' implicitly has an 'any' type.
+packages/fff/extensions/fff.ts(372,9): error TS2322: Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; maxResults?: number | undefined; query: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+      Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+        Property 'details' is optional in type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' but required in type 'AgentToolResult<unknown>'.
+packages/fff/extensions/fff.ts(442,9): error TS2322: Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; maxResults?: number | undefined; mode?: string | undefined; context?: number | undefined; query: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+      Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+        Property 'details' is optional in type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' but required in type 'AgentToolResult<unknown>'.
+packages/fff/extensions/fff.ts(517,9): error TS2322: Type '(_toolCallId: string, params: any, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { cwd?: string | undefined; constraints?: string | undefined; maxResults?: number | undefined; context?: number | undefined; patterns: string[]; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; } | { content: { type: "text"; text: string; }[]; details: Record<string, unknown> | undefined; isError?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+      Type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+        Property 'details' is optional in type '{ content: { type: "text"; text: string; }[]; isError: boolean; details?: undefined; }' but required in type 'AgentToolResult<unknown>'.
+packages/shared/src/ouija-core.ts(295,34): error TS2345: Argument of type 'OuijaArgs' is not assignable to parameter of type '{ query: string; project?: string | undefined; since?: string | undefined; limit?: number | undefined; }'.
+  Types of property 'query' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+packages/shared/src/ouija-core.ts(299,32): error TS2345: Argument of type 'OuijaArgs' is not assignable to parameter of type '{ session?: string | undefined; query: string; limit?: number | undefined; entries?: AdhocEntry[] | undefined; }'.
+  Types of property 'query' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+packages/shared/src/ouija-core.ts(303,32): error TS2345: Argument of type 'OuijaArgs' is not assignable to parameter of type '{ query: string; limit?: number | undefined; }'.
+  Types of property 'query' are incompatible.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.
+packages/tldr-code/extensions/tldr-code.ts(364,16): error TS2345: Argument of type '{ content: { type: "text"; text: string; }[]; }' is not assignable to parameter of type 'AgentToolResult<unknown>'.
+  Property 'details' is missing in type '{ content: { type: "text"; text: string; }[]; }' but required in type 'AgentToolResult<unknown>'.
+packages/tldr-code/extensions/tldr-code.ts(634,15): error TS2345: Argument of type '{ content: { type: "text"; text: string; }[]; }' is not assignable to parameter of type 'AgentToolResult<unknown>'.
+  Property 'details' is missing in type '{ content: { type: "text"; text: string; }[]; }' but required in type 'AgentToolResult<unknown>'.
+```

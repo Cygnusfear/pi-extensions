@@ -38,7 +38,7 @@ function expectSafe(cmd: string) {
 //    destructive commands omit it. This is the #1 bypass.
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("CRITICAL: .git without trailing slash", () => {
+describe("CRITICAL: .git without trailing slash", () => {
 	// BYPASS: rm -rf .git (no trailing slash) is the most common way to nuke a repo
 	test("BYPASS: rm -rf .git (no slash) — most common destructive command", () => {
 		expectBypass("rm -rf .git");
@@ -93,7 +93,7 @@ describe.skip("CRITICAL: .git without trailing slash", () => {
 // 2. Shell Obfuscation
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("shell obfuscation: variable expansion", () => {
+describe("shell obfuscation: variable expansion", () => {
 	// The guard checks for =git\b but NOT =.git or quoted forms
 	test("BYPASS: D=.git; rm -rf $D/ — dot before git breaks =git\\b match", () => {
 		expectBypass("D=.git; rm -rf $D/");
@@ -125,7 +125,7 @@ describe.skip("shell obfuscation: variable expansion", () => {
 	});
 });
 
-describe.skip("shell obfuscation: brace expansion", () => {
+describe("shell obfuscation: brace expansion", () => {
 	// Shell expands .{git} to .git — guard doesn't handle braces
 	test("BYPASS: rm -rf .{git}/ — brace expansion around git", () => {
 		expectBypass("rm -rf .{git}/");
@@ -144,7 +144,7 @@ describe.skip("shell obfuscation: brace expansion", () => {
 	});
 });
 
-describe.skip("shell obfuscation: glob patterns", () => {
+describe("shell obfuscation: glob patterns", () => {
 	// Guard checks .g*/, .gi?/, .gi*/, .git*/ but misses other patterns
 	test("catches rm -rf .g*/", () => {
 		expectCaught("rm -rf .g*/", "git_write");
@@ -184,7 +184,7 @@ describe.skip("shell obfuscation: glob patterns", () => {
 	});
 });
 
-describe.skip("shell obfuscation: ANSI-C quoting ($'...')", () => {
+describe("shell obfuscation: ANSI-C quoting ($'...')", () => {
 	// Guard checks DOT_ESCAPES but pattern requires quote boundary at wrong place
 	test("BYPASS: rm -rf $'\\x2egit'/ — escape and git inside same quoting context", () => {
 		// The $'\x2e' pattern expects closing quote RIGHT after the escape
@@ -206,7 +206,7 @@ describe.skip("shell obfuscation: ANSI-C quoting ($'...')", () => {
 	});
 });
 
-describe.skip("shell obfuscation: eval and indirect execution", () => {
+describe("shell obfuscation: eval and indirect execution", () => {
 	// eval with the command visible — caught because rm and .git/ are in the string
 	test("catches eval 'rm -rf .git/'", () => {
 		expectCaught("eval 'rm -rf .git/'", "git_write");
@@ -227,7 +227,7 @@ describe.skip("shell obfuscation: eval and indirect execution", () => {
 	});
 });
 
-describe.skip("shell obfuscation: base64 / encoding", () => {
+describe("shell obfuscation: base64 / encoding", () => {
 	// rm -rf .git/ = cm0gLXJmIC5naXQv in base64
 	test("BYPASS: echo cm0gLXJmIC5naXQv | base64 -d | bash", () => {
 		expectBypass("echo cm0gLXJmIC5naXQv | base64 -d | bash");
@@ -246,7 +246,7 @@ describe.skip("shell obfuscation: base64 / encoding", () => {
 	});
 });
 
-describe.skip("shell obfuscation: env / command / exec", () => {
+describe("shell obfuscation: env / command / exec", () => {
 	// env and command still leave rm visible, so they're caught
 	test("catches env rm -rf .git/", () => {
 		expectCaught("env rm -rf .git/", "git_write");
@@ -263,7 +263,7 @@ describe.skip("shell obfuscation: env / command / exec", () => {
 	});
 });
 
-describe.skip("shell obfuscation: subshells and backgrounding", () => {
+describe("shell obfuscation: subshells and backgrounding", () => {
 	// Subshells in parens — still detected since parens aren't split points
 	test("catches (rm -rf .git/) — subshell", () => {
 		expectCaught("(rm -rf .git/)", "git_write");
@@ -284,7 +284,7 @@ describe.skip("shell obfuscation: subshells and backgrounding", () => {
 // 3. Interpreter Escapes
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("interpreter escapes", () => {
+describe("interpreter escapes", () => {
 	test("BYPASS: python3 -c 'import shutil; shutil.rmtree(\".git\")'", () => {
 		expectBypass("python3 -c 'import shutil; shutil.rmtree(\".git\")'");
 	});
@@ -332,7 +332,7 @@ describe.skip("interpreter escapes", () => {
 // 4. Indirect Attacks (xargs, find, pipes)
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("indirect: xargs", () => {
+describe("indirect: xargs", () => {
 	test("BYPASS: echo .git | xargs rm -rf — target in different pipe segment", () => {
 		expectBypass("echo .git | xargs rm -rf");
 	});
@@ -354,7 +354,7 @@ describe.skip("indirect: xargs", () => {
 	});
 });
 
-describe.skip("indirect: find -exec and -delete", () => {
+describe("indirect: find -exec and -delete", () => {
 	test("BYPASS: find . -name '.git' -exec rm -rf {} \\;", () => {
 		// rm is there but .git has quotes and no trailing /
 		expectBypass("find . -name '.git' -exec rm -rf {} \\;");
@@ -384,7 +384,7 @@ describe.skip("indirect: find -exec and -delete", () => {
 	});
 });
 
-describe.skip("indirect: pipes and redirection tricks", () => {
+describe("indirect: pipes and redirection tricks", () => {
 	test("BYPASS: cat /dev/null | tee .git/config — tee via pipe input", () => {
 		// Split on |: "cat /dev/null" and "tee .git/config"
 		// "tee .git/config" — tee IS a write command, .git/ IS present → CAUGHT?
@@ -405,7 +405,7 @@ describe.skip("indirect: pipes and redirection tricks", () => {
 // 5. Missing write commands in WRITE_COMMANDS_RE
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("BYPASS: write commands not in WRITE_COMMANDS_RE", () => {
+describe("BYPASS: write commands not in WRITE_COMMANDS_RE", () => {
 	test("BYPASS: sed -i 's/a/b/' .git/config — sed modifies files in-place", () => {
 		expectBypass("sed -i 's/a/b/' .git/config");
 	});
@@ -448,7 +448,7 @@ describe.skip("BYPASS: write commands not in WRITE_COMMANDS_RE", () => {
 // 6. Dangerous git commands not in destructive list
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("dangerous git commands not caught", () => {
+describe("dangerous git commands not caught", () => {
 	test("BYPASS: git update-ref -d HEAD — deletes HEAD reference", () => {
 		expectBypass("git update-ref -d HEAD");
 	});
@@ -497,7 +497,7 @@ describe.skip("dangerous git commands not caught", () => {
 // 7. Case sensitivity attacks (macOS HFS+ is case-insensitive)
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("case sensitivity attacks", () => {
+describe("case sensitivity attacks", () => {
 	test("BYPASS: rm -rf .GIT/ — uppercase (works on macOS)", () => {
 		expectBypass("rm -rf .GIT/");
 	});
@@ -523,7 +523,7 @@ describe.skip("case sensitivity attacks", () => {
 // 8. isGitPath bypasses
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("isGitPath bypasses", () => {
+describe("isGitPath bypasses", () => {
 	test("BYPASS: .GIT/config — uppercase on case-insensitive FS", () => {
 		expect(isGitPath(".GIT/config")).toBe(false);
 	});
@@ -571,7 +571,7 @@ describe.skip("isGitPath bypasses", () => {
 // 9. FALSE POSITIVE tests — safe commands that MUST pass through
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("false positives: normal git operations (must be safe)", () => {
+describe("false positives: normal git operations (must be safe)", () => {
 	const safeCommands = [
 		// Basic operations
 		"git status",
@@ -716,7 +716,7 @@ describe.skip("false positives: normal git operations (must be safe)", () => {
 	}
 });
 
-describe.skip("false positives: read-only .git access", () => {
+describe("false positives: read-only .git access", () => {
 	const safeReads = [
 		"cat .git/config",
 		"cat .git/HEAD",
@@ -748,7 +748,7 @@ describe.skip("false positives: read-only .git access", () => {
 	}
 });
 
-describe.skip("false positives: incidental .git mentions", () => {
+describe("false positives: incidental .git mentions", () => {
 	const safeMentions = [
 		"echo 'the .git folder is important'",
 		"echo 'cloned from https://github.com/user/repo.git'",
@@ -770,7 +770,7 @@ describe.skip("false positives: incidental .git mentions", () => {
 	}
 });
 
-describe.skip("false positives: build/dev commands", () => {
+describe("false positives: build/dev commands", () => {
 	const safeBuild = [
 		"npm run build",
 		"pnpm test",
@@ -792,7 +792,7 @@ describe.skip("false positives: build/dev commands", () => {
 	}
 });
 
-describe.skip("false positives: compound safe commands", () => {
+describe("false positives: compound safe commands", () => {
 	test("git add + commit pipeline", () => {
 		expectSafe("git add -A && git commit -m 'fix'");
 	});
@@ -826,7 +826,7 @@ describe.skip("false positives: compound safe commands", () => {
 // 10. Edge cases and curiosities
 // ═══════════════════════════════════════════════════════════════
 
-describe.skip("edge cases", () => {
+describe("edge cases", () => {
 	test("empty string is safe", () => {
 		expectSafe("");
 	});
@@ -868,7 +868,7 @@ describe.skip("edge cases", () => {
 	});
 });
 
-describe.skip("edge cases: git init variations", () => {
+describe("edge cases: git init variations", () => {
 	test("catches git init", () => {
 		expectCaught("git init", "destructive");
 	});
@@ -891,7 +891,7 @@ describe.skip("edge cases: git init variations", () => {
 	});
 });
 
-describe.skip("edge cases: force push variations", () => {
+describe("edge cases: force push variations", () => {
 	test("catches git push --force", () => {
 		expectCaught("git push --force", "destructive");
 	});

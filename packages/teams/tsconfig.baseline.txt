@@ -1,0 +1,114 @@
+# teams-tsconfig TypeScript baseline
+
+Generated: 2026-04-28T03:22:41.941Z
+Command: bunx tsc --noEmit --strict --skipLibCheck -p packages/teams/tsconfig.json
+TypeScript: Version 5.9.3
+Exit: 2
+Error count: 31
+
+This honest typecheck intentionally includes real teams source (`*.ts`, `v2/**/*.ts`) instead of the deleted fake `sandbox-registry-compat.ts` smoke stub. The errors below are documented pre-existing teams/pi-mesh typing debt; none are sandbox-registry import/shape errors.
+
+## Baseline errors (file:line:column code message)
+- packages/pi-mesh/extension/pi-mesh.ts:1597:9 TS2322 Type '(_toolCallId: string, params: { timeoutMs?: number | undefined; waitFor?: string | undefined; message: unknown; sessionId: string; }) => Promise<{ content: { type: "text"; text: string; }[]; details: { sessionId: string; ... 5 more ...; ack: undefined; }; isError: boolean; } | { ...; } | { ...; } | { ...; }>' is not assignable to type '(toolCallId: string, params: { timeoutMs?: number | undefined; waitFor?: string | undefined; message: unknown; sessionId: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/pi-mesh/extension/pi-mesh.ts:1655:9 TS2322 Type '(_toolCallId: string, params: { start?: number | undefined; end?: number | undefined; timeoutMs?: number | undefined; sessionId: string; }) => Promise<{ content: { type: "text"; text: string; }[]; details: { ...; }; isError: boolean; } | { ...; }>' is not assignable to type '(toolCallId: string, params: { start?: number | undefined; end?: number | undefined; timeoutMs?: number | undefined; sessionId: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/pi-mesh/extension/pi-mesh.ts:1952:5 TS2322 Type 'string | undefined' is not assignable to type 'string | null'.
+- packages/teams/index.ts:39:17 TS2339 Property 'details' does not exist on type '{ content: { type: "text"; text: string; }[]; isError?: undefined; } | { content: { type: "text"; text: string; }[]; isError: boolean; }'.
+- packages/teams/leader.ts:320:5 TS2322 Type '"failed"' is not assignable to type '"warning" | "turn_finished" | "success" | "failure"'.
+- packages/teams/leader.ts:323:5 TS2322 Type '"failed"' is not assignable to type '"warning" | "turn_finished" | "success" | "failure"'.
+- packages/teams/leader.ts:1066:44 TS2339 Property 'off' does not exist on type '{ tell: (id: string, msg: unknown) => void; ask: (id: string, msg: unknown, timeout?: number | undefined) => Promise<unknown>; chat: (ch: string, msg: unknown) => void; joinChannel: (ch: string) => void; stop: () => void; on: (event: "message" | "channel", cb: (payload: unknown) => void) => void; peers: () => { ...;...'.
+- packages/teams/leader.ts:1067:44 TS2339 Property 'off' does not exist on type '{ tell: (id: string, msg: unknown) => void; ask: (id: string, msg: unknown, timeout?: number | undefined) => Promise<unknown>; chat: (ch: string, msg: unknown) => void; joinChannel: (ch: string) => void; stop: () => void; on: (event: "message" | "channel", cb: (payload: unknown) => void) => void; peers: () => { ...;...'.
+- packages/teams/leader.ts:1428:3 TS2322 Type '(msg: { from: string; channel: string; payload: unknown; timestamp: number; }) => void' is not assignable to type '(payload: unknown) => void'.
+- packages/teams/leader.ts:1448:54 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerCommentPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1449:26 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerCommentPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1474:27 TS2345 Argument of type '((payload: unknown) => void) | undefined' is not assignable to parameter of type '(payload: unknown) => void'.
+- packages/teams/leader.ts:1477:3 TS2322 Type '(msg: { from: string; payload: unknown; }) => void' is not assignable to type '(payload: unknown) => void'.
+- packages/teams/leader.ts:1491:46 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1492:88 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1498:56 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1499:88 TS2352 Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+- packages/teams/leader.ts:1505:27 TS2345 Argument of type '((payload: unknown) => void) | undefined' is not assignable to parameter of type '(payload: unknown) => void'.
+- packages/teams/leader.ts:1709:25 TS2367 This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+- packages/teams/leader.ts:1711:9 TS2367 This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+- packages/teams/leader.ts:1774:9 TS2367 This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+- packages/teams/leader.ts:1885:25 TS2367 This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+- packages/teams/leader.ts:2143:3 TS2393 Duplicate function implementation.
+- packages/teams/leader.ts:2303:3 TS2393 Duplicate function implementation.
+- packages/teams/tool.ts:332:11 TS2322 Type '(_id: string, params: { name?: string | undefined; message?: string | undefined; action?: "tell" | "delegate" | "list" | "kill" | "kill_all" | "tell_all" | "view" | "runtime" | undefined; ... 5 more ...; baseRef?: string | undefined; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<...> | unde...' is not assignable to type '(toolCallId: string, params: { name?: string | undefined; message?: string | undefined; action?: "tell" | "delegate" | "list" | "kill" | "kill_all" | "tell_all" | "view" | "runtime" | undefined; ... 5 more ...; baseRef?: string | undefined; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> |...'.
+- packages/teams/worker.ts:108:5 TS2322 Type 'string | undefined' is not assignable to type 'string'.
+- packages/teams/worker.ts:180:5 TS2322 Type 'string | undefined' is not assignable to type 'string'.
+- packages/teams/worker.ts:187:6 TS2322 Type 'string | undefined' is not assignable to type 'string'.
+- packages/teams/worker.ts:275:9 TS2322 Type '(_id: string, params: { message?: string | undefined; filePath?: string | undefined; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { message?: string | undefined; filePath?: string | undefined; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+- packages/teams/worker.ts:317:6 TS2322 Type 'string | undefined' is not assignable to type 'string'.
+- packages/teams/worker.ts:334:9 TS2322 Type '(_id: string, params: { status: TerminalStatus; summary: string; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { status: "done" | "quit"; summary: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+
+## Raw output
+```
+packages/pi-mesh/extension/pi-mesh.ts(1597,9): error TS2322: Type '(_toolCallId: string, params: { timeoutMs?: number | undefined; waitFor?: string | undefined; message: unknown; sessionId: string; }) => Promise<{ content: { type: "text"; text: string; }[]; details: { sessionId: string; ... 5 more ...; ack: undefined; }; isError: boolean; } | { ...; } | { ...; } | { ...; }>' is not assignable to type '(toolCallId: string, params: { timeoutMs?: number | undefined; waitFor?: string | undefined; message: unknown; sessionId: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; details: { sessionId: string; error: string; resolvedSessionId: string | undefined; sent: boolean | undefined; deliveryId: string | undefined; waitFor: string | undefined; ack: undefined; }; isError: boolean; } | { ...; } | { ...; } | { ...; }>' is not assignable to type 'Promise<AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; sent: boolean | undefined; deliveryId: string | undefined; waitFor: string | undefined; ack: undefined; }>>'.
+    Type '{ content: { type: "text"; text: string; }[]; details: { sessionId: string; error: string; resolvedSessionId: string | undefined; sent: boolean | undefined; deliveryId: string | undefined; waitFor: string | undefined; ack: undefined; }; isError: boolean; } | { ...; } | { ...; } | { ...; }' is not assignable to type 'AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; sent: boolean | undefined; deliveryId: string | undefined; waitFor: string | undefined; ack: undefined; }>'.
+      Type '{ content: { type: "text"; text: string; }[]; details: { sessionId: string; resolvedSessionId: string; sent: boolean; deliveryId: string; waitFor: string; error: undefined; ack: any; }; isError?: undefined; }' is not assignable to type 'AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; sent: boolean | undefined; deliveryId: string | undefined; waitFor: string | undefined; ack: undefined; }>'.
+        The types of 'details.error' are incompatible between these types.
+          Type 'undefined' is not assignable to type 'string'.
+packages/pi-mesh/extension/pi-mesh.ts(1655,9): error TS2322: Type '(_toolCallId: string, params: { start?: number | undefined; end?: number | undefined; timeoutMs?: number | undefined; sessionId: string; }) => Promise<{ content: { type: "text"; text: string; }[]; details: { ...; }; isError: boolean; } | { ...; }>' is not assignable to type '(toolCallId: string, params: { start?: number | undefined; end?: number | undefined; timeoutMs?: number | undefined; sessionId: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; details: { sessionId: string; error: string; resolvedSessionId: string | undefined; reply: Record<string, unknown> | undefined; }; isError: boolean; } | { ...; }>' is not assignable to type 'Promise<AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; reply: Record<string, unknown> | undefined; }>>'.
+    Type '{ content: { type: "text"; text: string; }[]; details: { sessionId: string; error: string; resolvedSessionId: string | undefined; reply: Record<string, unknown> | undefined; }; isError: boolean; } | { ...; }' is not assignable to type 'AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; reply: Record<string, unknown> | undefined; }>'.
+      Type '{ content: { type: "text"; text: string; }[]; details: { sessionId: string; resolvedSessionId: string; reply: Record<string, unknown>; error: string | undefined; }; isError?: undefined; }' is not assignable to type 'AgentToolResult<{ sessionId: string; error: string; resolvedSessionId: string | undefined; reply: Record<string, unknown> | undefined; }>'.
+        The types of 'details.error' are incompatible between these types.
+          Type 'string | undefined' is not assignable to type 'string'.
+            Type 'undefined' is not assignable to type 'string'.
+packages/pi-mesh/extension/pi-mesh.ts(1952,5): error TS2322: Type 'string | undefined' is not assignable to type 'string | null'.
+  Type 'undefined' is not assignable to type 'string | null'.
+packages/teams/index.ts(39,17): error TS2339: Property 'details' does not exist on type '{ content: { type: "text"; text: string; }[]; isError?: undefined; } | { content: { type: "text"; text: string; }[]; isError: boolean; }'.
+  Property 'details' does not exist on type '{ content: { type: "text"; text: string; }[]; isError?: undefined; }'.
+packages/teams/leader.ts(320,5): error TS2322: Type '"failed"' is not assignable to type '"warning" | "turn_finished" | "success" | "failure"'.
+packages/teams/leader.ts(323,5): error TS2322: Type '"failed"' is not assignable to type '"warning" | "turn_finished" | "success" | "failure"'.
+packages/teams/leader.ts(1066,44): error TS2339: Property 'off' does not exist on type '{ tell: (id: string, msg: unknown) => void; ask: (id: string, msg: unknown, timeout?: number | undefined) => Promise<unknown>; chat: (ch: string, msg: unknown) => void; joinChannel: (ch: string) => void; stop: () => void; on: (event: "message" | "channel", cb: (payload: unknown) => void) => void; peers: () => { ...;...'.
+packages/teams/leader.ts(1067,44): error TS2339: Property 'off' does not exist on type '{ tell: (id: string, msg: unknown) => void; ask: (id: string, msg: unknown, timeout?: number | undefined) => Promise<unknown>; chat: (ch: string, msg: unknown) => void; joinChannel: (ch: string) => void; stop: () => void; on: (event: "message" | "channel", cb: (payload: unknown) => void) => void; peers: () => { ...;...'.
+packages/teams/leader.ts(1428,3): error TS2322: Type '(msg: { from: string; channel: string; payload: unknown; timestamp: number; }) => void' is not assignable to type '(payload: unknown) => void'.
+  Types of parameters 'msg' and 'payload' are incompatible.
+    Type 'unknown' is not assignable to type '{ from: string; channel: string; payload: unknown; timestamp: number; }'.
+packages/teams/leader.ts(1448,54): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerCommentPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'text' is missing in type 'Record<string, unknown>' but required in type 'WorkerCommentPayload'.
+packages/teams/leader.ts(1449,26): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerCommentPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'text' is missing in type 'Record<string, unknown>' but required in type 'WorkerCommentPayload'.
+packages/teams/leader.ts(1474,27): error TS2345: Argument of type '((payload: unknown) => void) | undefined' is not assignable to parameter of type '(payload: unknown) => void'.
+  Type 'undefined' is not assignable to type '(payload: unknown) => void'.
+packages/teams/leader.ts(1477,3): error TS2322: Type '(msg: { from: string; payload: unknown; }) => void' is not assignable to type '(payload: unknown) => void'.
+  Types of parameters 'msg' and 'payload' are incompatible.
+    Type 'unknown' is not assignable to type '{ from: string; payload: unknown; }'.
+packages/teams/leader.ts(1491,46): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'WorkerFinishPayload': status, summary
+packages/teams/leader.ts(1492,88): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'WorkerFinishPayload': status, summary
+packages/teams/leader.ts(1498,56): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'WorkerFinishPayload': status, summary
+packages/teams/leader.ts(1499,88): error TS2352: Conversion of type 'Record<string, unknown>' to type 'WorkerFinishPayload' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'WorkerFinishPayload': status, summary
+packages/teams/leader.ts(1505,27): error TS2345: Argument of type '((payload: unknown) => void) | undefined' is not assignable to parameter of type '(payload: unknown) => void'.
+  Type 'undefined' is not assignable to type '(payload: unknown) => void'.
+packages/teams/leader.ts(1709,25): error TS2367: This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+packages/teams/leader.ts(1711,9): error TS2367: This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+packages/teams/leader.ts(1774,9): error TS2367: This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+packages/teams/leader.ts(1885,25): error TS2367: This comparison appears to be unintentional because the types '"warning" | "turn_finished" | "success" | "failure"' and '"failed"' have no overlap.
+packages/teams/leader.ts(2143,3): error TS2393: Duplicate function implementation.
+packages/teams/leader.ts(2303,3): error TS2393: Duplicate function implementation.
+packages/teams/tool.ts(332,11): error TS2322: Type '(_id: string, params: { name?: string | undefined; message?: string | undefined; action?: "tell" | "delegate" | "list" | "kill" | "kill_all" | "tell_all" | "view" | "runtime" | undefined; ... 5 more ...; baseRef?: string | undefined; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<...> | unde...' is not assignable to type '(toolCallId: string, params: { name?: string | undefined; message?: string | undefined; action?: "tell" | "delegate" | "list" | "kill" | "kill_all" | "tell_all" | "view" | "runtime" | undefined; ... 5 more ...; baseRef?: string | undefined; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<...> |...'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; isError?: undefined; } | { content: { type: "text"; text: string; }[]; isError: boolean; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Type '{ content: { type: "text"; text: string; }[]; isError?: undefined; } | { content: { type: "text"; text: string; }[]; isError: boolean; }' is not assignable to type 'AgentToolResult<unknown>'.
+      Property 'details' is missing in type '{ content: { type: "text"; text: string; }[]; isError?: undefined; }' but required in type 'AgentToolResult<unknown>'.
+packages/teams/worker.ts(108,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+packages/teams/worker.ts(180,5): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+packages/teams/worker.ts(187,6): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+packages/teams/worker.ts(275,9): error TS2322: Type '(_id: string, params: { message?: string | undefined; filePath?: string | undefined; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { message?: string | undefined; filePath?: string | undefined; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; isError: boolean; } | { content: { type: "text"; text: string; }[]; isError?: undefined; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Type '{ content: { type: "text"; text: string; }[]; isError: boolean; } | { content: { type: "text"; text: string; }[]; isError?: undefined; }' is not assignable to type 'AgentToolResult<unknown>'.
+      Property 'details' is missing in type '{ content: { type: "text"; text: string; }[]; isError: boolean; }' but required in type 'AgentToolResult<unknown>'.
+packages/teams/worker.ts(317,6): error TS2322: Type 'string | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+packages/teams/worker.ts(334,9): error TS2322: Type '(_id: string, params: { status: TerminalStatus; summary: string; }, _signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>' is not assignable to type '(toolCallId: string, params: { status: "done" | "quit"; summary: string; }, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionContext) => Promise<...>'.
+  Type 'Promise<{ content: { type: "text"; text: string; }[]; }>' is not assignable to type 'Promise<AgentToolResult<unknown>>'.
+    Property 'details' is missing in type '{ content: { type: "text"; text: string; }[]; }' but required in type 'AgentToolResult<unknown>'.
+```

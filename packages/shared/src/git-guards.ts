@@ -61,14 +61,6 @@ const DESTRUCTIVE_GIT_COMMANDS: Array<[RegExp, string]> = [
 
 	// git reflog expire — destroys reflog history
 	[/\bgit\s+reflog\s+expire\b/, "git reflog expire — destroys reflog history"],
-
-	// git worktree remove --force / -f — removes dirty worktrees
-	[/\bgit\s+worktree\s+remove\s+(?:--force|-f)\b/, "git worktree remove --force — can destroy uncommitted work"],
-	[/\bgit\s+worktree\s+remove\s+.*\s(?:--force|-f)\b/, "git worktree remove --force — can destroy uncommitted work"],
-
-	// git submodule deinit --force / -f — removes submodule working trees
-	[/\bgit\s+submodule\s+deinit\s+(?:--force|-f)\b/, "git submodule deinit --force — can destroy submodule work"],
-	[/\bgit\s+submodule\s+deinit\s+.*\s(?:--force|-f)\b/, "git submodule deinit --force — can destroy submodule work"],
 ];
 
 /**
@@ -148,10 +140,6 @@ export function isGitUnsafeBash(cmd: string): { type: "destructive" | "git_write
 	}
 	if (/\bfind\b.*\.git.*-delete\b/i.test(normalized)) {
 		return { type: "git_write", reason: "find -delete targeting .git" };
-	}
-
-	if (/\b(?:rm|rmdir|mv|cp|chmod|chown|truncate|shred)\b.*\$\([^)]*\)/i.test(normalized)) {
-		return { type: "git_write", reason: "write operation targeting command-substituted path" };
 	}
 
 	// ── Per-segment: write command + .git target ──

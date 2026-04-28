@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@pi-extensions/fff": "*",
+    "@pi-extensions/runbooks": "*",
     "@pi-extensions/shared": "*",
     "@pi-extensions/tldr-code": "*",
     "turndown": "*"
