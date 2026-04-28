@@ -363,6 +363,19 @@
         "@mariozechner/pi-coding-agent": ">=0.66.0",
       },
     },
+    "packages/rlm": {
+      "name": "@pi-extensions/rlm",
+      "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/code-mode": "*",
+        "@pi-extensions/shared": "*",
+      },
+      "peerDependencies": {
+        "@mariozechner/pi-ai": "*",
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@sinclair/typebox": "*",
+      },
+    },
     "packages/runbooks": {
       "name": "@pi-extensions/runbooks",
       "version": "0.0.1",
@@ -701,6 +714,8 @@
     "@pi-extensions/prompt-templates": ["@pi-extensions/prompt-templates@workspace:packages/prompt-templates"],
 
     "@pi-extensions/provider-filter": ["@pi-extensions/provider-filter@workspace:packages/provider-filter"],
+
+    "@pi-extensions/rlm": ["@pi-extensions/rlm@workspace:packages/rlm"],
 
     "@pi-extensions/runbooks": ["@pi-extensions/runbooks@workspace:packages/runbooks"],
 

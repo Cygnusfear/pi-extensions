@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "allowJs": true,
+    "ignoreDeprecations": "5.0"
+  },
+  "include": ["index.ts", "src/**/*.ts"],
+  "exclude": ["**/*.test.ts", "test/**"]
+}

@@ -47,6 +47,7 @@
       "./packages/skills/extensions/skills.ts",
       "./packages/nested-skills/extensions/nested-skills.ts",
       "./packages/teams/index.ts",
+      "./packages/rlm/index.ts",
       "./packages/webfetch/extensions/webfetch.ts",
       "./packages/worktree-summaries/extensions/worktree-summaries.ts",
       "./packages/image-links/extensions/image-links.ts",
