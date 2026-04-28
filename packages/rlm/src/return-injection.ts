@@ -4,7 +4,6 @@ import type { RlmResult, RlmState } from "./types";
 export function buildRlmReturn(state: RlmState) {
 	return function rlmReturn(value: Record<string, unknown>): never {
 		if (state.disposed) {
-			state.debug.push("late rlm.return ignored after dispose");
 			return undefined as never;
 		}
 		if (state.resolved) throw new Error("rlm: already returned");

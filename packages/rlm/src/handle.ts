@@ -1,13 +1,9 @@
+import { combineSignals } from "./combine-signals";
+import { DEFAULT_TIMEOUT_MS } from "./constants";
 import { runRlm } from "./loop";
 import type { RlmDeps, RlmHandle, RlmOptions, RlmResult } from "./types";
 
 const activeCancels = new Set<(reason: Error) => void>();
-
-function combineSignals(signals: AbortSignal[]): AbortSignal {
-	const live = signals.filter(Boolean);
-	if (live.length === 1) return live[0];
-	return AbortSignal.any(live);
-}
 
 export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): RlmHandle {
 	const cancelController = new AbortController();
@@ -54,6 +50,7 @@ export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): Rlm
 		},
 	};
 
+	timeoutHandle = setTimeout(() => cancel(new Error("rlm: timeout after " + DEFAULT_TIMEOUT_MS + "ms")), DEFAULT_TIMEOUT_MS);
 	activeCancels.add(cancel);
 	return handle as RlmHandle<RlmResult>;
 }

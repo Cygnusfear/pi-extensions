@@ -1,13 +1,9 @@
-import { complete, type Message } from "@mariozechner/pi-ai";
+import { complete, type Context, type Model, type ProviderStreamOptions } from "@mariozechner/pi-ai";
+import type { RlmCompleteFn } from "./types";
 
-export interface CompleteResponse {
-	content: Array<{ type: string; text?: string }>;
-	usage?: { input?: number; output?: number; inputTokens?: number; outputTokens?: number };
-	stopReason?: string;
-}
+export type CompleteResponse = Awaited<ReturnType<typeof complete>>;
 
-export async function completeRlm(model: unknown, request: { systemPrompt: string; messages: Message[] }, auth: { apiKey: string; headers?: Record<string, string>; signal?: AbortSignal }): Promise<CompleteResponse> {
-	const testHook = (globalThis as any).__rlmCompleteMock;
-	if (typeof testHook === "function") return testHook(model, request, auth) as Promise<CompleteResponse>;
-	return complete(model as any, request as any, auth as any) as Promise<CompleteResponse>;
+export async function completeRlm(completeFn: RlmCompleteFn | undefined, model: Model<any>, request: Context, auth: ProviderStreamOptions): Promise<CompleteResponse> {
+	const fn = completeFn ?? complete;
+	return fn(model, request, auth);
 }

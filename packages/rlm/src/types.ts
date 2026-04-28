@@ -1,4 +1,7 @@
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@mariozechner/pi-ai";
+
+export type RlmCompleteFn = (model: Model<any>, request: Context, auth?: ProviderStreamOptions) => Promise<AssistantMessage>;
 
 export interface RlmOptions {
 	task: string;
@@ -25,8 +28,9 @@ export interface RlmDeps {
 	cwd: string;
 	parentModel: { provider: string; id: string };
 	modelRegistry: ModelRegistry;
+	completeFn?: RlmCompleteFn;
 	sendMessage?: (msg: unknown, opts?: unknown) => void;
-	sendUserMessage?: (msg: string, opts?: { deliverAs?: "followUp" }) => void;
+	sendUserMessage?: (msg: string, opts?: { deliverAs?: "followUp" | "steer" }) => void;
 }
 
 export interface RlmState {
@@ -36,5 +40,4 @@ export interface RlmState {
 	disposeAbort: AbortController;
 	timeoutHandle: ReturnType<typeof setTimeout> | null;
 	usage: { input: number; output: number };
-	debug: string[];
 }

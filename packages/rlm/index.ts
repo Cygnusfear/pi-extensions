@@ -10,7 +10,7 @@ export function buildDeps(ctx: SandboxCallContext): RlmDeps {
 		parentModel: ctx.model,
 		modelRegistry: ctx.modelRegistry,
 		sendMessage: ctx.sendMessage,
-		sendUserMessage: ctx.sendUserMessage as RlmDeps["sendUserMessage"],
+		sendUserMessage: ctx.sendUserMessage,
 	};
 }
 

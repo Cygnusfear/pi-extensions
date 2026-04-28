@@ -1,3 +1,5 @@
+import { createToolBindings } from "@pi-extensions/code-mode/sandbox-tools";
+import type { SandboxContext } from "@pi-extensions/code-mode/types";
 import { getSandboxFnNames } from "@pi-extensions/shared/sandbox-registry";
 import type { RlmDeps, RlmOptions } from "./types";
 
@@ -9,17 +11,11 @@ export function resolveModel(s: string): [provider: string, id: string] {
 	return [s.slice(0, slash), s.slice(slash + 1)];
 }
 
-const BUILTIN_TOOL_NAMES = [
-	"Bash", "bash", "Read", "read", "Write", "write", "Edit", "edit", "Glob", "glob", "Python", "python", "WebFetch", "webFetch",
-	"rg", "fd", "sleep", "mai", "maiCall", "maiTicket", "recall", "memory", "memoryContext", "memoryCreate", "memoryUnfold", "memoryStatus", "memorySubscribe", "memoryUnsubscribe", "memoryCheckUpdates",
-	"brave", "braveSearch", "braveCodeSearch", "getCurrentTime", "hash", "hashRead", "hashEdit", "applyPatch", "context7", "context7Resolve", "context7Docs",
-	"fff", "fffFind", "fffGrep", "fffMultiGrep", "tldr", "tldrSemanticSearch", "tldrStructure", "tldrCalls", "tldrExtract", "tldrDead", "tldrArch", "tldrImpact", "tldrIndexStatus",
-	"man", "readImage", "bashBgStart", "bashBgStatus", "bashBgLogs", "bashBgStop", "bashBgList", "runbook", "runbookSave", "runbookList", "runbookLoad", "runbookRun", "runbookDelete",
-	"mesh", "meshPeers", "meshTell", "meshView", "meshBroadcast", "meshChat", "meshJoinChannel", "meshLeaveChannel", "teams", "ouija", "supervise", "getSkillPaths",
-];
-
-function availableToolNames(_deps: RlmDeps): Set<string> {
-	return new Set([...BUILTIN_TOOL_NAMES, ...getSandboxFnNames()]);
+function availableToolNames(deps: RlmDeps): Set<string> {
+	const minimalCtx: SandboxContext = { cwd: deps.cwd, images: [], signal: deps.signal };
+	const all = new Set([...Object.keys(createToolBindings(minimalCtx)), ...getSandboxFnNames()]);
+	all.delete("runbookRun");
+	return all;
 }
 
 export function validateOptions(opts: RlmOptions, deps: RlmDeps): void {
