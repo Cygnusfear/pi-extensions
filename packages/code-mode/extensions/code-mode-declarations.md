@@ -735,7 +735,6 @@ export interface RlmOptions {
   model?: string;
   maxIterations?: number;
   maxDepth?: number;
-  maxTokens?: number;
   systemPrompt?: string;
   signal?: AbortSignal;
 }

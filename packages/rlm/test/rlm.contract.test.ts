@@ -26,7 +26,12 @@ function deps(overrides: Record<string, unknown> = {}) {
 	} as any;
 }
 function setComplete(fn: CompleteMock) { completeMock = fn; }
-function resp(text: string, usage = { input: 1, output: 1 }, stopReason = "stop") { return { content: [{ type: "text", text }], usage, stopReason }; }
+function contentFromText(text: string) {
+	const m = text.match(/^```(?:javascript|js|typescript|ts)\n([\s\S]*)\n```$/);
+	if (m) return [{ type: "toolCall", id: "tool-" + Math.random().toString(36).slice(2), name: "execute_code", arguments: { code: m[1] } }];
+	return [{ type: "text", text }];
+}
+function resp(text: string, usage = { input: 1, output: 1 }, stopReason = "stop") { return { role: "assistant", content: contentFromText(text), usage, stopReason, provider: "test", model: "test-model", api: "test", timestamp: Date.now() }; }
 function queue(...texts: string[]) { let i = 0; setComplete(() => resp(texts[i++] ?? texts[texts.length - 1])); }
 async function expectReject(p: PromiseLike<unknown> | RlmHandle, text: string) { await expect(Promise.resolve(p)).rejects.toThrow(text); }
 function messageText(msg: any): string {
@@ -123,20 +128,15 @@ describe("rlm contract", () => {
 		queue(js("rlm.return({kind: typeof memory.context});"));
 		await expect(runRlm(deps(), { task: "mem", tools: ["memory"] }, 0)).resolves.toMatchObject({ kind: "function" });
 		await expectReject(runRlm(deps(), { task: "bad", tools: ["memory.context"] }, 0), "unknown tool");
-		await expectReject(runRlm(deps(), { task: "bad", tools: ["rlm"] }, 0), "always injected");
+		queue(js("rlm.return({kind: typeof rlm});"));
+		await expect(runRlm(deps(), { task: "rlm-listed", tools: ["rlm"] }, 0)).resolves.toMatchObject({ kind: "function" });
 	});
 	test("9 depth cap permits child and rejects grandchild", async () => {
-		setComplete((_m, req) => req.messages[0].content === "child" ? resp(js("try { rlm({task:'grand', tools:[]}); } catch (e) { rlm.return({err:e.message}); }")) : resp(js("const child = await rlm({task:'child', tools:[], maxDepth:2}); rlm.return({child});")));
+		setComplete((_m, req) => messageText(req.messages[0]) === "child" ? resp(js("try { rlm({task:'grand', tools:[]}); } catch (e) { rlm.return({err:e.message}); }")) : resp(js("const child = await rlm({task:'child', tools:[], maxDepth:2}); rlm.return({child});")));
 		await expect(runRlm(deps(), { task: "parent", tools: [], maxDepth: 2 }, 0)).resolves.toMatchObject({ child: { err: "rlm: max depth reached" } });
 	});
 	test("10 iteration cap rejects without return", async () => { queue(js("console.log('no return');")); await expectReject(runRlm(deps(), { task: "cap", tools: [], maxIterations: 2 }, 0), "maxIterations (2)"); });
-	test("11 token cap fires before executing high-usage code", async () => {
-		const key = envKey("TOKEN_EXECUTED");
-		setComplete(() => resp(js("process.env[" + JSON.stringify(key) + "] = '1'; rlm.return({shouldNot:true});"), { input: 60, output: 60 }));
-		await expectReject(runRlm(deps(), { task: "tok", tools: [], maxTokens: 100 }, 0), "maxTokens reached");
-		expect(process.env[key]).toBeUndefined();
-	});
-	test("12 no-code strike limit rejects", async () => { queue("plain prose"); await expectReject(runRlm(deps(), { task: "nocode", tools: [] }, 0), "sub-LLM not emitting code blocks"); });
+	test("12 plain text without tool call rejects", async () => { queue("plain prose"); await expectReject(runRlm(deps(), { task: "nocode", tools: [] }, 0), "agent finished without rlm.return"); });
 	test("13 parent abort propagates into complete signal", async () => {
 		const ac = new AbortController(); let seen = false;
 		setComplete((_m, _req, auth) => new Promise((_res, rej) => { auth.signal.addEventListener("abort", () => { seen = auth.signal.aborted; rej(new Error("Aborted")); }); }));
@@ -150,7 +150,7 @@ describe("rlm contract", () => {
 	});
 	test("15 timeout rejects with exact timeout error", async () => { setComplete((_m,_r,auth) => new Promise((_res, rej) => auth.signal.addEventListener("abort", () => rej(new Error("Aborted"))))); const h = createRlmHandle(deps(), { task: "timeout", tools: [] }, 0).timeout(20); await expectReject(h, "rlm: timeout after 20ms"); });
 	test("16 parallel isolation", async () => {
-		setComplete((_m, req) => resp(js("rlm.return({task:" + JSON.stringify(req.messages[0].content) + "});")));
+		setComplete((_m, req) => resp(js("rlm.return({task:" + JSON.stringify(messageText(req.messages[0])) + "});")));
 		const out = await Promise.all(["a","b","c"].map((task) => runRlm(deps(), { task, tools: [] }, 0)));
 		expect(out.map((x:any) => x.task)).toEqual(["a","b","c"]);
 	});

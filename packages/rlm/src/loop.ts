@@ -1,19 +1,26 @@
-import type { Message } from "@mariozechner/pi-ai";
+import { runAgentLoop, type AgentMessage, type AgentTool } from "@mariozechner/pi-agent-core";
+import { createAssistantMessageEventStream, streamSimple, type AssistantMessage, type Model } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
 import { createCodeModeSession, executeInSession } from "@pi-extensions/code-mode/session-factory";
-import { completeRlm } from "./api-client";
 import { combineSignals } from "./combine-signals";
-import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_ITERATIONS, NO_CODE_STRIKE_LIMIT } from "./constants";
+import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_ITERATIONS } from "./constants";
 import { disposeSub } from "./dispose";
-import { extractCodeBlocks } from "./extract";
 import { createRlmHandle } from "./handle";
-import { buildIterationPrompt, buildSystemPrompt } from "./prompts";
+import { buildSystemPrompt } from "./prompts";
 import { buildRlmReturn } from "./return-injection";
 import { isRlmReturnSignal } from "./return-signal";
 import type { RlmDeps, RlmOptions, RlmResult, RlmState } from "./types";
 import { resolveModel, validateOptions } from "./validate";
 
+class RlmResolvedSignal extends Error {
+	constructor() {
+		super("rlm resolved");
+	}
+}
+
 function abortError(signal: AbortSignal): Error {
-	return signal.reason instanceof Error ? signal.reason : new Error("Aborted");
+	if (signal.reason instanceof Error && signal.reason.name !== "AbortError") return signal.reason;
+	return new Error("Aborted");
 }
 
 function usageInput(usage: unknown): number {
@@ -30,8 +37,75 @@ function errorFromUnknown(e: unknown): Error {
 	return e instanceof Error ? e : new Error(String(e));
 }
 
-function formatBlockError(error: Error): string {
-	return error.name && error.name !== "Error" ? error.name + ": " + error.message : error.message;
+function formatExecutionError(error: Error, stdout: string): string {
+	const formatted = error.name && error.name !== "Error" ? error.name + ": " + error.message : error.message;
+	return stdout ? "stdout: " + stdout + "\n\nExecution error: " + formatted : formatted;
+}
+
+function completeFnStream(deps: RlmDeps, model: Model<any>, auth: { apiKey: string; headers?: Record<string, string> }) {
+	return (_model: Model<any>, context: any, options: any) => {
+		const stream = createAssistantMessageEventStream();
+		void (async () => {
+			try {
+				const message = await deps.completeFn!(model, context, { apiKey: auth.apiKey, headers: auth.headers, signal: options?.signal });
+				stream.push({ type: "start", partial: message });
+				stream.push({ type: message.stopReason === "error" || message.stopReason === "aborted" ? "error" : "done", reason: message.stopReason === "aborted" ? "aborted" : message.stopReason === "error" ? "error" : message.stopReason === "length" ? "length" : message.stopReason === "toolUse" ? "toolUse" : "stop", ...(message.stopReason === "error" || message.stopReason === "aborted" ? { error: message } : { message }) } as any);
+		} catch (e) {
+			const err = errorFromUnknown(e);
+			const message: AssistantMessage = { role: "assistant", content: [{ type: "text", text: "" }], api: model.api, provider: model.provider, model: model.id, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: options?.signal?.aborted ? "aborted" : "error", errorMessage: err.message, timestamp: Date.now() } as any;
+			stream.push({ type: "error", reason: message.stopReason as any, error: message });
+		}
+		})();
+		return stream;
+	};
+}
+
+function buildExecuteCodeTool(params: {
+	subSession: ReturnType<typeof createCodeModeSession>;
+	combined: AbortSignal;
+	deps: RlmDeps;
+	opts: RlmOptions;
+	modelRef: { provider: string; id: string };
+	rlmWithReturn: unknown;
+	state: RlmState;
+}): AgentTool<any, any> {
+	return {
+		name: "execute_code",
+		label: "Code Mode",
+		description: "Execute JavaScript/TypeScript code in a persistent code-mode sandbox. Use this for every step. Call rlm.return({...}) inside the code when the final structured object is ready.",
+		parameters: Type.Object({
+			code: Type.String({ description: "JavaScript/TypeScript to execute. All sandbox functions are async; use await. Call rlm.return({...}) to finish." }),
+		}),
+		async execute(_toolCallId, toolParams, signal) {
+			const effectiveSignal = signal ?? params.combined;
+			try {
+				await executeInSession(params.subSession, String(toolParams.code), {
+					signal: effectiveSignal,
+					cwd: params.deps.cwd,
+					model: params.modelRef,
+					modelRegistry: params.deps.modelRegistry,
+					hydrateBareGlobals: false,
+					injectSessionApi: false,
+					injectConsoleWake: false,
+					injectRunbookRun: false,
+					errorMode: "rethrow",
+					allowedTools: new Set(params.opts.tools),
+					extraBindings: { rlm: params.rlmWithReturn },
+				});
+			} catch (e) {
+				const stdout = params.subSession.drainLogs();
+				if (isRlmReturnSignal(e)) {
+					params.state.disposed = true;
+					return { content: [{ type: "text", text: stdout || "rlm.return called" }], details: { returned: true, stdout } };
+				}
+				const err = errorFromUnknown(e);
+				if (err.message === "rlm.return: value must be JSON-serializable") throw err;
+				throw new Error(formatExecutionError(err, stdout));
+			}
+			const stdout = params.subSession.drainLogs();
+			return { content: [{ type: "text", text: stdout || "(no output)" }], details: { stdout } };
+		},
+	};
 }
 
 export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promise<RlmResult> {
@@ -61,80 +135,57 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 		? (() => { throw new Error("rlm: max depth reached"); })
 		: ((subOpts: RlmOptions) => createRlmHandle(deps, subOpts, depth + 1));
 	const rlmWithReturn = Object.assign((subOpts: RlmOptions) => rlmCallable(subOpts), { return: buildRlmReturn(state) });
+	const effectiveOpts: RlmOptions = { ...opts, tools: opts.tools.filter((tool) => tool !== "rlm") };
+	const executeCodeTool = buildExecuteCodeTool({ subSession, combined, deps, opts: effectiveOpts, modelRef: { provider: p, id }, rlmWithReturn, state });
 
-	const messages: Message[] = [{ role: "user", content: opts.task } as unknown as Message];
-	const systemPrompt = opts.systemPrompt ?? buildSystemPrompt(opts);
-	let strikes = 0;
-	let lastError: Error | null = null;
-	let lastStdout = "";
 	const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-	const maxTokens = opts.maxTokens ?? Infinity;
+	let turns = 0;
+	let terminalError: Error | null = null;
+	const messages: AgentMessage[] = [{ role: "user", content: [{ type: "text", text: opts.task }], timestamp: Date.now() } as any];
+
+	const streamFn = deps.completeFn
+		? completeFnStream(deps, model, { apiKey: auth.apiKey, headers: auth.headers })
+		: ((streamModel: Model<any>, context: any, options: any) => streamSimple(streamModel, context, { ...options, apiKey: auth.apiKey, headers: auth.headers, signal: options?.signal }));
 
 	try {
-		for (let i = 0; i < maxIterations; i++) {
-			if (state.resolved) break;
+		await runAgentLoop(messages, { systemPrompt: opts.systemPrompt ?? buildSystemPrompt(opts), messages: [], tools: [executeCodeTool] }, {
+			model,
+			convertToLlm: (msgs: AgentMessage[]) => msgs.filter((m: any) => m.role === "user" || m.role === "assistant" || m.role === "toolResult") as any,
+			toolExecution: "sequential",
+			getSteeringMessages: async () => [],
+			getFollowUpMessages: async () => [],
+			afterToolCall: async (ctx: any) => {
+				const text = (ctx.result?.content ?? []).map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n");
+				if (ctx.isError && text.includes("rlm.return: value must be JSON-serializable")) throw new Error("rlm.return: value must be JSON-serializable");
+				return undefined;
+			},
+		} as any, async (event) => {
+			if (event.type === "message_end" && (event.message as any).role === "assistant") {
+				const assistant = event.message as AssistantMessage;
+				state.usage.input += usageInput(assistant.usage);
+				state.usage.output += usageOutput(assistant.usage);
+				if (assistant.stopReason === "error") terminalError = new Error(assistant.errorMessage || "rlm: sub-agent error");
+				if (assistant.stopReason === "aborted") terminalError = new Error(assistant.errorMessage || "Aborted");
+			}
+			if (event.type === "turn_end") {
+				turns++;
+				if (state.resolved) throw new RlmResolvedSignal();
+				if (turns >= maxIterations) throw new Error("rlm: maxIterations (" + maxIterations + ") reached without rlm.return");
+			}
+		}, combined, streamFn);
+	} catch (e) {
+		if (e instanceof RlmResolvedSignal) {
+			// Expected terminal path: rlm.return was called inside execute_code.
+		} else {
 			if (combined.aborted) throw abortError(combined);
-			if (state.usage.input + state.usage.output >= maxTokens) throw new Error("rlm: maxTokens reached");
-
-			const iterationMsg = buildIterationPrompt({ iterationIndex: i, strikes, lastError, lastStdout }) as Message;
-			const response = await completeRlm(deps.completeFn, model, { systemPrompt, messages: [...messages, iterationMsg] }, { apiKey: auth.apiKey, headers: auth.headers, signal: combined });
-
-			if (combined.aborted || response.stopReason === "aborted") throw new Error("Aborted");
-
-			const text = response.content
-				.filter((c) => c.type === "text")
-				.map((c) => c.text)
-				.join("\n");
-
-			state.usage.input += usageInput(response.usage);
-			state.usage.output += usageOutput(response.usage);
-			if (state.usage.input + state.usage.output >= maxTokens) throw new Error("rlm: maxTokens reached");
-
-			const blocks = extractCodeBlocks(text);
-			if (blocks.length === 0) {
-				strikes++;
-				messages.push({ role: "assistant", content: text } as unknown as Message);
-				lastError = null;
-				lastStdout = "";
-				if (strikes >= NO_CODE_STRIKE_LIMIT) throw new Error("rlm: sub-LLM not emitting code blocks");
-				continue;
-			}
-			strikes = 0;
-
-			let blockError: Error | null = null;
-			for (const block of blocks) {
-				try {
-					await executeInSession(subSession, block, {
-						signal: combined,
-						cwd: deps.cwd,
-						model: { provider: p, id },
-						modelRegistry: deps.modelRegistry,
-						hydrateBareGlobals: false,
-						injectSessionApi: false,
-						injectConsoleWake: false,
-						injectRunbookRun: false,
-						errorMode: "rethrow",
-						allowedTools: new Set(opts.tools),
-						extraBindings: { rlm: rlmWithReturn },
-					});
-				} catch (e) {
-					if (isRlmReturnSignal(e)) break;
-					blockError = errorFromUnknown(e);
-					break;
-				}
-			}
-			lastStdout = subSession.drainLogs();
-			if (state.resolved) break;
-
-			// TODO(pe-8759-followup): replace this string check with a symbol-branded RlmSerializationError.
-			if (blockError?.message === "rlm.return: value must be JSON-serializable") throw blockError;
-			lastError = blockError;
-			messages.push({ role: "assistant", content: text } as unknown as Message);
-			messages.push({ role: "user", content: blockError ? "stdout: " + lastStdout + "\n\nExecution error: " + formatBlockError(blockError) : "stdout: " + lastStdout } as unknown as Message);
+			throw e;
 		}
-		if (!state.resolved) throw new Error("rlm: maxIterations (" + maxIterations + ") reached without rlm.return");
-		return { ...(state.value ?? {}), __rlm_usage: { input: state.usage.input, output: state.usage.output, model: p + "/" + id } };
-	} finally {
-		disposeSub(state);
 	}
+
+	if (combined.aborted) throw abortError(combined);
+	if (!state.resolved) {
+		if (terminalError) throw terminalError;
+		throw new Error("rlm: agent finished without rlm.return");
+	}
+	return { ...(state.value ?? {}), __rlm_usage: { input: state.usage.input, output: state.usage.output, model: p + "/" + id } };
 }

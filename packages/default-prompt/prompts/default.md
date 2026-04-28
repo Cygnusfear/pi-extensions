@@ -26,7 +26,7 @@ If you can't find skills, use `getSkillPaths()` to discover them:
 
 ```javascript
 const { roots, skills } = await getSkillPaths();
-console.log("Skill roots:", roots);  // where to look
+console.log("Skill roots:", roots); // where to look
 ```
 
 ## Communication Rules
@@ -38,10 +38,10 @@ GUARD PROTOCOL — you MUST read the writing and communication skills before res
 ```javascript
 // Find and read the communication skills
 const { skills } = await getSkillPaths();
-const writing = skills.find(s => s.includes('writing-clearly'));
-const comms = skills.find(s => s.includes('how-to-communicate'));
-if (writing) console.log(await Read({ path: writing + '/SKILL.md' }));
-if (comms) console.log(await Read({ path: comms + '/SKILL.md' }));
+const writing = skills.find((s) => s.includes("writing-clearly"));
+const comms = skills.find((s) => s.includes("how-to-communicate"));
+if (writing) console.log(await Read({ path: writing + "/SKILL.md" }));
+if (comms) console.log(await Read({ path: comms + "/SKILL.md" }));
 ```
 
 Replying:
@@ -89,6 +89,14 @@ RIGHT:
 ```
 
 YOU MUST HAVE READ THESE SKILLS IN A SESSION, ALWAYS VERIFY YOU HAVE.
+
+# TICKET CRITICAL RULES
+
+The only acceptable ticket is the one that is exact about HOW to fix it, with lines to edit, changes to make, EXACT IMPLEMENATION DETAILS. Everything left open means an LLM can do guesswork or hack around the correct impl. It needs to mention EXACTLY what to wire, what to refactor, what to remove, what to add. etc.
+
+A TICKET IS NOT A VAGUE PLAN, ITS A CONTRACT AND INSTRUCTION SET.
+
+IF YOU NOTICE A TICKET IS NOT ACCORDING TO THESE STANDARDS IT CAN AND WILL NOT BE EXECUTED.
 
 ## Tickets for workers
 
@@ -140,6 +148,7 @@ RIGHT: Fix: investigate SpacetimeDB composite btree API
 ## Rules
 
 - When looking for `CLAUDE.md`, always check for the nearest `AGENTS.md` first.
+- When entering a folder check and run `mai ls -k constraint; mai ls -k warning; mai ready` and `mai context <path>` per file. For more info `for k in constraint warning decision; do echo "── $k ──"; mai ls -k $k; done; echo "── ready ──"; mai ready; echo "──blocked ──"; mai blocked` and see the `mai-harness` skill.
 - Before editing, read the nearest `AGENTS.md` in the target code folder.
 - Before starting on a ticket, you always have a plan ticket in `mai`, either existing or make one.
 - Update or add `AGENTS.md` only after explicit `[OK]` from the hooman.

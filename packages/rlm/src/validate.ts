@@ -21,9 +21,9 @@ function availableToolNames(deps: RlmDeps): Set<string> {
 export function validateOptions(opts: RlmOptions, deps: RlmDeps): void {
 	if (!opts || typeof opts.task !== "string" || opts.task.trim().length === 0) throw new Error("rlm: task must be a non-empty string");
 	if (!Array.isArray(opts.tools) || opts.tools.some((t) => typeof t !== "string")) throw new Error("rlm: tools must be an array of strings");
-	if (opts.tools.includes("rlm")) throw new Error("rlm: 'rlm' is always injected and cannot be listed in tools");
 	const known = availableToolNames(deps);
 	for (const name of [...new Set(opts.tools)]) {
+		if (name === "rlm") continue;
 		if (!known.has(name)) throw new Error("rlm: unknown tool '" + name + "'");
 	}
 	if (opts.model) {

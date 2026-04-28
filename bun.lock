@@ -371,6 +371,7 @@
         "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
+        "@mariozechner/pi-agent-core": "*",
         "@mariozechner/pi-ai": "*",
         "@mariozechner/pi-coding-agent": ">=0.66.0",
         "@sinclair/typebox": "*",
