@@ -661,6 +661,8 @@ function seededShuffle<T>(arr: readonly T[], salt: string): T[] {
  */
 export function claimNickname(id: string, livePeerNicknames: Set<string>): string {
 	const preferred = deriveTripleName(id);
+	const namespaceSize = FIRST_NAMES.length * COSMIC_MIDDLES.length * LAST_NAMES.length + REAL_ASTRONOMERS.length;
+	if (livePeerNicknames.size >= namespaceSize) return `${preferred} #${id.slice(0, 4)}`;
 	if (!livePeerNicknames.has(preferred)) return preferred;
 
 	// Base indices for the preferred triple

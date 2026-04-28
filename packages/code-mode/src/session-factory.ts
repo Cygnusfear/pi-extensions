@@ -16,16 +16,47 @@
  */
 
 import vm from "node:vm";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import * as acorn from "acorn";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { createPersistentStore } from "./persistent-store";
-import { createToolBindings } from "./sandbox-tools";
-import { buildOutput } from "./tool-reference";
-import { loadRunbook } from "../../runbooks/src/runbook-engine";
 import {
 	getSandboxFnsForCall,
 	type SandboxCallContext,
-} from "../../shared/src/sandbox-registry";
+} from "@pi-extensions/shared/sandbox-registry";
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Runbook loading — kept local so the public @pi-extensions/code-mode/session-factory
+// export does not depend on unpublished sibling package source paths.
+// ───────────────────────────────────────────────────────────────────────────────
+
+const RUNBOOK_DIR = ".pi/runbooks";
+const GLOBAL_RUNBOOK_DIR = path.join(os.homedir(), ".pi", "runbooks");
+
+function validateRunbookName(name: string): string {
+	const clean = name.replace(/\.js$/, "");
+	if (!/^[a-zA-Z0-9_-]+$/.test(clean)) {
+		throw new Error(`Invalid runbook name "${name}". Use alphanumeric characters, hyphens, and underscores only.`);
+	}
+	if (clean.length > 64) throw new Error("Runbook name must be 64 characters or fewer.");
+	return clean;
+}
+
+function loadRunbookCode(projectRoot: string, name: string): { code: string; raw: string } {
+	const clean = validateRunbookName(name);
+	const localPath = path.join(projectRoot, RUNBOOK_DIR, `${clean}.js`);
+	const globalPath = path.join(GLOBAL_RUNBOOK_DIR, `${clean}.js`);
+	const filePath = fs.existsSync(localPath) ? localPath : fs.existsSync(globalPath) ? globalPath : null;
+	if (!filePath) {
+		throw new Error(`Runbook "${name}" not found in .pi/runbooks/ or ~/.pi/runbooks/`);
+	}
+	const raw = fs.readFileSync(filePath, "utf-8");
+	const code = raw.replace(/^\/\*\*[\s\S]*?\*\/\n?/, "").trim();
+	return { code, raw };
+}
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Session shape
@@ -47,6 +78,23 @@ export interface CreateSessionOptions {
 	cwd?: string;
 	/** Default false. */
 	initialEscaped?: boolean;
+}
+
+
+function buildOutput(warnings: string[], logs: string[]): string {
+	const parts: string[] = [];
+	if (warnings.length > 0) {
+		parts.push(warnings.join("\n"));
+		if (logs.length > 0) parts.push("---");
+	}
+	if (logs.length > 0) parts.push(logs.join("\n"));
+	return parts.join("\n");
+}
+
+async function loadCreateToolBindings(): Promise<(ctx: any) => Record<string, unknown>> {
+	const dynamicImport = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
+	const mod = await dynamicImport("./sandbox-tools.ts");
+	return mod.createToolBindings as (ctx: any) => Record<string, unknown>;
 }
 
 function formatArg(arg: unknown): string {
@@ -852,7 +900,8 @@ function buildSandboxCallContext(deps: ExecutionDeps): SandboxCallContext {
 	};
 }
 
-function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDeps): void {
+async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDeps): Promise<void> {
+	const createToolBindings = await loadCreateToolBindings();
 	const rawBindings = createToolBindings({
 		cwd: deps.cwd,
 		images: session.images,
@@ -886,7 +935,7 @@ function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDeps): v
 
 function injectRunbookRunFn(session: CodeModeSession, deps: ExecutionDeps): void {
 	(session.context as any).runbookRun = async (input: { name: string; args?: Record<string, unknown> }) => {
-		const { code } = loadRunbook(deps.cwd, input.name);
+		const { code } = loadRunbookCode(deps.cwd, input.name);
 		const argsLine = input.args ? "const args = " + JSON.stringify(input.args) + ";\n" : "const args = {};\n";
 		const wrapped = "(async () => {\n" + argsLine + code + "\n})()";
 		return vm.runInContext(wrapped, session.context, { filename: "runbook:" + input.name });
@@ -958,7 +1007,7 @@ export async function executeInSession(
 		// Caller is responsible for the entire binding set.
 		if (deps.bindings) Object.assign(session.context, deps.bindings);
 	} else {
-		injectDefaultBindings(session, deps);
+		await injectDefaultBindings(session, deps);
 	}
 
 	// Update process.cwd to reflect the current call's working directory (always applied).

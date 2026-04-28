@@ -186,14 +186,21 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
   ]);
 
   const proxy = new Proxy({} as Record<string, unknown>, {
-    set(_target, prop: string, value) {
+    set(_target, prop: string | symbol, value) {
+      if (typeof prop !== "string") return false;
+      if (prop === "__escaped") {
+        store.set("__escaped", { value: value === true, lastAccessTurn: currentTurn, pinned: true });
+        return true;
+      }
       if (RESERVED.has(prop)) return false;
       const existing = store.get(prop);
       store.set(prop, { value, lastAccessTurn: currentTurn, pinned: existing?.pinned ?? false });
       if (persisted.has(prop)) debouncedFlush();
       return true;
     },
-    get(_target, prop: string) {
+    get(_target, prop: string | symbol) {
+      if (prop === Symbol.toPrimitive || prop === Symbol.toStringTag) return undefined;
+      if (typeof prop !== "string") return undefined;
       switch (prop) {
         case "__reset":
           return () => {
@@ -254,10 +261,7 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
         case "__persisted":
           return () => [...persisted];
         case "__escaped":
-          return () => !!(opts?.getEscaped?.());
-        case Symbol.toPrimitive:
-        case Symbol.toStringTag:
-          return undefined;
+          return store.get("__escaped")?.value ?? !!(opts?.getEscaped?.());
         case "toJSON":
           return () => {
             const obj: Record<string, unknown> = {};
@@ -272,10 +276,11 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
       }
       return undefined;
     },
-    has(_target, prop: string) {
-      return store.has(prop) || RESERVED.has(prop);
+    has(_target, prop: string | symbol) {
+      return typeof prop === "string" && (store.has(prop) || RESERVED.has(prop));
     },
-    deleteProperty(_target, prop: string) {
+    deleteProperty(_target, prop: string | symbol) {
+      if (typeof prop !== "string") return false;
       if (RESERVED.has(prop)) return false;
       store.delete(prop);
       return true;
@@ -283,8 +288,8 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
     ownKeys() {
       return [...store.keys()];
     },
-    getOwnPropertyDescriptor(_target, prop: string) {
-      if (store.has(prop)) {
+    getOwnPropertyDescriptor(_target, prop: string | symbol) {
+      if (typeof prop === "string" && store.has(prop)) {
         return {
           configurable: true,
           enumerable: true,

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "allowJs": true,
+    "baseUrl": "../..",
+    "paths": {
+      "@pi-extensions/shared/sandbox-registry": [
+        "packages/shared/src/sandbox-registry.ts"
+      ]
+    }
+  },
+  "include": [
+    "sandbox-registry-compat.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts"
+  ]
+}
