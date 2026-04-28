@@ -724,6 +724,47 @@ declare const runbookRun: typeof runbook.run;
 /** @deprecated Use `runbook.delete()` instead. */
 declare const runbookDelete: typeof runbook.delete;
 
+
+// =====================================================================
+// RLM — recursive code-mode primitive
+// =====================================================================
+
+export interface RlmOptions {
+  task: string;
+  tools: string[];
+  model?: string;
+  maxIterations?: number;
+  maxDepth?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+  signal?: AbortSignal;
+}
+
+export type RlmResult = Record<string, unknown> & {
+  __rlm_usage?: { input: number; output: number; model: string };
+};
+
+export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
+  timeout(ms: number): this;
+  unsubscribe(): void;
+}
+
+/**
+ * rlm runs a small in-process LLM loop with a private code-mode $ store and a caller-chosen tool whitelist.
+ * The sub-agent must finish by calling rlm.return({...}). The returned value can be a large JSON-cloneable
+ * object, so callers can keep rich ref-graphs cheaply on their own $ store. Canonical caller pattern:
+ *
+ *   $.rlm = $.rlm ?? {};
+ *   $.rlm.buddy = await rlm({ task: "search ouija for X", tools: ["ouija"] });
+ *   // Later: $.rlm.buddy.sessions[sessionId].content
+ *
+ * Treat $ as a 50MB-capable transport for structured data, not only a scratchpad. Store the object and
+ * drill into exact keys later instead of forcing a prose summary through the context window.
+ */
+declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
+  return(value: Record<string, unknown>): never;
+};
+
 // =====================================================================
 // Console Extensions
 // =====================================================================
@@ -886,15 +927,13 @@ declare const teams: {
   /**
    * Subscribe to the leader's PollEvent stream. Returns a TeamsSubscription that is
    * thenable (so `await teams.on(...)` resolves on the next match) and chainable
-   * via .each(), .wake(), .timeout(), .unsubscribe().
+   * via .each(), .timeout(), .unsubscribe().
    *
    * Event types: "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive"
    *
    * - One-shot form: awaiting the subscription resolves on the first matching event
    *   and auto-unsubscribes.
    * - Streaming form: .each(cb) keeps firing until .unsubscribe() is called.
-   * - Background wake: .wake(msg?) triggers a coordinator turn when the event fires,
-   *   works from background promises after the execute_code block has returned.
    * - Terminal state short-circuit: if the target worker is already in the requested
    *   terminal state at subscribe time, the subscription resolves immediately from
    *   the current WorkerHandle rather than hanging forever.
@@ -951,12 +990,12 @@ type TeamsPollEventBase =
  *   - defaultPrevented        — read-only flag, true if any handler preventDefault'd
  *   - propagationStopped      — read-only flag, true if any handler stopPropagation'd
  *
- * Must be called SYNCHRONOUSLY inside a handler callback (.each / .wake message
- * builder). Calling preventDefault() on an awaited value is a no-op — by the
+ * Must be called SYNCHRONOUSLY inside a handler callback. Calling preventDefault()
+ * on an awaited value is a no-op — by the
  * time your code resumes, the dispatch loop has already decided.
  *
  * For "I'm awaiting and I want the default suppressed" use the chain shortcut:
- *   teams.on(...).preventDefault().then(e => ...)
+ *   teams.on(...).preventDefault().then(e => console.wake(...))
  */
 type TeamsPollEvent = TeamsPollEventBase & {
   preventDefault(): void;
@@ -996,9 +1035,9 @@ interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
   /**
    * Pre-register preventDefault() on every matched event. Suppresses the
    * leader's default notifyLLM batch wake, so you won't get a duplicate
-   * team-event turn trigger on top of your .each/.wake/.then handler.
+   * team-event turn trigger on top of your .each/.then handler.
    *
-   * Equivalent to `.each(e => e.preventDefault())` but chainable with .wake/.then.
+   * Equivalent to `.each(e => e.preventDefault())` but chainable with .then.
    */
   preventDefault(): this;
 

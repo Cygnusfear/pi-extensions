@@ -1,0 +1,26 @@
+{
+  "name": "@pi-extensions/rlm",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./index.ts"] },
+  "dependencies": {
+    "@pi-extensions/shared": "*",
+    "@pi-extensions/code-mode": "*"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.66.0",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "files": ["index.ts", "src", "prompts"],
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./src/types.ts",
+    "./loop": "./src/loop.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx --bun tsc --noEmit --strict --skipLibCheck -p tsconfig.json"
+  }
+}

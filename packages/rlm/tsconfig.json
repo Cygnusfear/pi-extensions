@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "paths": {
+      "@pi-extensions/code-mode/session-factory": ["./src/ts-shims/code-mode-session-factory.ts"],
+      "@pi-extensions/code-mode/sandbox-tools": ["./src/ts-shims/code-mode-sandbox-tools.ts"],
+      "@pi-extensions/code-mode/types": ["./src/ts-shims/code-mode-types.ts"]
+    },
+    "allowJs": true
+  },
+  "include": ["index.ts", "src/**/*.ts"],
+  "exclude": ["**/*.test.ts", "test/**"]
+}

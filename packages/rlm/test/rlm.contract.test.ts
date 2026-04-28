@@ -1,0 +1,203 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { runRlm } from "../src/loop";
+import { cancelAllRlmHandles, createRlmHandle } from "../src/handle";
+import type { RlmHandle } from "../src/types";
+
+type CompleteMock = (model: unknown, request: any, auth: any) => Promise<any> | any;
+const bt = String.fromCharCode(96);
+const js = (code: string) => bt.repeat(3) + "javascript\n" + code + "\n" + bt.repeat(3);
+const model = { provider: "test", id: "test-model" };
+const repoRoot = new URL("../../..", import.meta.url).pathname;
+let completeMock: CompleteMock | undefined;
+const envKeys = new Set<string>();
+
+function deps(overrides: Record<string, unknown> = {}) {
+	const ac = new AbortController();
+	return {
+		signal: ac.signal,
+		cwd: repoRoot,
+		parentModel: model,
+		modelRegistry: {
+			find: (p: string, id: string) => (p === "missing" ? undefined : { provider: p, id }),
+			getApiKeyAndHeaders: async (m: any) => m.provider === "noauth" ? { ok: false } : { ok: true, apiKey: "key", headers: { h: "v" } },
+		},
+		completeFn: completeMock,
+		...overrides,
+	} as any;
+}
+function setComplete(fn: CompleteMock) { completeMock = fn; }
+function resp(text: string, usage = { input: 1, output: 1 }, stopReason = "stop") { return { content: [{ type: "text", text }], usage, stopReason }; }
+function queue(...texts: string[]) { let i = 0; setComplete(() => resp(texts[i++] ?? texts[texts.length - 1])); }
+async function expectReject(p: PromiseLike<unknown> | RlmHandle, text: string) { await expect(Promise.resolve(p)).rejects.toThrow(text); }
+function messageText(msg: any): string {
+	const content = msg?.content;
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) return content.map((part) => typeof part?.text === "string" ? part.text : JSON.stringify(part)).join("\n");
+	return String(content ?? "");
+}
+function requestText(req: any): string {
+	return (req?.messages ?? []).map(messageText).join("\n---message---\n");
+}
+function envKey(name: string): string {
+	const key = "RLM_TEST_" + name + "_" + Math.random().toString(36).slice(2);
+	envKeys.add(key);
+	delete process.env[key];
+	return key;
+}
+afterEach(() => {
+	completeMock = undefined;
+	cancelAllRlmHandles(new Error("test cleanup"));
+	for (const key of envKeys) delete process.env[key];
+	envKeys.clear();
+});
+
+describe("rlm contract", () => {
+	test("1 smoke returns structured object plus own usage", async () => {
+		queue(js("rlm.return({a:1, b:'two', sessions:{x:{full:'long'}}});"));
+		await expect(runRlm(deps(), { task: "smoke", tools: [] }, 0)).resolves.toEqual({ a: 1, b: "two", sessions: { x: { full: "long" } }, __rlm_usage: { input: 1, output: 1, model: "test/test-model" } });
+	});
+	test("2 rlm.return idempotency exposes the second-call error", async () => {
+		const key = envKey("SECOND_ERROR");
+		queue(js("try { rlm.return({a:1}); } catch (e) {}\ntry { rlm.return({a:2}); } catch (e) { process.env[" + JSON.stringify(key) + "] = e.message; throw e; }"));
+		await expect(runRlm(deps(), { task: "idempotent", tools: [] }, 0)).resolves.toMatchObject({ a: 1 });
+		expect(process.env[key]).toBe("rlm: already returned");
+	});
+	test("3 rlm.return after dispose is silent noop without unhandled process errors", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (err: unknown) => unhandled.push(err);
+		process.on("unhandledRejection", onUnhandled as any);
+		process.on("uncaughtException", onUnhandled as any);
+		try {
+			queue(js("setTimeout(() => rlm.return({late:true}), 20);\nrlm.return({early:true});"));
+			const result = await runRlm(deps(), { task: "late", tools: [] }, 0);
+			expect(result.early).toBe(true);
+			const usageBefore = (result as any).__rlm_usage;
+			await new Promise((r) => setTimeout(r, 60));
+			expect(result).not.toHaveProperty("late");
+			expect((result as any).__rlm_usage).toEqual(usageBefore);
+			expect(unhandled).toHaveLength(0);
+		} finally {
+			process.removeListener("unhandledRejection", onUnhandled as any);
+			process.removeListener("uncaughtException", onUnhandled as any);
+		}
+	});
+	test("4 JSON serialization edge cases drop non-JSON members", async () => {
+		queue(js("const d = new Date('2020-01-02T03:04:05.000Z');\nconst s = Symbol('x');\nrlm.return({fn: () => 1, n:5, u: undefined, arr:[undefined], d, m:new Map([[1,2]]), set:new Set([1]), re:/x/, [s]:'hidden', sym:s});"));
+		const result = await runRlm(deps(), { task: "ser", tools: [] }, 0);
+		expect(result.n).toBe(5);
+		expect(result.arr).toEqual([null]);
+		expect(result.d).toBe("2020-01-02T03:04:05.000Z");
+		expect(result.m).toEqual({});
+		expect(result.set).toEqual({});
+		expect(result.re).toEqual({});
+		expect(result).not.toHaveProperty("fn");
+		expect(result).not.toHaveProperty("u");
+		expect(result).not.toHaveProperty("sym");
+		expect(Object.getOwnPropertySymbols(result)).toHaveLength(0);
+	});
+	test("4b root undefined is rejected as non-serializable", async () => { queue(js("rlm.return(undefined);")); await expectReject(runRlm(deps(), { task: "undefined", tools: [] }, 0), "rlm.return: value must be JSON-serializable"); });
+	test("5 cycles throw wrapped JSON error", async () => { queue(js("const o = {}; o.self = o; rlm.return(o);")); await expectReject(runRlm(deps(), { task: "cycle", tools: [] }, 0), "rlm.return: value must be JSON-serializable"); });
+	test("6 BigInt throws wrapped JSON error", async () => { queue(js("rlm.return({n: 1n});")); await expectReject(runRlm(deps(), { task: "bigint", tools: [] }, 0), "rlm.return: value must be JSON-serializable"); });
+	test("7 whitelist denial feeds ReferenceError back to the LLM", async () => {
+		let calls = 0;
+		let secondCallReceived = "";
+		setComplete((_m, req) => {
+			calls++;
+			if (calls > 1) {
+				secondCallReceived = requestText(req);
+				return resp(js("rlm.return({ok:'second'});"));
+			}
+			return resp(js("await Bash({command:'true'});"));
+		});
+		await expect(runRlm(deps(), { task: "deny", tools: ["Read"], maxIterations: 3 }, 0)).resolves.toMatchObject({ ok: "second" });
+		expect(secondCallReceived).toContain("ReferenceError");
+		expect(secondCallReceived).toContain("Bash");
+	});
+	test("7b whitelist allow makes Bash available when requested", async () => {
+		setComplete(() => resp(js("const r = await Bash({command:'echo hi'}); rlm.return({stdout: r.stdout});")));
+		const result = await runRlm(deps(), { task: "allow", tools: ["Bash"] }, 0);
+		expect(String(result.stdout)).toContain("hi");
+	});
+	test("7c runbookRun is rejected because RLM disables runbook injection", async () => { await expectReject(runRlm(deps(), { task: "runbook", tools: ["runbookRun"] }, 0), "unknown tool 'runbookRun'"); });
+	test("8 whitelist namespace allows memory but rejects memory.context and rlm", async () => {
+		queue(js("rlm.return({kind: typeof memory.context});"));
+		await expect(runRlm(deps(), { task: "mem", tools: ["memory"] }, 0)).resolves.toMatchObject({ kind: "function" });
+		await expectReject(runRlm(deps(), { task: "bad", tools: ["memory.context"] }, 0), "unknown tool");
+		await expectReject(runRlm(deps(), { task: "bad", tools: ["rlm"] }, 0), "always injected");
+	});
+	test("9 depth cap permits child and rejects grandchild", async () => {
+		setComplete((_m, req) => req.messages[0].content === "child" ? resp(js("try { rlm({task:'grand', tools:[]}); } catch (e) { rlm.return({err:e.message}); }")) : resp(js("const child = await rlm({task:'child', tools:[], maxDepth:2}); rlm.return({child});")));
+		await expect(runRlm(deps(), { task: "parent", tools: [], maxDepth: 2 }, 0)).resolves.toMatchObject({ child: { err: "rlm: max depth reached" } });
+	});
+	test("10 iteration cap rejects without return", async () => { queue(js("console.log('no return');")); await expectReject(runRlm(deps(), { task: "cap", tools: [], maxIterations: 2 }, 0), "maxIterations (2)"); });
+	test("11 token cap fires before executing high-usage code", async () => {
+		const key = envKey("TOKEN_EXECUTED");
+		setComplete(() => resp(js("process.env[" + JSON.stringify(key) + "] = '1'; rlm.return({shouldNot:true});"), { input: 60, output: 60 }));
+		await expectReject(runRlm(deps(), { task: "tok", tools: [], maxTokens: 100 }, 0), "maxTokens reached");
+		expect(process.env[key]).toBeUndefined();
+	});
+	test("12 no-code strike limit rejects", async () => { queue("plain prose"); await expectReject(runRlm(deps(), { task: "nocode", tools: [] }, 0), "sub-LLM not emitting code blocks"); });
+	test("13 parent abort propagates into complete signal", async () => {
+		const ac = new AbortController(); let seen = false;
+		setComplete((_m, _req, auth) => new Promise((_res, rej) => { auth.signal.addEventListener("abort", () => { seen = auth.signal.aborted; rej(new Error("Aborted")); }); }));
+		const p = runRlm(deps({ signal: ac.signal }), { task: "abort", tools: [] }, 0); setTimeout(() => ac.abort(), 10);
+		await expectReject(p, "Aborted"); expect(seen).toBe(true);
+	});
+	test("14 unsubscribe cancels handle", async () => {
+		let seen = false; setComplete((_m,_r,auth) => new Promise((_res, rej) => auth.signal.addEventListener("abort", () => { seen = true; rej(new Error("Aborted")); })));
+		const h = createRlmHandle(deps(), { task: "unsub", tools: [] }, 0); setTimeout(() => h.unsubscribe(), 10);
+		await expectReject(h, "rlm: cancelled"); expect(seen).toBe(true);
+	});
+	test("15 timeout rejects with exact timeout error", async () => { setComplete((_m,_r,auth) => new Promise((_res, rej) => auth.signal.addEventListener("abort", () => rej(new Error("Aborted"))))); const h = createRlmHandle(deps(), { task: "timeout", tools: [] }, 0).timeout(20); await expectReject(h, "rlm: timeout after 20ms"); });
+	test("16 parallel isolation", async () => {
+		setComplete((_m, req) => resp(js("rlm.return({task:" + JSON.stringify(req.messages[0].content) + "});")));
+		const out = await Promise.all(["a","b","c"].map((task) => runRlm(deps(), { task, tools: [] }, 0)));
+		expect(out.map((x:any) => x.task)).toEqual(["a","b","c"]);
+	});
+	test("17 promise survives unrelated awaits when stored", async () => {
+		queue(js("await new Promise(r => setTimeout(r, 50)); rlm.return({survived:true});"));
+		const stored = createRlmHandle(deps(), { task: "survive", tools: [] }, 0);
+		await new Promise((r) => setTimeout(r, 100));
+		await expect(Promise.resolve(stored)).resolves.toMatchObject({ survived: true });
+	});
+	test("18 session_shutdown subscriber cancels active handles", async () => {
+		let shutdownHandler: (() => void) | undefined;
+		const piStub: any = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdownHandler = fn; } };
+		const mod = await import("../index");
+		mod.default(piStub);
+		expect(shutdownHandler).toBeDefined();
+		setComplete((_m,_r,auth) => new Promise((_res, rej) => auth.signal.addEventListener("abort", () => rej(new Error("Aborted")))));
+		const h = createRlmHandle(deps(), { task: "shutdown", tools: [] }, 0);
+		setTimeout(() => shutdownHandler!(), 10);
+		await expectReject(h, "rlm: session shutdown");
+	});
+	test("19 no session API is injected and the ReferenceError is fed back", async () => {
+		let calls = 0;
+		let secondCallReceived = "";
+		setComplete((_m, req) => {
+			calls++;
+			if (calls === 1) return resp(js("session.messages();"));
+			secondCallReceived = requestText(req);
+			return resp(js("rlm.return({calls:2});"));
+		});
+		await expect(runRlm(deps(), { task: "nosession", tools: [], maxIterations: 3 }, 0)).resolves.toMatchObject({ calls: 2 });
+		expect(secondCallReceived).toContain("ReferenceError");
+		expect(secondCallReceived).toContain("session");
+	});
+	test("20 no console.wake is injected and the TypeError is fed back", async () => {
+		let calls = 0;
+		let secondCallReceived = "";
+		setComplete((_m, req) => {
+			calls++;
+			if (calls === 1) return resp(js("console.wake('x');"));
+			secondCallReceived = requestText(req);
+			return resp(js("rlm.return({calls:2});"));
+		});
+		await expect(runRlm(deps(), { task: "nowake", tools: [], maxIterations: 3 }, 0)).resolves.toMatchObject({ calls: 2 });
+		expect(secondCallReceived).toContain("TypeError");
+		expect(secondCallReceived).toContain("console.wake");
+	});
+	test("21 non-aborted stopReason passes through", async () => { setComplete(() => resp(js("rlm.return({n:1});"), { input: 2, output: 3 }, "max_tokens")); await expect(runRlm(deps(), { task: "stop", tools: [] }, 0)).resolves.toMatchObject({ n: 1 }); });
+	test("22 cwd is passed to sub tool bindings", async () => { queue(js("const pkg = await Read({path:'package.json'}); rlm.return({hasWorkspaces: pkg.includes('\\\"workspaces\\\"')});")); await expect(runRlm(deps(), { task: "cwd", tools: ["Read"] }, 0)).resolves.toMatchObject({ hasWorkspaces: true }); });
+	test("23 model auth failure rejects", async () => { await expectReject(runRlm(deps({ parentModel: { provider: "noauth", id: "x" } }), { task: "auth", tools: [] }, 0), "no API key for model"); });
+});
