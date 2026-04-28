@@ -1,0 +1,24 @@
+// Honest typecheck: includes the refactored extension and all src files.
+// This currently reports only pre-existing baseline errors documented in tsconfig.baseline.txt; pe-tk4s must introduce no new errors.
+// Avoid baseUrl so the config works under both TypeScript 5.9 and TypeScript 6.x without TS5101.
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "allowJs": true,
+    "ignoreDeprecations": "5.0"
+  },
+  "include": [
+    "src/**/*.ts",
+    "extensions/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts"
+  ]
+}
