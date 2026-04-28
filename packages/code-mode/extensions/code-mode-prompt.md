@@ -16,6 +16,12 @@ You have an `execute_code` tool that runs JavaScript with typed async functions 
 All functions are async — use `await`. Use `console.log()` to return output.
 Only console output is returned to you. If you don't log anything, you get "(no output)".
 
+### Discovery offload
+
+When a task is mostly discovery, search, comparison, or evidence gathering across multiple files/tools, consider whether rlm() should do the exploration in a private code-mode context and return a structured object. This is usually the right shape when you would otherwise spend many sequential execute_code blocks gathering references, grep results, ticket context, or proof artifacts before summarizing. Store the result on $ and inspect it from the parent.
+
+Prefer direct local tool calls for a small one-file lookup or one obvious command. Use rlm() when the work benefits from isolated scratch state, a narrower tool whitelist, parallelizable investigation, or a large structured evidence map.
+
 ## Persistent State: `$`
 
 The `$` object persists across `execute_code` calls within a session. Use it for:

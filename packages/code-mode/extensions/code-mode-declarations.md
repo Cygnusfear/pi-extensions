@@ -761,6 +761,14 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
  *   $.rlm.buddy = await rlm({ task: "search ouija for X", tools: ["ouija"] });
  *   // Later: $.rlm.buddy.sessions[sessionId].content
  *
+ * Use rlm proactively for discovery, search, comparison, and evidence-map tasks that would otherwise take
+ * many parent execute_code blocks. Good fits: mapping where a symbol is defined/used/tested, comparing
+ * docs against implementation, scanning tickets/sessions, collecting TODO clusters, or summarizing proof
+ * artifacts. Ask the sub-agent for structured keys like { files, refs, tests, notes } and store the result
+ * on $ for later drill-down.
+ *
+ * Prefer direct parent tool calls for a tiny one-file lookup, a single obvious command, or when you are about
+ * to edit. rlm is strongest as an isolated discovery worker with a narrow tools list and a structured return.
  * Treat $ as a 50MB-capable transport for structured data, not only a scratchpad. Store the object and
  * drill into exact keys later instead of forcing a prose summary through the context window.
  */
