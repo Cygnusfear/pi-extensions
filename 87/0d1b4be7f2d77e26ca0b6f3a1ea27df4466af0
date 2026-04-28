@@ -1,0 +1,27 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  f7b18307270dab57 770-772
+packages/code-mode/extensions/code-mode-prompt.md
+  f7b18307270dab57 25-26
+packages/default-prompt/prompts/default.md
+  f7b18307270dab57 15,17,25-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "870d1b4be7f2d77e26ca0b6f3a1ea27df4466af0",
+  "prompts": {
+    "f7b18307270dab57": {
+      "agent_id": {
+        "tool": "Jane Cosmos Aghanim",
+        "id": "019dd16f-0ed5-74e3-8c56-3e2fa25324a9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 5,
+      "accepted_lines": 10,
+      "overriden_lines": 0
+    }
+  }
+}
