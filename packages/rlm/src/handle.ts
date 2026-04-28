@@ -35,6 +35,11 @@ export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): Rlm
 			activeCancels.delete(cancel);
 		});
 
+	// Mark the internal promise as observed immediately. Callers can still await the
+	// handle and receive the original rejection, but fire-and-cancel patterns do not
+	// crash the host with an unhandled rejection before the next block can inspect it.
+	void promise.catch(() => {});
+
 	const handle: RlmHandle = {
 		then(onfulfilled, onrejected) {
 			return promise.then(onfulfilled, onrejected);
