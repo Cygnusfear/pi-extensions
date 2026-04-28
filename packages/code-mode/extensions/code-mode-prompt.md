@@ -22,6 +22,8 @@ When a task is mostly discovery, search, comparison, or evidence gathering acros
 
 Prefer direct local tool calls for a small one-file lookup or one obvious command. Use rlm() when the work benefits from isolated scratch state, a narrower tool whitelist, parallelizable investigation, or a large structured evidence map.
 
+For non-trivial editing tasks, use rlm() for pre-edit discovery and planning, then apply the final edit from the parent code-mode context and verify. Ask the RLM worker for structured fields like files, exactChanges, risks, and verification.
+
 ## Persistent State: `$`
 
 The `$` object persists across `execute_code` calls within a session. Use it for:

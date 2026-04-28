@@ -767,8 +767,9 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
  * artifacts. Ask the sub-agent for structured keys like { files, refs, tests, notes } and store the result
  * on $ for later drill-down.
  *
- * Prefer direct parent tool calls for a tiny one-file lookup, a single obvious command, or when you are about
- * to edit. rlm is strongest as an isolated discovery worker with a narrow tools list and a structured return.
+ * Prefer direct parent tool calls for a tiny one-file lookup or a single obvious command. For non-trivial edits,
+ * use rlm before editing to build a structured plan/evidence map, then apply the final patch from the parent.
+ * rlm is strongest as an isolated discovery/planning worker with a narrow tools list and a structured return.
  * Treat $ as a 50MB-capable transport for structured data, not only a scratchpad. Store the object and
  * drill into exact keys later instead of forcing a prose summary through the context window.
  */
