@@ -1,0 +1,63 @@
+packages/rlm/src/constants.ts
+  3da9a6e758a3b9cd 1-4
+packages/rlm/src/dispose.ts
+  3da9a6e758a3b9cd 1-9
+packages/rlm/src/sub-context.ts
+  3da9a6e758a3b9cd 1-4
+packages/rlm/src/handle.ts
+  3da9a6e758a3b9cd 1-63
+packages/rlm/src/prompts.ts
+  3da9a6e758a3b9cd 1-31
+packages/rlm/src/return-signal.ts
+  3da9a6e758a3b9cd 1-14
+packages/rlm/src/api-client.ts
+  3da9a6e758a3b9cd 1-13
+packages/rlm/src/loop.ts
+  3da9a6e758a3b9cd 1-143
+packages/rlm/src/return-injection.ts
+  3da9a6e758a3b9cd 1-25
+packages/rlm/prompts/rlm-system.md
+  3da9a6e758a3b9cd 1-40
+packages/rlm/tsconfig.json
+  3da9a6e758a3b9cd 1-16
+packages/code-mode/extensions/code-mode-declarations.md
+  3da9a6e758a3b9cd 727-767,930,993-994,998,1038,1040
+packages/rlm/prompts/rlm-iteration.md
+  3da9a6e758a3b9cd 1-8
+packages/rlm/test/rlm.contract.test.ts
+  3da9a6e758a3b9cd 1-85
+packages/rlm/package.json
+  3da9a6e758a3b9cd 1-26
+packages/rlm/src/extract.ts
+  3da9a6e758a3b9cd 1-11
+packages/rlm/src/validate.ts
+  3da9a6e758a3b9cd 1-39
+packages/rlm/src/whitelist.ts
+  3da9a6e758a3b9cd 1-3
+packages/rlm/src/types.ts
+  3da9a6e758a3b9cd 1-40
+packages/rlm/index.ts
+  3da9a6e758a3b9cd 1-25
+package.json
+  3da9a6e758a3b9cd 50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "2dd517a80a60e88531f3dd97fae88a0cc94530b8",
+  "prompts": {
+    "3da9a6e758a3b9cd": {
+      "agent_id": {
+        "tool": "Antonia Neutron Hoffleit",
+        "id": "019dd3a7-7cf5-7249-b840-7adbbf5b83d8",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 641,
+      "total_deletions": 81,
+      "accepted_lines": 574,
+      "overriden_lines": 0
+    }
+  }
+}
