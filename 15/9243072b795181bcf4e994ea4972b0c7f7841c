@@ -1,0 +1,33 @@
+packages/rlm/tsconfig.json
+  dc1938f30f1b6b0a 12-14,16
+packages/rlm/src/ts-shims/code-mode-sandbox-tools.ts
+  dc1938f30f1b6b0a 1-17
+packages/rlm/src/ts-shims/code-mode-session-factory.ts
+  dc1938f30f1b6b0a 1-17,27-38
+packages/rlm/index.ts
+  dc1938f30f1b6b0a 4-6,21-23
+packages/rlm/src/ts-shims/code-mode-types.ts
+  dc1938f30f1b6b0a 1-17
+packages/rlm/src/loop.ts
+  dc1938f30f1b6b0a 129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "159243072b795181bcf4e994ea4972b0c7f7841c",
+  "prompts": {
+    "dc1938f30f1b6b0a": {
+      "agent_id": {
+        "tool": "Geoffrey Saturn Chandrasekhar",
+        "id": "019dd3e4-e9e5-701f-a2d9-4dd250888f20",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 227,
+      "total_deletions": 28,
+      "accepted_lines": 76,
+      "overriden_lines": 0
+    }
+  }
+}
