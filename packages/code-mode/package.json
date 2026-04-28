@@ -22,6 +22,17 @@
     "turndown": "*"
   },
   "files": [
-    "extensions"
-  ]
+    "extensions",
+    "src"
+  ],
+  "exports": {
+    ".": "./extensions/code-mode.ts",
+    "./session-factory": "./src/session-factory.ts",
+    "./sandbox-tools": "./src/sandbox-tools.ts",
+    "./types": "./src/types.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx --bun tsc --noEmit --target esnext --module esnext --moduleResolution bundler --jsx preserve --strict --skipLibCheck extensions/code-mode.ts src/session-factory.ts"
+  }
 }

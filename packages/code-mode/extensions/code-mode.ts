@@ -19,22 +19,20 @@ import { Type } from "@sinclair/typebox";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import vm from "node:vm";
-import * as acorn from "acorn";
 // Eagerly start Shiki loading via relative path (must match require() in renderCall)
 require("../../shared/src/tui-diff-renderer.ts");
-import { createToolBindings } from "../src/sandbox-tools";
-import { getSandboxFns } from "../../shared/src/sandbox-registry";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 import { createOuijaExecutor } from "../../shared/src/ouija-core";
-import { loadRunbook } from "../../runbooks/src/runbook-engine";
-import { createPersistentStore } from "../src/persistent-store";
 import {
-  buildOutput,
   cachedToolReference,
   extendWithAllTools,
   rebuildCachedReference,
 } from "../src/tool-reference";
+import {
+  createCodeModeSession,
+  executeInSession,
+  type CodeModeSession,
+} from "../src/session-factory";
 
 // =============================================================================
 // Constants
@@ -127,48 +125,18 @@ function buildContextFooter(ctx: {
   }
 }
 
-interface PersistentSession {
-  context: vm.Context;
-  store: ReturnType<typeof createPersistentStore>;
-  logs: string[];
-  images: Array<{ data: string; mimeType: string }>; // stashed by readImage()
-}
+// =============================================================================
+// Session + execution — extracted into ./src/session-factory.ts.
+//
+// This extension keeps the singleton, the lifecycle/UX state (deferred squash,
+// deferred checkout, contextSize cap, current ouija session file, context-guard
+// toggle) and the dispatch/UI wrapper around `executeInSession`. The actual
+// runtime (vm.Context, $-store, AST persist, console.wake, session API, runbook
+// runner, bare-global hydration, vm.runInContext + Promise.race) lives in the
+// factory module.
+// =============================================================================
 
-function createSession(): PersistentSession {
-  const store = createPersistentStore({ getEscaped: () => escaped });
-  const logs: string[] = [];
-  const images: Array<{ data: string; mimeType: string }> = [];
-
-  const sandbox = {
-    $: store.proxy,
-
-    // Console capture — logs array is cleared per execution, but reference stays
-    console: {
-      log: (...args: unknown[]) => logs.push(args.map(formatArg).join(" ")),
-      error: (...args: unknown[]) => logs.push("[stderr] " + args.map(formatArg).join(" ")),
-      warn: (...args: unknown[]) => logs.push("[warn] " + args.map(formatArg).join(" ")),
-      info: (...args: unknown[]) => logs.push(args.map(formatArg).join(" ")),
-    },
-
-    // Timers (needed for sleep and async patterns)
-    setTimeout: globalThis.setTimeout.bind(globalThis),
-    clearTimeout: globalThis.clearTimeout.bind(globalThis),
-
-    // Process — env, platform, pid are static; cwd is updated per-execution in executeCode()
-    process: {
-      env: globalThis.process.env,
-      cwd: () => globalThis.process.cwd(),
-      platform: globalThis.process.platform,
-      pid: globalThis.process.pid,
-    },
-  };
-
-  const context = vm.createContext(sandbox);
-  return { context, store, logs, images };
-}
-
-let session: PersistentSession | null = null;
-let escaped = false;
+let session: CodeModeSession | null = null;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
 let pendingSquash: { continue?: string } | null = null;
@@ -178,21 +146,8 @@ let currentOuijaSessionFile: string | null = null;
 // When context usage exceeds the threshold (default 94%), only context-management
 // tools are allowed. The guard auto-disarms when usage drops back below threshold.
 let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
-const CONTEXT_GUARD_THRESHOLD = 0.94;
 
-/** Tools allowed through the context guard (context management + safe reads). */
-const CONTEXT_GUARD_ALLOWED = new Set([
-  // These are NOT from createToolBindings — they're injected by executeCode() itself
-  // into the VM context. The guard only wraps createToolBindings keys, so these
-  // naturally pass through since they're assigned after wrapping.
-  // But we list them for documentation:
-  // session, contextTag, contextLog, contextCheckout, $, console, process, setTimeout, clearTimeout
-  //
-  // From createToolBindings — allowed:
-  "Read", "read",
-  "sleep",
-  "man",
-]);
+const CONTEXT_GUARD_THRESHOLD = 0.94;
 
 /** Check if context usage exceeds the guard threshold. */
 function isContextGuardActive(getUsage?: (() => any) | undefined): boolean {
@@ -207,648 +162,10 @@ function isContextGuardActive(getUsage?: (() => any) | undefined): boolean {
   }
 }
 
-/** Wrap tool bindings so blocked tools throw when the guard is active. */
-function wrapWithContextGuard(
-  bindings: Record<string, unknown>,
-  getUsage?: (() => any) | undefined,
-): Record<string, unknown> {
-  if (!getUsage) return bindings; // no usage info → can't guard
-
-  const wrapped: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(bindings)) {
-    if (CONTEXT_GUARD_ALLOWED.has(key)) {
-      wrapped[key] = value; // pass through
-    } else if (typeof value === "function") {
-      wrapped[key] = (...args: unknown[]) => {
-        if (isContextGuardActive(getUsage)) {
-          const pct = (() => { try { return getUsage().percent.toFixed(1); } catch { return "?"; } })();
-          throw new Error(
-            `🚫 Context guard active (${pct}% used, threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). ` +
-            `Most tools blocked — only context management allowed.\n\n` +
-            `BEFORE squashing, save thick context to $ (survives compaction):\n` +
-            `$.ctx = \`TASK — mid-stream\nDone: ...\nGotcha: ...\nNext: ...\`;\n\n` +
-            `Then squash with continuation:\n` +
-            `session.squash({ continue: \"Squash done. Continue with [next step].\" });\n\n` +
-            `Toggle guard: /context-guard off`
-          );
-        }
-        return (value as Function)(...args);
-      };
-    } else {
-      wrapped[key] = value; // non-function values (shouldn't exist, but defensive)
-    }
-  }
-  return wrapped;
-}
-
-function getSession(): PersistentSession {
-  if (!session) session = createSession();
+function getSession(): CodeModeSession {
+  if (!session) session = createCodeModeSession();
   return session;
 }
-
-async function executeCode(
-  code: string,
-  cwd: string,
-  signal?: AbortSignal,
-  executionTimeoutMs: number = DEFAULT_EXECUTION_TIMEOUT_MS,
-  toolCtx?: {
-    sessionManager?: any;
-    getContextUsage?: () => any;
-    confirmFn?: (title: string, body: string) => Promise<boolean>;
-    compact?: (options?: any) => void;
-    setLabel?: (entryId: string, label: string | undefined) => void;
-    navigateTree?: (targetId: string, options?: any) => Promise<any>;
-    abort?: () => void;
-    model?: any;
-    modelRegistry?: any;
-    sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void;
-    sendMessage?: (
-      message: { customType: string; content: string; display?: boolean },
-      options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
-    ) => void;
-  },
-): Promise<{ output: string; error?: string; duration: number }> {
-  const sess = getSession();
-
-  // Advance turn and process expiry
-  sess.store.nextTurn();
-  const warnings = sess.store.processExpiry();
-
-  // Clear logs for this execution
-  sess.logs.length = 0;
-
-  function extractAutoPersistNames(code: string): string[] {
-    try {
-      const ast = acorn.parse(code, {
-        ecmaVersion: "latest",
-        sourceType: "module",
-        locations: false,
-        ranges: false,
-      }) as any;
-
-      const names: string[] = [];
-
-      for (const node of ast.body) {
-        if (node.type === "VariableDeclaration") {
-          for (const decl of node.declarations) {
-            collectBindingNames(decl.id, names);
-          }
-        } else if (node.type === "FunctionDeclaration" && node.id) {
-          names.push(node.id.name);
-        }
-      }
-
-      return [...new Set(names)];
-    } catch {
-      // Parse failed — fall back to no auto-persist (hydration still works)
-      return [];
-    }
-  }
-
-  /** Recursively collect all binding names from a pattern (handles destructuring). */
-  function collectBindingNames(pattern: any, out: string[]): void {
-    if (!pattern) return;
-    switch (pattern.type) {
-      case "Identifier":
-        out.push(pattern.name);
-        break;
-      case "ObjectPattern":
-        for (const prop of pattern.properties) {
-          if (prop.type === "RestElement") {
-            collectBindingNames(prop.argument, out);
-          } else {
-            // Property: key (static) → value (binding pattern)
-            // { foo } → prop.value is Identifier
-            // { foo: bar } → prop.value is Identifier "bar"
-            // { foo: { baz } } → prop.value is ObjectPattern
-            collectBindingNames(prop.value, out);
-          }
-        }
-        break;
-      case "ArrayPattern":
-        for (const elem of pattern.elements) {
-          if (elem === null) continue; // holes: const [a, , b]
-          if (elem.type === "RestElement") {
-            collectBindingNames(elem.argument, out);
-          } else {
-            collectBindingNames(elem, out);
-          }
-        }
-        break;
-      case "AssignmentPattern":
-        // const { foo = defaultValue } → pattern.left is the binding
-        collectBindingNames(pattern.left, out);
-        break;
-      // RestElement at top level shouldn't happen, but handle defensively
-      case "RestElement":
-        collectBindingNames(pattern.argument, out);
-        break;
-    }
-  }
-
-  // --- Layer 1: Syntax pre-validation ---
-  // Catch parse errors (Unexpected EOF, etc.) without touching the store
-  const autoPersistNames = extractAutoPersistNames(code);
-  const autoPersistSuffix = autoPersistNames
-    .map((n) => `$.${n} = typeof ${n} !== "undefined" ? ${n} : $.${n};`)
-    .join("\n");
-  const wrapped = `(async () => {\n${code}\n${autoPersistSuffix}\n})()`;
-  const start = Date.now();
-  try {
-    new vm.Script(wrapped, { filename: "code-mode.js" });
-  } catch (parseErr) {
-    const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-    const storeInfo = sess.store.getStatus();
-    return {
-      output: buildOutput(warnings, [
-        `\u26a0\ufe0f Syntax error: ${parseMsg}`,
-        "",
-        "Your $ store was NOT affected. Fix the syntax and retry.",
-        "",
-        storeInfo,
-      ]),
-      error: parseMsg,
-      duration: Date.now() - start,
-    };
-  }
-
-  // --- Layer 2: Execute with fault tolerance ---
-  // Refresh tool bindings (cwd may have changed)
-  sess.images.length = 0; // clear stashed images for this execution
-  currentOuijaSessionFile = toolCtx?.sessionManager?.getSessionFile?.() ?? null;
-  const rawBindings = createToolBindings({ cwd, images: sess.images, confirmFn: toolCtx?.confirmFn, logFn: (msg: string) => sess.logs.push(msg), signal, sessionManager: toolCtx?.sessionManager });
-  const bindings = wrapWithContextGuard(rawBindings, toolCtx?.getContextUsage);
-  Object.assign(sess.context, bindings);
-
-  // Update process.cwd to reflect the current session working directory
-  (sess.context as any).process.cwd = () => cwd;
-
-  // Inject console.wake — lets background promises trigger a new agent turn.
-  // console.log() only writes to the current block's output (gone when block returns).
-  // console.wake(message) queues a user message via deliverAs:"followUp" so it lands
-  // safely whether the agent is idle OR currently streaming a response. Without the
-  // explicit deliverAs, pi throws "Agent is already processing. Specify
-  // streamingBehavior ('steer' or 'followUp') to queue the message." and the wake
-  // is lost — which is exactly what was happening to background teams.on callbacks
-  // that fired mid-turn.
-  //
-  // No one-wake-per-block limit anymore: every call goes through. Pi's own message
-  // queue serializes followUp messages correctly, so multiple subscriptions firing
-  // in close succession each land as their own follow-up turn trigger.
-  if (toolCtx?.sendMessage || toolCtx?.sendUserMessage) {
-    const sendMsg = toolCtx.sendMessage;
-    const sendUser = toolCtx.sendUserMessage;
-    (sess.context as any).console.wake = (...args: unknown[]) => {
-      const message = args.map(formatArg).join(" ");
-      try {
-        if (sendMsg) {
-          // Deliver as a custom-typed entry so the renderer can distinguish
-          // background wakes from hooman user messages. Carries display:true so
-          // it still shows up in the TUI, and deliverAs:"followUp" so it lands
-          // safely whether the agent is idle or mid-turn.
-          sendMsg(
-            { customType: "console-wake", content: "[CONSOLE.WAKE] " + message, display: true },
-            { deliverAs: "followUp", triggerTurn: true },
-          );
-        } else if (sendUser) {
-          // Fallback for older host versions that don't expose sendMessage.
-          sendUser(message, { deliverAs: "followUp" });
-        }
-      } catch (err) {
-        // Last-ditch: log the wake content to the block output so it isn't totally
-        // lost. The caller will still see it the next time they inspect the block.
-        console.warn("[console.wake] send failed:", err instanceof Error ? err.message : String(err));
-        console.warn("[console.wake] wake content:", message.slice(0, 400));
-      }
-    };
-  }
-
-  // Inject session introspection API if ctx available
-  if (toolCtx?.sessionManager) {
-    const sm = toolCtx.sessionManager;
-    const getUsage = toolCtx.getContextUsage;
-    Object.assign(sess.context, {
-      session: {
-        messages: () => {
-          const branch = sm.getBranch();
-          return branch
-            .filter((e: any) => e.type === "message")
-            .map((e: any) => {
-              const m = e.message;
-              const content = typeof m.content === "string"
-                ? m.content
-                : Array.isArray(m.content)
-                  ? m.content
-                      .filter((p: any) => p.type === "text")
-                      .map((p: any) => p.text)
-                      .join("\n")
-                  : "";
-              return { id: e.id, role: m.role, content, timestamp: e.timestamp };
-            });
-        },
-        tokens: () => {
-          if (!getUsage) return null;
-          const usage = getUsage();
-          return usage ?? null;
-        },
-        tags: () => {
-          const entries = sm.getEntries();
-          return entries
-            .filter((e: any) => e.type === "label" && e.label)
-            .map((e: any) => ({ id: e.id, targetId: e.targetId, label: e.label, timestamp: e.timestamp }));
-        },
-        tag: (name: string) => {
-          if (!name || !name.trim()) return "Tag name cannot be empty";
-          const leafId = sm.getLeafId();
-          if (!leafId) return "No current position to tag";
-          sm.appendLabelChange(leafId, name.trim());
-          return "Tagged: " + name.trim();
-        },
-        id: () => sm.getSessionId(),
-        name: () => sm.getSessionName() ?? null,
-        save: (key: string, data: unknown) => {
-          if (!key || !key.trim()) return "Key cannot be empty";
-          if (key.length > 128) return "Key too long (max 128 chars)";
-          let json: string;
-          try {
-            json = JSON.stringify(data);
-          } catch {
-            return "Cannot save: data is not JSON-serializable";
-          }
-          if (json === undefined) return "Cannot save: data is not JSON-serializable (function/symbol)";
-          if (json.length > 512 * 1024) return "Cannot save: data exceeds 512KB limit";
-          sm.appendCustomEntry("code-mode:" + key.trim(), data);
-          return "Saved: " + key.trim();
-        },
-        setContextSize: (n?: number) => {
-          if (n === undefined || n === null) {
-            contextSize = null;
-            return "Context size reset (sending all messages)";
-          }
-          if (typeof n !== "number" || !isFinite(n)) {
-            return "Invalid context size: must be a finite number";
-          }
-          const size = Math.max(4, Math.abs(Math.round(n)));
-          contextSize = size;
-          return "Context limited to last " + size + " messages";
-        },
-        preCompact: () => {
-          const log = (msg: string) => sess.logs.push(msg);
-          const branch = sm.getBranch();
-          const outline: string[] = [];
-          let msgCount = 0;
-          for (const entry of branch) {
-            if (entry.type !== "message") continue;
-            const msg = (entry as any).message;
-            if (!msg) continue;
-            msgCount++;
-            const idTag = entry.id ? entry.id + " · " : "";
-            if (typeof msg.content === "string") {
-              outline.push("[" + idTag + msg.role + "] " + msg.content.slice(0, 200));
-            } else if (Array.isArray(msg.content)) {
-              const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-              const tools = msg.content.filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
-              if (text || tools.length) {
-                outline.push("[" + idTag + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
-              }
-            }
-          }
-          sess.store.proxy.preCompact = {
-            messageCount: msgCount,
-            outline: outline.join("\n"),
-          };
-          log("preCompact: stashed outline of " + msgCount + " messages into $.preCompact. Review it, pin important messages by ID with session.pin([...]), then call session.squash().");
-        },
-        pin: (ids: string[]) => {
-          const log = (msg: string) => sess.logs.push(msg);
-          if (!Array.isArray(ids) || ids.length === 0) {
-            log("session.pin(): pass an array of message IDs (get them from $.preCompact.outline or session.messages())");
-            return "No IDs provided";
-          }
-          const want = new Set(ids.filter((x) => typeof x === "string" && x.length > 0));
-          if (want.size === 0) {
-            log("session.pin(): no valid string IDs in input");
-            return "No valid IDs";
-          }
-          const branch = sm.getBranch();
-          const byId = new Map<string, any>();
-          for (const e of branch) {
-            if (e.type === "message" && e.id && want.has(e.id)) byId.set(e.id, e);
-          }
-          const missing = [...want].filter((id) => !byId.has(id));
-          const proxy = sess.store.proxy;
-          const existing = Array.isArray(proxy.pinned) ? (proxy.pinned as any[]) : [];
-          const seenIds = new Set(existing.map((m: any) => m?.id).filter(Boolean));
-          let added = 0;
-          let chars = 0;
-          // Preserve order-of-pin for new additions; keep prior pins where they were.
-          for (const id of ids) {
-            if (!byId.has(id)) continue;
-            if (seenIds.has(id)) continue;
-            const entry = byId.get(id);
-            const msg = entry.message;
-            const content = typeof msg.content === "string"
-              ? msg.content
-              : Array.isArray(msg.content)
-                ? msg.content
-                    .filter((p: any) => p.type === "text")
-                    .map((p: any) => p.text)
-                    .join("\n")
-                : "";
-            existing.push({ id: entry.id, role: msg.role, content, timestamp: entry.timestamp });
-            seenIds.add(id);
-            added++;
-            chars += content.length;
-          }
-          proxy.pinned = existing;
-          const parts = ["session.pin(): pinned " + added + " message(s) into $.pinned (total: " + existing.length + ", " + chars + " new chars)"];
-          if (missing.length > 0) parts.push("skipped unknown IDs: " + missing.join(", "));
-          const msg = parts.join("; ");
-          log(msg);
-          return msg;
-        },
-        squash: (options?: { continue?: string }) => {
-          const log = (msg: string) => sess.logs.push(msg);
-          if (!toolCtx?.compact) {
-            log("session.squash(): compaction not available in this context");
-            return;
-          }
-          pendingSquash = { continue: options?.continue };
-          log("session.squash(): compaction scheduled for after this turn completes");
-        },
-        load: (key: string) => {
-          const entries = sm.getEntries();
-          const prefix = "code-mode:" + key;
-          // Find the LAST matching custom entry
-          let latest: any = null;
-          for (const e of entries) {
-            if (e.type === "custom" && e.customType === prefix) {
-              latest = e.data;
-            }
-          }
-          return latest;
-        },
-        entries: () => {
-          return sm.getBranch().map((e: any) => ({
-            id: e.id,
-            type: e.type,
-            timestamp: e.timestamp,
-            ...(e.type === "message" ? { role: e.message?.role } : {}),
-            ...(e.type === "label" ? { label: e.label } : {}),
-            ...(e.type === "compaction" || e.type === "branch_summary" ? { summary: e.summary } : {}),
-            ...(e.type === "custom" ? { customType: e.customType, data: e.data } : {}),
-          }));
-        },
-      },
-    });
-
-    // Context management functions (vendored from pi-context, always available)
-    Object.assign(sess.context, {
-      contextTag: (args: { name: string; target?: string }) => {
-        if (!args?.name || !args.name.trim()) return "Error: tag name required";
-        const tagName = args.name.trim();
-
-        const resolveTargetId = (target: string): string => {
-          if (target.toLowerCase() === "root") { const t = sm.getTree(); return t.length > 0 ? t[0].entry.id : target; }
-          if (/^[0-9a-f]{8,}$/i.test(target)) return target;
-          const stack: any[] = [...sm.getTree()];
-          while (stack.length > 0) { const n = stack.pop()!; if (sm.getLabel(n.entry.id) === target) return n.entry.id; if (n.children?.length) stack.push(...n.children); }
-          return target;
-        };
-
-        const findTagInTree = (nodes: any[], name: string): string | null => {
-          for (const n of nodes) {
-            if (sm.getLabel(n.entry.id) === name) return n.entry.id;
-            const r = findTagInTree(n.children || [], name);
-            if (r) return r;
-          }
-          return null;
-        };
-
-        const existing = findTagInTree(sm.getTree(), tagName);
-        if (existing) return "Error: Tag '" + tagName + "' already exists at " + existing;
-
-        let id = args.target ? resolveTargetId(args.target) : undefined;
-        if (!id) {
-          const branch = sm.getBranch();
-          for (let i = branch.length - 1; i >= 0; i--) {
-            const entry = branch[i];
-            if (entry.type === "message" && entry.message.role === "toolResult") continue;
-            id = entry.id;
-            break;
-          }
-          if (!id) id = sm.getLeafId() ?? "";
-        }
-
-        if (toolCtx?.setLabel) {
-          toolCtx.setLabel(id, tagName);
-        } else {
-          sm.appendLabelChange(id, tagName);
-        }
-        return "Tagged '" + tagName + "' at " + id;
-      },
-
-      contextLog: (args?: { limit?: number; verbose?: boolean }) => {
-        const branch = sm.getBranch();
-        const leafId = sm.getLeafId();
-        const verbose = args?.verbose ?? false;
-        const limit = args?.limit ?? 50;
-
-        const getContent = (entry: any): string => {
-          if (entry.type === "branch_summary" || entry.type === "compaction") return (entry.summary || "[No summary]").slice(0, 120);
-          if (entry.type === "label") return "tag: " + entry.label;
-          if (entry.type === "message") {
-            const msg = entry.message;
-            if (msg.role === "toolResult") {
-              const text = (msg.content || []).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-              return "(" + msg.toolName + ") " + (text.length > 80 ? text.slice(0, 80) + "..." : text);
-            }
-            if (msg.role === "bashExecution") return "[Bash] " + msg.command;
-            if (msg.role === "user") return (typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim() : "").slice(0, 120);
-            if (msg.role === "assistant") {
-              let text = typeof msg.content === "string" ? msg.content : Array.isArray(msg.content) ? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim() : "";
-              const tcs = (msg.content || []).filter((c: any) => c.type === "toolCall").map((tc: any) => tc.name);
-              if (tcs.length) text = (text ? text + " | " : "") + "tools: " + tcs.join(", ");
-              return text.slice(0, 120);
-            }
-          }
-          return "";
-        };
-
-        const isInteresting = (entry: any): boolean => {
-          if (entry.id === leafId) return true;
-          if (branch[0] && entry.id === branch[0].id) return true;
-          if (sm.getLabel(entry.id)) return true;
-          if (entry.type === "label") return false;
-          if (entry.type === "branch_summary" || entry.type === "compaction") return true;
-          if (sm.getChildren(entry.id).length > 1) return true;
-          if (entry.type === "message" && entry.message.role === "user") return true;
-          return false;
-        };
-
-        const seq: any[] = [];
-        const backboneIds = new Set(branch.map((e: any) => e.id));
-        branch.forEach((entry: any) => {
-          seq.push(entry);
-          sm.getChildren(entry.id).forEach((child: any) => {
-            if ((child.type === "branch_summary" || child.type === "compaction") && !backboneIds.has(child.id)) seq.push(child);
-          });
-        });
-
-        const visIds = new Set<string>();
-        seq.forEach((e: any) => { if (verbose || isInteresting(e)) visIds.add(e.id); });
-        let vis = seq.filter((e: any) => visIds.has(e.id));
-        if (vis.length > limit) {
-          const allowed = new Set(vis.slice(-limit).map((e: any) => e.id));
-          visIds.clear();
-          allowed.forEach((id: string) => visIds.add(id));
-        }
-
-        const lines: string[] = [];
-        let hidden = 0;
-        seq.forEach((entry: any) => {
-          if (!visIds.has(entry.id)) { hidden++; return; }
-          if (hidden > 0) { lines.push("  ... (" + hidden + " hidden) ..."); hidden = 0; }
-          const isHead = entry.id === leafId;
-          const label = sm.getLabel(entry.id);
-          const body = getContent(entry).replace(/\s+/g, " ");
-          let role = entry.type === "message" ? (entry.message.role === "assistant" ? "AI" : entry.message.role === "user" ? "USER" : "TOOL") : entry.type === "compaction" || entry.type === "branch_summary" ? "SUMMARY" : entry.type.toUpperCase();
-          if (role === "CUSTOM_MESSAGE") return;
-          const meta = [branch[0] && entry.id === branch[0].id ? "ROOT" : null, isHead ? "HEAD" : null, label ? "tag:" + label : null].filter(Boolean).join(", ");
-          lines.push((isHead ? "*" : role === "USER" ? "•" : "|") + " " + entry.id.slice(0, 8) + (meta ? " (" + meta + ")" : "") + " [" + role + "] " + body);
-        });
-        if (hidden > 0) lines.push("  ... (" + hidden + " hidden) ...");
-
-        const usage = getUsage ? getUsage() : null;
-        let usageStr = "Unknown";
-        if (usage) usageStr = (usage.percent?.toFixed(1) ?? "?") + "% (" + Math.round((usage.tokens ?? 0) / 1024) + "k/" + Math.round((usage.contextWindow ?? 0) / 1024) + "k)";
-        let stepsSince = 0, nearestTag = "None";
-        for (let i = branch.length - 1; i >= 0; i--) { const l = sm.getLabel(branch[i].id); if (l) { nearestTag = l; break; } stepsSince++; }
-        return "[Context Dashboard]\n• Usage: " + usageStr + "\n• Steps since '" + nearestTag + "': " + stepsSince + "\n---\n" + (lines.join("\n") || "(empty)");
-      },
-
-      contextCheckout: (args: { target: string; message: string; backupTag?: string }) => {
-        if (!args?.target) return "Error: target required";
-        if (!args?.message) return "Error: message required";
-
-        const resolveId = (target: string): string => {
-          if (target.toLowerCase() === "root") { const t = sm.getTree(); return t.length > 0 ? t[0].entry.id : target; }
-          if (/^[0-9a-f]{8,}$/i.test(target)) return target;
-          const stack: any[] = [...sm.getTree()];
-          while (stack.length > 0) { const n = stack.pop()!; if (sm.getLabel(n.entry.id) === target) return n.entry.id; if (n.children?.length) stack.push(...n.children); }
-          return target;
-        };
-
-        const tid = resolveId(args.target);
-        const currentLeaf = sm.getLeafId();
-        if (currentLeaf === tid) return "Already at target " + tid;
-        if (args.backupTag && currentLeaf && toolCtx?.setLabel) toolCtx.setLabel(currentLeaf, args.backupTag);
-
-        const label = currentLeaf ? sm.getLabel(currentLeaf) : undefined;
-        const origin = label ? "tag: " + label : (currentLeaf || "unknown");
-        const enrichedMessage = "(summary from " + origin + ")\n" + args.message;
-
-        const nid = sm.branchWithSummary(tid, enrichedMessage);
-        pendingCheckout = { targetId: nid, enrichedMessage, backupTag: args.backupTag };
-
-        return "Checkout initiated -> " + args.target + ". Backup: " + (args.backupTag || "none") + ". Navigation completes after this turn.";
-      },
-    });
-  }
-
-
-  // Inject sandbox functions registered by other extensions
-  const sandboxFns = getSandboxFns();
-  if (Object.keys(sandboxFns).length > 0) {
-    Object.assign(sess.context, sandboxFns);
-  }
-
-  // runbookRun — executes a saved runbook in the current VM context
-  (sess.context as any).runbookRun = async (input: { name: string; args?: Record<string, unknown> }) => {
-    const { code } = loadRunbook(cwd, input.name);
-    const argsLine = input.args ? `const args = ${JSON.stringify(input.args)};\n` : "const args = {};\n";
-    const wrapped = `(async () => {\n${argsLine}${code}\n})()`;
-    return vm.runInContext(wrapped, sess.context, { filename: `runbook:${input.name}` });
-  };
-
-  // --- Hydrate persisted $ vars as bare context globals ---
-  // Agents naturally expect `const x = ...` in call N to be available as bare `x` in call N+1.
-  // Without this, they waste 2-3 turns discovering the $. prefix requirement.
-  const storeKeys = sess.store.proxy.__keys();
-  const PROTECTED = new Set(["$", "console", "session", "setTimeout", "clearTimeout", "process"]);
-  for (const key of storeKeys) {
-    if (key.startsWith("__") || PROTECTED.has(key)) continue;
-    // Never overwrite tool bindings or other functions (tools always win)
-    const existing = (sess.context as any)[key];
-    if (typeof existing === "function") continue;
-    (sess.context as any)[key] = sess.store.proxy[key];
-  }
-
-  try {
-    const promise = vm.runInContext(wrapped, sess.context, {
-      filename: "code-mode.js",
-      // timeout intentionally omitted: Bun 1.3.9 applies vm.runInContext timeout to
-      // async code as well, causing a panic(main thread): unreachable when slow async
-      // operations (like multiple ouija calls) exceed the timeout. Async execution
-      // is bounded by the Promise.race timeout below. Sync parse errors are caught by
-      // the vm.Script(wrapped) call above.
-    });
-
-    // Race: execution vs timeout vs abort
-    const races: Promise<unknown>[] = [promise];
-
-    // Async timeout
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Execution timed out after ${executionTimeoutMs / 1000}s`)),
-        executionTimeoutMs,
-      );
-    });
-    races.push(timeoutPromise);
-
-    // Abort signal
-    if (signal) {
-      const abortPromise = new Promise<never>((_, reject) => {
-        if (signal.aborted) {
-          reject(new Error("Aborted"));
-          return;
-        }
-        signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true });
-      });
-      races.push(abortPromise);
-    }
-
-    await Promise.race(races);
-    if (timeoutHandle) clearTimeout(timeoutHandle);
-
-    const output = buildOutput(warnings, sess.logs);
-    return {
-      output,
-      duration: Date.now() - start,
-    };
-  } catch (err) {
-    // --- Layer 3: Graceful error with recovery context ---
-    const error = err instanceof Error ? err.message : String(err);
-    const partialOutput = buildOutput(warnings, sess.logs);
-    const storeInfo = sess.store.getStatus();
-    const recoveryHint =
-      storeInfo !== "$ is empty"
-        ? `Your $ store survived. Use $.<var> to continue from where you left off.\n${storeInfo}`
-        : "$ store is empty — nothing to recover.";
-
-    const output = partialOutput
-      ? `${partialOutput}\n\n\u274c ${error}\n\n${recoveryHint}`
-      : `\u274c ${error}\n\n${recoveryHint}`;
-
-    return {
-      output,
-      error,
-      duration: Date.now() - start,
-    };
-  }
-}
-
 
 // =============================================================================
 // Tool Exclusivity — tools that remain as direct LLM tools
@@ -1151,7 +468,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("escape_code_mode", {
     description: "Restore all tools for this session (disable sandbox restriction).",
     handler: async (_args, ctx) => {
-      escaped = true;
+      getSession().setEscaped(true);
       pi.setActiveTools(pi.getAllTools().map((t) => t.name));
       ctx.ui.notify(
         "Escape mode: all tools restored. Use /code_mode to re-enable sandbox.",
@@ -1164,7 +481,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("code_mode", {
     description: "Re-enable code-mode sandbox (restrict tools to execute_code).",
     handler: async (_args, ctx) => {
-      escaped = false;
+      getSession().setEscaped(false);
       const allowed = pi
         .getAllTools()
         .filter((t) => PASSTHROUGH_TOOLS.has(t.name) || !CODE_MODE_ONLY_TOOLS.has(t.name))
@@ -1200,7 +517,7 @@ export default function (pi: ExtensionAPI) {
 
   // Hard guard: if LLM somehow calls a code-mode-only tool directly, redirect it
   pi.on("tool_call", async (event) => {
-    if (!escaped && CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
+    if (!getSession().getEscaped() && CODE_MODE_ONLY_TOOLS.has(event.toolName)) {
       return {
         block: true,
         reason: `Tool '${event.toolName}' is only available inside execute_code. Use execute_code to call ${event.toolName}().`,
@@ -1253,12 +570,12 @@ export default function (pi: ExtensionAPI) {
       const timeoutMs = params.timeout
         ? Math.min(params.timeout * 1000, MAX_EXECUTION_TIMEOUT_MS)
         : DEFAULT_EXECUTION_TIMEOUT_MS;
-      // Check escape mode toggle after execution
+      // ── Site 3 escape sync (pe-tk4s AC3 v4 patch — preserve setActiveTools side-effects) ──
       const sess = getSession();
       const wantEscape = sess.store.proxy.__escaped === true;
-      if (wantEscape !== escaped) {
-        escaped = wantEscape;
-        if (escaped) {
+      if (wantEscape !== sess.getEscaped()) {
+        sess.setEscaped(wantEscape);
+        if (wantEscape) {
           pi.setActiveTools(pi.getAllTools().map((t) => t.name));
         } else {
           const allowed = pi
@@ -1268,12 +585,19 @@ export default function (pi: ExtensionAPI) {
           pi.setActiveTools(allowed);
         }
       }
-      const { output, error, duration } = await executeCode(
+
+      // Capture current ouija session file for the in-block ouija executor.
+      currentOuijaSessionFile = (ctx as any).sessionManager?.getSessionFile?.() ?? null;
+
+      const { output, error, duration } = await executeInSession(
+        sess,
         params.code,
-        ctx.cwd,
-        signal,
-        timeoutMs,
         {
+          signal: signal ?? new AbortController().signal,
+          cwd: ctx.cwd,
+          model: (ctx as any).model,
+          modelRegistry: (ctx as any).modelRegistry,
+          executionTimeoutMs: timeoutMs,
           sessionManager: (ctx as any).sessionManager,
           getContextUsage: (ctx as any).getContextUsage,
           confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
@@ -1282,14 +606,22 @@ export default function (pi: ExtensionAPI) {
           compact: (ctx as any).compact?.bind(ctx),
           setLabel: (id: string, label: string | undefined) => pi.setLabel(id, label),
           abort: () => ctx.abort(),
-          model: (ctx as any).model,
-          modelRegistry: (ctx as any).modelRegistry,
           sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) =>
             pi.sendUserMessage(content, options),
           sendMessage: (
             message: { customType: string; content: string; display?: boolean },
             options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
           ) => (pi as any).sendMessage?.(message, options),
+          contextGuardEnabled,
+          requestSquash: (options) => {
+            pendingSquash = { continue: options?.continue };
+          },
+          requestCheckout: (info) => {
+            pendingCheckout = info;
+          },
+          setContextSize: (n) => {
+            contextSize = n;
+          },
         },
       );
 
