@@ -1,0 +1,29 @@
+packages/rlm/src/types.ts
+  f7b18307270dab57 42-43
+packages/rlm/src/return-injection.ts
+  f7b18307270dab57 21-28
+packages/rlm/test/rlm.contract.test.ts
+  f7b18307270dab57 163-180
+packages/rlm/src/loop.ts
+  f7b18307270dab57 97,106-109,128-130,157-160,194-195,198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "62966c802df8b09dd9ab7c10a5fd3a510012d97c",
+  "prompts": {
+    "f7b18307270dab57": {
+      "agent_id": {
+        "tool": "Jane Cosmos Aghanim",
+        "id": "019dd16f-0ed5-74e3-8c56-3e2fa25324a9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 43,
+      "total_deletions": 4,
+      "accepted_lines": 43,
+      "overriden_lines": 0
+    }
+  }
+}
