@@ -160,6 +160,24 @@ describe("rlm contract", () => {
 		await new Promise((r) => setTimeout(r, 100));
 		await expect(Promise.resolve(stored)).resolves.toMatchObject({ survived: true });
 	});
+	test("17b unawaited async main rlm.return resolves without unhandled rejection", async () => {
+		const unhandled: unknown[] = [];
+		const onUnhandled = (err: unknown) => unhandled.push(err);
+		process.on("unhandledRejection", onUnhandled as any);
+		try {
+			let calls = 0;
+			setComplete((_m, _req, auth) => {
+				calls++;
+				if (calls === 1) return resp(js("async function main() { await new Promise(r => setTimeout(r, 20)); rlm.return({lateAsync:true}); }\nmain();"));
+				return new Promise((_res, rej) => auth.signal.addEventListener("abort", () => rej(new Error("Aborted"))));
+			});
+			await expect(runRlm(deps(), { task: "unawaited-main", tools: [], maxIterations: 5 }, 0)).resolves.toMatchObject({ lateAsync: true });
+			await new Promise((r) => setTimeout(r, 20));
+			expect(unhandled).toHaveLength(0);
+		} finally {
+			process.removeListener("unhandledRejection", onUnhandled as any);
+		}
+	});
 	test("18 session_shutdown subscriber cancels active handles", async () => {
 		let shutdownHandler: (() => void) | undefined;
 		const piStub: any = { on: (event: string, fn: () => void) => { if (event === "session_shutdown") shutdownHandler = fn; } };

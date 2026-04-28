@@ -94,7 +94,7 @@ function buildExecuteCodeTool(params: {
 				});
 			} catch (e) {
 				const stdout = params.subSession.drainLogs();
-				if (isRlmReturnSignal(e)) {
+				if (isRlmReturnSignal(e) || params.state.resolved) {
 					params.state.disposed = true;
 					return { content: [{ type: "text", text: stdout || "rlm.return called" }], details: { returned: true, stdout } };
 				}
@@ -103,6 +103,10 @@ function buildExecuteCodeTool(params: {
 				throw new Error(formatExecutionError(err, stdout));
 			}
 			const stdout = params.subSession.drainLogs();
+			if (params.state.resolved) {
+				params.state.disposed = true;
+				return { content: [{ type: "text", text: stdout || "rlm.return called" }], details: { returned: true, stdout } };
+			}
 			return { content: [{ type: "text", text: stdout || "(no output)" }], details: { stdout } };
 		},
 	};
@@ -120,6 +124,9 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 		disposeAbort: new AbortController(),
 		timeoutHandle: null,
 		usage: { input: 0, output: 0 },
+	};
+	state.onReturn = () => {
+		if (!state.disposeAbort.signal.aborted) state.disposeAbort.abort(new RlmResolvedSignal());
 	};
 	const combined = combineSignals([deps.signal, opts.signal, state.disposeAbort.signal].filter(Boolean) as AbortSignal[]);
 	if (combined.aborted) throw abortError(combined);
@@ -147,6 +154,10 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 		? completeFnStream(deps, model, { apiKey: auth.apiKey, headers: auth.headers })
 		: ((streamModel: Model<any>, context: any, options: any) => streamSimple(streamModel, context, { ...options, apiKey: auth.apiKey, headers: auth.headers, signal: options?.signal }));
 
+	const swallowLateReturn = (reason: unknown) => {
+		if (isRlmReturnSignal(reason)) state.onReturn?.();
+	};
+	process.on("unhandledRejection", swallowLateReturn);
 	try {
 		await runAgentLoop(messages, { systemPrompt: opts.systemPrompt ?? buildSystemPrompt(opts), messages: [], tools: [executeCodeTool] }, {
 			model,
@@ -180,9 +191,11 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 			if (combined.aborted) throw abortError(combined);
 			throw e;
 		}
+	} finally {
+		process.removeListener("unhandledRejection", swallowLateReturn);
 	}
 
-	if (combined.aborted) throw abortError(combined);
+	if (combined.aborted && !state.resolved) throw abortError(combined);
 	if (!state.resolved) {
 		if (terminalError) throw terminalError;
 		throw new Error("rlm: agent finished without rlm.return");

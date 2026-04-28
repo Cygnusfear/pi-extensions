@@ -1,4 +1,3 @@
-import { RlmReturnSignal } from "./return-signal";
 import type { RlmResult, RlmState } from "./types";
 
 export function buildRlmReturn(state: RlmState) {
@@ -19,6 +18,13 @@ export function buildRlmReturn(state: RlmState) {
 
 		state.value = cloned;
 		state.resolved = true;
-		throw new RlmReturnSignal(cloned);
+		state.onReturn?.();
+
+		// Historically this threw RlmReturnSignal for control flow. That breaks when
+		// callers put rlm.return() inside an unawaited async function: the thrown
+		// signal becomes an unhandled promise rejection. State + onReturn now carry
+		// the terminal signal, so rlm.return() can be safe in both awaited and
+		// fire-and-forget async shapes.
+		return undefined as never;
 	};
 }

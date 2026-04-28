@@ -39,4 +39,6 @@ export interface RlmState {
 	disposeAbort: AbortController;
 	timeoutHandle: ReturnType<typeof setTimeout> | null;
 	usage: { input: number; output: number };
+	/** Called immediately when rlm.return stores a value, even if its control-flow signal is thrown from an unawaited promise. */
+	onReturn?: () => void;
 }
