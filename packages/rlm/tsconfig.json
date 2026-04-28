@@ -8,14 +8,12 @@
     "strict": true,
     "skipLibCheck": true,
     "jsx": "preserve",
-    "baseUrl": ".",
     "paths": {
-      "@pi-extensions/code-mode/session-factory": ["src/ts-shims/code-mode-session-factory.ts"],
-      "@pi-extensions/code-mode/sandbox-tools": ["src/ts-shims/code-mode-sandbox-tools.ts"],
-      "@pi-extensions/code-mode/types": ["src/ts-shims/code-mode-types.ts"]
+      "@pi-extensions/code-mode/session-factory": ["./src/ts-shims/code-mode-session-factory.ts"],
+      "@pi-extensions/code-mode/sandbox-tools": ["./src/ts-shims/code-mode-sandbox-tools.ts"],
+      "@pi-extensions/code-mode/types": ["./src/ts-shims/code-mode-types.ts"]
     },
-    "allowJs": true,
-    "ignoreDeprecations": "5.0"
+    "allowJs": true
   },
   "include": ["index.ts", "src/**/*.ts"],
   "exclude": ["**/*.test.ts", "test/**"]

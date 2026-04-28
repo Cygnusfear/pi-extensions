@@ -126,6 +126,7 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 			lastStdout = subSession.drainLogs();
 			if (state.resolved) break;
 
+			// TODO(pe-8759-followup): replace this string check with a symbol-branded RlmSerializationError.
 			if (blockError?.message === "rlm.return: value must be JSON-serializable") throw blockError;
 			lastError = blockError;
 			messages.push({ role: "assistant", content: text } as unknown as Message);

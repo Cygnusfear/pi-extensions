@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { registerContextualSandboxFn, type SandboxCallContext } from "@pi-extensions/shared/sandbox-registry";
 import { cancelAllRlmHandles, createRlmHandle } from "./src/handle";
-import type { RlmDeps, RlmOptions } from "./src/types";
+import type { RlmDeps, RlmHandle, RlmOptions } from "./src/types";
+
+type RlmSandboxFn = (opts: RlmOptions) => RlmHandle;
 
 export function buildDeps(ctx: SandboxCallContext): RlmDeps {
 	return {
@@ -16,7 +18,9 @@ export function buildDeps(ctx: SandboxCallContext): RlmDeps {
 
 export default function (pi: ExtensionAPI) {
 	registerContextualSandboxFn("rlm", (ctx) => {
-		return ((opts: RlmOptions) => createRlmHandle(buildDeps(ctx), opts, 0)) as any;
+		const deps = buildDeps(ctx);
+		const rlm: RlmSandboxFn = (opts) => createRlmHandle(deps, opts, 0);
+		return rlm;
 	});
 
 	pi.on("session_shutdown", () => {
