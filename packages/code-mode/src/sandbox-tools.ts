@@ -782,9 +782,17 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       try {
         content = fs.readFileSync(resolved, "utf-8");
       } catch (err) {
-        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === "ENOENT") {
           if (optional) return null;
           throw new Error("Read: file not found: " + filePath + " (resolved: " + resolved + "). Check existence first with Glob/fd, or pass optional: true for convention files that may not exist.");
+        }
+        if (code === "EISDIR") {
+          const skillPath = path.join(resolved, "SKILL.md");
+          const hint = fs.existsSync(skillPath)
+            ? " Did you mean " + skillPath + "?"
+            : " If this is a skill directory, read its SKILL.md file instead.";
+          throw new Error("Read: path is a directory: " + filePath + " (resolved: " + resolved + ")." + hint);
         }
         throw err;
       }

@@ -230,7 +230,7 @@ All of these are available inside `execute_code` as typed async functions:
 | Function | Description |
 |----------|-------------|
 | `Bash({ command, cwd?, timeout? })` | Execute shell commands (git-safety guards apply — shows confirm dialog for destructive git ops) |
-| `Read({ path, offset?, limit?, optional? })` | Read file contents; missing files throw `Read: file not found` unless `optional: true` returns `null` |
+| `Read({ path, offset?, limit?, optional? })` | Read file contents; missing files throw `Read: file not found` unless `optional: true` returns `null`; directories throw a clear `Read: path is a directory` error |
 | `Write({ path, content })` | Write/create files |
 | `Edit({ path, edits: [{oldText, newText}] })` | Precise text replacement |
 | `Glob({ pattern, path? })` | Find files by glob |

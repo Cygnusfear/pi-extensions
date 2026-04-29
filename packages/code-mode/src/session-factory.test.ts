@@ -355,6 +355,21 @@ describe("executeInSession — Read missing files", () => {
 			fs.rmSync(cwd, { recursive: true, force: true });
 		}
 	});
+
+	test("Read directory reports clear error and suggests SKILL.md when present", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-dir-"));
+		try {
+			fs.mkdirSync(path.join(cwd, "20-02-example"));
+			fs.writeFileSync(path.join(cwd, "20-02-example", "SKILL.md"), "# Skill\n");
+			const result = await executeInSession(sess, "await Read({ path: '20-02-example' })", makeDeps({ cwd }));
+
+			expect(result.error).toContain("Read: path is a directory: 20-02-example");
+			expect(result.output).toContain("SKILL.md");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("executeInSession — rg/fd symlink following", () => {

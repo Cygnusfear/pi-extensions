@@ -114,6 +114,7 @@ declare function Python(input: {
  * Returns the file text. Supports line-based offset and limit.
  * Missing files throw a clear Read: file not found error by default.
  * Use optional: true only for convention files that may not exist.
+ * Directory paths throw a clear error; skill directories suggest SKILL.md.
  */
 declare function Read(input: {
   /** Path to the file (relative to cwd or absolute) */
