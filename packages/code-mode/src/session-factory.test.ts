@@ -315,6 +315,24 @@ describe("executeInSession — session squash continuation hook", () => {
 });
 
 
+describe("executeInSession — Read missing files", () => {
+	test("Read missing file reports clear error and optional=true returns null", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-missing-"));
+		try {
+			const r1 = await executeInSession(sess, "await Read({ path: 'missing-AGENTS.md' })", makeDeps({ cwd }));
+			expect(r1.error).toContain("Read: file not found: missing-AGENTS.md");
+			expect(r1.output).toContain("optional: true");
+
+			const r2 = await executeInSession(sess, "const value = await Read({ path: 'missing-AGENTS.md', optional: true }); console.log(value === null);", makeDeps({ cwd }));
+			expect(r2.error).toBeUndefined();
+			expect(r2.output).toContain("true");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("executeInSession — rg/fd symlink following", () => {
 	test("rg/fd follow symlinks by default, opt out with follow=false", async () => {
 		const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "code-mode-follow-"));

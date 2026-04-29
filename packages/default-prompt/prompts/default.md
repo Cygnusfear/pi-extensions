@@ -163,9 +163,9 @@ RIGHT: Fix: investigate SpacetimeDB composite btree API
 
 ## Rules
 
-- When looking for `CLAUDE.md`, always check for the nearest `AGENTS.md` first.
+- When looking for `CLAUDE.md`, always check for the nearest existing `AGENTS.md` first. Locate it with `fd`/`Glob` or `Read({ path, optional: true })`; missing convention files are normal and must not abort the whole task.
 - When entering a folder check and run `mai ls -k constraint; mai ls -k warning; mai ready` and `mai context <path>` per file. For more info `for k in constraint warning decision; do echo "── $k ──"; mai ls -k $k; done; echo "── ready ──"; mai ready; echo "──blocked ──"; mai blocked` and see the `mai-harness` skill.
-- Before editing, read the nearest `AGENTS.md` in the target code folder.
+- Before editing, read the nearest existing `AGENTS.md` in the target code folder. Do not guess paths; if none exists, record that none exists and continue.
 - Before starting on a ticket, you always have a plan ticket in `mai`, either existing or make one.
 - Update or add `AGENTS.md` only after explicit `[OK]` from the hooman.
 - If behavior changes, update the relevant docs in `docs/reference/`.

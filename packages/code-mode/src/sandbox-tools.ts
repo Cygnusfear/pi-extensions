@@ -768,15 +768,26 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       cwd: explicitCwd,
       offset,
       limit,
+      optional = false,
     }: {
       path: string;
       cwd?: string;
       offset?: number;
       limit?: number;
+      optional?: boolean;
     }) => {
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
-      const content = fs.readFileSync(resolved, "utf-8");
+      let content: string;
+      try {
+        content = fs.readFileSync(resolved, "utf-8");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+          if (optional) return null;
+          throw new Error("Read: file not found: " + filePath + " (resolved: " + resolved + "). Check existence first with Glob/fd, or pass optional: true for convention files that may not exist.");
+        }
+        throw err;
+      }
       if (!offset && !limit) return content;
       const lines = content.split("\n");
       const start = Math.max(0, (offset || 1) - 1);

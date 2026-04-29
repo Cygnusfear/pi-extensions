@@ -112,6 +112,8 @@ declare function Python(input: {
 /**
  * Read the contents of a file.
  * Returns the file text. Supports line-based offset and limit.
+ * Missing files throw a clear Read: file not found error by default.
+ * Use optional: true only for convention files that may not exist.
  */
 declare function Read(input: {
   /** Path to the file (relative to cwd or absolute) */
@@ -122,7 +124,9 @@ declare function Read(input: {
   offset?: number;
   /** Maximum number of lines to read */
   limit?: number;
-}): Promise<string>;
+  /** Return null instead of throwing when the file does not exist. */
+  optional?: boolean;
+}): Promise<string | null>;
 
 /**
  * Write content to a file.
