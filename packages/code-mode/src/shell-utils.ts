@@ -179,13 +179,24 @@ export function spawnAsync({
 
     const onAbort = () => {
       if (settled) return;
-      settled = true;
-      if (child.pid) killTree(child.pid);
+	  settled = true;
+	  if (child.pid) killTree(child.pid);
+	  child.stdout?.destroy();
+	  child.stderr?.destroy();
+	  child.unref();
+	  const reason = externalSignal?.reason;
+      const message = reason instanceof Error
+        ? reason.message
+        : typeof reason === "string"
+          ? reason
+          : externalSignal?.aborted
+            ? "Aborted"
+            : "Timed out after " + timeout + "ms";
       resolve({
         stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
         stderr: Buffer.concat(stderrChunks).toString("utf-8"),
         status: null,
-        error: new Error(externalSignal?.aborted ? "Aborted" : `Timed out after ${timeout}ms`),
+        error: new Error(message),
       });
     };
 

@@ -974,27 +974,33 @@ export async function executeInSession(
 	}
 
 	// Layer 2: prepare bindings + context
+	const executionAbort = new AbortController();
+	const runtimeDeps: ExecutionDeps = {
+		...deps,
+		signal: AbortSignal.any([deps.signal, executionAbort.signal]),
+	};
+
 	if (deps.skipToolInjection) {
 		// Caller is responsible for the entire binding set.
 		if (deps.bindings) Object.assign(session.context, deps.bindings);
 	} else {
-		await injectDefaultBindings(session, deps);
+		await injectDefaultBindings(session, runtimeDeps);
 	}
 
 	// Update process.cwd to reflect the current call's working directory (always applied).
-	(session.context as any).process.cwd = () => deps.cwd;
+	(session.context as any).process.cwd = () => runtimeDeps.cwd;
 
 	// Console.wake — gated.
-	if (deps.injectConsoleWake !== false) injectConsoleWake(session, deps);
+	if (runtimeDeps.injectConsoleWake !== false) injectConsoleWake(session, runtimeDeps);
 
 	// Session/context helpers — gated.
-	if (deps.injectSessionApi !== false) injectSessionHelpers(session, deps);
+	if (runtimeDeps.injectSessionApi !== false) injectSessionHelpers(session, runtimeDeps);
 
 	// Runbook runner — gated.
-	if (deps.injectRunbookRun !== false) injectRunbookRunFn(session, deps);
+	if (runtimeDeps.injectRunbookRun !== false) injectRunbookRunFn(session, runtimeDeps);
 
 	// $-bare-global hydration — gated.
-	if (deps.hydrateBareGlobals !== false) hydrateBareGlobals(session);
+	if (runtimeDeps.hydrateBareGlobals !== false) hydrateBareGlobals(session);
 
 	// Layer 3: run inside the vm.
 	const runVm = async () => {
@@ -1004,11 +1010,19 @@ export async function executeInSession(
 
 		const races: Promise<unknown>[] = [promise];
 
-		const timeoutMs = deps.executionTimeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
+		const timeoutMs = runtimeDeps.executionTimeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		let timeoutRejectHandle: ReturnType<typeof setTimeout> | undefined;
 		const timeoutPromise = new Promise<never>((_, reject) => {
 			timeoutHandle = setTimeout(
-				() => reject(new Error("Execution timed out after " + timeoutMs / 1000 + "s")),
+				() => {
+					const timeoutError = new Error("Timed out after " + timeoutMs + "ms");
+					if (!executionAbort.signal.aborted) executionAbort.abort(timeoutError);
+					timeoutRejectHandle = setTimeout(
+						() => reject(new Error("Execution timed out after " + timeoutMs / 1000 + "s")),
+						25,
+					);
+				},
 				timeoutMs,
 			);
 		});
@@ -1028,6 +1042,7 @@ export async function executeInSession(
 			await Promise.race(races);
 		} finally {
 			if (timeoutHandle) clearTimeout(timeoutHandle);
+			if (timeoutRejectHandle) clearTimeout(timeoutRejectHandle);
 		}
 	};
 

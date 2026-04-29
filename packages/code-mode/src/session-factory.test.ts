@@ -168,6 +168,26 @@ describe("executeInSession — error modes", () => {
 		expect(result.output).not.toContain("largeTokenSink");
 		expect(result.output).not.toContain("$ store:");
 	});
+
+	test("execution timeout aborts Bash and preserves partial subprocess output", async () => {
+		const sess = createCodeModeSession();
+		const result = await executeInSession(
+			sess,
+			"const result = await Bash({ command: 'printf before; sleep 2; printf after', timeout: 5 }); console.log(JSON.stringify(result));",
+			makeDeps({
+				executionTimeoutMs: 100,
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			}),
+		);
+
+		expect(result.error).toBeUndefined();
+		const parsed = JSON.parse(result.output.trim());
+		expect(parsed.stdout).toBe("before");
+		expect(parsed.timedOut).toBe(true);
+	});
 });
 
 describe("executeInSession — whitelist", () => {
