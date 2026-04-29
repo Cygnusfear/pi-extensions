@@ -959,15 +959,14 @@ export async function executeInSession(
 		new vm.Script(wrapped, { filename: "code-mode.js" });
 	} catch (parseErr) {
 		const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-		const storeInfo = session.store.getStatus();
 		if (errorMode === "rethrow") throw parseErr instanceof Error ? parseErr : new Error(parseMsg);
 		return {
 			output: buildOutput(warnings, [
 				"\u26a0\ufe0f Syntax error: " + parseMsg,
 				"",
 				"Your $ store was NOT affected. Fix the syntax and retry.",
+				"Run console.log($.__status()) only if you need store details.",
 				"",
-				storeInfo,
 			]),
 			error: parseMsg,
 			duration: Date.now() - start,
@@ -1045,6 +1044,18 @@ export async function executeInSession(
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		const partialOutput = buildOutput(warnings, session.logs);
+		const errorName = (err as { name?: unknown })?.name;
+		const isSyntaxError = errorName === "SyntaxError" || error.startsWith("SyntaxError:");
+		if (isSyntaxError) {
+			const syntaxOutput = buildOutput(warnings, [
+				...(partialOutput ? [partialOutput, ""] : []),
+				"⚠️ Syntax error: " + error.replace(/^SyntaxError:\s*/, ""),
+				"",
+				"Your $ store was NOT affected. Fix the syntax and retry.",
+				"Run console.log($.__status()) only if you need store details.",
+			]);
+			return { output: syntaxOutput, error, duration: Date.now() - start };
+		}
 		const storeInfo = session.store.getStatus();
 		const recoveryHint =
 			storeInfo !== "$ is empty"

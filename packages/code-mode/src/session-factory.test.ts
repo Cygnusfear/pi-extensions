@@ -144,6 +144,30 @@ describe("executeInSession — error modes", () => {
 		expect(result.error).toContain("boom");
 		expect(typeof result.duration).toBe("number");
 	});
+
+	test("syntax errors are concise and do not dump the $ store", async () => {
+		const sess = createCodeModeSession();
+		(sess.store.proxy as any).largeTokenSink = "x".repeat(1000);
+		const result = await executeInSession(
+			sess,
+			"const bad = ;",
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.error).toContain("Unexpected");
+		expect(result.output).toContain("Syntax error");
+		expect(result.output).toContain("Your $ store was NOT affected");
+		expect(result.output).toContain("$.__status()");
+		expect(result.output).not.toContain("largeTokenSink");
+		expect(result.output).not.toContain("$ store:");
+	});
 });
 
 describe("executeInSession — whitelist", () => {
