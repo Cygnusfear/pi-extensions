@@ -1,0 +1,23 @@
+packages/code-mode/README.md
+  f7b18307270dab57 233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f33c58be0a1049588f83d5fd37eddb5a5d1f850b",
+  "prompts": {
+    "f7b18307270dab57": {
+      "agent_id": {
+        "tool": "Jane Cosmos Aghanim",
+        "id": "019dd16f-0ed5-74e3-8c56-3e2fa25324a9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
