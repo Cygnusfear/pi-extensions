@@ -1,0 +1,25 @@
+packages/code-mode/src/session-factory.ts
+  f7b18307270dab57 968,1047-1058
+packages/code-mode/src/session-factory.test.ts
+  f7b18307270dab57 147-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "f3ce9c58d317cd791f632429974b0a1a0b7e7cf9",
+  "prompts": {
+    "f7b18307270dab57": {
+      "agent_id": {
+        "tool": "Jane Cosmos Aghanim",
+        "id": "019dd16f-0ed5-74e3-8c56-3e2fa25324a9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 37,
+      "total_deletions": 2,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
