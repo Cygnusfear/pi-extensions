@@ -25,5 +25,6 @@ export function buildSystemPrompt(opts: RlmOptions): string {
 		.replaceAll("{tools}", [...opts.tools, "rlm"].join(", "))
 		.replaceAll("{maxIterations}", String(opts.maxIterations ?? DEFAULT_MAX_ITERATIONS))
 		.replaceAll("{maxDepth}", String(opts.maxDepth ?? DEFAULT_MAX_DEPTH))
+		.replaceAll("{requiredKeys}", opts.requiredKeys?.length ? opts.requiredKeys.join(", ") : "none")
 		.replaceAll("{codeModeDeclarations}", readCodeModeDeclarations());
 }

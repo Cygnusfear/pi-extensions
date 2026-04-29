@@ -744,6 +744,8 @@ export interface RlmOptions {
   model?: string;
   maxIterations?: number;
   maxDepth?: number;
+  /** Optional runtime schema guard: rlm.return() result must contain every listed top-level key. */
+  requiredKeys?: string[];
   systemPrompt?: string;
   signal?: AbortSignal;
 }

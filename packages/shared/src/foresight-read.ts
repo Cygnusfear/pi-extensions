@@ -9,12 +9,24 @@ import { createDep } from "./tool-availability";
 
 const dep = createDep({ binary: FORESIGHT_BIN, install: "Install: git clone + cargo install --path . (see github.com/cygnusfear/foresight)", name: "foresight" });
 
-const CLI_TIMEOUT_MS = 15_000;
+const DEFAULT_CLI_TIMEOUT_MS = 45_000;
+const CLI_TIMEOUT_MS = Number(process.env.FORESIGHT_READ_TIMEOUT_MS || DEFAULT_CLI_TIMEOUT_MS);
 
 function runCli(args: string[]): Promise<string> {
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		const settleReject = (error: Error) => {
+			if (settled) return;
+			settled = true;
+			reject(error);
+		};
+		const settleResolve = (value: string) => {
+			if (settled) return;
+			settled = true;
+			resolve(value);
+		};
 		if (!dep.ok) {
-			reject(new Error(`Foresight binary '${FORESIGHT_BIN}' not found on PATH`));
+			settleReject(new Error(`Foresight binary '${FORESIGHT_BIN}' not found on PATH`));
 			return;
 		}
 
@@ -34,25 +46,29 @@ function runCli(args: string[]): Promise<string> {
 
 		const timer = setTimeout(() => {
 			child.kill("SIGTERM");
-			reject(new Error(`foresight timeout after ${CLI_TIMEOUT_MS}ms`));
+			setTimeout(() => {
+				if (!settled) child.kill("SIGKILL");
+			}, 1_000).unref?.();
+			settleReject(new Error(`foresight timeout after ${CLI_TIMEOUT_MS}ms (args: ${args.join(" ")}). Continue with local evidence or retry with FORESIGHT_READ_TIMEOUT_MS set higher.`));
 		}, CLI_TIMEOUT_MS);
 
 		child.on("close", (code) => {
 			clearTimeout(timer);
+			if (settled) return;
 			if (code !== 0) {
-				reject(new Error(err.trim() || `foresight exit ${code}`));
+				settleReject(new Error(err.trim() || `foresight exit ${code}`));
 				return;
 			}
 			const trimmed = out.trim();
 			if (!trimmed) {
-				reject(new Error(`foresight produced no output (args: ${args.join(" ")})`));
+				settleReject(new Error(`foresight produced no output (args: ${args.join(" ")})`));
 				return;
 			}
-			resolve(trimmed);
+			settleResolve(trimmed);
 		});
 		child.on("error", (e) => {
 			clearTimeout(timer);
-			reject(e);
+			settleReject(e);
 		});
 	});
 }

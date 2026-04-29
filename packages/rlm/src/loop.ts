@@ -200,5 +200,7 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 		if (terminalError) throw terminalError;
 		throw new Error("rlm: agent finished without rlm.return");
 	}
+	const missingKeys = (opts.requiredKeys ?? []).filter((key) => !Object.prototype.hasOwnProperty.call(state.value ?? {}, key));
+	if (missingKeys.length > 0) throw new Error("rlm: returned object missing required keys: " + missingKeys.join(", "));
 	return { ...(state.value ?? {}), __rlm_usage: { input: state.usage.input, output: state.usage.output, model: p + "/" + id } };
 }

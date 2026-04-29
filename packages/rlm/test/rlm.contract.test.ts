@@ -61,6 +61,13 @@ describe("rlm contract", () => {
 		queue(js("rlm.return({a:1, b:'two', sessions:{x:{full:'long'}}});"));
 		await expect(runRlm(deps(), { task: "smoke", tools: [] }, 0)).resolves.toEqual({ a: 1, b: "two", sessions: { x: { full: "long" } }, __rlm_usage: { input: 1, output: 1, model: "test/test-model" } });
 	});
+	test("1b requiredKeys rejects schema-missing returns", async () => {
+		queue(js("rlm.return({checkedFiles:['a.ts'], summary:'no findings key'});"));
+		await expectReject(
+			runRlm(deps(), { task: "schema", tools: [], requiredKeys: ["findings", "checkedFiles", "summary"] }, 0),
+			"rlm: returned object missing required keys: findings",
+		);
+	});
 	test("2 rlm.return idempotency exposes the second-call error", async () => {
 		const key = envKey("SECOND_ERROR");
 		queue(js("try { rlm.return({a:1}); } catch (e) {}\ntry { rlm.return({a:2}); } catch (e) { process.env[" + JSON.stringify(key) + "] = e.message; throw e; }"));
