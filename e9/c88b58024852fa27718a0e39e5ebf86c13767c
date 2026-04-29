@@ -1,0 +1,35 @@
+packages/rlm/src/prompts.ts
+  f7b18307270dab57 28
+packages/rlm/test/rlm.contract.test.ts
+  f7b18307270dab57 64-70
+packages/shared/src/foresight-read.ts
+  f7b18307270dab57 12-13,17-27,29,49-52,57,59,64,67,71
+packages/rlm/src/types.ts
+  f7b18307270dab57 12-13
+packages/rlm/prompts/rlm-system.md
+  f7b18307270dab57 7-8,15
+packages/rlm/src/loop.ts
+  f7b18307270dab57 203-204
+packages/code-mode/extensions/code-mode-declarations.md
+  f7b18307270dab57 747-748
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e9c88b58024852fa27718a0e39e5ebf86c13767c",
+  "prompts": {
+    "f7b18307270dab57": {
+      "agent_id": {
+        "tool": "Jane Cosmos Aghanim",
+        "id": "019dd16f-0ed5-74e3-8c56-3e2fa25324a9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 8,
+      "accepted_lines": 40,
+      "overriden_lines": 0
+    }
+  }
+}
