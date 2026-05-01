@@ -33,6 +33,7 @@ export const FAMILY_PATTERNS: [RegExp, string][] = [
 	[/^glm-4.7-flashx/, "glm-4.7-flashx"],
 	[/^glm-4.7-flash/, "glm-4.7-flash"],
 	[/^glm-4.7$/, "glm-4.7"],
+	[/^k\d+p/, "kimi-k"],
 ];
 
 /** Get the family label for a model ID, or null if unrecognized. */
@@ -57,6 +58,10 @@ export function extractVersion(modelId: string): number | null {
 	// claude-opus-4-6 → 4.6, gpt-5.3-codex → 5.3
 	const match = modelId.match(/(\d+)[-.](\d+)/);
 	if (match) return parseFloat(`${match[1]}.${match[2]}`);
+
+	// k2p6 → 2.6
+	const kMatch = modelId.match(/k(\d+)p(\d+)/);
+	if (kMatch) return parseFloat(kMatch[1] + "." + kMatch[2]);
 
 	// Single version: claude-haiku-4 → 4
 	const single = modelId.match(/-(\d+)(?:-|$)/);

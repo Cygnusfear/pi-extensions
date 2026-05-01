@@ -17,6 +17,7 @@ const SHORTCUTS = [
   { command: "z5v", provider: "zai", family: /^glm-5v/, label: "GLM-5V-Turbo" },
   { command: "z47", provider: "zai", family: /^glm-4.7$/, label: "GLM-4.7" },
   { command: "zflash", provider: "zai", family: /^glm-4.7-flash$/, label: "GLM-4.7-Flash" },
+  { command: "kimi", provider: "kimi-coding", family: /^k\d+p/, label: "Kimi K" },
 ] as const;
 
 export default function (pi: ExtensionAPI) {

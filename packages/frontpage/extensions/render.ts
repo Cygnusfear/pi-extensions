@@ -29,7 +29,7 @@ export interface FrontpageSpec {
 
 export type SectionSpec =
   | LeadSec | ProseSec | PullQuoteSec | CalloutSec
-  | KpiGridSec | TableSec | TimelineSec | CardGridSec
+  | KpiGridSec | TableSec | MarkdownTableSec | TimelineSec | CardGridSec
   | MermaidSec | D3Sec | ChartJsSec | SvgSec
   | AnnotationChartSec | RawHtmlSec;
 
@@ -44,6 +44,12 @@ export interface TableSec extends BaseSec {
   type: "table";
   columns: { key: string; title: string; align?: "left" | "right" | "center"; mono?: boolean }[];
   rows: Record<string, string>[];
+  notes?: string;
+}
+export interface MarkdownTableSec extends BaseSec {
+  type: "markdown_table";
+  /** Raw markdown table text: | col | col |\n|---|---|\n| val | val | */
+  body: string;
   notes?: string;
 }
 export interface TimelineSec extends BaseSec { type: "timeline"; entries: { phase: string; title: string; body: string }[]; }
@@ -106,6 +112,23 @@ function markdown(input: string): string {
   s = s.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
   // links
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  // markdown tables: | col | col | / |---|---| / | val | val |
+  s = s.replace(/(^|\n\n)((?:^\|.+\|$(?:\n)?)+)/gm, (_match, _prefix, block) => {
+    const lines = block.trim().split(/\n/).filter((l: string) => l.trim().startsWith("|"));
+    if (lines.length < 2) return _match;
+    const parseCells = (line: string) => line.split("|").slice(1, -1).map((c: string) => c.trim());
+    const headers = parseCells(lines[0]);
+    // skip separator row (|---|---|)
+    const dataLines = lines.slice(1).filter((l: string) => !/^\|[\s\-:|]+\|$/.test(l.trim()));
+    if (dataLines.length === 0 && headers.length === 0) return _match;
+    const ths = headers.map((h: string) => `      <th>${h}</th>`).join("\n");
+    const rows = dataLines.map((line: string) => {
+      const cells = parseCells(line);
+      const tds = cells.map((c: string) => `        <td>${c}</td>`).join("\n");
+      return `    <tr>\n${tds}\n    </tr>`;
+    }).join("\n");
+    return `\n\n<table class="data-table">\n  <thead>\n    <tr>\n${ths}\n    </tr>\n  </thead>\n  <tbody>\n${rows}\n  </tbody>\n</table>\n\n`;
+  });
   // lists (grouped)
   s = s.replace(/(^|\n)((?:- .+\n?)+)/g, (_m, pre, block) => {
     const items = block.trim().split(/\n/).map((l: string) => `<li>${l.replace(/^- /, "")}</li>`).join("");
@@ -179,6 +202,23 @@ function renderSection(sec: SectionSpec, ctx: RenderCtx): string {
       const notesBlock = sec.notes ? `    <div class="notes">${sec.notes}</div>\n` : "";
       return fill(read("sections/table.html"), { id, i, label_block: lbl, ths, rows, notes_block: notesBlock });
     }
+    case "markdown_table": {
+      // Parse raw markdown table text into structured columns/rows, then
+      // render through the same table.html partial for consistent styling.
+      const lines = sec.body.trim().split(/\n/).filter((l: string) => l.trim().startsWith("|"));
+      const parseCells = (line: string) => line.split("|").slice(1, -1).map((c: string) => c.trim());
+      const headers = lines.length > 0 ? parseCells(lines[0]) : [];
+      const dataLines = lines.slice(1).filter((l: string) => !/^\|[\s\-:|]+\|$/.test(l.trim()));
+      const mths = headers.map((h: string) => `<th>${escapeHtml(h)}</th>`).join("");
+      const mrows = dataLines.map((r: string) => {
+        const cells = parseCells(r);
+        const tds = cells.map((c: string) => `<td>${c}</td>`).join("");
+        return `        <tr>${tds}</tr>`;
+      }).join("\n");
+      const mNotesBlock = sec.notes ? `    <div class="notes">${sec.notes}</div>\n` : "";
+      return fill(read("sections/table.html"), { id, i, label_block: lbl, ths: mths, rows: mrows, notes_block: mNotesBlock });
+    }
+
     case "timeline": {
       const tpl = read("sections/timeline-entry.html");
       const entries = sec.entries.map(e => fill(tpl, {

@@ -335,11 +335,12 @@ export default function (pi: ExtensionAPI) {
 	const gitAiBin = resolveGitAiBin();
 	let gitAiAvailable = false;
 
-	// ── Commit trailer env vars ──
-	// Point core.hooksPath at our bundled prepare-commit-msg via GIT_CONFIG_*
-	// env override, and publish agent identity for that hook to read.
-	// Only affects git processes spawned under pi's env — user terminal commits
-	// are untouched.
+	// ── Commit hook env vars ──
+	// Point core.hooksPath at our bundled hook dispatcher via GIT_CONFIG_*
+	// env override, and publish agent identity for prepare-commit-msg to read.
+	// The bundled hooks dispatch repo-local .git/hooks first, so existing
+	// lefthook/husky/custom hook enforcement is preserved. Only affects git
+	// processes spawned under pi's env — user terminal commits are untouched.
 	const hooksDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "hooks");
 	let sessionManagerRef: any = null;
 
@@ -363,9 +364,6 @@ export default function (pi: ExtensionAPI) {
 		if (model) process.env.PI_AGENT_MODEL = model;
 		if (sessionId) process.env.PI_SESSION_ID = sessionId;
 		if (sessionName) process.env.PI_SESSION_NAME = sessionName;
-		// PI_REAL_HOOKS_DIR is left unset by default; the hook is a shell script
-		// that no-ops the chain if not provided. Users who want repo-local hook
-		// chaining can set it themselves.
 	}
 
 	pi.on("session_start", async (_event, ctx) => {

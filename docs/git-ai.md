@@ -28,3 +28,7 @@ The `git-ai` tool provides three subcommands:
 | `search` | Find AI-generated prompts in the codebase |
 
 Attribution happens automatically on every edit — no manual steps needed.
+
+## Git hooks
+
+Inside pi-spawned Git commands, the extension sets `core.hooksPath` to `packages/git-ai/hooks` through environment-only Git config. Git can only use one hooks path, so the bundled git-ai hooks act as dispatchers: they run executable repo-local hooks from `.git/hooks/<hook-name>` first, then continue with git-ai behavior. This preserves lefthook/husky/custom enforcement such as format checks while still adding git-ai commit trailers.

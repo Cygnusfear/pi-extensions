@@ -23,7 +23,7 @@ import {
   writeLeaderLease,
 } from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
-import { isProcessAlive, resumeWorker, spawnWorker } from "./spawner.js";
+import { isProcessAlive, killWorker, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
 import { wrapPollEvent, type TeamsEvent } from "./subscription.js";
 import type { PollEvent, SpawnConfig, WorkerAttempt, WorkerHandle } from "./types.js";
@@ -886,10 +886,21 @@ export class TeamLeader {
     }
   }
 
+  private static readonly TERMINAL_RESTORE_TTL_MS = 30 * 60_000; // 30 minutes
+
   private deriveRestoredStatus(saved: PersistedWorkerState, now: number): WorkerHandle["status"] | null {
     if (saved.killedAt) return null;
 
     const lifecycle = readWorkerLifecycleFacts(saved.sessionDir);
+
+    // Prune terminal workers (done/warning/failed) older than TTL — they're stale
+    // and will never be interacted with again. Prevents accumulation across reloads.
+    const terminalCutoff = now - TeamLeader.TERMINAL_RESTORE_TTL_MS;
+    if (lifecycle.lastTerminalStatus || saved.status === "done" || saved.status === "warning" || saved.status === "failed") {
+      const terminalAt = saved.doneAt ?? saved.lastActivityAt ?? saved.spawnedAt;
+      if (terminalAt && terminalAt < terminalCutoff) return null;
+    }
+
     if (lifecycle.lastTerminalStatus === "done") {
       return saved.freeform
         ? (saved.graceAt && now >= saved.graceAt ? "grace" : "done")
@@ -931,16 +942,17 @@ export class TeamLeader {
     if (!worker.freeform || !worker.doneAt || !worker.graceAt || !worker.resumableUntilAt) return;
 
     const toGraceMs = Math.max(0, worker.graceAt - now);
-    setTimeout(() => {
+    const graceTimer = setTimeout(() => {
       const current = this.workers.get(workerName);
       if (!current || current.status !== "done") return;
       current.status = "grace";
       this.renderWidget();
       this.persistStateIfHydrated();
     }, toGraceMs);
+    this.trackWorkerTimer(workerName, graceTimer);
 
     const toExpireMs = Math.max(0, worker.resumableUntilAt - now);
-    setTimeout(() => {
+    const expireTimer = setTimeout(() => {
       const current = this.workers.get(workerName);
       if (!current) return;
       if (current.freeform && current.resumableUntilAt && Date.now() >= current.resumableUntilAt) {
@@ -950,10 +962,12 @@ export class TeamLeader {
         this.meshDelivered.delete(workerName);
         this.childProcesses.delete(workerName);
         this.clearPendingAmbientChat(workerName);
+        this.cancelWorkerTimers(workerName);
         this.renderWidget();
         this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
       }
     }, toExpireMs);
+    this.trackWorkerTimer(workerName, expireTimer);
   }
 
   /** Restore worker state from the session JSONL after a reload. */
@@ -1515,6 +1529,7 @@ export class TeamLeader {
     freeform?: boolean,
     baseRef?: string,
     ticketText?: string,
+    explicitCwd?: string,
   ): Promise<WorkerHandle> {
     if (!this.ctx) throw new Error("Leader context not set");
 
@@ -1531,7 +1546,7 @@ export class TeamLeader {
       useWorktree = false;
     }
 
-    const repoDir = this.ctx.cwd;
+    const repoDir = explicitCwd ?? this.ctx.cwd;
     let cwd = repoDir;
 
     if (useWorktree) {
@@ -1662,6 +1677,10 @@ export class TeamLeader {
 
   private async handleWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null) {
     if (!this.ctx) return;
+    // Guard: if this worker was explicitly killed and already removed from the map,
+    // do NOT re-add it. The exit handler fires asynchronously after kill() deletes
+    // the worker — re-adding creates a zombie that persists forever. (RC-A4)
+    if (worker.status === "killed" || worker.killedAt) return;
     if (!this.workers.has(name)) {
       this.workers.set(name, worker);
     }
@@ -2091,33 +2110,92 @@ export class TeamLeader {
   async kill(workerName: string): Promise<void> {
     const worker = this.workers.get(workerName);
     if (!worker) return;
+
+    // ── Phase 1: Immediate synchronous teardown ──────────────────────────
+    // Everything here is synchronous and fast. No await, no throws.
     this.appendV2Fact(workerName, { type: "worker_killed", at: Date.now() });
     worker.status = "killed";
     worker.routeState = "dead";
     worker.meshClientId = undefined;
     worker.killedAt = Date.now();
-    this.unwatchWorker(workerName);
 
-    // Signal worker disposal to active subscriptions so they clean up
-    // without waiting for their timeout to fire (which produces spammy wakes).
-    this.disposeSubscriptionsForWorker(workerName);
-
-    if (this.ctx) {
-      await this.pi.exec(getMaiBin(), ["close", worker.ticketId], { cwd: this.ctx.cwd, timeout: 5000 }).catch(() => {});
-      await cleanupWorker(this.ctx.cwd, worker, { preserveBranch: true } /* always preserve branch on kill */);
-    }
+    // Remove from map FIRST — prevents handleWorkerExit zombie re-add (RC-A4)
+    // and ensures widget/polling no longer see this worker.
     this.workers.delete(workerName);
+    const child = this.childProcesses.get(workerName);
     this.childProcesses.delete(workerName);
     this.meshDelivered.delete(workerName);
     this.clearPendingAmbientChat(workerName);
+
+    // Stop activity monitor + cancel any pending lifecycle timers
+    this.unwatchWorker(workerName);
+    this.cancelWorkerTimers(workerName);
+
+    // Signal disposal to active subscriptions
+    this.disposeSubscriptionsForWorker(workerName);
+
+    // Persist cleared state immediately — even if background cleanup fails (RC-B1)
     this.renderWidget();
     this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
+
+    // ── Phase 2: Fire-and-forget background cleanup ──────────────────────
+    // Kill the process, close the ticket, clean worktree. All best-effort.
+    // Never blocks the caller and never throws back into kill().
+    void this.backgroundCleanup(workerName, worker, child);
+  }
+
+  /**
+   * Best-effort background cleanup after a worker is killed.
+   * Kills the child process, closes the mai ticket, and cleans up the worktree.
+   * All operations are fire-and-forget — never throws.
+   */
+  private async backgroundCleanup(
+    workerName: string,
+    worker: WorkerHandle,
+    child: ChildProcess | undefined,
+  ): Promise<void> {
+    try {
+      // Kill the child process — try both the ChildProcess reference and the
+      // worker's PID directly (restored workers may not have a ChildProcess ref).
+      const pid = child?.pid ?? worker.pid;
+      if (pid && pid > 0) {
+        try { killWorker(pid); } catch { /* process may already be dead */ }
+      }
+
+      // Close mai ticket (best-effort, 5s timeout)
+      if (this.ctx) {
+        await this.pi.exec(getMaiBin(), ["close", worker.ticketId], {
+          cwd: this.ctx.cwd, timeout: 5000,
+        }).catch(() => {});
+        await cleanupWorker(this.ctx.cwd, worker, {
+          preserveBranch: true, // always preserve branch on kill
+        }).catch(() => {});
+      }
+    } catch {
+      // Swallow everything — this is background best-effort cleanup
+    }
+  }
+
+  /** Cancel any pending setTimeout-based timers for a worker. */
+  private workerTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
+  private cancelWorkerTimers(workerName: string) {
+    const timers = this.workerTimers.get(workerName);
+    if (timers) {
+      for (const t of timers) clearTimeout(t);
+      this.workerTimers.delete(workerName);
+    }
+  }
+
+  private trackWorkerTimer(workerName: string, timer: ReturnType<typeof setTimeout>) {
+    const arr = this.workerTimers.get(workerName) ?? [];
+    arr.push(timer);
+    this.workerTimers.set(workerName, arr);
   }
 
   async killAll(): Promise<void> {
-    for (const name of [...this.workers.keys()]) {
-      await this.kill(name);
-    }
+    // Parallel kill with per-worker error isolation (RC-A6)
+    const names = [...this.workers.keys()];
+    await Promise.allSettled(names.map(name => this.kill(name)));
     this.renderWidget();
   }
 
@@ -2147,6 +2225,7 @@ export class TeamLeader {
 
   private pruneStaleRecoveredWorkers() {
     const now = Date.now();
+    let pruned = false;
     for (const [name, worker] of this.workers) {
       if (worker.status !== "spawning" && worker.status !== "running") continue;
       if (isProcessAlive(worker.pid)) continue;
@@ -2165,11 +2244,18 @@ export class TeamLeader {
       worker.routeState = "dead";
       worker.meshClientId = undefined;
       worker.lastNote = worker.lastNote ?? "stale recovered worker pruned after reload";
+      pruned = true;
+    }
+    // Persist prune results so reload doesn't restore the same stale workers again (RC-B3)
+    if (pruned) {
+      this.renderWidget();
+      this.persistStateIfHydrated();
     }
   }
 
   private scheduleWorkerCleanup(workerName: string, expectedTicketId: string, expectedSpawnedAt: number) {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.workerTimers.delete(workerName); // self-clean
       const w = this.workers.get(workerName);
       if (!w) return;
       if (w.ticketId !== expectedTicketId) return;
@@ -2183,6 +2269,7 @@ export class TeamLeader {
         this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
       }
     }, 180_000);
+    this.trackWorkerTimer(workerName, timer);
   }
 
   /**

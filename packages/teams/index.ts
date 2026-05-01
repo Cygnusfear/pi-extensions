@@ -107,6 +107,8 @@ export default function (pi: ExtensionAPI) {
 		});
 		pi.on("session_shutdown", async () => {
 			leader.stopPolling();
+			// Kill all workers and persist clean state so reload doesn't restore orphans (RC-B5)
+			await leader.killAll();
 		});
 		return;
 	}

@@ -91,7 +91,7 @@ const TeamsParams = Type.Object({
 
 type TeamsActionParams = {
   action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
-  tasks?: Array<{ text: string; ticketId?: string; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean }>;
+  tasks?: Array<{ text: string; ticketId?: string | { id: string; [k: string]: unknown }; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean; cwd?: string }>;
   name?: string;
   names?: string[];
   message?: string;
@@ -243,7 +243,10 @@ async function runTeamsAction(
 
       if (task.ticketId) {
         // Pre-created ticket — skip creation, just ensure it's started
-        ticketId = task.ticketId;
+        // Coerce: mai.ticket() returns { id, started, message } — extract .id if object
+        const raw = task.ticketId;
+        ticketId = typeof raw === 'string' ? raw
+          : (raw && typeof raw === 'object' && 'id' in raw ? String(raw.id) : String(raw));
         await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
       } else {
         // Create ticket from task text
@@ -281,7 +284,7 @@ async function runTeamsAction(
       }
 
       try {
-        const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef, task.text);
+        const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef, task.text, task.cwd);
         const modelInfo = effectiveModel ? ` [${effectiveModel}]` : "";
         const toolsInfo = task.hasTools ? " [has-tools]" : "";
         const tmplInfo = task.template ? ` (template: ${task.template})` : "";

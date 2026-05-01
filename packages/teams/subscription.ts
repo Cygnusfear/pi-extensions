@@ -256,6 +256,11 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		return p.then(onfulfilled ?? undefined, onrejected ?? undefined);
 	}
 
+	/** Catch rejection. Returns a native Promise so it integrates with await/try-catch. */
+	catch<TResult = never>(onrejected: (reason: unknown) => TResult | PromiseLike<TResult>): Promise<TeamsEvent | TResult> {
+		return this.then(undefined, onrejected);
+	}
+
 	// ─── Chainable helpers ───
 
 	/** Register a streaming callback. Fires on every matching event until unsubscribed. */
@@ -270,6 +275,10 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		this.timeoutHandle = setTimeout(() => {
 			this.rejectWith(new Error(`teams.on timeout after ${ms}ms`));
 		}, ms);
+		// Prevent unhandled rejection crash — attach a silent no-op catch.
+		// The caller's await will still see the rejection, but if they don't
+		// catch it (e.g. in a background promise), the process won't crash.
+		this.catch(() => {});
 		return this;
 	}
 

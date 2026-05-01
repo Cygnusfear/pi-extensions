@@ -12,12 +12,14 @@ When multiple AI agents work on the same codebase, tracking authorship becomes i
 - **Agent-v1 protocol** — full transcript with agent name (mesh nickname), model ID, conversation ID, and file paths
 - **Session transcript parsing** — extracts user messages, assistant responses, thinking blocks, and tool calls from pi's JSONL session files
 - **Blame, stats, search tools** — query git-ai attribution data from within pi
+- **Local hook preservation** — git-ai's bundled hooks dispatch repo-local `.git/hooks` hooks first, so tools like lefthook, husky, and format checks still run when pi sets `core.hooksPath`
 
 ## How It Works
 
 1. On every `edit`, `write`, `apply_patch`, or `hash_edit` tool call, the extension fires a **PreToolUse** checkpoint to git-ai (marks state before edit).
 2. After the tool completes, a **PostToolUse** checkpoint records the full conversation transcript and edited file paths.
-3. git-ai uses this data to attribute lines to the correct agent, model, and session in `git blame` output.
+3. For commits spawned inside pi, the extension points `core.hooksPath` at its bundled hooks via environment-only Git config. Those bundled hooks first run executable repo-local hooks from `.git/hooks/<hook-name>`, then run git-ai behavior.
+4. git-ai uses checkpoint and trailer data to attribute lines to the correct agent, model, and session in `git blame` output.
 
 ### agent-v1 Payload
 

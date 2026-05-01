@@ -392,6 +392,97 @@ describe("executeInSession — Read missing files", () => {
 	});
 });
 
+describe("executeInSession — Read binary files", () => {
+	test("Read PNG file returns image description, not raw bytes", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-binary-"));
+		try {
+			// Create a minimal 1x1 PNG
+			const pngHeader = Buffer.from([
+				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+				0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+				0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+				0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+				0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, // IDAT chunk
+				0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+				0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+				0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, // IEND chunk
+				0x44, 0xae, 0x42, 0x60, 0x82,
+			]);
+			fs.writeFileSync(path.join(cwd, "test.png"), pngHeader);
+
+			const result = await executeInSession(
+				sess,
+				"const content = await Read({ path: 'test.png' }); console.log(content);",
+				makeDeps({ cwd }),
+			);
+			expect(result.error).toBeUndefined();
+			expect(result.output).toContain("image/png");
+			expect(result.output).toContain("test.png");
+			// Must NOT contain raw binary garbage
+			expect(result.output).not.toContain("IHDR");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("Read non-image binary file returns binary description", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-binary-other-"));
+		try {
+			// Create a minimal gzip file (magic: 1f 8b)
+			const gzipHeader = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+			fs.writeFileSync(path.join(cwd, "data.gz"), gzipHeader);
+
+			const result = await executeInSession(
+				sess,
+				"const content = await Read({ path: 'data.gz' }); console.log(content);",
+				makeDeps({ cwd }),
+			);
+			expect(result.error).toBeUndefined();
+			expect(result.output).toContain("Binary file");
+			expect(result.output).toContain("gzip");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("Read text file still works normally", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-text-"));
+		try {
+			fs.writeFileSync(path.join(cwd, "hello.txt"), "Hello World\nLine 2\n", "utf-8");
+			const result = await executeInSession(
+				sess,
+				"const content = await Read({ path: 'hello.txt' }); console.log(content);",
+				makeDeps({ cwd }),
+			);
+			expect(result.error).toBeUndefined();
+			expect(result.output).toContain("Hello World");
+			expect(result.output).toContain("Line 2");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("Read text file with offset and limit still works", async () => {
+		const sess = createCodeModeSession();
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-text-offset-"));
+		try {
+			fs.writeFileSync(path.join(cwd, "lines.txt"), "line1\nline2\nline3\nline4\n", "utf-8");
+			const result = await executeInSession(
+				sess,
+				"const content = await Read({ path: 'lines.txt', offset: 2, limit: 2 }); console.log(content);",
+				makeDeps({ cwd }),
+			);
+			expect(result.error).toBeUndefined();
+			expect(result.output.trim()).toBe("line2\nline3");
+		} finally {
+			fs.rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("executeInSession — rg/fd symlink following", () => {
 	test("rg/fd follow symlinks by default, opt out with follow=false", async () => {
 		const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "code-mode-follow-"));

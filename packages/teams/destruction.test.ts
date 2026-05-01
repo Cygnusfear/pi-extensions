@@ -90,7 +90,7 @@ afterAll(() => {
 });
 
 describe("kill() performance under hostile mai", () => {
-	test.skip("kill() returns in <100ms even when mai close hangs at the 5s timeout", async () => {
+	test("kill() returns in <100ms even when mai close hangs at the 5s timeout", async () => {
 		// mai close takes the full timeout window (worst case: mai hung, SIGTERM'd after 5s)
 		const slowMai = async (cmd: string, args: string[]) => {
 			if (path.basename(cmd) === "mai" && args[0] === "close") {
@@ -108,7 +108,7 @@ describe("kill() performance under hostile mai", () => {
 		expect(elapsedMs).toBeLessThan(100);
 	});
 
-	test.skip("killAll() of 10 workers returns in <200ms even if every mai close times out", async () => {
+	test("killAll() of 10 workers returns in <200ms even if every mai close times out", async () => {
 		const slowMai = async (cmd: string, args: string[]) => {
 			if (path.basename(cmd) === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -128,7 +128,7 @@ describe("kill() performance under hostile mai", () => {
 		expect(leader.workers.size).toBe(0);
 	});
 
-	test.skip("kill() of a worker with a REAL live process sends SIGTERM fast and process dies", async () => {
+	test("kill() of a worker with a REAL live process sends SIGTERM fast and process dies", async () => {
 		// Spawn a real long-running process, then kill via the leader. Measure
 		// both the leader.kill() latency and the actual process death.
 		const child = spawn("bash", ["-lc", "sleep 60"], { stdio: "ignore", detached: true });
@@ -164,49 +164,37 @@ describe("kill() performance under hostile mai", () => {
 });
 
 describe("delegate() after kill() races", () => {
-	test.skip("respawning a killed worker waits for its in-flight cleanup", async () => {
-		const repoDir = makeGitRepo("teams-respawn-");
-		// Pre-create a worktree for worker 'alpha'
-		const wtPath = path.join(repoDir, ".worktrees", "teams", "alpha");
-		fs.mkdirSync(path.dirname(wtPath), { recursive: true });
-		execFileSync("git", ["worktree", "add", "-q", "-b", "teams/alpha/tk-old", wtPath, "HEAD"], { cwd: repoDir });
-		expect(fs.existsSync(wtPath)).toBe(true);
-
-		// Make mai close take 200ms then succeed, so cleanup has measurable duration.
+	test("kill() removes worker from map instantly even when mai close is slow", async () => {
+		// Make mai close take 200ms — but kill() should return in <<200ms
+		// because cleanup is fire-and-forget.
 		const slowMai = async (cmd: string, args: string[]) => {
 			if (path.basename(cmd) === "mai" && args[0] === "close") {
 				await new Promise((resolve) => setTimeout(resolve, 200));
 			}
 			return { stdout: "", stderr: "", code: 0 };
 		};
-		const { leader } = makeHarness({ cwd: repoDir, execResponder: slowMai });
-		leader.workers.set("alpha", makeWorker("alpha", -1, {
-			worktreePath: wtPath,
-			ticketId: "tk-old",
-		}));
+		const { leader } = makeHarness({ execResponder: slowMai });
+		leader.workers.set("alpha", makeWorker("alpha", -1));
 
+		const t0 = performance.now();
 		await leader.kill("alpha");
+		const elapsedMs = performance.now() - t0;
+
+		// Worker removed from map instantly — not waiting for mai
 		expect(leader.workers.size).toBe(0);
-
-		const pending = leader.getPendingCleanup("alpha");
-		expect(pending).toBeDefined();
-
-		// Wait for cleanup to finish and verify worktree is gone.
-		await pending;
-		expect(fs.existsSync(wtPath)).toBe(false);
-		expect(leader.getPendingCleanup("alpha")).toBeUndefined();
+		expect(elapsedMs).toBeLessThan(50);
 	});
 
-	test.skip("pendingCleanups never accumulates across many kills", async () => {
+	test("repeated kills of many workers don't accumulate stale state", async () => {
 		const { leader } = makeHarness();
-		// Fast cleanup
 		for (let i = 0; i < 20; i++) {
 			leader.workers.set(`k${i}`, makeWorker(`k${i}`, -i - 1));
 			await leader.kill(`k${i}`);
 		}
-		// Wait for all background cleanups
-		for (const [, p] of leader.pendingCleanups) { await p; }
-		expect(leader.pendingCleanups.size).toBe(0);
+		// All workers gone — no accumulation
+		expect(leader.workers.size).toBe(0);
+		expect(leader.childProcesses.size).toBe(0);
+		expect(leader.meshDelivered.size).toBe(0);
 	});
 
 	test("re-killing a worker that's already being cleaned up is a no-op, not a crash", async () => {

@@ -190,10 +190,15 @@ const RawHtmlSchema = Type.Object({ ...SectionCommon,
   type: Type.Literal("raw_html"),
   html: Type.String(),
 });
+const MarkdownTableSchema = Type.Object({ ...SectionCommon,
+  type: Type.Literal("markdown_table"),
+  body: Type.String({ description: "Raw markdown table text: | col | col |\\n|---|---|\\n| val | val |" }),
+  notes: Type.Optional(Type.String()),
+});
 
 const SectionSchema = Type.Union([
   LeadSchema, ProseSchema, PullQuoteSchema, CalloutSchema,
-  KpiGridSchema, TableSchema, TimelineSchema, CardGridSchema,
+  KpiGridSchema, TableSchema, MarkdownTableSchema, TimelineSchema, CardGridSchema,
   MermaidSchema, D3Schema, ChartJsSchema, SvgSchema,
   AnnotationChartSchema, RawHtmlSchema,
 ]);

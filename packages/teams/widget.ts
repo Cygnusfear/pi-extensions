@@ -49,10 +49,19 @@ export function createTeamsWidget(
       const now = Date.now();
       // Hide grace workers whose last output was > 2min ago.
       // They're still visible to the agent — just not cluttering the TUI.
+      const TERMINAL_TUI_HIDE_MS = 120_000; // 2 minutes — same as grace
       const workers = allWorkers.filter((w) => {
-        if (w.status !== "grace") return true;
-        if (!w.lastOutputAt) return true; // no output timestamp → keep visible
-        return now - w.lastOutputAt < GRACE_TUI_HIDE_MS;
+        // Hide terminal workers (killed/done/warning/failed) older than TTL
+        if (["killed", "done", "warning", "failed"].includes(w.status)) {
+          const terminalAt = w.doneAt ?? w.killedAt ?? w.lastOutputAt ?? w.lastActivityAt;
+          if (terminalAt && now - terminalAt > TERMINAL_TUI_HIDE_MS) return false;
+        }
+        // Hide grace workers whose last output was > 2min ago
+        if (w.status === "grace") {
+          if (!w.lastOutputAt) return true;
+          return now - w.lastOutputAt < GRACE_TUI_HIDE_MS;
+        }
+        return true;
       });
       if (!workers.length) return [];
 
