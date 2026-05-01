@@ -1,71 +1,68 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# prepare-commit-msg — dispatch repo-local hooks, then inject AI agent trailers
+# when invoked inside a pi-spawned process.
+#
+# pi's git-ai extension sets:
+#   core.hooksPath = <this dir>        (via GIT_CONFIG_COUNT env override)
+#   PI_AGENT_NAME, PI_AGENT_EMAIL      (required — else no-op after local hook)
+#   PI_AGENT_MODEL                     (optional)
+#   PI_SESSION_ID, PI_SESSION_NAME     (optional)
+#   PI_REAL_HOOKS_DIR                  (optional — override chained repo hook dir)
+#
+# Behavior:
+#   1. Run repo-local .git/hooks/prepare-commit-msg first when executable.
+#      Propagate failures and preserve Git's original hook arguments.
+#   2. If PI_AGENT_NAME unset → no-op after the local hook.
+#   3. Skip merge/squash/commit-source commit messages (git calls the hook
+#      multiple times; we only want to amend fresh message sources).
+#   4. Append trailers via `git interpret-trailers --in-place --if-exists
+#      addIfDifferent` so re-amends don't duplicate lines.
 
-if [ "$LEFTHOOK_VERBOSE" = "1" -o "$LEFTHOOK_VERBOSE" = "true" ]; then
-  set -x
+set -e
+
+GIT_AI_HOOK_SELF="$0"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/local-hook-dispatch.sh
+. "${SCRIPT_DIR}/lib/local-hook-dispatch.sh"
+
+# Run the repository's own hook before git-ai mutates the commit message.
+git_ai_run_local_hook "prepare-commit-msg" "$@"
+
+MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+
+# No agent identity → no-op after local hook pass-through.
+if [ -z "${PI_AGENT_NAME:-}" ]; then
+	exit 0
 fi
 
-if [ "$LEFTHOOK" = "0" ]; then
-  exit 0
+# Don't touch merge/squash/template/existing commits being amended via -C.
+case "$COMMIT_SOURCE" in
+	merge|squash|commit)
+		exit 0
+		;;
+esac
+
+AGENT_EMAIL="${PI_AGENT_EMAIL:-pi-agent@localhost}"
+
+# Build trailer args. Each trailer is only added if the exact key+value isn't
+# already present (addIfDifferent), so repeated amends don't dup lines.
+TRAILER_ARGS=(
+	--in-place
+	--if-exists addIfDifferent
+	--trailer "Co-Authored-By: ${PI_AGENT_NAME} <${AGENT_EMAIL}>"
+	--trailer "AI-Agent: ${PI_AGENT_NAME}"
+)
+
+if [ -n "${PI_AGENT_MODEL:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Model: ${PI_AGENT_MODEL}")
+fi
+if [ -n "${PI_SESSION_ID:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Session-Id: ${PI_SESSION_ID}")
+fi
+if [ -n "${PI_SESSION_NAME:-}" ]; then
+	TRAILER_ARGS+=(--trailer "AI-Session-Name: ${PI_SESSION_NAME}")
 fi
 
-call_lefthook()
-{
-  if test -n "$LEFTHOOK_BIN"
-  then
-    "$LEFTHOOK_BIN" "$@"
-  elif lefthook -h >/dev/null 2>&1
-  then
-    lefthook "$@"
-  elif /etc/profiles/per-user/alexander/bin/lefthook -h >/dev/null 2>&1
-  then
-    /etc/profiles/per-user/alexander/bin/lefthook "$@"
-  else
-    dir="$(git rev-parse --show-toplevel)"
-    osArch=$(uname | tr '[:upper:]' '[:lower:]')
-    cpuArch=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
-    if test -f "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook"
-    then
-      "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook" "$@"
-    elif test -f "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook"
-    then
-      "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook" "$@"
-    elif test -f "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook"
-    then
-      "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook" "$@"
-    elif test -f "$dir/node_modules/lefthook/bin/index.js"
-    then
-      "$dir/node_modules/lefthook/bin/index.js" "$@"
-    elif go tool lefthook -h >/dev/null 2>&1
-    then
-      go tool lefthook "$@"
-    elif bundle exec lefthook -h >/dev/null 2>&1
-    then
-      bundle exec lefthook "$@"
-    elif yarn lefthook -h >/dev/null 2>&1
-    then
-      yarn lefthook "$@"
-    elif pnpm lefthook -h >/dev/null 2>&1
-    then
-      pnpm lefthook "$@"
-    elif swift package lefthook >/dev/null 2>&1
-    then
-      swift package --build-path .build/lefthook --disable-sandbox lefthook "$@"
-    elif command -v mint >/dev/null 2>&1
-    then
-      mint run csjones/lefthook-plugin "$@"
-    elif uv run lefthook -h >/dev/null 2>&1
-    then
-      uv run lefthook "$@"
-    elif mise exec -- lefthook -h >/dev/null 2>&1
-    then
-      mise exec -- lefthook "$@"
-    elif devbox run lefthook -h >/dev/null 2>&1
-    then
-      devbox run lefthook "$@"
-    else
-      echo "Can't find lefthook in PATH"
-    fi
-  fi
-}
-
-call_lefthook run "prepare-commit-msg" "$@"
+git interpret-trailers "${TRAILER_ARGS[@]}" "$MSG_FILE"
+exit 0

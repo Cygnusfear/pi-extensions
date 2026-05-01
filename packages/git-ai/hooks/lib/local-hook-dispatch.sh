@@ -57,6 +57,24 @@ _git_ai_git_hooks_dir() {
 	return 1
 }
 
+_git_ai_run_repo_local_hook() {
+	local hooks_dir="$1"
+	shift
+
+	# The parent git command reaches this package through a GIT_CONFIG_*
+	# core.hooksPath override. Do not leak that override into repo-local hook
+	# managers: lefthook/husky may inspect core.hooksPath and rewrite the
+	# active hooks directory. While the local hook runs, make Git report the
+	# repository-local hooks directory instead.
+	(
+		unset GIT_CONFIG_PARAMETERS
+		export GIT_CONFIG_COUNT=1
+		export GIT_CONFIG_KEY_0=core.hooksPath
+		export GIT_CONFIG_VALUE_0="$hooks_dir"
+		"$@"
+	)
+}
+
 git_ai_run_local_hook() {
 	local hook_name="$1"
 	shift
@@ -83,5 +101,5 @@ git_ai_run_local_hook() {
 		return 0
 	fi
 
-	"$hook_path" "$@"
+	_git_ai_run_repo_local_hook "$hooks_dir" "$hook_path" "$@"
 }
