@@ -683,12 +683,23 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       }
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
+
+      // Build env with optional agent git identity
+      const gitEnv: Record<string, string | undefined> = { ...process.env };
+      if (ctx.agentGitIdentity) {
+        gitEnv.GIT_AUTHOR_NAME = ctx.agentGitIdentity.name;
+        gitEnv.GIT_AUTHOR_EMAIL = ctx.agentGitIdentity.email;
+        gitEnv.GIT_COMMITTER_NAME = ctx.agentGitIdentity.name;
+        gitEnv.GIT_COMMITTER_EMAIL = ctx.agentGitIdentity.email;
+      }
+
       const result = await spawnAsync({
         cmd: "sh",
         args: ["-c", command],
         cwd: dir,
         timeout: timeoutMs,
         signal,
+        env: gitEnv,
       });
       if (result.error) {
         const isTimeout = result.error.message.includes("Timed out");
@@ -778,9 +789,65 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     }) => {
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
-      let content: string;
+
+      // Image extension → MIME map (same as readImage)
+      const imageExtMap: Record<string, string> = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+      };
+
+      // Check if the file is an image by extension
+      const ext = path.extname(resolved).toLowerCase();
+      const imageMime = imageExtMap[ext];
+
+      // Sniff first bytes to detect binary content (even without a known extension)
+      const isBinaryContent = (buf: Buffer): boolean => {
+        // Check for known image magic bytes
+        if (buf.length >= 8) {
+          // PNG: 89 50 4E 47 0D 0A 1A 0A
+          if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true;
+          // JPEG: FF D8 FF
+          if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true;
+          // GIF: GIF87a or GIF89a
+          if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+          // WebP: RIFF....WEBP
+          if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+            && buf.length >= 12 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+          // PDF: %PDF
+          if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return true;
+          // ZIP/PKG/JAR/DOCX etc: PK
+          if (buf[0] === 0x50 && buf[1] === 0x4b) return true;
+          // Gzip
+          if (buf[0] === 0x1f && buf[1] === 0x8b) return true;
+          // BZip2
+          if (buf[0] === 0x42 && buf[1] === 0x5a && buf[2] === 0x68) return true;
+          // 7z
+          if (buf[0] === 0x37 && buf[1] === 0x7a && buf[2] === 0xbc && buf[3] === 0xaf) return true;
+          // RAR
+          if (buf[0] === 0x52 && buf[1] === 0x61 && buf[2] === 0x72) return true;
+          // SQLite
+          if (buf.toString("ascii", 0, 6) === "SQLite") return true;
+          // Class file (Java)
+          if (buf[0] === 0xca && buf[1] === 0xfe && buf[2] === 0xba && buf[3] === 0xbe) return true;
+          // ELF
+          if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) return true;
+          // Mach-O
+          if ((buf[0] === 0xfe && buf[1] === 0xed && buf[2] === 0xfa) || (buf[0] === 0xce && buf[1] === 0xfa && buf[2] === 0xed)) return true;
+        }
+        // Fallback: check for null bytes in first 8KB (binary files almost always have them)
+        const sniffSize = Math.min(buf.length, 8192);
+        for (let i = 0; i < sniffSize; i++) {
+          if (buf[i] === 0) return true;
+        }
+        return false;
+      };
+
+      let buffer: Buffer;
       try {
-        content = fs.readFileSync(resolved, "utf-8");
+        buffer = fs.readFileSync(resolved);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException)?.code;
         if (code === "ENOENT") {
@@ -796,6 +863,33 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         }
         throw err;
       }
+
+      // Detect if this is a binary file
+      const isBinary = isBinaryContent(buffer);
+
+      if (isBinary) {
+        // Image files: base64 encode and attach like readImage does
+        if (imageMime) {
+          const base64 = buffer.toString("base64");
+          images.push({ data: base64, mimeType: imageMime });
+          return "Read image file [" + imageMime + "] (" + path.basename(resolved) + ", " + Math.round(buffer.length / 1024) + "KB)";
+        }
+        // Other binary files: return a clear description instead of garbled bytes
+        // Try to detect the actual type from magic bytes for a better message
+        let detectedType = "binary";
+        if (buffer.length >= 4) {
+          if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) detectedType = "PDF";
+          else if (buffer[0] === 0x50 && buffer[1] === 0x4b) detectedType = "ZIP/archive";
+          else if (buffer[0] === 0x1f && buffer[1] === 0x8b) detectedType = "gzip";
+          else if (buffer[0] === 0x42 && buffer[1] === 0x5a) detectedType = "bzip2";
+          else if (buffer.toString("ascii", 0, 6) === "SQLite") detectedType = "SQLite database";
+          else if (buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) detectedType = "ELF binary";
+        }
+        return "[Binary file: " + detectedType + ", " + Math.round(buffer.length / 1024) + "KB. Use bash to inspect: file " + filePath + "]";
+      }
+
+      // Text file: proceed as before
+      const content = buffer.toString("utf-8");
       if (!offset && !limit) return content;
       const lines = content.split("\n");
       const start = Math.max(0, (offset || 1) - 1);

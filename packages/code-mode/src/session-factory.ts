@@ -207,6 +207,9 @@ export interface ExecutionDeps {
 	 */
 	bindings?: Record<string, unknown>;
 
+	/** Optional git identity — injected into Bash env vars for automatic commit attribution. */
+	agentGitIdentity?: { name: string; email: string };
+
 	// ── Extension-side deferral hooks ───────────────────────────────────────────
 	// The session-helpers block (when injectSessionApi=true) needs to communicate
 	// back to extension lifecycle handlers (turn_end / agent_end). The host
@@ -881,6 +884,7 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 		logFn: (msg: string) => session.logs.push(msg),
 		signal: deps.signal,
 		sessionManager: deps.sessionManager,
+		agentGitIdentity: deps.agentGitIdentity,
 	});
 	const guarded = wrapWithContextGuard(
 		rawBindings,

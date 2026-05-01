@@ -16,6 +16,7 @@ import type {
 import { keyHint } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -59,6 +60,33 @@ const CODE_MODE_DECLARATIONS = fs.readFileSync(
 const CODE_MODE_SYSTEM_PROMPT = fs
   .readFileSync(new URL("./code-mode-prompt.md", import.meta.url), "utf-8")
   .replace("{{CODE_MODE_DECLARATIONS}}", CODE_MODE_DECLARATIONS);
+
+// =============================================================================
+// Agent Git Identity
+// =============================================================================
+
+/**
+ * Derive a git identity from the agent's stable nickname for automatic commit attribution.
+ * Uses @manada.dev as the email domain so agent commits are clearly distinguishable.
+ * Falls back to model slug if no stable identity is available.
+ */
+function deriveAgentGitIdentity(
+  model: { provider: string; id: string },
+): { name: string; email: string } {
+  const stableName = getStableNickname();
+  if (stableName) {
+    const slug = stableName.replace(/[^a-zA-Z0-9._-]/g, "-");
+    return {
+      name: stableName,
+      email: slug + "@manada.dev",
+    };
+  }
+  const slug = model.id.replace(/[^a-zA-Z0-9._-]/g, "-");
+  return {
+    name: model.id,
+    email: slug + "@manada.dev",
+  };
+}
 
 // =============================================================================
 // Extension
@@ -589,13 +617,14 @@ export default function (pi: ExtensionAPI) {
       // Capture current ouija session file for the in-block ouija executor.
       currentOuijaSessionFile = (ctx as any).sessionManager?.getSessionFile?.() ?? null;
 
+      const model = (ctx as any).model as { provider: string; id: string } | undefined;
       const { output, error, duration } = await executeInSession(
         sess,
         params.code,
         {
           signal: signal ?? new AbortController().signal,
           cwd: ctx.cwd,
-          model: (ctx as any).model,
+          model: model ?? { provider: "unknown", id: "unknown" },
           modelRegistry: (ctx as any).modelRegistry,
           executionTimeoutMs: timeoutMs,
           sessionManager: (ctx as any).sessionManager,
@@ -613,6 +642,7 @@ export default function (pi: ExtensionAPI) {
             options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
           ) => (pi as any).sendMessage?.(message, options),
           contextGuardEnabled,
+          agentGitIdentity: model ? deriveAgentGitIdentity(model) : undefined,
           requestSquash: (options) => {
             pendingSquash = { continue: options?.continue };
           },
