@@ -1,0 +1,23 @@
+packages/code-mode/extensions/code-mode.ts
+  d7a22c7b5b5bb303 19,64-90,620,627,645
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6f3c2183ac19b30e207d4e0a42dd104324a5869c",
+  "prompts": {
+    "d7a22c7b5b5bb303": {
+      "agent_id": {
+        "tool": "Claire Wormhole Tinsley",
+        "id": "019de3ff-2795-70b6-ac48-e96d9577897e",
+        "model": "kimi-coding/k2p6"
+      },
+      "human_author": null,
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 20,
+      "accepted_lines": 26,
+      "overriden_lines": 0
+    }
+  }
+}
