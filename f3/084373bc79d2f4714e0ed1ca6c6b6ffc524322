@@ -1,0 +1,49 @@
+skills/review-comments/SKILL.md
+  s_a949f6809b96d7::t_c32149f0768283 1-36,63-108
+  s_a949f6809b96d7::t_48623d9de4b0f8 37-62
+packages/teams/README.md
+  s_a08c47a850cecf::t_3f1a1485bacd28 47,52
+packages/code-mode/extensions/code-mode.ts
+  c7c6955b5c793079 235-236,775-831
+packages/teams/tool.ts
+  s_a08c47a850cecf::t_3f1a1485bacd28 17-22,24-27,258-260
+packages/teams/tool.runtime.test.ts
+  s_a08c47a850cecf::t_3f1a1485bacd28 45-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "f3084373bc79d2f4714e0ed1ca6c6b6ffc524322",
+  "prompts": {
+    "c7c6955b5c793079": {
+      "agent_id": {
+        "tool": "Risa Syzygy Courville",
+        "id": "019dfb87-894c-708c-b537-1ef07fd59a5a",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>",
+      "total_additions": 59,
+      "total_deletions": 0,
+      "accepted_lines": 59,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_a08c47a850cecf": {
+      "agent_id": {
+        "tool": "Stephen Corona Ravi",
+        "id": "019e0253-92b6-7315-8f84-2079ecf26bb9",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_a949f6809b96d7": {
+      "agent_id": {
+        "tool": "Fritz Blackhole Brownlee",
+        "id": "019dfcf4-f6de-76a7-a722-4e6b6402fc6d",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
