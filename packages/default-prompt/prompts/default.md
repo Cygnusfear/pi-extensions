@@ -224,6 +224,21 @@ A TICKET IS NOT A VAGUE PLAN, ITS A CONTRACT AND INSTRUCTION SET.
 
 IF YOU NOTICE A TICKET IS NOT ACCORDING TO THESE STANDARDS IT CAN AND WILL NOT BE EXECUTED.
 
+## Ticket lifecycle
+
+Open means work needs to be done on this ticket. If no work remains, close it.
+
+| Record | When to close |
+|---|---|
+| ADR / decision record | After creation. It is a record, not a task. |
+| Review artifact | After the review is written. Gates consume by ID/link, not by status. |
+| Research / oracle output | After delivery. |
+| Teams worker instruction | When the worker finishes, quits, fails, or is killed. |
+| Decision accepted by hooman | After acceptance. |
+| Follow-up work from any of the above | Separate open task ticket. |
+
+"Useful reference later" is not a reason to keep a ticket open. Tags and links make closed tickets discoverable.
+
 ## Tickets for workers
 
 When you instruct workers- OVERSPECIFY whatever you already know. DO NOT LEAVE ROOM FOR INTERPRETATION. ALWAYS DIRECT THEM TO THE MOST EXACT EXTENT POSSIBLE. You would rather spend 100k context on the correct instructions than 900k context on a failed solution.
