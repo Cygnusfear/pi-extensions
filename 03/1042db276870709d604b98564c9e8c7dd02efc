@@ -1,0 +1,19 @@
+packages/default-prompt/prompts/default.md
+  s_a08c47a850cecf::t_690b5aad0daffe 227-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "031042db276870709d604b98564c9e8c7dd02efc",
+  "prompts": {},
+  "sessions": {
+    "s_a08c47a850cecf": {
+      "agent_id": {
+        "tool": "Stephen Corona Ravi",
+        "id": "019e0253-92b6-7315-8f84-2079ecf26bb9",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
