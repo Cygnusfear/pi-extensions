@@ -44,10 +44,12 @@ await teams({
 ```
 
 Each task creates:
-1. A **mai ticket** with the task description
+1. A **mai instruction ticket** with the task description, tagged `team,agent-instruction`
 2. A **pi session** running as a separate process
 3. A **git worktree** (when `useWorktree: true`) branched from `baseRef`
 4. A **mesh channel** for leader↔worker communication
+
+Teams-created tickets are worker assignment records, not result artifacts. A review worker's assignment ticket is tagged `agent-instruction`; the review worker creates a separate `mai review` ticket tagged `review` for the actual review output. The same separation applies to oracle, research, and audit workers: the instruction ticket follows Teams lifecycle, while the produced artifact stays available for downstream use.
 
 ## Worker Lifecycle
 

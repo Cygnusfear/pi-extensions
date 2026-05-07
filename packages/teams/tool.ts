@@ -14,13 +14,17 @@ function formatActionError(error: unknown): string {
 }
 
 /**
- * Maps team template names to ticket creation semantics.
- * Templates not listed here default to normal actionable tickets.
+ * Tags that describe the worker role on Teams-created assignment tickets.
+ *
+ * These tickets are instructions owned by the Teams lifecycle, not the output
+ * artifacts produced by the worker. For example, a review worker's assignment
+ * ticket is tagged `agent-instruction`; the review worker creates a separate
+ * `review` artifact for the actual review output.
  */
-const TEMPLATE_TICKET_OVERRIDES: Record<string, { type: string; tags: string[] }> = {
-  review: { type: "artifact", tags: ["review"] },
-  oracle: { type: "artifact", tags: ["research", "oracle"] },
-  investigate: { type: "artifact", tags: ["research"] },
+const TEMPLATE_INSTRUCTION_TAGS: Record<string, string[]> = {
+  review: ["reviewer"],
+  oracle: ["oracle"],
+  investigate: ["investigate"],
 };
 
 const TeamsParams = Type.Object({
@@ -251,9 +255,9 @@ async function runTeamsAction(
       } else {
         // Create ticket from task text
         const templateName = task.template ?? "";
-        const overrides = TEMPLATE_TICKET_OVERRIDES[templateName];
-        const ticketType = overrides?.type ?? "task";
-        const ticketTags = ["team", ...(overrides?.tags ?? [])].join(",");
+        const templateTags = templateName ? (TEMPLATE_INSTRUCTION_TAGS[templateName] ?? [`template-${templateName}`]) : [];
+        const ticketType = "task";
+        const ticketTags = ["team", "agent-instruction", ...templateTags].join(",");
 
         const taskTitle = task.text.split("\n")[0].slice(0, 120);
         const needsBody = task.text.length > taskTitle.length;

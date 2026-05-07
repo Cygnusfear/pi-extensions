@@ -42,6 +42,34 @@ describe("teams tool runtime action", () => {
 		expect(result.content[0]?.text).toContain('already active');
 	});
 
+	test("delegate creates worker instruction tickets, not review artifacts", async () => {
+		const execCalls: Array<{ cmd: string; args: string[] }> = [];
+		const leader = {
+			setContext: () => {},
+			delegate: async () => ({ pid: 123 }),
+			startPolling: () => {},
+		} as any;
+		const pi = {
+			exec: async (cmd: string, args: string[]) => {
+				execCalls.push({ cmd, args });
+				if (path.basename(cmd) === 'mai' && args[0] === 'ticket') return { stdout: 'pe-review-inst\n', code: 0 };
+				return { stdout: '', code: 0 };
+			},
+		} as any;
+
+		await runTeamsAction(
+			pi,
+			leader,
+			{ action: 'delegate', tasks: [{ text: 'review x', assignee: 'rev', template: 'review' }], useWorktree: false },
+			{ cwd: '/tmp' } as any,
+		);
+
+		const create = execCalls.find((c) => path.basename(c.cmd) === 'mai' && c.args[0] === 'ticket');
+		expect(create?.args).toEqual(['ticket', 'review x', 'task', '-l', 'team,agent-instruction,reviewer', '-a', 'rev']);
+		expect(create?.args).not.toContain('artifact');
+		expect(create?.args.join(',')).not.toContain('review,');
+	});
+
 	test("kill action accepts an array of worker names", async () => {
 		const killed: string[] = [];
 		const leader = {

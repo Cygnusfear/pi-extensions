@@ -232,6 +232,8 @@ const PASSTHROUGH_TOOLS = new Set([
   "hotseat_handbook_read",
   // Session search
   "ouija",
+  // Heredoc injection (bypasses code-mode JS escaping)
+  "code_heredoc",
 ]);
 
 // Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
@@ -769,6 +771,63 @@ export default function (pi: ExtensionAPI) {
       }
 
       return new Text(`${header}\n\n${styled}`, 0, 0);
+    },
+  });
+
+  // ── code_heredoc: inject pre-escaped content into $ for use in execute_code ──────────
+  //
+  // The LLM calls this as a direct tool (not inside execute_code). The content goes through
+  // exactly ONE level of JSON unescaping (the tool-call parameter parse). The result is stored
+  // as $.heredoc_<key> on the persistent store proxy, which the next execute_code call can
+  // reference directly — no additional JS-string-escaping layer.
+  //
+  // This solves the "every tool eats backslashes" problem: when the target file needs literal
+  // backslash sequences (Python escape strings, regex, LaTeX, etc.), the LLM calls
+  // code_heredoc to stage the content, then execute_code with Write({ content: $.heredoc_x }).
+  pi.registerTool({
+    name: "code_heredoc",
+    label: "Heredoc",
+    description:
+      "Inject content into the code-mode persistent store ($). Use when the target content " +
+      "contains backslash sequences that would be mangled by double-escaping through " +
+      "execute_code's JS execution layer. The content goes through only one level of JSON " +
+      "unescaping (the tool-call protocol), then is stored verbatim as $.heredoc_<key>. " +
+      "Reference it in the next execute_code call as $.heredoc_<key>.",
+    parameters: Type.Object({
+      key: Type.String({
+        description:
+          "Storage key. Content will be available as $.heredoc_<key> in execute_code. " +
+          "Use a descriptive name like 'script', 'config', 'regex'.",
+      }),
+      content: Type.String({
+        description:
+          "The content to inject. This string goes through exactly one JSON.parse " +
+          "(standard tool-call parameter parsing) and is then stored verbatim in $.heredoc_<key>.",
+        promptGuidelines: [
+          "Use code_heredoc when Write/Edit/Python drop backslashes from content.",
+          "Common cases: Python strings with \" escapes, regex patterns, LaTeX, Windows paths.",
+          "The content goes through ONE JSON parse (not two) — single-level escaping works correctly.",
+          "After calling code_heredoc, use execute_code with $.heredoc_<key> as the content argument.",
+        ],
+      }),
+    }),
+    async execute(_toolCallId, params) {
+      const storeKey = "heredoc_" + params.key;
+      getSession().store.proxy[storeKey] = params.content;
+      const byteLen = Buffer.byteLength(params.content, "utf-8");
+      const humanSize = byteLen < 1024 ? byteLen + "B" : (byteLen / 1024).toFixed(1) + "KB";
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text:
+              "$." + storeKey + " set (" + humanSize + ", " +
+              params.content.split("\n").length + " lines). " +
+              "Use in execute_code: Write({ content: $." + storeKey + " })",
+          },
+        ],
+        details: undefined,
+      };
     },
   });
 
