@@ -2428,15 +2428,6 @@ export class TeamLeader {
       this.notifiedTerminal.add(key);
     }
 
-    // turn_finished is informational — the worker finished a turn but is still
-    // resumable. Don't trigger a coordinator turn (it's not actionable yet).
-    if (event.type === "turn_finished") {
-      const msg = formatPollEvent(event);
-      this.notifyQueue.push({ msg, triggerTurn: false });
-      void this.drainNotifyQueue();
-      return;
-    }
-
     if (event.type === "comment" && (event.comment.startsWith("DONE:") || event.comment.startsWith("QUIT:"))) {
       return;
     }

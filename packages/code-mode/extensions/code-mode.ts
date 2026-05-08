@@ -34,6 +34,7 @@ import {
   executeInSession,
   type CodeModeSession,
 } from "../src/session-factory";
+import { installCodeModeProcessGuard } from "../src/process-guard";
 
 // =============================================================================
 // Constants
@@ -277,6 +278,11 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 ]);
 
 export default function (pi: ExtensionAPI) {
+  // Process-level safety net: contain unhandled rejections / uncaught exceptions
+  // from vm-context user code so the host pi process can't be taken out by a
+  // background promise on $ that rejects with no .catch().
+  installCodeModeProcessGuard(pi);
+
   // Enforce tool exclusivity: only execute_code + passthrough tools visible to LLM
   pi.on("session_start", () => {
 

@@ -238,7 +238,10 @@ declare function maiCall(input?: { args?: string; cwd?: string }): Promise<{ std
  * await mai.close(t.id);
  */
 declare const mai: {
-  /** Create a structured ticket with Goal/AC/Verification template. */
+  /** Create a structured ticket with Goal/AC/Verification template.
+   *  By default the new ticket has status=open (backlog). Pass start: true to
+   *  also run `mai start <id>` (status=in_progress) when you're picking it up
+   *  immediately. */
   ticket(input: {
     title: string;
     description: string;
@@ -248,6 +251,7 @@ declare const mai: {
     goal?: string;
     acceptanceCriteria?: string[];
     verification?: string[];
+    /** Default false. Pass true to also start the ticket on creation. */
     start?: boolean;
     cwd?: string;
   }): Promise<{ id: string; started: boolean; message: string }>;

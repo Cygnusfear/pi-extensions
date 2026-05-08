@@ -126,7 +126,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     title, description, tags,
     type = "task", priority = 2,
     goal, acceptanceCriteria, verification,
-    start = true, cwd: explicitCwd,
+    // Default to false: mai's substrate convention is "creation = open / backlog,
+    // start when actually working on it". Auto-starting on creation skipped the
+    // backlog state and made all filed tickets look in-progress. Callers who
+    // want to start immediately pass start: true explicitly.
+    start = false, cwd: explicitCwd,
   }) => {
     const dir = maiResolveDir(explicitCwd);
     const buildChecklist = (items?: string[]) => {
