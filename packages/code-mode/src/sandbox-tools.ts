@@ -24,6 +24,7 @@ import {
   tldrSemanticSearchAPI,
   tldrStructureAPI,
 } from "@pi-extensions/tldr-code/api";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -86,6 +87,40 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     return result;
   }
 
+  interface ReviewHandoffInput {
+    worktree?: string;
+    base?: string;
+    head?: string;
+    commits: string[];
+    branch?: string;
+    ticket?: string;
+    worker?: string;
+    session?: string;
+    token?: string;
+    cwd?: string;
+  }
+
+  interface ReviewHandoffResult {
+    token: string;
+    link: string;
+    vscodeLink: string;
+    file: string;
+    payload: {
+      version: 1;
+      token: string;
+      createdAt: string;
+      worktree: string;
+      base?: string;
+      head?: string;
+      commits: string[];
+      commitOrder: "oldest-to-newest";
+      branch?: string;
+      ticket?: string;
+      worker?: string;
+      session?: string;
+    };
+  }
+
   type MaiFn = (input?: { args?: string; cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
   type MaiNs = MaiFn & {
     /** Create a structured ticket with optional Goal/AC/Verification body. */
@@ -113,6 +148,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     noteFile: (id: string, filePath: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
     /** List tickets (mai ls). */
     ls: (opts?: { cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+    /** Create a short Maiboard review handoff link backed by ~/.maitake/review-handoffs/<token>.json. */
+    reviewLink: (input: ReviewHandoffInput) => Promise<ReviewHandoffResult>;
   };
 
   const mai: MaiNs = (async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string } = {}) => {
@@ -195,6 +232,71 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     const result = await maiRun(["ls"], maiResolveDir(opts?.cwd));
     const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
     return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
+  };
+
+  const REVIEW_HANDOFF_TOKEN_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$/;
+  const REVIEW_HANDOFF_COMMIT_RE = /^[0-9a-f]{7,64}$/i;
+
+  const shortReviewHandoffToken = () => crypto.randomBytes(7).toString("base64url");
+
+  const gitOutForReviewHandoff = async (dir: string, args: string[]) => {
+    const result = await spawnAsync({ cmd: "git", args, cwd: dir, signal, timeout: 10_000 });
+    return result.status === 0 ? (result.stdout || "").trim() : "";
+  };
+
+  mai.reviewLink = async ({
+    worktree,
+    base,
+    head,
+    commits,
+    branch,
+    ticket,
+    worker,
+    session,
+    token,
+    cwd: explicitCwd,
+  }) => {
+    const dir = worktree ? resolvePath(worktree, cwd) : maiResolveDir(explicitCwd);
+    const resolvedWorktree = path.resolve(dir);
+    const cleanedCommits = (commits ?? []).map((commit) => String(commit).trim()).filter(Boolean);
+    if (cleanedCommits.length === 0) throw new Error("mai.reviewLink requires at least one commit");
+    const invalidCommit = cleanedCommits.find((commit) => !REVIEW_HANDOFF_COMMIT_RE.test(commit));
+    if (invalidCommit) throw new Error(`mai.reviewLink invalid commit: ${invalidCommit}`);
+
+    const safeToken = token ?? shortReviewHandoffToken();
+    if (!REVIEW_HANDOFF_TOKEN_RE.test(safeToken)) throw new Error("mai.reviewLink invalid token");
+
+    const resolvedBranch = branch || await gitOutForReviewHandoff(resolvedWorktree, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const resolvedHead = head || cleanedCommits[cleanedCommits.length - 1];
+    const resolvedBase = base || (await gitOutForReviewHandoff(resolvedWorktree, ["rev-parse", cleanedCommits[0] + "^"])) || undefined;
+
+    const payload: ReviewHandoffResult["payload"] = {
+      version: 1,
+      token: safeToken,
+      createdAt: new Date().toISOString(),
+      worktree: resolvedWorktree,
+      commits: cleanedCommits,
+      commitOrder: "oldest-to-newest",
+    };
+    if (resolvedBase) payload.base = resolvedBase;
+    if (resolvedHead) payload.head = resolvedHead;
+    if (resolvedBranch && resolvedBranch !== "HEAD") payload.branch = resolvedBranch;
+    if (ticket) payload.ticket = ticket;
+    if (worker) payload.worker = worker;
+    if (session) payload.session = session;
+
+    const dirPath = path.join(os.homedir(), ".maitake", "review-handoffs");
+    fs.mkdirSync(dirPath, { recursive: true });
+    const file = path.join(dirPath, safeToken + ".json");
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+
+    return {
+      token: safeToken,
+      link: `mai://review/${safeToken}`,
+      vscodeLink: `vscode://pi0.maiboard/review/${safeToken}`,
+      file,
+      payload,
+    };
   };
 
   // ==========================================================================

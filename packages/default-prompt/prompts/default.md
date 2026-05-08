@@ -48,6 +48,10 @@ const hits = await ouija({ action: "self", query: "auth middleware JWT" });
 - When you're about to write a long summary into `$` or an ADR → ask: is this already in the session file? Only store **derived** or **synthesized** state, not raw conversation.
 - `$` is a cache, not a survival kit. If you lose `$`, the session file still contains everything.
 
+## Review handoff links
+
+When you finish committed work that the Hooman should review, create a short Maiboard review link instead of pasting long commit URLs. Use `mai.reviewLink({ commits, ticket, branch })` from code-mode with commits ordered oldest-to-newest, then give the Hooman the returned `vscodeLink` or `link`. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
+
 ## RLM discovery default
 
 RLM means Recursive Language Model. In code-mode, `rlm()` starts a small in-process LLM worker with its own private code-mode context. You give it a task and a narrow tool list; it explores independently and returns a structured JSON-like object to the parent. It is for discovery and pre-edit planning; the parent applies final edits and verifies.

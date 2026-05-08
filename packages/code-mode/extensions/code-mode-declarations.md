@@ -273,6 +273,49 @@ declare const mai: {
 
   /** List tickets (mai ls). */
   ls(opts?: { cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+
+  /**
+   * Create a short Maiboard review handoff link.
+   * Writes ~/.maitake/review-handoffs/<token>.json and returns short links.
+   * commits must be ordered oldest-to-newest, matching the order you want reviewed.
+   */
+  reviewLink(input: {
+    /** Worktree/repo path. Defaults to cwd. */
+    worktree?: string;
+    /** Optional explicit base commit. Defaults to first commit's parent when available. */
+    base?: string;
+    /** Optional explicit head commit. Defaults to the last commit. */
+    head?: string;
+    /** Commits to review, ordered oldest-to-newest. */
+    commits: string[];
+    branch?: string;
+    ticket?: string;
+    worker?: string;
+    session?: string;
+    token?: string;
+    cwd?: string;
+  }): Promise<{
+    token: string;
+    /** Human-facing short link. */
+    link: string;
+    /** VS Code-native short link handled by Maiboard. */
+    vscodeLink: string;
+    file: string;
+    payload: {
+      version: 1;
+      token: string;
+      createdAt: string;
+      worktree: string;
+      base?: string;
+      head?: string;
+      commits: string[];
+      commitOrder: "oldest-to-newest";
+      branch?: string;
+      ticket?: string;
+      worker?: string;
+      session?: string;
+    };
+  }>;
 };
 
 /** @deprecated Use `mai.ticket()` instead. */
