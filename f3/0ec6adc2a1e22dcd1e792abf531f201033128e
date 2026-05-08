@@ -1,0 +1,21 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  s_3d5ce21b9977e9::t_41bc1dce7ee636 285,315
+packages/code-mode/src/sandbox-tools.ts
+  s_3d5ce21b9977e9::t_33045fefe00d62 107,114,256,260,265-270,322,326
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "f30ec6adc2a1e22dcd1e792abf531f201033128e",
+  "prompts": {},
+  "sessions": {
+    "s_3d5ce21b9977e9": {
+      "agent_id": {
+        "tool": "Katie Cosmos Shoemaker",
+        "id": "019dfd48-2572-729f-bbd2-599a5e5125ab",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
