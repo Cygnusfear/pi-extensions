@@ -11,19 +11,19 @@ Instant model switching with slash commands. Zero maintenance — always resolve
 
 ## Commands
 
-| Command | Provider | Resolves | Example Output |
-|---------|----------|----------|----------------|
-| `/opus` | Anthropic | Latest `claude-opus-*` | `claude-opus-4-6` |
-| `/sonnet` | Anthropic | Latest `claude-sonnet-*` | `claude-sonnet-4-6` |
-| `/haiku` | Anthropic | Latest `claude-haiku-*` | `claude-haiku-4-5` |
-| `/codex` | OpenAI Codex | Latest `gpt-*-codex` | `gpt-5.3-codex` |
-| `/gpt` | OpenAI Codex | Latest `gpt-5.*` | `gpt-5.4` |
-| `/zai` | ZAI Coding | `glm-5.1*` | `glm-5.1` |
-| `/zturbo` | ZAI | `glm-5-turbo` | `glm-5-turbo` |
-| `/z5v` | ZAI | `glm-5v*` | `glm-5v-turbo` |
-| `/z47` | ZAI | `glm-4.7` | `glm-4.7` |
-| `/zflash` | ZAI | `glm-4.7-flash` | `glm-4.7-flash` |
-| `/kimi` | Kimi Coding | `k2p*` | `k2p6` |
+| Command   | Provider     | Resolves                 | Example Output      |
+| --------- | ------------ | ------------------------ | ------------------- |
+| `/opus`   | Anthropic    | Latest `claude-opus-*`   | `claude-opus-4-7`   |
+| `/sonnet` | Anthropic    | Latest `claude-sonnet-*` | `claude-sonnet-4-7` |
+| `/haiku`  | Anthropic    | Latest `claude-haiku-*`  | `claude-haiku-4-7`  |
+| `/codex`  | OpenAI Codex | Latest `gpt-*-codex`     | `gpt-5.5x`          |
+| `/gpt`    | OpenAI Codex | Latest `gpt-5.*`         | `gpt-5.5`           |
+| `/zai`    | ZAI Coding   | `glm-5.1*`               | `glm-5.1`           |
+| `/zturbo` | ZAI          | `glm-5-turbo`            | `glm-5-turbo`       |
+| `/z5v`    | ZAI          | `glm-5v*`                | `glm-5v-turbo`      |
+| `/z47`    | ZAI          | `glm-4.7`                | `glm-4.7`           |
+| `/zflash` | ZAI          | `glm-4.7-flash`          | `glm-4.7-flash`     |
+| `/kimi`   | Kimi Coding  | `k2p*`                   | `k2p6`              |
 
 ## How Dynamic Resolution Works
 
