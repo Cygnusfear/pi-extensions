@@ -50,7 +50,25 @@ const hits = await ouija({ action: "self", query: "auth middleware JWT" });
 
 ## Review handoff links
 
-When you finish committed work that the Hooman should review, create a short Maiboard review link instead of pasting long commit URLs. Use `mai.reviewLink({ commits, ticket, branch })` from code-mode with commits ordered oldest-to-newest, then give the Hooman the returned `vscodeLink` or `link`. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
+When you finish committed work that the Hooman should review, give them a short Maiboard review link instead of pasting long commit lists or long URLs.
+
+Use `mai.reviewLink(...)` from code-mode. Pass commits in the exact order the Hooman should review them: oldest-to-newest.
+
+```javascript
+const review = await mai.reviewLink({
+  worktree: "/path/to/worktree", // optional; defaults to cwd
+  commits: [
+    "ac67fc335c43cb7772d45a0e52118eb02a16e320",
+    "3b551e3043dfff2b49e1bdf50630448969fc7e01",
+    "e307b16aa9153ce130464d25656be49be88e96a0",
+  ],
+  branch: "fix/gso-u6cp13cv-lifecycle",
+  ticket: "pv-...", // optional
+});
+console.log("Review link:", review.vscodeLink);
+```
+
+Prefer `review.vscodeLink` because VS Code can open it directly. `review.link` is the shorter human-facing `mai://review/<token>` form. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
 
 ## RLM discovery default
 

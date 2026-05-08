@@ -72,9 +72,32 @@ See [WORKER_LIFECYCLE.md](./WORKER_LIFECYCLE.md) for full details.
 - **`team_finish(quit)`** = intentional non-success
 - **Ambiguous exit** after real work = `warning` (not done)
 - **Long markdown/code-heavy worker notes should be file-backed** (write a file, then use `team_comment { filePath }`)
+- **Committed worker results should include a Maiboard review handoff link**. Use `mai.reviewLink({ commits, ticket, branch, worktree })` with commits ordered oldest-to-newest, then include `review.vscodeLink` or `review.link` in the worker's final `team_finish` summary.
 - **Startup failure** = `failed`
 - Workers **never** close tickets themselves — the coordinator owns ticket lifecycle
 - Workers **never** guess the coordinator's identity — it's injected at spawn time
+
+### Review handoff links for completed work
+
+When a worker commits changes that need review, create a short Maiboard link before `team_finish(done)`. Use code-mode to create the link, then include it in the direct `team_finish` tool summary. Do not paste a long commit list as the only review handoff.
+
+```javascript
+const review = await mai.reviewLink({
+  worktree: process.cwd(),
+  commits: [
+    "ac67fc335c43cb7772d45a0e52118eb02a16e320",
+    "3b551e3043dfff2b49e1bdf50630448969fc7e01",
+    "e307b16aa9153ce130464d25656be49be88e96a0",
+  ],
+  branch: "fix/gso-u6cp13cv-lifecycle",
+  ticket: "pv-...",
+  worker: "auth-worker",
+});
+
+console.log("Review link:", review.vscodeLink);
+```
+
+The link is short because the full payload lives in `~/.maitake/review-handoffs/<token>.json`. Maiboard resolves the token, opens the right worktree, and loads the exact ordered commit set.
 
 ## Session Strategies
 

@@ -10,6 +10,18 @@ Additive system prompt layering — loads a global default prompt and an optiona
 - **Frontmatter stripping** — YAML frontmatter is automatically removed before injection
 - **Hot-reload with caching** — files are stat-checked on each turn; only re-read when mtime changes
 
+## Agent review links
+
+The bundled prompt tells agents to create short Maiboard review handoff links when they finish committed work. Agents should call `mai.reviewLink(...)` from code-mode, pass commits oldest-to-newest, and print `review.vscodeLink` or `review.link` instead of a long commit list.
+
+The full review payload is stored at:
+
+```text
+~/.maitake/review-handoffs/<token>.json
+```
+
+This keeps chat output short enough for harnesses that wrap long lines, while preserving the exact worktree and ordered commit set for Maiboard.
+
 ## Prompt Layer Order
 
 ```

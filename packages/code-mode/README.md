@@ -242,6 +242,7 @@ All of these are available inside `execute_code` as typed async functions:
 | `readImage({ path })` | Read image files (png, jpg, gif, webp) |
 | `maiCall({ args? })` | Run mai CLI commands (raw passthrough) |
 | `mai.ticket/start/close/show/note/ls` | Structured mai operations |
+| `mai.reviewLink({ commits, ... })` | Create a short Maiboard review handoff link backed by `~/.maitake/review-handoffs/<token>.json` |
 | `maiTicket({...})` | Create tickets |
 | `recall({...})` | Search Foresight memory |
 | `memoryCreate({...})` | Create memory nodes |
@@ -265,6 +266,40 @@ All of these are available inside `execute_code` as typed async functions:
 | `tldrDead({ path })` | Find dead functions |
 | `tldrArch({ path })` | Detect architecture layers |
 | `tldrImpact({ func, path })` | Find all callers |
+
+## Maiboard review handoff links
+
+Use `mai.reviewLink(...)` when committed work is ready for the Hooman to review in Maiboard. The helper writes the full payload to disk and returns short links that do not break when the chat harness wraps long lines.
+
+```javascript
+const review = await mai.reviewLink({
+  worktree: process.cwd(),
+  commits: [
+    "ac67fc335c43cb7772d45a0e52118eb02a16e320",
+    "3b551e3043dfff2b49e1bdf50630448969fc7e01",
+    "e307b16aa9153ce130464d25656be49be88e96a0",
+  ],
+  branch: "fix/gso-u6cp13cv-lifecycle",
+  ticket: "pv-...",
+});
+
+console.log("Review link:", review.vscodeLink);
+```
+
+Commit order matters. Pass `commits` oldest-to-newest, matching the order the reviewer should read. The helper stores:
+
+```text
+~/.maitake/review-handoffs/<token>.json
+```
+
+Return fields:
+
+| Field | Meaning |
+|-------|---------|
+| `vscodeLink` | `vscode://pi0.maiboard/review/<token>` — preferred because VS Code can open it directly |
+| `link` | `mai://review/<token>` — shorter human-facing form |
+| `file` | Payload path under `~/.maitake/review-handoffs/` |
+| `payload` | Versioned payload containing worktree, base/head, ordered commits, branch, ticket, worker, and session metadata |
 
 ### Console extensions
 

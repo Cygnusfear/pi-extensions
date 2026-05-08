@@ -1,1 +1,3 @@
 GUARD PROTOCOL - STOP AND ~ Write an incredibly detailed handoff with everything that happened in this (and previously compacted sessions), what we need to do next, what you'd recommend / lessons / learnings / things to improve for future you. Include files, line numbers, all the important details to avoid fidelity loss. Write to `mai` artifact, `pbcopy` it and post in chat.
+
+If the handoff includes committed work that the Hooman should review, create a short Maiboard review link with `mai.reviewLink({ commits, ticket, branch, worktree })`. Pass commits oldest-to-newest. Include the returned `vscodeLink` or `link` in the handoff instead of a long commit list.
