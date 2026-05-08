@@ -1,0 +1,43 @@
+packages/tldr-code/extensions/tldr-code.ts
+  s_17a54c80a14ed2::t_e6c9a3cc7dadd1 364
+  s_17a54c80a14ed2::t_4aaa312398dfaa 634
+packages/shared/src/ouija-core.ts
+  s_17a54c80a14ed2::t_d549f80e6a8249 294-298,301-305,308-312
+packages/code-mode/extensions/code-mode.ts
+  s_17a54c80a14ed2::t_c56d5389fa8442 410
+  s_17a54c80a14ed2::t_3158206b692577 375
+  s_17a54c80a14ed2::t_4d108a36263b33 847-855
+packages/code-mode/src/tool-reference.ts
+  s_17a54c80a14ed2::t_5eec5032a0deb8 86-92
+packages/code-mode/tsconfig.json
+  s_17a54c80a14ed2::t_b840d4dccedbf5 19
+packages/code-mode/src/sandbox-tools.ts
+  s_17a54c80a14ed2::t_30d9663a8a26f1 1066-1068
+  s_17a54c80a14ed2::t_c6bf060cd908a5 202-205,208-236,238-264,266-277,279-285,287-309,311-313,315-319
+  s_17a54c80a14ed2::t_b1825c8874724d 325-336,338-341,343-372,375,380-381,383,385-399,401-415,417-418
+packages/fff/extensions/fff.ts
+  s_17a54c80a14ed2::t_b2c42062e065d7 372
+  s_17a54c80a14ed2::t_86a2ffa558c751 54
+  s_17a54c80a14ed2::t_957f2b8a8b9e27 519
+  s_17a54c80a14ed2::t_57a8086eae6181 380
+  s_17a54c80a14ed2::t_6d3691abe57064 456
+  s_17a54c80a14ed2::t_cb77ec558df6f2 443
+  s_17a54c80a14ed2::t_728ecd2ca25fa1 532
+  s_17a54c80a14ed2::t_b33169e88836ba 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "8a49e4798295fb02347e54607778ba957d01fe09",
+  "prompts": {},
+  "sessions": {
+    "s_17a54c80a14ed2": {
+      "agent_id": {
+        "tool": "Marcia Boson Perlmutter",
+        "id": "019e0497-87a8-7587-bd35-8e0a99afd9d7",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
