@@ -48,6 +48,17 @@ const hits = await ouija({ action: "self", query: "auth middleware JWT" });
 - When you're about to write a long summary into `$` or an ADR → ask: is this already in the session file? Only store **derived** or **synthesized** state, not raw conversation.
 - `$` is a cache, not a survival kit. If you lose `$`, the session file still contains everything.
 
+## Ticket links
+
+When you mention a specific mai ticket that the Hooman may want to open, use a short Maiboard ticket link instead of plain text when useful.
+
+```javascript
+const link = await mai.ticketLink("gso-x6nv04u5");
+console.log("Ticket link:", link.vscodeLink);
+```
+
+Prefer `link.vscodeLink` because VS Code can open it directly. `link.link` is the shorter human-facing `mai://ticket/<id>` form.
+
 ## Review handoff links
 
 When you finish committed work that the Hooman should review, give them a short Maiboard review link instead of pasting long commit lists or long URLs.

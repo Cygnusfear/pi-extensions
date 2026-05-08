@@ -274,6 +274,15 @@ declare const mai: {
   /** List tickets (mai ls). */
   ls(opts?: { cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
 
+  /** Create a short Maiboard ticket link. */
+  ticketLink(input: string | { ticket: string }): Promise<{
+    ticket: string;
+    /** Human-facing short link. */
+    link: string;
+    /** VS Code-native short link handled by Maiboard. */
+    vscodeLink: string;
+  }>;
+
   /**
    * Create a short Maiboard review handoff link.
    * Writes ~/.maitake/review-handoffs/<token>.json and returns short links.

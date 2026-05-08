@@ -100,6 +100,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     cwd?: string;
   }
 
+  interface TicketLinkResult {
+    ticket: string;
+    link: string;
+    vscodeLink: string;
+  }
+
   interface ReviewHandoffResult {
     token: string;
     link: string;
@@ -148,6 +154,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     noteFile: (id: string, filePath: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
     /** List tickets (mai ls). */
     ls: (opts?: { cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+    /** Create a short Maiboard ticket link. */
+    ticketLink: (input: string | { ticket: string }) => Promise<TicketLinkResult>;
     /** Create a short Maiboard review handoff link backed by ~/.maitake/review-handoffs/<token>.json. */
     reviewLink: (input: ReviewHandoffInput) => Promise<ReviewHandoffResult>;
   };
@@ -236,8 +244,19 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
   const REVIEW_HANDOFF_TOKEN_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$/;
   const REVIEW_HANDOFF_COMMIT_RE = /^[0-9a-f]{7,64}$/i;
+  const MAI_TICKET_ID_RE = /^[a-z]{2,4}-[a-z0-9]{4,8}$/;
 
   const shortReviewHandoffToken = () => crypto.randomBytes(7).toString("base64url");
+
+  mai.ticketLink = async (input) => {
+    const ticket = (typeof input === "string" ? input : input.ticket).trim();
+    if (!MAI_TICKET_ID_RE.test(ticket)) throw new Error(`mai.ticketLink invalid ticket id: ${ticket}`);
+    return {
+      ticket,
+      link: `mai://ticket/${ticket}`,
+      vscodeLink: `vscode://pi0.maiboard/ticket/${ticket}`,
+    };
+  };
 
   const gitOutForReviewHandoff = async (dir: string, args: string[]) => {
     const result = await spawnAsync({ cmd: "git", args, cwd: dir, signal, timeout: 10_000 });

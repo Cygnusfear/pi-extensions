@@ -242,6 +242,7 @@ All of these are available inside `execute_code` as typed async functions:
 | `readImage({ path })` | Read image files (png, jpg, gif, webp) |
 | `maiCall({ args? })` | Run mai CLI commands (raw passthrough) |
 | `mai.ticket/start/close/show/note/ls` | Structured mai operations |
+| `mai.ticketLink(ticketId)` | Create a short Maiboard ticket link |
 | `mai.reviewLink({ commits, ... })` | Create a short Maiboard review handoff link backed by `~/.maitake/review-handoffs/<token>.json` |
 | `maiTicket({...})` | Create tickets |
 | `recall({...})` | Search Foresight memory |
@@ -266,6 +267,23 @@ All of these are available inside `execute_code` as typed async functions:
 | `tldrDead({ path })` | Find dead functions |
 | `tldrArch({ path })` | Detect architecture layers |
 | `tldrImpact({ func, path })` | Find all callers |
+
+## Maiboard ticket links
+
+Use `mai.ticketLink(...)` when you want to give the Hooman a clickable link to one mai ticket.
+
+```javascript
+const ticket = await mai.ticketLink("gso-x6nv04u5");
+console.log("Ticket link:", ticket.vscodeLink);
+```
+
+Return fields:
+
+| Field | Meaning |
+|-------|---------|
+| `vscodeLink` | `vscode://pi0.maiboard/ticket/<ticketId>` — preferred because VS Code can open it directly |
+| `link` | `mai://ticket/<ticketId>` — shorter human-facing form |
+| `ticket` | The validated ticket id |
 
 ## Maiboard review handoff links
 

@@ -22,6 +22,8 @@ The full review payload is stored at:
 
 This keeps chat output short enough for harnesses that wrap long lines, while preserving the exact worktree and ordered commit set for Maiboard.
 
+The same prompt also tells agents to use short Maiboard ticket links, `vscode://pi0.maiboard/ticket/<ticketId>` or `mai://ticket/<ticketId>`, when they mention a specific mai ticket the Hooman may want to open.
+
 ## Prompt Layer Order
 
 ```
