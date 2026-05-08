@@ -1,0 +1,29 @@
+packages/prompt-templates/prompts/cmd.handoff.md
+  s_3d5ce21b9977e9::t_66c97ef9d41dcb 2-3
+packages/code-mode/README.md
+  s_3d5ce21b9977e9::t_50fbff73b7c065 245
+  s_3d5ce21b9977e9::t_66c97ef9d41dcb 270-303
+packages/default-prompt/prompts/default.md
+  s_3d5ce21b9977e9::t_50fbff73b7c065 53-71
+packages/teams/README.md
+  s_3d5ce21b9977e9::t_66c97ef9d41dcb 80-81,83-96,98-100
+  s_3d5ce21b9977e9::t_8e0934832fe7d5 75,82,97
+packages/default-prompt/README.md
+  s_3d5ce21b9977e9::t_50fbff73b7c065 13-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "fffaf2f90a7ea325a9b28dbf3e5d8e2c5e900758",
+  "prompts": {},
+  "sessions": {
+    "s_3d5ce21b9977e9": {
+      "agent_id": {
+        "tool": "Katie Cosmos Shoemaker",
+        "id": "019dfd48-2572-729f-bbd2-599a5e5125ab",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
