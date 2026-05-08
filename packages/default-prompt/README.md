@@ -12,7 +12,7 @@ Additive system prompt layering — loads a global default prompt and an optiona
 
 ## Agent review links
 
-The bundled prompt tells agents to create short Maiboard review handoff links when they finish committed work. Agents should call `mai.reviewLink(...)` from code-mode, pass commits oldest-to-newest, and print `review.vscodeLink` or `review.link` instead of a long commit list.
+The bundled prompt tells agents to create short Maiboard review handoff links when they finish committed work. Agents should call `mai.reviewLink(...)` from code-mode, pass commits oldest-to-newest, and print `review.terminalLink` in terminal output instead of a long commit list.
 
 The full review payload is stored at:
 
@@ -22,7 +22,7 @@ The full review payload is stored at:
 
 This keeps chat output short enough for harnesses that wrap long lines, while preserving the exact worktree and ordered commit set for Maiboard.
 
-The same prompt also tells agents to use short Maiboard ticket links, `vscode://pi0.maiboard/ticket/<ticketId>` or `mai://ticket/<ticketId>`, when they mention a specific mai ticket the Hooman may want to open.
+The same prompt also tells agents to use short Maiboard ticket links, preferably `ticket.terminalLink` (`http://127.0.0.1:39287/ticket/<ticketId>`) in terminal output, when they mention a specific mai ticket the Hooman may want to open.
 
 ## Prompt Layer Order
 

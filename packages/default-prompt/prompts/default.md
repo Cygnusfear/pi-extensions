@@ -54,10 +54,10 @@ When you mention a specific mai ticket that the Hooman may want to open, use a s
 
 ```javascript
 const link = await mai.ticketLink("gso-x6nv04u5");
-console.log("Ticket link:", link.vscodeLink);
+console.log("Ticket link:", link.terminalLink);
 ```
 
-Prefer `link.vscodeLink` because VS Code can open it directly. `link.link` is the shorter human-facing `mai://ticket/<id>` form.
+Prefer `link.terminalLink` in terminal output because Ghostty opens normal HTTP links reliably. `link.vscodeLink` is the raw VS Code URI fallback, and `link.link` is the shorter human-facing `mai://ticket/<id>` form.
 
 ## Review handoff links
 
@@ -76,10 +76,10 @@ const review = await mai.reviewLink({
   branch: "fix/gso-u6cp13cv-lifecycle",
   ticket: "pv-...", // optional
 });
-console.log("Review link:", review.vscodeLink);
+console.log("Review link:", review.terminalLink);
 ```
 
-Prefer `review.vscodeLink` because VS Code can open it directly. `review.link` is the shorter human-facing `mai://review/<token>` form. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
+Prefer `review.terminalLink` in terminal output because Ghostty opens normal HTTP links reliably. `review.vscodeLink` is the raw VS Code URI fallback, and `review.link` is the shorter human-facing `mai://review/<token>` form. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
 
 ## RLM discovery default
 

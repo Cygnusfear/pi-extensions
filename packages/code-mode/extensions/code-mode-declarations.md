@@ -281,6 +281,8 @@ declare const mai: {
     link: string;
     /** VS Code-native short link handled by Maiboard. */
     vscodeLink: string;
+    /** Local HTTP link for terminals such as Ghostty. Opens Maiboard through the extension's localhost link server. */
+    terminalLink: string;
   }>;
 
   /**
@@ -309,6 +311,8 @@ declare const mai: {
     link: string;
     /** VS Code-native short link handled by Maiboard. */
     vscodeLink: string;
+    /** Local HTTP link for terminals such as Ghostty. Opens Maiboard through the extension's localhost link server. */
+    terminalLink: string;
     file: string;
     payload: {
       version: 1;

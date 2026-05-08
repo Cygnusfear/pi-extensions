@@ -104,12 +104,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     ticket: string;
     link: string;
     vscodeLink: string;
+    terminalLink: string;
   }
 
   interface ReviewHandoffResult {
     token: string;
     link: string;
     vscodeLink: string;
+    terminalLink: string;
     file: string;
     payload: {
       version: 1;
@@ -251,11 +253,19 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   mai.ticketLink = async (input) => {
     const ticket = (typeof input === "string" ? input : input.ticket).trim();
     if (!MAI_TICKET_ID_RE.test(ticket)) throw new Error(`mai.ticketLink invalid ticket id: ${ticket}`);
+    const vscodeLink = `vscode://pi0.maiboard/ticket/${ticket}`;
     return {
       ticket,
       link: `mai://ticket/${ticket}`,
-      vscodeLink: `vscode://pi0.maiboard/ticket/${ticket}`,
+      vscodeLink,
+      terminalLink: `http://127.0.0.1:39287/ticket/${ticket}`,
     };
+  };
+
+  const osc8Link = (href: string, label: string) => {
+    const safeHref = href.replace(/[\u0000-\u001f\u007f]/g, "");
+    const safeLabel = label.replace(/[\u001b\u0007]/g, "");
+    return `\u001b]8;;${safeHref}\u001b\\${safeLabel}\u001b]8;;\u001b\\`;
   };
 
   const gitOutForReviewHandoff = async (dir: string, args: string[]) => {
@@ -309,10 +319,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     const file = path.join(dirPath, safeToken + ".json");
     fs.writeFileSync(file, JSON.stringify(payload, null, 2) + "\n", "utf-8");
 
+    const vscodeLink = `vscode://pi0.maiboard/review/${safeToken}`;
     return {
       token: safeToken,
       link: `mai://review/${safeToken}`,
-      vscodeLink: `vscode://pi0.maiboard/review/${safeToken}`,
+      vscodeLink,
+      terminalLink: `http://127.0.0.1:39287/review/${safeToken}`,
       file,
       payload,
     };

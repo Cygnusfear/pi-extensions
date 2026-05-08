@@ -274,14 +274,15 @@ Use `mai.ticketLink(...)` when you want to give the Hooman a clickable link to o
 
 ```javascript
 const ticket = await mai.ticketLink("gso-x6nv04u5");
-console.log("Ticket link:", ticket.vscodeLink);
+console.log("Ticket link:", ticket.terminalLink);
 ```
 
 Return fields:
 
 | Field | Meaning |
 |-------|---------|
-| `vscodeLink` | `vscode://pi0.maiboard/ticket/<ticketId>` — preferred because VS Code can open it directly |
+| `terminalLink` | `http://127.0.0.1:39287/ticket/<ticketId>` — preferred for terminal output because Ghostty opens normal HTTP links reliably |
+| `vscodeLink` | `vscode://pi0.maiboard/ticket/<ticketId>` — raw VS Code URI fallback |
 | `link` | `mai://ticket/<ticketId>` — shorter human-facing form |
 | `ticket` | The validated ticket id |
 
@@ -301,7 +302,7 @@ const review = await mai.reviewLink({
   ticket: "pv-...",
 });
 
-console.log("Review link:", review.vscodeLink);
+console.log("Review link:", review.terminalLink);
 ```
 
 Commit order matters. Pass `commits` oldest-to-newest, matching the order the reviewer should read. The helper stores:
@@ -314,7 +315,8 @@ Return fields:
 
 | Field | Meaning |
 |-------|---------|
-| `vscodeLink` | `vscode://pi0.maiboard/review/<token>` — preferred because VS Code can open it directly |
+| `terminalLink` | `http://127.0.0.1:39287/review/<token>` — preferred for terminal output because Ghostty opens normal HTTP links reliably |
+| `vscodeLink` | `vscode://pi0.maiboard/review/<token>` — raw VS Code URI fallback |
 | `link` | `mai://review/<token>` — shorter human-facing form |
 | `file` | Payload path under `~/.maitake/review-handoffs/` |
 | `payload` | Versioned payload containing worktree, base/head, ordered commits, branch, ticket, worker, and session metadata |
