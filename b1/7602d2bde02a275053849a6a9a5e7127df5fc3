@@ -1,0 +1,51 @@
+packages/teams/leader.ts
+  s_17a54c80a14ed2::t_d3025ea17c1889 771-772
+  s_17a54c80a14ed2::t_f4884b36a68407 1918
+  s_17a54c80a14ed2::t_cb4fba5dbfe423 2235-2237
+  s_17a54c80a14ed2::t_b874bd5e28eb71 1474-1475
+  s_17a54c80a14ed2::t_3b9493c20c8874 1807
+  s_17a54c80a14ed2::t_09aa7e1939472c 1517-1520,1526-1527
+  s_17a54c80a14ed2::t_0fde8561296176 1742,1744
+  s_17a54c80a14ed2::t_b5038c44b8ae74 325,328
+  s_17a54c80a14ed2::t_10fbdcbefa37b3 53-57
+  s_17a54c80a14ed2::t_faf4a8d8a93ef7 745-748,755-758
+packages/teams/leader.retry.test.ts
+  s_17a54c80a14ed2::t_d2d490b085f860 210
+packages/teams/tool.ts
+  s_17a54c80a14ed2::t_2a1202f69d3c39 122,124
+  s_17a54c80a14ed2::t_74ecb224c512b6 205
+  s_17a54c80a14ed2::t_06c66b65e7f2ac 170
+  s_17a54c80a14ed2::t_2058c4919bc4b9 137,168,175,180,190,198,221,315
+  s_17a54c80a14ed2::t_a41cd31c175778 110-114,117
+  s_17a54c80a14ed2::t_3e409546ac8983 162
+  s_17a54c80a14ed2::t_0ad0e1de565166 213
+  s_17a54c80a14ed2::t_4ff6f6242a2955 207
+  s_17a54c80a14ed2::t_fe9f5b5cdb7b1a 193
+  s_17a54c80a14ed2::t_b567dbc4cadb73 318
+  s_17a54c80a14ed2::t_58d95978742c13 218
+  s_17a54c80a14ed2::t_e4e60990aea1a6 185
+  s_17a54c80a14ed2::t_ef19ff1b5ce623 115-116,118-121,123
+packages/teams/worker.ts
+  s_17a54c80a14ed2::t_c70335fea2d7ef 282
+  s_17a54c80a14ed2::t_22df74c0dfc25a 297
+  s_17a54c80a14ed2::t_bf294dd434bd29 39
+  s_17a54c80a14ed2::t_99c6367815b536 339
+  s_17a54c80a14ed2::t_c876523e2369df 315
+  s_17a54c80a14ed2::t_edad8e6559b089 328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "b17602d2bde02a275053849a6a9a5e7127df5fc3",
+  "prompts": {},
+  "sessions": {
+    "s_17a54c80a14ed2": {
+      "agent_id": {
+        "tool": "Marcia Boson Perlmutter",
+        "id": "019e0497-87a8-7587-bd35-8e0a99afd9d7",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}

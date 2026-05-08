@@ -1,0 +1,36 @@
+packages/code-mode/src/process-guard.ts
+  s_17a54c80a14ed2::t_089410ca5badb6 1-158
+packages/code-mode/src/process-guard.test.ts
+  s_17a54c80a14ed2::t_722cb0d20a97a3 1-173
+packages/code-mode/src/sandbox-tools.ts
+  s_e0304edd6ca250::t_4c0b6a11e63de7 129-133
+packages/code-mode/extensions/code-mode-declarations.md
+  s_e0304edd6ca250::t_b1e9ce96546faa 241-244,254
+packages/code-mode/extensions/code-mode.ts
+  s_17a54c80a14ed2::t_dfb3f8d56c6dd3 281-285
+  s_17a54c80a14ed2::t_54faa608d3e13f 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "c717be9549a41caaa517d87c3e990d7bd96c96cf",
+  "prompts": {},
+  "sessions": {
+    "s_17a54c80a14ed2": {
+      "agent_id": {
+        "tool": "Marcia Boson Perlmutter",
+        "id": "019e0497-87a8-7587-bd35-8e0a99afd9d7",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_e0304edd6ca250": {
+      "agent_id": {
+        "tool": "Natalie Supernova Godbole",
+        "id": "019dfd48-2572-729f-bbd2-599a5e5125ab",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
