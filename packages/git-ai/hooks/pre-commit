@@ -1,71 +1,18 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# pre-commit — dispatcher preserving repo-local hooks while core.hooksPath
+# points at git-ai's bundled hook directory.
 
-if [ "$LEFTHOOK_VERBOSE" = "1" -o "$LEFTHOOK_VERBOSE" = "true" ]; then
-  set -x
-fi
+set -e
 
-if [ "$LEFTHOOK" = "0" ]; then
-  exit 0
-fi
+GIT_AI_HOOK_SELF="$0"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/local-hook-dispatch.sh
+. "${SCRIPT_DIR}/lib/local-hook-dispatch.sh"
 
-call_lefthook()
-{
-  if test -n "$LEFTHOOK_BIN"
-  then
-    "$LEFTHOOK_BIN" "$@"
-  elif lefthook -h >/dev/null 2>&1
-  then
-    lefthook "$@"
-  elif /etc/profiles/per-user/alexander/bin/lefthook -h >/dev/null 2>&1
-  then
-    /etc/profiles/per-user/alexander/bin/lefthook "$@"
-  else
-    dir="$(git rev-parse --show-toplevel)"
-    osArch=$(uname | tr '[:upper:]' '[:lower:]')
-    cpuArch=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
-    if test -f "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook"
-    then
-      "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook" "$@"
-    elif test -f "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook"
-    then
-      "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook" "$@"
-    elif test -f "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook"
-    then
-      "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook" "$@"
-    elif test -f "$dir/node_modules/lefthook/bin/index.js"
-    then
-      "$dir/node_modules/lefthook/bin/index.js" "$@"
-    elif go tool lefthook -h >/dev/null 2>&1
-    then
-      go tool lefthook "$@"
-    elif bundle exec lefthook -h >/dev/null 2>&1
-    then
-      bundle exec lefthook "$@"
-    elif yarn lefthook -h >/dev/null 2>&1
-    then
-      yarn lefthook "$@"
-    elif pnpm lefthook -h >/dev/null 2>&1
-    then
-      pnpm lefthook "$@"
-    elif swift package lefthook >/dev/null 2>&1
-    then
-      swift package --build-path .build/lefthook --disable-sandbox lefthook "$@"
-    elif command -v mint >/dev/null 2>&1
-    then
-      mint run csjones/lefthook-plugin "$@"
-    elif uv run lefthook -h >/dev/null 2>&1
-    then
-      uv run lefthook "$@"
-    elif mise exec -- lefthook -h >/dev/null 2>&1
-    then
-      mise exec -- lefthook "$@"
-    elif devbox run lefthook -h >/dev/null 2>&1
-    then
-      devbox run lefthook "$@"
-    else
-      echo "Can't find lefthook in PATH"
-    fi
-  fi
-}
+# Run the repository's own .git/hooks/pre-commit first. If it fails, propagate
+# the failure and stop, matching Git's normal hook semantics.
+git_ai_run_local_hook "pre-commit" "$@"
 
-call_lefthook run "pre-commit" "$@"
+# git-ai currently has no pre-commit behavior; this hook exists so setting
+# core.hooksPath to the git-ai hooks directory does not disable local hooks.
+exit 0
