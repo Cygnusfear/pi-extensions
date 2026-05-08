@@ -207,7 +207,7 @@ describe("assessWorkerExit", () => {
 			].join("\n") + "\n",
 		);
 		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "DONE: summary");
-		expect(result.classification).toBe("failed");
+		expect(result.classification).toBe("failure");
 		expect(result.forcedExit).toBe(true);
 	});
 });

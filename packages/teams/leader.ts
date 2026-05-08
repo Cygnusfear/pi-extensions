@@ -50,6 +50,11 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
   ? Math.floor(ambientChatBatchMsRaw)
   : 750;
 
+/** Mesh "channel" event payload — broadcasts on subscribed channels. */
+type ChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => void;
+/** Mesh "message" event payload — direct tells. */
+type MessageHandler = (msg: { from: string; payload: unknown }) => void;
+
 interface RealActivity {
   timestampMs: number;
   label: string;
@@ -317,10 +322,10 @@ export function assessWorkerExit(
     // Legacy compatibility for workers that still closed the ticket directly.
     classification = "success";
   } else if (forcedExit) {
-    classification = "failed";
+    classification = "failure";
     reason = lastNote;
   } else if (!outputMeaningful) {
-    classification = "failed";
+    classification = "failure";
     reason = outputCheck.reason;
   } else {
     classification = "warning";
@@ -737,13 +742,20 @@ export class TeamLeader {
   showComments = true;
 
   // Mesh — shared instance from pi-mesh extension, set via setMesh()
+  // The on/off callback shape varies by event channel: "channel" emits
+  // ChannelMessage, "message" emits MeshMessage. Use overloaded function
+  // signatures so each handler can declare the precise per-event payload it
+  // expects without forcing teams to import pi-mesh's internal types.
   private mesh: {
     tell: (id: string, msg: unknown) => void;
     ask: (id: string, msg: unknown, timeout?: number) => Promise<unknown>;
     chat: (ch: string, msg: unknown) => void;
     joinChannel: (ch: string) => void;
     stop: () => void;
-    on: (event: "channel" | "message", cb: (payload: unknown) => void) => void;
+    on: ((event: "channel", cb: ChannelHandler) => void)
+      & ((event: "message", cb: MessageHandler) => void);
+    off: ((event: "channel", cb: ChannelHandler) => void)
+      & ((event: "message", cb: MessageHandler) => void);
     peers: () => Array<{ id: string; sessionId?: string; nickname?: string; name?: string }>;
     self: () => { id: string };
   } | null = null;
@@ -756,8 +768,8 @@ export class TeamLeader {
   private pendingAmbientTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private leaseFilePath: string | null = null;
   private leaseTimer: ReturnType<typeof setInterval> | null = null;
-  private meshChannelHandler?: (payload: unknown) => void;
-  private meshMessageHandler?: (payload: unknown) => void;
+  private meshChannelHandler?: ChannelHandler;
+  private meshMessageHandler?: MessageHandler;
 
   private static readonly STATE_ENTRY_TYPE = "teams-leader-state";
   private static readonly STALE_RESTORE_PRUNE_MS = 60_000;
@@ -1459,8 +1471,8 @@ export class TeamLeader {
 				if (peer?.nickname) peerNickname = peer.nickname;
       }
 
-			if (envelope.type === "worker.comment" && typeof (p as WorkerCommentPayload).text === "string") {
-				const commentText = (p as WorkerCommentPayload).text;
+			const commentText = typeof p.text === "string" ? p.text : null;
+			if (envelope.type === "worker.comment" && commentText !== null) {
         this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
         // Any worker channel activity tells us its current direct mesh route.
         this.linkWorkerRoute(worker, msg.from, peerNickname);
@@ -1502,15 +1514,17 @@ export class TeamLeader {
 			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
 
 			this.linkWorkerRoute(worker, msg.from);
-			if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "done") {
-        this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: (p as WorkerFinishPayload).summary });
+			const finishStatus = p.status;
+			const finishSummary = typeof p.summary === "string" ? p.summary : "";
+			if (envelope.type === "worker.finish" && finishStatus === "done") {
+        this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: finishSummary });
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh done";
         // Don't emit completion here — process exit handler is authoritative.
         // But update the widget immediately.
         this.renderWidget();
-      } else if (envelope.type === "worker.finish" && (p as WorkerFinishPayload).status === "quit") {
-        this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: (p as WorkerFinishPayload).summary });
+      } else if (envelope.type === "worker.finish" && finishStatus === "quit") {
+        this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh quit";
         this.renderWidget();
@@ -1725,9 +1739,9 @@ export class TeamLeader {
       lastNote = assessment.reason;
     }
 
-    const diagnostics = classification === "failed" ? readSessionDiagnostics(worker.sessionDir) : "";
+    const diagnostics = classification === "failure" ? readSessionDiagnostics(worker.sessionDir) : "";
 
-    if (classification === "failed" && (worker.recoveryAttempts ?? 0) < 1) {
+    if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       const recovery = getRecoverableToolRetry(diagnostics);
       if (recovery) {
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
@@ -1790,7 +1804,7 @@ export class TeamLeader {
     //      was still alive.
     // In both cases, resumeWorker can't work (no session to continue).
     // We respawn from the original SpawnConfig once.
-    if (classification === "failed" && (worker.recoveryAttempts ?? 0) < 1) {
+    if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       const runtimeMs = Date.now() - worker.spawnedAt;
       const STARTUP_WINDOW_MS = 5000;
 
@@ -1901,7 +1915,7 @@ export class TeamLeader {
     }
 
     // Build crash report BEFORE cleanup — cleanup may remove the worker worktree
-    const crashReport = classification === "failed" ? buildWorkerCrashReport(worker, exitCode) : "";
+    const crashReport = classification === "failure" ? buildWorkerCrashReport(worker, exitCode) : "";
     this.projectV2WorkerRuntime(name);
     worker.routeState = "dead";
     worker.meshClientId = undefined;
@@ -2218,6 +2232,9 @@ export class TeamLeader {
     return worker.attempts.find((attempt) => attempt.attemptId === worker.currentAttemptId)?.sessionMode ?? null;
   }
 
+  /** Current live workers — used by teams.on to check for already-terminal
+   *  targets and by general lookups. Prunes stale "spawning"/"running" recovered
+   *  worker entries on access. */
   getWorker(name: string): WorkerHandle | undefined {
     this.pruneStaleRecoveredWorkers();
     return this.workers.get(name);
@@ -2384,11 +2401,6 @@ export class TeamLeader {
       try { cb(); } catch { /* best effort */ }
     }
     this.workerDisposalCallbacks.delete(workerName);
-  }
-
-  /** Current live workers — used by teams.on to check for already-terminal targets. */
-  getWorker(name: string): WorkerHandle | undefined {
-    return this.workers.get(name);
   }
 
   private notifyLLM(event: PollEvent) {

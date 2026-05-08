@@ -36,7 +36,7 @@ function resolveHeartbeatIntervalMs(): number {
 }
 
 export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
-	const ticketId = process.env.PI_TEAMS_TICKET_ID;
+	const ticketId = process.env.PI_TEAMS_TICKET_ID ?? "";
 	const workerName = process.env.PI_TEAMS_WORKER_NAME ?? "worker";
 	const workerInstanceId = process.env.PI_TEAMS_WORKER_INSTANCE_ID ?? "unknown-worker-instance";
 	const autoCloseOnAgentEnd = options.autoCloseOnAgentEnd !== false;
@@ -279,6 +279,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				return {
 					content: [{ type: "text" as const, text: "Provide exactly one of { message } or { filePath }." }],
 					isError: true,
+					details: undefined,
 				};
 			}
 
@@ -293,6 +294,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					return {
 						content: [{ type: "text" as const, text: `Failed to read comment file: ${error}` }],
 						isError: true,
+						details: undefined,
 					};
 				}
 				result = await pi.exec(getMaiBin(), ["add-note", ticketId, "--file", resolvedPath], {
@@ -310,6 +312,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				return {
 					content: [{ type: "text" as const, text: `Failed to comment: ${result.stderr}` }],
 					isError: true,
+					details: undefined,
 				};
 			}
 			meshChat(
@@ -322,7 +325,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					text: commentText,
 				}),
 			);
-			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }] };
+			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }], details: undefined };
 		},
 	});
 
@@ -333,7 +336,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		parameters: FinishParams,
 		async execute(_id, params: { status: TerminalStatus; summary: string }, _signal, _onUpdate, ctx) {
 			await finalizeTask(ctx.cwd, params.status, params.summary);
-			return { content: [{ type: "text" as const, text: `Marked ${ticketId} as ${params.status}` }] };
+			return { content: [{ type: "text" as const, text: `Marked ${ticketId} as ${params.status}` }], details: undefined };
 		},
 	});
 

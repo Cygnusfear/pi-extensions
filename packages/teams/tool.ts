@@ -107,6 +107,21 @@ type TeamsActionParams = {
 
 
 
+/** Shape of every AgentToolResult returned by runTeamsAction. Matches
+ *  `AgentToolResult` from the pi SDK (`content` + `details: unknown`) plus an
+ *  optional `isError` flag that downstream `ToolResultMessage` carries.
+ *  `details` is mandatory (typed unknown, may be undefined) so the SDK's
+ *  required-property contract is satisfied at compile time. */
+type TeamsActionResult = {
+  content: Array<{ type: "text"; text: string }>;
+  details: unknown;
+  isError?: boolean;
+};
+/** Build a successful AgentToolResult from a single text body. */
+const ok = (text: string): TeamsActionResult => ({ content: [{ type: "text", text }], details: undefined });
+/** Same as `ok` but flagged as an error result. */
+const err = (text: string): TeamsActionResult => ({ content: [{ type: "text", text }], isError: true, details: undefined });
+
 async function runTeamsAction(
   pi: ExtensionAPI,
   leader: TeamLeader,
@@ -119,7 +134,7 @@ async function runTeamsAction(
   if (action === "list") {
     const workers = leader.getWorkers();
     if (workers.length === 0) {
-      return { content: [{ type: "text" as const, text: "No active workers." }] };
+      return ok("No active workers.");
     }
     const v2Team = leader.getV2TeamRecord();
     const lines = workers.map((w) => {
@@ -144,73 +159,66 @@ async function runTeamsAction(
       return parts.join("\n");
     });
     const header = v2Team ? `v2 team ${v2Team.teamId} · leaderEpoch ${v2Team.leaderEpoch}` : "v2 team unavailable";
-    return { content: [{ type: "text" as const, text: `${header}\n\n${lines.join("\n")}` }] };
+    return ok(`${header}\n\n${lines.join("\n")}`);
   }
 
   if (action === "kill") {
     const names = params.names?.length ? params.names : (params.name ? [params.name] : []);
     if (names.length === 0)
-      return { content: [{ type: "text" as const, text: "Provide worker name(s)." }], isError: true };
+      return err("Provide worker name(s).");
     for (const name of names) await leader.kill(name);
-    return { content: [{ type: "text" as const, text: names.length === 1 ? `Killed worker "${names[0]}"` : `Killed ${names.length} workers` }] };
+    return ok(names.length === 1 ? `Killed worker "${names[0]}"` : `Killed ${names.length} workers`);
   }
 
   if (action === "kill_all") {
     await leader.killAll();
-    return { content: [{ type: "text" as const, text: "All workers killed." }] };
+    return ok("All workers killed.");
   }
 
   if (action === "tell") {
     if (!params.name || !params.message) {
-      return { content: [{ type: "text" as const, text: "Provide name and message." }], isError: true };
+      return err("Provide name and message.");
     }
     const sent = leader.tellWorker(params.name, params.message);
     const worker = leader.getWorker(params.name);
     const why = worker ? ` (route ${worker.routeState})` : "";
-    return { content: [{ type: "text" as const, text: sent ? `Told "${params.name}"` : `Worker "${params.name}" not reachable${why}` }] };
+    return ok(sent ? `Told "${params.name}"` : `Worker "${params.name}" not reachable${why}`);
   }
 
   if (action === "tell_all") {
     if (!params.message) {
-      return { content: [{ type: "text" as const, text: "Provide message." }], isError: true };
+      return err("Provide message.");
     }
     const count = leader.tellAllWorkers(params.message);
-    return { content: [{ type: "text" as const, text: `Told ${count} worker(s)` }] };
+    return ok(`Told ${count} worker(s)`);
   }
 
   if (action === "view") {
     if (!params.name) {
-      return { content: [{ type: "text" as const, text: "Provide worker name." }], isError: true };
+      return err("Provide worker name.");
     }
     try {
       const viewed = await leader.viewWorker(params.name, params.start ?? -20, params.end ?? 0);
       const v2Lifecycle = leader.getV2WorkerLifecycle(params.name);
       const sessionMode = leader.getV2CurrentSessionMode(params.name);
       const sessionLabel = sessionMode ? (sessionMode.kind === "fork" ? `fork:${sessionMode.parentLeafId}` : sessionMode.kind) : "unknown";
-      return {
-        content: [{ type: "text" as const, text: `[source: ${viewed.source} · route: ${viewed.routeState} · v2: ${v2Lifecycle ?? "unknown"} · session: ${sessionLabel}]\n\n${viewed.text}` }],
-      };
+      return ok(`[source: ${viewed.source} · route: ${viewed.routeState} · v2: ${v2Lifecycle ?? "unknown"} · session: ${sessionLabel}]\n\n${viewed.text}`);
     } catch (error) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${formatActionError(error)}` }],
-        isError: true,
-      };
+      return err(`Error: ${formatActionError(error)}`);
     }
   }
 
   if (action === "runtime") {
     const runtime = leader.getV2TeamRecord();
-    return {
-      content: [{ type: "text" as const, text: runtime ? JSON.stringify(runtime, null, 2) : "No v2 runtime state." }],
-    };
+    return ok(runtime ? JSON.stringify(runtime, null, 2) : "No v2 runtime state.");
   }
 
   if (action === "delegate") {
     if (!maiDep.ok) {
-      return { content: [{ type: "text" as const, text: `${maiDep.reason}. ${maiDep.install}` }], isError: true };
+      return err(`${maiDep.reason}. ${maiDep.install}`);
     }
     if (!params.tasks?.length) {
-      return { content: [{ type: "text" as const, text: "Provide tasks array." }], isError: true };
+      return err("Provide tasks array.");
     }
 
     const defaultWorktree = params.useWorktree ?? true;
@@ -304,10 +312,10 @@ async function runTeamsAction(
     }
 
     leader.startPolling();
-    return { content: [{ type: "text" as const, text: results.join("\n") }] };
+    return ok(results.join("\n"));
   }
 
-  return { content: [{ type: "text" as const, text: `Unknown action: ${action}` }], isError: true };
+  return err(`Unknown action: ${action}`);
 }
 
 export function registerTeamsTool(pi: ExtensionAPI, leader: TeamLeader) {
