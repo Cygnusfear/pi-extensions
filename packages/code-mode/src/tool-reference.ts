@@ -83,7 +83,13 @@ export function buildToolRef(name: string, def: ToolDefinition): SandboxToolRef 
 
 export function initBuiltinToolRefs(): void {
   const cwd = process.cwd();
-  const builtinDefs: Array<[string, ToolDefinition | undefined]> = [
+  // `ToolDefinition` is generic over TSchema/TDetails/TRenderState; concrete
+  // tool definitions narrow those generics, and TypeScript treats those
+  // generic parameters as invariant when comparing array element types.
+  // We don't care about the per-tool specifics here — `buildToolRef` only
+  // consumes the structural shape — so widen the element generic params to
+  // `any` and assert at the array boundary.
+  const builtinDefs: Array<[string, ToolDefinition<any, any, any> | undefined]> = [
     ["bash", bashToolDefinition ?? createBashToolDefinition(cwd)],
     ["read", readToolDefinition ?? createReadToolDefinition(cwd)],
     ["write", writeToolDefinition ?? createWriteToolDefinition(cwd)],

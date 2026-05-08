@@ -361,7 +361,7 @@ export default function (pi: ExtensionAPI) {
 			// Auto-index if needed
 			const state = checkIndex(projectPath);
 			if (!state.indexed) {
-				onUpdate?.({ content: [{ type: "text", text: "Project not indexed. Building semantic index..." }] });
+				onUpdate?.({ content: [{ type: "text", text: "Project not indexed. Building semantic index..." }], details: undefined });
 				const err = await ensureIndexed(projectPath);
 				if (err) throw new Error(`Auto-indexing failed: ${err}`);
 				ctx.ui.setStatus("tldr", `tldr: indexed`);
@@ -631,7 +631,7 @@ export default function (pi: ExtensionAPI) {
 			const projectPath = params.path ?? ctx.cwd;
 			const language = params.lang ?? detectPrimaryLanguage(projectPath) ?? "all";
 
-			onUpdate?.({ content: [{ type: "text", text: `Indexing ${projectPath} (${language})...` }] });
+			onUpdate?.({ content: [{ type: "text", text: `Indexing ${projectPath} (${language})...` }], details: undefined });
 
 			const result = await runTldr(
 				["semantic", "index", "--lang", language, "--model", "all-MiniLM-L6-v2", projectPath],

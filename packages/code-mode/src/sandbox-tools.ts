@@ -199,213 +199,223 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
 
   // ==========================================================================
   // memory namespace — callable (recall) + methods
+  //
+  // Built with Object.assign so the callable + methods are a single value with
+  // a proper function-with-methods type. Avoids `(memory as any).foo = ...`
+  // assignments that hide the methods from TS at lookup time.
   // ==========================================================================
 
-  const memory = async ({
-    query,
-    limit = 10,
-    factType,
-    minScore,
-    bank,
-  }: {
-    query: string;
-    limit?: number;
-    factType?: string;
-    minScore?: number;
-    bank?: string;
-  }) => {
-    const data = await foresightRecall(bank || FORESIGHT_BANK, query, limit, factType, minScore);
-    return JSON.stringify(data);
-  };
+  const memory = Object.assign(
+    async ({
+      query,
+      limit = 10,
+      factType,
+      minScore,
+      bank,
+    }: {
+      query: string;
+      limit?: number;
+      factType?: string;
+      minScore?: number;
+      bank?: string;
+    }) => {
+      const data = await foresightRecall(bank || FORESIGHT_BANK, query, limit, factType, minScore);
+      return JSON.stringify(data);
+    },
+    {
+      context: async ({
+        task,
+        maxNodes = 10,
+        bank,
+      }: {
+        task: string;
+        maxNodes?: number;
+        bank?: string;
+      }) => {
+        return foresightContext(bank || FORESIGHT_BANK, task, maxNodes);
+      },
 
-  (memory as any).context = async ({
-    task,
-    maxNodes = 10,
-    bank,
-  }: {
-    task: string;
-    maxNodes?: number;
-    bank?: string;
-  }) => {
-    return foresightContext(bank || FORESIGHT_BANK, task, maxNodes);
-  };
+      create: async ({
+        factType,
+        oneLiner,
+        summary,
+        fullSynthesis,
+        entityName,
+        repo,
+        bank,
+      }: {
+        factType: string;
+        oneLiner: string;
+        summary: string;
+        fullSynthesis?: string;
+        entityName?: string;
+        repo?: string;
+        bank?: string;
+      }) => {
+        const result = await foresightRetain(bank || FORESIGHT_BANK, {
+          factType: factType as any,
+          oneLiner,
+          summary,
+          fullSynthesis,
+          entityName,
+          repo,
+        });
+        return JSON.stringify(result);
+      },
 
-  (memory as any).create = async ({
-    factType,
-    oneLiner,
-    summary,
-    fullSynthesis,
-    entityName,
-    repo,
-    bank,
-  }: {
-    factType: string;
-    oneLiner: string;
-    summary: string;
-    fullSynthesis?: string;
-    entityName?: string;
-    repo?: string;
-    bank?: string;
-  }) => {
-    const result = await foresightRetain(bank || FORESIGHT_BANK, {
-      factType: factType as any,
-      oneLiner,
-      summary,
-      fullSynthesis,
-      entityName,
-      repo,
-    });
-    return JSON.stringify(result);
-  };
+      unfold: async ({
+        nodeId,
+        depth = "full",
+        bank,
+      }: {
+        nodeId: string;
+        depth?: string;
+        bank?: string;
+      }) => {
+        const data = await foresightUnfold(bank || FORESIGHT_BANK, nodeId, depth);
+        return JSON.stringify(data);
+      },
 
-  (memory as any).unfold = async ({
-    nodeId,
-    depth = "full",
-    bank,
-  }: {
-    nodeId: string;
-    depth?: string;
-    bank?: string;
-  }) => {
-    const data = await foresightUnfold(bank || FORESIGHT_BANK, nodeId, depth);
-    return JSON.stringify(data);
-  };
+      status: async () => {
+        return JSON.stringify({
+          backend: "foresight",
+          bank: FORESIGHT_BANK,
+          status: "ok",
+        });
+      },
 
-  (memory as any).status = async () => {
-    return JSON.stringify({
-      backend: "foresight",
-      bank: FORESIGHT_BANK,
-      status: "ok",
-    });
-  };
+      subscribe: async ({
+        nodeId,
+        entity,
+        topic,
+        subscriber: _subscriber,
+      }: {
+        nodeId?: string;
+        entity?: string;
+        topic?: string;
+        subscriber?: string;
+      }) => {
+        const watching = nodeId
+          ? `node:${nodeId.slice(0, 8)}…`
+          : entity
+            ? `entity:${entity}`
+            : `topic:${topic}`;
+        return JSON.stringify({
+          status: "acknowledged",
+          subscriptionId: `stub-${Date.now()}`,
+          watching,
+          note: "Pub/sub not available with Foresight backend",
+        });
+      },
 
-  (memory as any).subscribe = async ({
-    nodeId,
-    entity,
-    topic,
-    subscriber,
-  }: {
-    nodeId?: string;
-    entity?: string;
-    topic?: string;
-    subscriber?: string;
-  }) => {
-    const watching = nodeId
-      ? `node:${nodeId.slice(0, 8)}…`
-      : entity
-        ? `entity:${entity}`
-        : `topic:${topic}`;
-    return JSON.stringify({
-      status: "acknowledged",
-      subscriptionId: `stub-${Date.now()}`,
-      watching,
-      note: "Pub/sub not available with Foresight backend",
-    });
-  };
+      unsubscribe: async ({ subscriptionId }: { subscriptionId: string }) => {
+        return JSON.stringify({ status: "acknowledged", subscriptionId });
+      },
 
-  (memory as any).unsubscribe = async ({ subscriptionId }: { subscriptionId: string }) => {
-    return JSON.stringify({ status: "acknowledged", subscriptionId });
-  };
-
-  (memory as any).checkUpdates = async (input?: { subscriber?: string }) => {
-    return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
-  };
+      checkUpdates: async (_input?: { subscriber?: string }) => {
+        return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
+      },
+    },
+  );
 
   // ==========================================================================
   // brave namespace — callable (search) + codeSearch method
   // ==========================================================================
 
-  const brave = async ({
-    query,
-    numResults = 5,
-    type = "llm_context",
-  }: {
-    query: string;
-    numResults?: number;
-    type?: string;
-  }) => {
-    const apiKey = process.env.BRAVE_API_KEY;
-    if (!apiKey) throw new Error("BRAVE_API_KEY not set");
+  const brave = Object.assign(
+    async ({
+      query,
+      numResults = 5,
+      type = "llm_context",
+    }: {
+      query: string;
+      numResults?: number;
+      type?: string;
+    }) => {
+      const apiKey = process.env.BRAVE_API_KEY;
+      if (!apiKey) throw new Error("BRAVE_API_KEY not set");
 
-    const url =
-      type === "web"
-        ? "https://api.search.brave.com/res/v1/web/search"
-        : "https://api.search.brave.com/res/v1/llm/context";
+      const url =
+        type === "web"
+          ? "https://api.search.brave.com/res/v1/web/search"
+          : "https://api.search.brave.com/res/v1/llm/context";
 
-    const params = new URLSearchParams({ q: query, count: String(numResults) });
-    const r = await fetch(`${url}?${params}`, {
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "identity",
-        "X-Subscription-Token": apiKey,
-      },
-      signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
-    });
+      const params = new URLSearchParams({ q: query, count: String(numResults) });
+      const r = await fetch(`${url}?${params}`, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "identity",
+          "X-Subscription-Token": apiKey,
+        },
+        signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
+      });
 
-    if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const data = await safeResponseJson<Record<string, any>>(r);
+      if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      const data = await safeResponseJson<Record<string, any>>(r);
 
-    if (type !== "web") {
-      const results = (data.grounding?.generic ?? []) as Array<{
+      if (type !== "web") {
+        const results = (data.grounding?.generic ?? []) as Array<{
+          title: string;
+          url: string;
+          snippets: string[];
+        }>;
+        return (
+          results
+            .map(
+              (res) =>
+                `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
+            )
+            .join("\n\n---\n\n") || "No results."
+        );
+      }
+
+      const results = (data.web?.results ?? []) as Array<{
         title: string;
         url: string;
-        snippets: string[];
+        description?: string;
       }>;
       return (
         results
           .map(
-            (res) =>
-              `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
+            (res, i) =>
+              `${i + 1}. ${res.title}\n   ${res.url}\n   ${(res.description || "").replace(/<\/?strong>/g, "**")}`,
           )
-          .join("\n\n---\n\n") || "No results."
+          .join("\n\n") || "No results."
       );
-    }
+    },
+    {
+      codeSearch: async ({ query, numResults = 5 }: { query: string; numResults?: number }) => {
+        const apiKey = process.env.BRAVE_API_KEY;
+        if (!apiKey) throw new Error("BRAVE_API_KEY not set");
 
-    const results = (data.web?.results ?? []) as Array<{
-      title: string;
-      url: string;
-      description?: string;
-    }>;
-    return (
-      results
-        .map(
-          (res, i) =>
-            `${i + 1}. ${res.title}\n   ${res.url}\n   ${(res.description || "").replace(/<\/?strong>/g, "**")}`,
-        )
-        .join("\n\n") || "No results."
-    );
-  };
+        const params = new URLSearchParams({ q: query, count: String(numResults) });
+        const r = await fetch(`https://api.search.brave.com/res/v1/llm/context?${params}`, {
+          headers: {
+            Accept: "application/json",
+            "Accept-Encoding": "identity",
+            "X-Subscription-Token": apiKey,
+          },
+          signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
+        });
 
-  (brave as any).codeSearch = async ({ query, numResults = 5 }: { query: string; numResults?: number }) => {
-    const apiKey = process.env.BRAVE_API_KEY;
-    if (!apiKey) throw new Error("BRAVE_API_KEY not set");
-
-    const params = new URLSearchParams({ q: query, count: String(numResults) });
-    const r = await fetch(`https://api.search.brave.com/res/v1/llm/context?${params}`, {
-      headers: {
-        Accept: "application/json",
-        "Accept-Encoding": "identity",
-        "X-Subscription-Token": apiKey,
+        if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        const data = await safeResponseJson<Record<string, any>>(r);
+        const results = (data.grounding?.generic ?? []) as Array<{
+          title: string;
+          url: string;
+          snippets: string[];
+        }>;
+        return (
+          results
+            .map(
+              (res) =>
+                `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
+            )
+            .join("\n\n---\n\n") || "No results."
+        );
       },
-      signal: signal ? AbortSignal.any([AbortSignal.timeout(15_000), signal]) : AbortSignal.timeout(15_000),
-    });
-
-    if (!r.ok) throw new Error(`Brave API ${r.status}: ${(await r.text()).slice(0, 200)}`);
-    const data = await safeResponseJson<Record<string, any>>(r);
-    const results = (data.grounding?.generic ?? []) as Array<{
-      title: string;
-      url: string;
-      snippets: string[];
-    }>;
-    return (
-      results
-        .map(
-          (res) =>
-            `### ${res.title}\n${res.url}\n\n${res.snippets?.slice(0, 3).join("\n\n") || ""}`,
-        )
-        .join("\n\n---\n\n") || "No results."
-    );
-  };
+    },
+  );
 
   // ==========================================================================
   // hash namespace — callable (read) + edit method
@@ -1053,9 +1063,9 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         .trim();
     },
 
-    sleep: (ms: number) => {
-      if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
-      return new Promise((resolve) => {
+    sleep: (ms: number): Promise<void> => {
+      if (!signal) return new Promise<void>((resolve) => setTimeout(resolve, ms));
+      return new Promise<void>((resolve) => {
         if (signal.aborted) { resolve(); return; }
         // Resolve early on abort instead of rejecting. The outer execute_code
         // runner already races the whole VM against the abort signal and returns

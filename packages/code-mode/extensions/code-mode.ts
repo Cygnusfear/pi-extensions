@@ -372,7 +372,7 @@ export default function (pi: ExtensionAPI) {
       const exec = _hlExecute;
       const action = params.action as string;
       if (action === "grep" || action === "self" || action === "search") {
-        const raw = (await exec(params)) ?? "";
+        const raw = (await exec(params as Parameters<typeof exec>[0])) ?? "";
         const hits: any[] = []; const sessionId = (params.session as string) || "self";
         if (action === "grep" || action === "self") {
           const lines = raw.split("\n"); let cur: any = null;
@@ -407,7 +407,7 @@ export default function (pi: ExtensionAPI) {
         return enrichPipeHits(hits, raw);
         }
         // view/list — raw string
-        return (await exec(params)) ?? "";
+        return (await exec(params as Parameters<typeof exec>[0])) ?? "";
     }
 
     const hlFn = async (...args: any[]) => {
@@ -844,11 +844,15 @@ export default function (pi: ExtensionAPI) {
       // Build outline of what's being compacted
       const outline: string[] = [];
       for (const msg of preparation.messagesToSummarize) {
-        if (typeof msg.content === "string") {
-          outline.push("[" + msg.role + "] " + msg.content.slice(0, 200));
-        } else if (Array.isArray(msg.content)) {
-          const text = (msg.content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
-          const tools = (msg.content as any[]).filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
+        // AgentMessage is a union including custom message types (e.g. bashExecution)
+        // that don't carry a `content` field. Narrow with a runtime guard.
+        if (!("content" in msg)) continue;
+        const content = msg.content;
+        if (typeof content === "string") {
+          outline.push("[" + msg.role + "] " + content.slice(0, 200));
+        } else if (Array.isArray(content)) {
+          const text = (content as any[]).filter((p: any) => p.type === "text").map((p: any) => p.text).join(" ").trim();
+          const tools = (content as any[]).filter((p: any) => p.type === "toolCall").map((p: any) => p.name);
           if (text || tools.length) {
             outline.push("[" + msg.role + "] " + (text.slice(0, 150) || "") + (tools.length ? " (tools: " + tools.join(", ") + ")" : ""));
           }

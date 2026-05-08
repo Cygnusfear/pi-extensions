@@ -291,16 +291,25 @@ function doList(args: { project?: string; since?: string; limit?: number }): str
 export function createOuijaExecutor(options?: OuijaOptions) {
 	return async (args: OuijaArgs): Promise<string> => {
 		switch (args.action) {
-			case "search":
-				return args.query ? doSearch(args) : "Error: 'query' required";
+			case "search": {
+				const query = args.query;
+				if (!query) return "Error: 'query' required";
+				return doSearch({ ...args, query });
+			}
 			case "view":
 				return doView(args, options);
-			case "grep":
-				return args.query ? doGrep(args, options) : "Error: 'query' required";
+			case "grep": {
+				const query = args.query;
+				if (!query) return "Error: 'query' required";
+				return doGrep({ ...args, query }, options);
+			}
 			case "list":
 				return doList(args);
-			case "self":
-				return args.query ? doSelf(args, options) : "Error: 'query' required";
+			case "self": {
+				const query = args.query;
+				if (!query) return "Error: 'query' required";
+				return doSelf({ ...args, query }, options);
+			}
 			default:
 				return `Unknown action: ${args.action}`;
 		}

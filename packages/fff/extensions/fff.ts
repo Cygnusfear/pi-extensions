@@ -45,13 +45,13 @@ function startServer(): boolean {
 			env: { ...process.env },
 		});
 
-		child.on("error", (err) => {
+		child.on("error", (err: Error) => {
 			startError = err.message;
 			serverProcess = null;
 			serverReady = false;
 		});
 
-		child.on("exit", (_code) => {
+		child.on("exit", (_code: number | null) => {
 			serverProcess = null;
 			serverReady = false;
 			stdoutBuffer = "";
@@ -369,7 +369,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 			cwd: Type.Optional(Type.String({ description: "Working directory override" })),
 		}),
 
-		async execute(_toolCallId, params: any, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const cwd = params.cwd || ctx.cwd;
 			const result = await fffFindAPI(params.query, { maxResults: params.maxResults, cwd });
 
@@ -377,6 +377,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text" as const, text: `fff not available: ${result.error}` }],
 					isError: true,
+					details: undefined,
 				};
 			}
 
@@ -439,7 +440,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 			cwd: Type.Optional(Type.String({ description: "Working directory override" })),
 		}),
 
-		async execute(_toolCallId, params: any, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const cwd = params.cwd || ctx.cwd;
 			const result = await fffGrepAPI(params.query, {
 				mode: params.mode,
@@ -452,6 +453,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text" as const, text: `fff not available: ${result.error}` }],
 					isError: true,
+					details: undefined,
 				};
 			}
 
@@ -514,7 +516,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 			cwd: Type.Optional(Type.String({ description: "Working directory override" })),
 		}),
 
-		async execute(_toolCallId, params: any, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const cwd = params.cwd || ctx.cwd;
 			const result = await fffMultiGrepAPI(params.patterns, {
 				constraints: params.constraints,
@@ -527,6 +529,7 @@ export default function fffExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text" as const, text: `fff not available: ${result.error}` }],
 					isError: true,
+					details: undefined,
 				};
 			}
 
