@@ -1,0 +1,33 @@
+docs/walkthrough.md
+  s_00ad1d3f9e400b::t_35f0a82126da1d 174,176
+packages/teams/README.md
+  s_00ad1d3f9e400b::t_2c0c26cf9d6651 33,38,44-47
+  s_00ad1d3f9e400b::t_c188193fc18b25 116,121-125,131,137-141,149
+  s_00ad1d3f9e400b::t_55ae1ca9214134 296,298-299
+docs/conventions/model-references.md
+  s_00ad1d3f9e400b::t_1e8a29b12872d4 1-80
+docs/demo-script.md
+  s_00ad1d3f9e400b::t_c7978e6c5adba7 110,112
+skills/environment/SKILL.md
+  s_00ad1d3f9e400b::t_a37a5d4a601ed0 159
+  s_00ad1d3f9e400b::t_c555de52bf1b86 103-105,110
+  s_00ad1d3f9e400b::t_4ca1fb213dc383 125,127-129
+packages/default-prompt/prompts/default.md
+  s_00ad1d3f9e400b::t_4635b6773c4963 318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6ceb6d29f71a97232450da49b77e0d1db1a3d4b6",
+  "prompts": {},
+  "sessions": {
+    "s_00ad1d3f9e400b": {
+      "agent_id": {
+        "tool": "Gabriela Sagittarius Cronin",
+        "id": "019e11a2-d094-7066-aa62-a0be035e42e3",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
