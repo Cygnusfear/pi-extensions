@@ -1,0 +1,46 @@
+packages/rlm/test/rlm.contract.test.ts
+  s_00ad1d3f9e400b::t_97f2b2244e25d2 249,273
+  s_00ad1d3f9e400b::t_ce99dccccd426c 228-240,242-248,250-254,259-272,274-277
+  s_00ad1d3f9e400b::t_ec44174c788b64 241,257-258
+  s_00ad1d3f9e400b::t_a0b395561bef1f 255
+  s_00ad1d3f9e400b::t_0935fc21cc4786 256
+packages/code-mode/src/session-factory.ts
+  s_00ad1d3f9e400b::t_0f9bea427f8853 210-211
+packages/code-mode/src/types.ts
+  s_00ad1d3f9e400b::t_50708571bd0130 18-20
+packages/rlm/src/progress.ts
+  s_00ad1d3f9e400b::t_cb99f788a71f11 1-107
+packages/rlm/src/types.ts
+  s_00ad1d3f9e400b::t_154d25a57b04d7 10-11,21,24-60,63-64
+packages/rlm/src/loop.ts
+  s_00ad1d3f9e400b::t_2ce3ecfbdb3cc6 72,83,97
+  s_00ad1d3f9e400b::t_a4179c1af7ff4b 9,120-123,143,155,187-188,194
+  s_00ad1d3f9e400b::t_c5d11bafccd24a 217-218
+packages/code-mode/src/sandbox-tools.ts
+  s_00ad1d3f9e400b::t_4a5f8a98155093 841-845
+packages/rlm/src/ts-shims/code-mode-session-factory.ts
+  s_00ad1d3f9e400b::t_869e6df11c6b93 61
+packages/code-mode/extensions/code-mode-declarations.md
+  s_00ad1d3f9e400b::t_118372a5bbfdb2 805-806,816,819-854,857-858,882-891
+  s_00ad1d3f9e400b::t_b7b058333842d7 914,918-919
+packages/rlm/src/handle.ts
+  s_00ad1d3f9e400b::t_c094c19a34af7c 28-29
+  s_00ad1d3f9e400b::t_be8df8a53bc442 4-5,11,20,30-33,38,62-66
+  s_00ad1d3f9e400b::t_5ef574df215645 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "bf81ab93f1f7a8fcd9a7270ec97af7245c8e223e",
+  "prompts": {},
+  "sessions": {
+    "s_00ad1d3f9e400b": {
+      "agent_id": {
+        "tool": "Gabriela Sagittarius Cronin",
+        "id": "019e11a2-d094-7066-aa62-a0be035e42e3",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
