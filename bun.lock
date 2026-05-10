@@ -281,6 +281,17 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/model-router": {
+      "name": "@pi-extensions/model-router",
+      "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
+      "peerDependencies": {
+        "@mariozechner/pi-coding-agent": ">=0.66.0",
+        "@sinclair/typebox": "*",
+      },
+    },
     "packages/model-shortcuts": {
       "name": "@pi-extensions/model-shortcuts",
       "version": "0.0.1",
@@ -699,6 +710,8 @@
     "@pi-extensions/mid-mortem": ["@pi-extensions/mid-mortem@workspace:packages/mid-mortem"],
 
     "@pi-extensions/model-hints": ["@pi-extensions/model-hints@workspace:packages/model-hints"],
+
+    "@pi-extensions/model-router": ["@pi-extensions/model-router@workspace:packages/model-router"],
 
     "@pi-extensions/model-shortcuts": ["@pi-extensions/model-shortcuts@workspace:packages/model-shortcuts"],
 

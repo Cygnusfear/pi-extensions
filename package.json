@@ -40,6 +40,7 @@
       "./packages/lock-mode/extensions/lock-mode.ts",
       "./packages/mid-mortem/extensions/mid-mortem.ts",
       "./packages/model-hints/extensions/model-hints.ts",
+    "./packages/model-router/extensions/model-router.ts",
       "./packages/model-shortcuts/extensions/model-shortcuts.ts",
       "./packages/notify/extensions/notify.ts",
       "./packages/powerline-footer/index.ts",

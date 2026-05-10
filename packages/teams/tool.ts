@@ -7,6 +7,7 @@ import { Type } from "@sinclair/typebox";
 import { formatRuntimeSummary } from "./activity.js";
 import type { TeamLeader } from "./leader.js";
 import { resolveTemplate, listTemplates } from "./templates.js";
+import { resolve as resolveModelRole, type ResolverContext } from "../model-router/src/router.js";
 import { projectWidgetStatus } from "./widget.js";
 
 function formatActionError(error: unknown): string {
@@ -244,7 +245,21 @@ async function runTeamsAction(
           results.push(`Unknown template "${task.template}" for "${workerName}". Available: ${names}. Configure in ~/.pi/agent/team-templates.json`);
           continue;
         }
-        if (!effectiveModel && tmpl.model) effectiveModel = tmpl.model;
+        // Resolve model via router when template has an array, direct when string
+        if (!effectiveModel && tmpl.model) {
+          if (Array.isArray(tmpl.model)) {
+            const resolverCtx: ResolverContext = { getAvailable: () => ctx.modelRegistry.getAvailable() };
+            const resolved = resolveModelRole(resolverCtx, { role: task.template, count: 1 });
+            if (resolved.resolved.length > 0) {
+              effectiveModel = resolved.resolved[0].id;
+            } else if (resolved.skipped.length > 0) {
+              results.push(`⚠ Role "${task.template}" has no available models. Skipped: ${resolved.skipped.map(s => `${s.id} (${s.skipReason})`).join(", ")}`);
+              continue;
+            }
+          } else {
+            effectiveModel = tmpl.model;
+          }
+        }
         if (tmpl.worktree !== undefined && params.useWorktree === undefined) effectiveWorktree = tmpl.worktree;
         if (tmpl.prompt) additionalPrompt = tmpl.prompt;
         if (tmpl.freeform) freeform = true;

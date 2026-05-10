@@ -4,7 +4,7 @@ import os from "node:os";
 
 export interface TeamTemplate {
 	worktree?: boolean;
-	model?: string;
+	model?: string | string[];
 	prompt?: string;
 	freeform?: boolean; // When true, skip GUARD PROTOCOL — coordinator controls ticket lifecycle
 }
