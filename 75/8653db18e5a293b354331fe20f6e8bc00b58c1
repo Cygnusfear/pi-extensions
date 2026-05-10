@@ -1,0 +1,43 @@
+packages/model-router/src/types.ts
+  s_00ad1d3f9e400b::t_f485952a6d702c 1-63
+packages/model-router/package.json
+  s_00ad1d3f9e400b::t_99c504199ba1e0 1-20
+packages/model-router/extensions/model-router.ts
+  s_00ad1d3f9e400b::t_6bc49ececa3db9 21
+  s_00ad1d3f9e400b::t_85073ed9559b44 1-20,22-108
+packages/teams/tool.ts
+  s_00ad1d3f9e400b::t_c351af8587eb16 10
+  s_00ad1d3f9e400b::t_925ea7874510b4 248-262
+packages/teams/templates.ts
+  s_00ad1d3f9e400b::t_308aee9d715fcc 7
+package.json
+  s_00ad1d3f9e400b::t_139fbcedb2d3af 43
+packages/model-router/tests/router.test.ts
+  s_00ad1d3f9e400b::t_5b3e5b5cb4e2ca 1-244
+packages/model-router/README.md
+  s_00ad1d3f9e400b::t_fbef2cb9b4f8a6 1-82
+packages/model-router/src/router.ts
+  s_00ad1d3f9e400b::t_fd95ac802210bf 1-18,21-27,29-44,48-58,60-67,69-81,83-249
+  s_00ad1d3f9e400b::t_b493f7b1bfbc0a 19-20
+  s_00ad1d3f9e400b::t_6d8aad91fec733 28
+  s_00ad1d3f9e400b::t_98ed6b69f8155e 45-47
+  s_00ad1d3f9e400b::t_fdd75301cfd50c 68
+  s_00ad1d3f9e400b::t_925b63bd78cede 82
+  s_00ad1d3f9e400b::t_11cfd61319feda 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "758653db18e5a293b354331fe20f6e8bc00b58c1",
+  "prompts": {},
+  "sessions": {
+    "s_00ad1d3f9e400b": {
+      "agent_id": {
+        "tool": "Gabriela Sagittarius Cronin",
+        "id": "019e11a2-d094-7066-aa62-a0be035e42e3",
+        "model": "zai-coding/glm-5.1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
