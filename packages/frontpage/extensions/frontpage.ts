@@ -329,27 +329,66 @@ export default function (pi: ExtensionAPI) {
       }
 
       const spec: FrontpageSpec = JSON.parse(JSON.stringify(meta.spec));
+      const applied: string[] = [];
+      const skipped: Array<{ op: string; reason: string; section_id?: string }> = [];
+
       for (const op of params.patch) {
         switch (op.op) {
           case "replace_section": {
             const i = spec.sections.findIndex(s => s.id === op.section_id);
-            if (i >= 0) spec.sections[i] = { ...(op.new_section as SectionSpec), id: op.section_id };
+            if (i >= 0) {
+              spec.sections[i] = { ...(op.new_section as SectionSpec), id: op.section_id };
+              applied.push(`replace ${op.section_id}`);
+            } else {
+              skipped.push({ op: "replace_section", section_id: op.section_id, reason: "section_id not found" });
+            }
             break;
           }
           case "append_section":
             spec.sections.push(op.new_section as SectionSpec);
+            applied.push(`append (${(op.new_section as SectionSpec).type})`);
             break;
-          case "remove_section":
+          case "remove_section": {
+            const before = spec.sections.length;
             spec.sections = spec.sections.filter(s => s.id !== op.section_id);
+            if (spec.sections.length < before) {
+              applied.push(`remove ${op.section_id}`);
+            } else {
+              skipped.push({ op: "remove_section", section_id: op.section_id, reason: "section_id not found" });
+            }
             break;
+          }
           case "update_meta": {
-            if (op.title) spec.title = op.title;
-            if (op.thesis) spec.thesis = op.thesis;
-            if (op.palette) spec.palette = op.palette as FrontpageSpec["palette"];
-            if (op.register) spec.register = op.register as FrontpageSpec["register"];
+            const fields: string[] = [];
+            if (op.title) { spec.title = op.title; fields.push("title"); }
+            if (op.thesis) { spec.thesis = op.thesis; fields.push("thesis"); }
+            if (op.palette) { spec.palette = op.palette as FrontpageSpec["palette"]; fields.push("palette"); }
+            if (op.register) { spec.register = op.register as FrontpageSpec["register"]; fields.push("register"); }
+            if (fields.length > 0) {
+              applied.push(`update_meta (${fields.join(",")})`);
+            } else {
+              skipped.push({ op: "update_meta", reason: "no fields to update" });
+            }
             break;
           }
         }
+      }
+
+      // If everything was skipped, do not write — tell the model what's there.
+      if (applied.length === 0) {
+        const availableIds = spec.sections.map(s => `${s.id} (${s.type})`).join(", ");
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `No ops applied to '${params.slug}'. ${skipped.length} op(s) skipped.`,
+              ...skipped.map(s => `  - ${s.op}${s.section_id ? ` ${s.section_id}` : ""}: ${s.reason}`),
+              `Available section IDs: ${availableIds}`,
+            ].join("\n"),
+          }],
+          isError: true,
+          details: { slug: params.slug, applied: 0, skipped, availableSectionIds: spec.sections.map(s => s.id) },
+        };
       }
 
       const withIds = assignIds(spec);
@@ -368,10 +407,12 @@ export default function (pi: ExtensionAPI) {
           text: [
             `Frontpage updated: ${filePath}`,
             meta.artifactId ? `mai note added to ${meta.artifactId}` : "mai artifact unknown — no note",
-            `Ops applied: ${params.patch.length}`,
+            `Ops applied: ${applied.length}/${params.patch.length}`,
+            ...applied.map(a => `  ✓ ${a}`),
+            ...(skipped.length > 0 ? [`Skipped: ${skipped.length}`, ...skipped.map(s => `  ✗ ${s.op}${s.section_id ? ` ${s.section_id}` : ""}: ${s.reason}`)] : []),
           ].join("\n"),
         }],
-        details: { slug: withIds.slug, path: filePath, artifactId: meta.artifactId, ops: params.patch.length },
+        details: { slug: withIds.slug, path: filePath, artifactId: meta.artifactId, applied: applied.length, skipped: skipped.length, sectionIds: withIds.sections.map(s => s.id) },
       };
     },
   });
