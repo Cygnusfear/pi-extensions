@@ -107,9 +107,9 @@ await teams({
   action: "delegate",
   tasks: [
     { text: "Fix the type errors in auth.ts", 
-      assignee: "fix-worker", model: "anthropic/claude-sonnet-4-6" },
+      assignee: "fix-worker", template: "fix" },
     { text: "Write comprehensive tests for the auth module",
-      assignee: "test-worker", model: "openai-codex/gpt-5.4" },
+      assignee: "test-worker", template: "implementer" },
     { text: "Review the auth module architecture",
       assignee: "reviewer", template: "review" }
   ]

@@ -81,6 +81,8 @@ console.log("Review link:", review.terminalLink);
 
 Prefer `review.terminalLink` in terminal output because Ghostty opens normal HTTP links reliably. `review.vscodeLink` is the raw VS Code URI fallback, and `review.link` is the shorter human-facing `mai://review/<token>` form. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
 
+When RE-reviewing- always default to an incremental review first, find problems fast, fix fast, and repeat fast.
+
 ## RLM discovery default
 
 RLM means Recursive Language Model. In code-mode, `rlm()` starts a small in-process LLM worker with its own private code-mode context. You give it a task and a narrow tool list; it explores independently and returns a structured JSON-like object to the parent. It is for discovery and pre-edit planning; the parent applies final edits and verifies.
@@ -313,7 +315,7 @@ If the hooman gives you **only** an ID like `20.01` (or `2001`), treat it as a *
 
 - ALWAYS TELL THE AGENTS to use the 'code reviewer' 6-pass review skill for reviews. NEVER 'self read' the skill and reinterpret it.
 - ALWAYS reference original specs, conversations, ADRs and tickets
-- ALWAYS use the `openai-codex/gpt-5.4` model for code reviews
+- ALWAYS use the `review` team template for code reviews. The model-router resolves the model from `~/.pi/agent/team-templates.json` so review quality stays current. Use `template: "review"` in `teams.delegate(...)`. Pin a literal `model: "..."` only when you have a specific reason to override.
 - REVIEWS need to be completed 10/10 ALWAYS follow 90.05
 - ALWAYS give the ORIGINAL code review to the fix agents, and tell them to fix everything, including suggestions. 10/10 ONLY. DO NOT INTERPRET THE REVIEWS.
 - Using different models for reviews means the reviews are illegitimate and invalid, it means the review needs to be REDONE COMPLETELY.

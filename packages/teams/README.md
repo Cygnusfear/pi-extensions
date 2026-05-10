@@ -30,17 +30,21 @@ await teams({
     {
       text: "Implement the user authentication module with JWT tokens",
       assignee: "auth-worker",
-      model: "anthropic/claude-sonnet-4-6"
+      template: "implementer"  // model resolved via model-router from team-templates.json
     },
     {
       text: "Write integration tests for the payment service",
       assignee: "test-worker",
-      model: "openai-codex/gpt-5.4"
+      template: "implementer"
     }
   ],
   useWorktree: true,
   baseRef: "main"
 });
+
+// You can still pin a specific model to override the role's resolution:
+//   { ..., model: "anthropic/claude-sonnet-4-7" }
+// The router never overrides explicit pins.
 ```
 
 Each task creates:
@@ -109,30 +113,40 @@ The link is short because the full payload lives in `~/.maitake/review-handoffs/
 
 ## Templates
 
-Templates define reusable worker profiles stored in `~/.pi/agent/team-templates.json`:
+Templates define reusable worker profiles stored in `~/.pi/agent/team-templates.json`. Each template's `model` can be a single ID or an ordered preference list — the model-router walks the list, filters by availability and health, and picks the first match (deduping providers for DEI).
 
 ```json
 {
   "review": {
-    "model": "openai-codex/gpt-5.4",
+    "model": [
+      "anthropic/claude-opus-4-7",
+      "openai-codex/gpt-5.5",
+      "zai-coding/glm-5.1"
+    ],
     "worktree": false,
     "prompt": "You are a code reviewer. Follow the 6-pass review skill.",
     "freeform": false
   },
   "oracle": {
-    "model": "anthropic/claude-opus-4-6",
+    "model": "anthropic/claude-opus-4-7",
     "worktree": false,
     "prompt": "You are a research oracle. Answer questions with deep analysis.",
     "freeform": false
   },
   "fix": {
-    "model": "anthropic/claude-sonnet-4-6",
+    "model": [
+      "zai-coding/glm-5.1",
+      "openai-codex/gpt-5.4",
+      "anthropic/claude-opus-4-7"
+    ],
     "worktree": true,
     "prompt": "You are a fix agent. Fix all issues found in the code review.",
     "freeform": false
   }
 }
 ```
+
+The router never reorders — your literal sequence is the contract. See `packages/model-router/README.md` for the full algorithm and the `modelRouter` code-mode API.
 
 Use templates when delegating:
 
@@ -279,10 +293,10 @@ If you want BOTH your handler and the leader's batch notify to fire, simply omit
 ### Background wake pattern — the replacement for sleep-polling
 
 ```javascript
-// Spawn workers
+// Spawn workers — use templates so the model-router stays current
 await teams.delegate([
-  { text: "Implement the feature", assignee: "impl", model: "anthropic/claude-sonnet-4-6" },
-  { text: "Review the implementation", assignee: "review", model: "openai-codex/gpt-5.4" },
+  { text: "Implement the feature", assignee: "impl", template: "implementer" },
+  { text: "Review the implementation", assignee: "review", template: "review" },
 ]);
 
 await supervise(false); // don't burn context while idle

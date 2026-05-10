@@ -100,11 +100,14 @@ You can spawn other agents to work in parallel. Each gets its own git worktree a
 await teams({
   action: "delegate",
   tasks: [
-    { text: "Rewrite the README for the auth package", assignee: "docs-worker", model: "zai/glm-5-turbo" },
-    { text: "Fix the type errors in src/api.ts", assignee: "fix-worker", model: "anthropic/claude-sonnet-4-6" }
+    // Preferred: use a team template — the model-router picks the model
+    { text: "Rewrite the README for the auth package", assignee: "docs-worker", template: "implementer" },
+    { text: "Fix the type errors in src/api.ts", assignee: "fix-worker", template: "fix" }
   ]
 });
 ```
+
+**Use `template` instead of `model`** — it resolves through `~/.pi/agent/team-templates.json` so model picks stay current. Only pass `model: "..."` directly when you need to pin a specific model for a specific reason (the router never overrides explicit pins).
 
 ### Waiting for workers — `teams.on(...)`
 
@@ -119,11 +122,11 @@ Two patterns depending on how long you expect to wait.
 **`await` inside `execute_code`.** The agent stays "busy" in the tool call until the event fires. No supervisor management needed — the supervisor only fires when the agent goes idle between turns.
 
 ```javascript
-// Spawn three workers
+// Spawn three workers — use templates so the model-router stays current
 await teams.delegate([
-  { text: "Implement feature A", assignee: "impl-a", model: "anthropic/claude-sonnet-4-6" },
-  { text: "Implement feature B", assignee: "impl-b", model: "openai-codex/gpt-5.4" },
-  { text: "Review architecture", assignee: "review", model: "anthropic/claude-opus-4-6" },
+  { text: "Implement feature A", assignee: "impl-a", template: "implementer" },
+  { text: "Implement feature B", assignee: "impl-b", template: "implementer" },
+  { text: "Review architecture", assignee: "review", template: "review" },
 ]);
 
 // Race — first worker to complete wakes us up, still inside this block
@@ -153,7 +156,7 @@ console.log(`${first.worker.name} finished first:`, first.result.slice(0, 500));
 
 ```javascript
 await teams.delegate([
-  { text: "Big refactor job", assignee: "refactor", model: "openai-codex/gpt-5.4" },
+  { text: "Big refactor job", assignee: "refactor", template: "implementer" },
 ]);
 
 // CRITICAL: turn off supervisor before going idle, otherwise it spams
