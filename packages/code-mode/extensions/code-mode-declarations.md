@@ -802,6 +802,8 @@ export interface RlmOptions {
   task: string;
   tools: string[];
   model?: string;
+  /** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
+  identity?: string | { name?: string; email?: string };
   maxIterations?: number;
   maxDepth?: number;
   /** Optional runtime schema guard: rlm.return() result must contain every listed top-level key. */
@@ -811,11 +813,49 @@ export interface RlmOptions {
 }
 
 export type RlmResult = Record<string, unknown> & {
-  __rlm_usage?: { input: number; output: number; model: string };
+  __rlm_usage?: { input: number; output: number; model: string; identity?: string };
 };
+
+export type RlmStatus = "pending" | "running" | "resolved" | "failed" | "cancelled" | "timeout";
+export type RlmEventType = "start" | "step" | "tool" | "return" | "error" | "settled";
+
+export interface RlmIdentity {
+  name: string;
+  email: string;
+}
+
+export interface RlmToolCallSummary {
+  name: string;
+  arguments?: unknown;
+  timestamp: number;
+}
+
+export interface RlmSnapshot {
+  status: RlmStatus;
+  identity: RlmIdentity;
+  model?: string;
+  iteration: number;
+  maxIterations?: number;
+  usage: { input: number; output: number };
+  lastAssistantSummary?: string;
+  lastToolCall?: RlmToolCallSummary;
+  toolHistory: RlmToolCallSummary[];
+  startedAt: number;
+  updatedAt: number;
+  error?: string;
+}
+
+export interface RlmEvent {
+  type: RlmEventType;
+  snapshot: RlmSnapshot;
+}
+
+export type RlmEventCallback = (event: RlmEvent) => void;
 
 export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
   timeout(ms: number): this;
+  inspect(): RlmSnapshot;
+  on(type: RlmEventType, callback: RlmEventCallback): this;
   unsubscribe(): void;
 }
 
@@ -839,6 +879,16 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
  * rlm is strongest as an isolated discovery/planning worker with a narrow tools list and a structured return.
  * Treat $ as a 50MB-capable transport for structured data, not only a scratchpad. Store the object and
  * drill into exact keys later instead of forcing a prose summary through the context window.
+ *
+ * Implementation workers can be run wake-safely without blocking the harness:
+ *
+ *   const h = rlm({ task, tools, identity: "slice-2" }).timeout(600_000);
+ *   h.on("step", e => console.log("rlm", e.snapshot.iteration, e.snapshot.lastAssistantSummary));
+ *   h.then(
+ *     r => console.wake("rlm done: " + JSON.stringify(r).slice(0, 500)),
+ *     e => console.wake("rlm failed: " + e.message),
+ *   );
+ *   console.log("RLM armed — inspect later with h.inspect(); do not sleep-poll.");
  */
 declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
   return(value: Record<string, unknown>): never;
@@ -861,11 +911,12 @@ declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
  *
  * Use cases:
  * - Background monitoring: fire a polling promise onto $, wake yourself when something changes
- * - Worker watching: poll a teams worker every few minutes, wake when it completes
+ * - Worker watching: prefer typed events like teams.on(...); do not foreground sleep-poll
  * - File watching: tail a log file, wake when a pattern appears
  *
  * @example
- * // Fire-and-forget monitor that wakes the agent when done
+ * // Fire-and-forget monitor that wakes the agent when done. Do NOT await this promise;
+ * // stashing it on $ lets this execute_code block return so the harness is not blocked.
  * $.monitor = (async () => {
  *   for (let i = 0; i < 20; i++) {
  *     await sleep(240000); // 4 minutes

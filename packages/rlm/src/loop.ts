@@ -6,6 +6,7 @@ import { combineSignals } from "./combine-signals";
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_ITERATIONS } from "./constants";
 import { disposeSub } from "./dispose";
 import { createRlmHandle } from "./handle";
+import { assistantToolCalls, summarizeAssistantMessage, type RlmProgressMonitor } from "./progress";
 import { buildSystemPrompt } from "./prompts";
 import { buildRlmReturn } from "./return-injection";
 import { isRlmReturnSignal } from "./return-signal";
@@ -68,6 +69,7 @@ function buildExecuteCodeTool(params: {
 	modelRef: { provider: string; id: string };
 	rlmWithReturn: unknown;
 	state: RlmState;
+	monitor?: RlmProgressMonitor;
 }): AgentTool<any, any> {
 	return {
 		name: "execute_code",
@@ -78,6 +80,7 @@ function buildExecuteCodeTool(params: {
 		}),
 		async execute(_toolCallId, toolParams, signal) {
 			const effectiveSignal = signal ?? params.combined;
+			const identity = params.monitor?.inspect().identity;
 			try {
 				await executeInSession(params.subSession, String(toolParams.code), {
 					signal: effectiveSignal,
@@ -91,6 +94,7 @@ function buildExecuteCodeTool(params: {
 					errorMode: "rethrow",
 					allowedTools: new Set(params.opts.tools),
 					extraBindings: { rlm: params.rlmWithReturn },
+					agentGitIdentity: identity ? { ...identity, model: params.modelRef.provider + "/" + params.modelRef.id } : undefined,
 				});
 			} catch (e) {
 				const stdout = params.subSession.drainLogs();
@@ -113,6 +117,10 @@ function buildExecuteCodeTool(params: {
 }
 
 export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promise<RlmResult> {
+	return runRlmWithMonitor(deps, opts, depth, undefined);
+}
+
+export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth = 0, monitor?: RlmProgressMonitor): Promise<RlmResult> {
 	validateOptions(opts, deps);
 	const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
 	if (depth >= maxDepth) throw new Error("rlm: max depth reached");
@@ -132,6 +140,7 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 	if (combined.aborted) throw abortError(combined);
 
 	const [p, id] = opts.model ? resolveModel(opts.model) : [deps.parentModel.provider, deps.parentModel.id];
+	monitor?.update({ status: "running", model: p + "/" + id, maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS }, "start");
 	const model = deps.modelRegistry.find(p, id);
 	if (!model) throw new Error("rlm: unknown model '" + (opts.model ?? p + "/" + id) + "'");
 	const auth = await deps.modelRegistry.getApiKeyAndHeaders(model);
@@ -143,7 +152,7 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 		: ((subOpts: RlmOptions) => createRlmHandle(deps, subOpts, depth + 1));
 	const rlmWithReturn = Object.assign((subOpts: RlmOptions) => rlmCallable(subOpts), { return: buildRlmReturn(state) });
 	const effectiveOpts: RlmOptions = { ...opts, tools: opts.tools.filter((tool) => tool !== "rlm") };
-	const executeCodeTool = buildExecuteCodeTool({ subSession, combined, deps, opts: effectiveOpts, modelRef: { provider: p, id }, rlmWithReturn, state });
+	const executeCodeTool = buildExecuteCodeTool({ subSession, combined, deps, opts: effectiveOpts, modelRef: { provider: p, id }, rlmWithReturn, state, monitor });
 
 	const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
 	let turns = 0;
@@ -175,11 +184,14 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 				const assistant = event.message as AssistantMessage;
 				state.usage.input += usageInput(assistant.usage);
 				state.usage.output += usageOutput(assistant.usage);
+				monitor?.update({ usage: { ...state.usage }, lastAssistantSummary: summarizeAssistantMessage(assistant) }, "step");
+				for (const toolCall of assistantToolCalls(assistant)) monitor?.recordTool(toolCall);
 				if (assistant.stopReason === "error") terminalError = new Error(assistant.errorMessage || "rlm: sub-agent error");
 				if (assistant.stopReason === "aborted") terminalError = new Error(assistant.errorMessage || "Aborted");
 			}
 			if (event.type === "turn_end") {
 				turns++;
+				monitor?.update({ iteration: turns, usage: { ...state.usage } }, "step");
 				if (state.resolved) throw new RlmResolvedSignal();
 				if (turns >= maxIterations) throw new Error("rlm: maxIterations (" + maxIterations + ") reached without rlm.return");
 			}
@@ -202,5 +214,6 @@ export async function runRlm(deps: RlmDeps, opts: RlmOptions, depth = 0): Promis
 	}
 	const missingKeys = (opts.requiredKeys ?? []).filter((key) => !Object.prototype.hasOwnProperty.call(state.value ?? {}, key));
 	if (missingKeys.length > 0) throw new Error("rlm: returned object missing required keys: " + missingKeys.join(", "));
-	return { ...(state.value ?? {}), __rlm_usage: { input: state.usage.input, output: state.usage.output, model: p + "/" + id } };
+	const usage = { input: state.usage.input, output: state.usage.output, model: p + "/" + id, ...(monitor ? { identity: monitor.inspect().identity.name } : {}) };
+	return { ...(state.value ?? {}), __rlm_usage: usage };
 }

@@ -838,6 +838,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         gitEnv.GIT_AUTHOR_EMAIL = ctx.agentGitIdentity.email;
         gitEnv.GIT_COMMITTER_NAME = ctx.agentGitIdentity.name;
         gitEnv.GIT_COMMITTER_EMAIL = ctx.agentGitIdentity.email;
+        gitEnv.PI_AGENT_NAME = ctx.agentGitIdentity.name;
+        gitEnv.PI_AGENT_EMAIL = ctx.agentGitIdentity.email;
+        if (ctx.agentGitIdentity.model) gitEnv.PI_AGENT_MODEL = ctx.agentGitIdentity.model;
+        if (ctx.agentGitIdentity.sessionId) gitEnv.PI_SESSION_ID = ctx.agentGitIdentity.sessionId;
+        if (ctx.agentGitIdentity.sessionName) gitEnv.PI_SESSION_NAME = ctx.agentGitIdentity.sessionName;
       }
 
       const result = await spawnAsync({

@@ -58,6 +58,7 @@ export function executeInSession(
 		errorMode?: "recover" | "rethrow";
 		allowedTools?: Set<string>;
 		extraBindings?: Record<string, unknown>;
+		agentGitIdentity?: { name: string; email: string; model?: string; sessionId?: string; sessionName?: string };
 	},
 ): Promise<{ output: string; error?: string; duration: number }> {
 	return sessionFactoryModule().executeInSession(session, code, deps);

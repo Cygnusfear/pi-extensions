@@ -207,8 +207,8 @@ export interface ExecutionDeps {
 	 */
 	bindings?: Record<string, unknown>;
 
-	/** Optional git identity — injected into Bash env vars for automatic commit attribution. */
-	agentGitIdentity?: { name: string; email: string };
+	/** Optional git identity — injected into Bash/git-ai env vars for automatic commit attribution. */
+	agentGitIdentity?: { name: string; email: string; model?: string; sessionId?: string; sessionName?: string };
 
 	// ── Extension-side deferral hooks ───────────────────────────────────────────
 	// The session-helpers block (when injectSessionApi=true) needs to communicate

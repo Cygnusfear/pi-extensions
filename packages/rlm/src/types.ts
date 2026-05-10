@@ -7,6 +7,8 @@ export interface RlmOptions {
 	task: string;
 	tools: string[];
 	model?: string;
+	/** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
+	identity?: string | { name?: string; email?: string };
 	maxIterations?: number;
 	maxDepth?: number;
 	/** Optional runtime schema guard: rlm.return() result must contain every listed top-level key. */
@@ -16,11 +18,50 @@ export interface RlmOptions {
 }
 
 export type RlmResult = Record<string, unknown> & {
-	__rlm_usage?: { input: number; output: number; model: string };
+	__rlm_usage?: { input: number; output: number; model: string; identity?: string };
 };
+
+export type RlmStatus = "pending" | "running" | "resolved" | "failed" | "cancelled" | "timeout";
+
+export interface RlmIdentity {
+	name: string;
+	email: string;
+}
+
+export interface RlmToolCallSummary {
+	name: string;
+	arguments?: unknown;
+	timestamp: number;
+}
+
+export interface RlmSnapshot {
+	status: RlmStatus;
+	identity: RlmIdentity;
+	model?: string;
+	iteration: number;
+	maxIterations?: number;
+	usage: { input: number; output: number };
+	lastAssistantSummary?: string;
+	lastToolCall?: RlmToolCallSummary;
+	toolHistory: RlmToolCallSummary[];
+	startedAt: number;
+	updatedAt: number;
+	error?: string;
+}
+
+export type RlmEventType = "start" | "step" | "tool" | "return" | "error" | "settled";
+
+export interface RlmEvent {
+	type: RlmEventType;
+	snapshot: RlmSnapshot;
+}
+
+export type RlmEventCallback = (event: RlmEvent) => void;
 
 export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
 	timeout(ms: number): this;
+	inspect(): RlmSnapshot;
+	on(type: RlmEventType, callback: RlmEventCallback): this;
 	unsubscribe(): void;
 }
 

@@ -225,4 +225,54 @@ describe("rlm contract", () => {
 	test("21 non-aborted stopReason passes through", async () => { setComplete(() => resp(js("rlm.return({n:1});"), { input: 2, output: 3 }, "max_tokens")); await expect(runRlm(deps(), { task: "stop", tools: [] }, 0)).resolves.toMatchObject({ n: 1 }); });
 	test("22 cwd is passed to sub tool bindings", async () => { queue(js("const pkg = await Read({path:'package.json'}); rlm.return({hasWorkspaces: pkg.includes('\\\"workspaces\\\"')});")); await expect(runRlm(deps(), { task: "cwd", tools: ["Read"] }, 0)).resolves.toMatchObject({ hasWorkspaces: true }); });
 	test("23 model auth failure rejects", async () => { await expectReject(runRlm(deps({ parentModel: { provider: "noauth", id: "x" } }), { task: "auth", tools: [] }, 0), "no API key for model"); });
+
+	test("24 handle inspect/on exposes identity, progress, and final usage", async () => {
+		let release!: (text: string) => void;
+		const requested = new Promise<void>((resolve) => {
+			setComplete(() => {
+				resolve();
+				return new Promise((res) => { release = (text: string) => res(resp(text, { input: 7, output: 3 })); });
+			});
+		});
+		const events: string[] = [];
+		const h = createRlmHandle(deps(), { task: "inspect", tools: [], identity: "slice-2-rlm" }, 0)
+			.on("start", (e) => events.push("start:" + e.snapshot.identity.name))
+			.on("step", (e) => events.push("step:" + e.snapshot.status))
+			.on("tool", (e) => events.push("tool:" + e.snapshot.lastToolCall?.name))
+			.on("return", (e) => events.push("return:" + e.snapshot.status));
+
+		await requested;
+		const mid = h.inspect();
+		expect(mid.status).toBe("running");
+		expect(mid.identity.name).toBe("slice-2-rlm");
+		expect(mid.model).toBe("test/test-model");
+		expect(mid.maxIterations).toBe(20);
+
+		release(js("rlm.return({ok:true});"));
+		const result = await h;
+		expect(result).toMatchObject({ ok: true, __rlm_usage: { input: 7, output: 3, model: "test/test-model", identity: "slice-2-rlm" } });
+		expect(h.inspect().status).toBe("resolved");
+		expect(events).toContain("start:slice-2-rlm");
+		expect(events).toContain("step:running");
+		expect(events).toContain("tool:execute_code");
+		expect(h.inspect().lastToolCall?.name).toBe("execute_code");
+		expect(events).toContain("return:resolved");
+	});
+
+	test("25 timeout updates inspect status", async () => {
+		setComplete((_m, _req, auth) => new Promise((_res, rej) => auth.signal.addEventListener("abort", () => rej(new Error("Aborted")))));
+		const h = createRlmHandle(deps(), { task: "timeout-inspect", tools: [], identity: "timeout-worker" }, 0).timeout(20);
+		await expectReject(h, "rlm: timeout after 20ms");
+		const snap = h.inspect();
+		expect(snap.status).toBe("timeout");
+		expect(snap.error).toBe("rlm: timeout after 20ms");
+	});
+
+	test("26 Bash receives rlm git-ai attribution env", async () => {
+		queue(js("const r = await Bash({command:'printf \"%s|%s|%s\" \"$PI_AGENT_NAME\" \"$PI_AGENT_EMAIL\" \"$PI_AGENT_MODEL\"'}); rlm.return({env:r.stdout});"));
+		await expect(Promise.resolve(createRlmHandle(deps(), { task: "git-env", tools: ["Bash"], identity: { name: "slice worker", email: "slice@example.test" } }, 0))).resolves.toMatchObject({
+			env: "slice worker|slice@example.test|test/test-model",
+			__rlm_usage: { identity: "slice worker" },
+		});
+	});
 });

@@ -1,12 +1,14 @@
 import { combineSignals } from "./combine-signals";
 import { DEFAULT_TIMEOUT_MS } from "./constants";
-import { runRlm } from "./loop";
-import type { RlmDeps, RlmHandle, RlmOptions, RlmResult } from "./types";
+import { runRlmWithMonitor } from "./loop";
+import { RlmProgressMonitor, resolveRlmIdentity } from "./progress";
+import type { RlmDeps, RlmEventCallback, RlmEventType, RlmHandle, RlmOptions, RlmResult } from "./types";
 
 const activeCancels = new Set<(reason: Error) => void>();
 
 export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): RlmHandle {
 	const cancelController = new AbortController();
+	const monitor = new RlmProgressMonitor(resolveRlmIdentity(opts.identity));
 	let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 	let settled = false;
 
@@ -15,6 +17,7 @@ export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): Rlm
 		if (timeoutHandle) clearTimeout(timeoutHandle);
 		timeoutHandle = null;
 		if (!cancelController.signal.aborted) cancelController.abort(reason);
+		monitor.settle(reason.message.startsWith("rlm: timeout") ? "timeout" : "cancelled", reason.message);
 	};
 
 	const effectiveOpts: RlmOptions = {
@@ -22,11 +25,17 @@ export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): Rlm
 		signal: opts.signal ? combineSignals([opts.signal, cancelController.signal]) : cancelController.signal,
 	};
 
-	const promise = runRlm(deps, effectiveOpts, depth)
+	const promise = Promise.resolve()
+		.then(() => runRlmWithMonitor(deps, effectiveOpts, depth, monitor))
+		.then((result) => {
+			monitor.settle("resolved");
+			return result;
+		})
 		.catch((err) => {
 			if (cancelController.signal.aborted && cancelController.signal.reason instanceof Error) {
 				throw cancelController.signal.reason;
 			}
+			monitor.settle("failed", err instanceof Error ? err.message : String(err));
 			throw err;
 		})
 		.finally(() => {
@@ -48,6 +57,13 @@ export function createRlmHandle(deps: RlmDeps, opts: RlmOptions, depth = 0): Rlm
 			if (settled) return this;
 			if (timeoutHandle) clearTimeout(timeoutHandle);
 			timeoutHandle = setTimeout(() => cancel(new Error("rlm: timeout after " + ms + "ms")), ms);
+			return this;
+		},
+		inspect() {
+			return monitor.inspect();
+		},
+		on(type: RlmEventType, callback: RlmEventCallback) {
+			monitor.on(type, callback);
 			return this;
 		},
 		unsubscribe() {

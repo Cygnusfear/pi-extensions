@@ -15,9 +15,9 @@ export interface SandboxContext {
   /** Optional read-only SessionManager — passed through to edit hooks so extensions
    *  (git-ai, etc.) can attribute edits to the current session/agent. */
   sessionManager?: any;
-  /** Optional git identity — when set, all Bash spawns get GIT_AUTHOR/COMMITTER
-   *  env vars so commits are attributed to the agent instead of the human. */
-  agentGitIdentity?: { name: string; email: string };
+  /** Optional git identity — when set, Bash spawns get GIT_AUTHOR/COMMITTER and
+   *  PI_AGENT_* env vars so git-ai commit hooks attribute work to the agent. */
+  agentGitIdentity?: { name: string; email: string; model?: string; sessionId?: string; sessionName?: string };
 }
 
 /**
