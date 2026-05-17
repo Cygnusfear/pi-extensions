@@ -1,0 +1,19 @@
+README.md
+  s_1190a2e6abc475::t_fe4edfb942cceb 10,15,54-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c4dc58c53c9de1a07dfb36bc5532dc8f4455c895",
+  "prompts": {},
+  "sessions": {
+    "s_1190a2e6abc475": {
+      "agent_id": {
+        "tool": "Henrietta Comet Biller",
+        "id": "019e3589-c362-71de-9ef9-5701ce20a495",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
