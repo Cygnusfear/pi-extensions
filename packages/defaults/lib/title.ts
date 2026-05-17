@@ -10,6 +10,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { safeAction } from "@pi-extensions/shared/tool-availability";
 
 const TITLE_MODEL = {
   provider: "openrouter",
@@ -193,7 +194,7 @@ export async function generateAndSetTitle(
 ): Promise<void> {
   const userText = getFirstUserText(ctx);
   if (!userText?.trim()) {
-    ctx.ui.notify("No user message to generate title from", "warning");
+    safeAction(() => ctx.ui.notify("No user message to generate title from", "warning"));
     return;
   }
 
@@ -204,39 +205,50 @@ export async function generateAndSetTitle(
     try {
       const title = await generateTitle(userText, assistantText, ctx);
       if (title) {
-        pi.setSessionName(title);
-        pi.appendEntry(TITLE_ENTRY_TYPE, {
-          title,
-          rawUserText: userText,
-          rawAssistantText: assistantText,
-          attempt,
+        // pi.setSessionName / pi.appendEntry / ctx.ui.notify are all
+        // assertActive-guarded. If the runtime was invalidated while the LLM
+        // call was in flight, swallow the stale-ctx error class and return.
+        // Any other throw bubbles up to the caller as before.
+        const settled = safeAction(() => {
+          pi.setSessionName(title);
+          pi.appendEntry(TITLE_ENTRY_TYPE, {
+            title,
+            rawUserText: userText,
+            rawAssistantText: assistantText,
+            attempt,
+          });
+          ctx.ui.notify(`Session: ${title}`, "info");
+          return true;
         });
-        ctx.ui.notify(`Session: ${title}`, "info");
+        if (settled) return;
+        // safeAction returned undefined → runtime stale → nothing more to do.
         return;
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < MAX_RETRIES) {
-        ctx.ui.notify(
+        safeAction(() => ctx.ui.notify(
           `Title generation failed (attempt ${attempt}/${MAX_RETRIES}), retrying...`,
           "warning",
-        );
+        ));
       }
     }
   }
 
   // All retries exhausted -- fallback
   const fallback = buildFallbackTitle(userText);
-  pi.setSessionName(fallback);
-  pi.appendEntry(TITLE_ENTRY_TYPE, {
-    title: fallback,
-    fallback: true,
-    error: lastError?.message ?? "Unknown error",
-    rawUserText: userText,
-    rawAssistantText: assistantText,
+  safeAction(() => {
+    pi.setSessionName(fallback);
+    pi.appendEntry(TITLE_ENTRY_TYPE, {
+      title: fallback,
+      fallback: true,
+      error: lastError?.message ?? "Unknown error",
+      rawUserText: userText,
+      rawAssistantText: assistantText,
+    });
+    ctx.ui.notify(
+      `Title generation failed, using fallback: ${fallback}`,
+      "error",
+    );
   });
-  ctx.ui.notify(
-    `Title generation failed, using fallback: ${fallback}`,
-    "error",
-  );
 }

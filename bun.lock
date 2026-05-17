@@ -399,6 +399,9 @@
     "packages/session-tab-title": {
       "name": "@pi-extensions/session-tab-title",
       "version": "0.0.2",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
       "peerDependencies": {
         "@earendil-works/pi-coding-agent": ">=0.74.0",
         "@earendil-works/pi-tui": "*",

@@ -55,6 +55,60 @@ export interface Dep {
   recheck(): boolean;
 }
 
+// ─── Safe action helper ──────────────────────────────────────────────────────
+
+/** Substring used by the pi runtime to identify stale-ctx errors. */
+const STALE_CTX_MARKER = "extension ctx is stale";
+
+/**
+ * Test whether an error is the pi runtime's "stale ctx after session
+ * replacement or reload" diagnostic. Used by safeAction and safeActionAsync
+ * to swallow exactly that error class and re-throw everything else.
+ */
+export function isStaleCtxError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes(STALE_CTX_MARKER);
+}
+
+/**
+ * Run a sync action that touches pi runtime state (action methods like
+ * pi.sendMessage / pi.appendEntry / pi.setSessionName, or ctx getters like
+ * ctx.cwd / ctx.hasUI / ctx.ui which are assertActive-guarded in pi 0.74) and
+ * swallow exactly the stale-ctx error. Anything else re-throws.
+ *
+ * Wrap whole handler bodies, not individual calls — ctx accessors are getters
+ * that throw on the FIRST read after invalidate(), so a single stale ctx.cwd
+ * read upstream of a wrapped action call still surfaces the warning.
+ *
+ * Example:
+ *
+ *     pi.on("agent_end", (_event, ctx) => {
+ *       safeAction(() => updateTitle(ctx));   // catches ctx.* stale + ui.* stale
+ *     });
+ */
+export function safeAction<T>(fn: () => T): T | undefined {
+  try {
+    return fn();
+  } catch (err) {
+    if (isStaleCtxError(err)) return undefined;
+    throw err;
+  }
+}
+
+/**
+ * Async variant of safeAction. Use for handlers that await before touching
+ * pi/ctx (e.g. session-name's generateAndSetTitle which awaits an LLM call
+ * and only then calls pi.setSessionName).
+ */
+export async function safeActionAsync<T>(fn: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isStaleCtxError(err)) return undefined;
+    throw err;
+  }
+}
+
 // ─── Global Registry ─────────────────────────────────────────────────────────
 
 const registry: Dep[] = [];
@@ -82,36 +136,28 @@ export function showMissingDeps(ctx: {
   const missing = getMissingDeps();
 
   if (missing.length === 0) {
-    try {
-      ctx.ui.setStatus("deps", undefined);
-    } catch {
-      // stale replacement-session context during reload; ignore
-    }
+    safeAction(() => ctx.ui.setStatus("deps", undefined));
     return;
   }
 
-  // Footer: compact summary
+  // Footer: compact summary. If setStatus is stale, skip the notify too —
+  // there's no point trying once we know this runtime is gone.
   const names = missing.map(d => d.name);
-  try {
+  const statusResult = safeAction(() => {
     ctx.ui.setStatus("deps", `\u26a0 ${names.join(", ")}`);
-  } catch {
-    // stale replacement-session context during reload; ignore
-    return;
-  }
+    return true;
+  });
+  if (statusResult === undefined) return;
 
   // Notification: actionable install instructions
   const lines = missing.map(d => `  • ${d.name} — ${d.install}`);
-  try {
-    ctx.ui.notify(
-      `Optional dependencies not found:
+  safeAction(() => ctx.ui.notify(
+    `Optional dependencies not found:
 ${lines.join("\n")}
 
 Run /deps for details.`,
-      "warning"
-    );
-  } catch {
-    // stale replacement-session context during reload; ignore
-  }
+    "warning",
+  ));
 }
 
 // ─── Implementation ──────────────────────────────────────────────────────────

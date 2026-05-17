@@ -17,9 +17,16 @@ export function setupHooks(
   setupTerminalTitleHook(pi);
   setupNotificationHook(pi);
 
-  // Consolidated dep check — one notification for all missing deps
+  // Consolidated dep check — one notification for all missing deps.
+  //
+  // Deps register at module load time via createDep() in each extension, so by
+  // the time session_start fires the registry is already populated. The
+  // previous setTimeout(200ms) here was a defensive delay that captured ctx in
+  // a closure; when the timer fired after the session was torn down, the
+  // closure's ctx pointed at a stale runtime and pi emitted "extension ctx is
+  // stale" warnings. showMissingDeps now uses safeAction internally so a
+  // stale fire at this exact moment is also harmless.
   pi.on("session_start", (_event, ctx) => {
-    // Delay so all extensions have registered their deps
-    setTimeout(() => showMissingDeps(ctx), 200);
+    showMissingDeps(ctx);
   });
 }

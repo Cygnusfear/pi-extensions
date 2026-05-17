@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { safeAction } from "@pi-extensions/shared/tool-availability";
 
 // Event channel for terminal title changes
 const TERMINAL_TITLE_EVENT = "ad:terminal-title";
@@ -79,7 +80,11 @@ function getContextName(cwd: string): string {
 }
 
 /**
- * Emit title event and persist to session
+ * Emit title event and persist to session.
+ *
+ * Callers must wrap invocations in safeAction — pi.appendEntry is an
+ * assertActive-guarded action method that throws "extension ctx is stale"
+ * when the runtime has been invalidated (e.g. mid-teardown).
  */
 function emitTitle(pi: ExtensionAPI, title: string) {
   const event: TerminalTitleEvent = { title };
@@ -88,24 +93,28 @@ function emitTitle(pi: ExtensionAPI, title: string) {
 }
 
 export function setupTerminalTitleHook(pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
-    emitTitle(pi, `π: ${getContextName(ctx.cwd)}`);
+  // Every handler below reads ctx.cwd, which is an assertActive-guarded getter
+  // in pi 0.74. The whole body is wrapped in safeAction so a stale read silently
+  // no-ops the title update instead of surfacing an "extension ctx is stale"
+  // warning to pi -p stderr.
+  pi.on("session_start", (_event, ctx) => {
+    safeAction(() => emitTitle(pi, `π: ${getContextName(ctx.cwd)}`));
   });
 
-  pi.on("agent_start", async (_event, ctx) => {
-    emitTitle(pi, `π: ${getContextName(ctx.cwd)} (thinking...)`);
+  pi.on("agent_start", (_event, ctx) => {
+    safeAction(() => emitTitle(pi, `π: ${getContextName(ctx.cwd)} (thinking...)`));
   });
 
-  pi.on("tool_call", async (event, ctx) => {
-    emitTitle(pi, `π: ${getContextName(ctx.cwd)} (${event.toolName})`);
+  pi.on("tool_call", (event, ctx) => {
+    safeAction(() => emitTitle(pi, `π: ${getContextName(ctx.cwd)} (${event.toolName})`));
     return undefined;
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
-    emitTitle(pi, `π: ${getContextName(ctx.cwd)}`);
+  pi.on("agent_end", (_event, ctx) => {
+    safeAction(() => emitTitle(pi, `π: ${getContextName(ctx.cwd)}`));
   });
 
-  pi.on("session_shutdown", async () => {
-    emitTitle(pi, "Terminal");
+  pi.on("session_shutdown", () => {
+    safeAction(() => emitTitle(pi, "Terminal"));
   });
 }

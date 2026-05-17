@@ -17,5 +17,8 @@
   },
   "files": [
     "extensions"
-  ]
+  ],
+  "dependencies": {
+    "@pi-extensions/shared": "*"
+  }
 }

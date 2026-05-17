@@ -8,6 +8,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
+import { safeAction } from "@pi-extensions/shared/tool-availability";
 
 function getSessionDisplayName(ctx: { sessionManager: { getSessionName(): string | undefined; getEntries(): any[] } }): string | undefined {
 	// Prefer explicit name set via /name
@@ -37,26 +38,35 @@ function getSessionDisplayName(ctx: { sessionManager: { getSessionName(): string
 	return undefined;
 }
 
+/**
+ * Update the terminal tab title.
+ *
+ * ctx.ui.setTitle is a runtime action method that throws "extension ctx is
+ * stale" if the runtime has been invalidated since this handler was scheduled
+ * (e.g. when an agent_end fires during the session-replacement teardown).
+ * safeAction swallows exactly that error and re-throws anything else.
+ */
 function updateTitle(ctx: any): void {
 	if (!ctx.hasUI) return;
 	const cwdBasename = path.basename(ctx.cwd);
 	const displayName = getSessionDisplayName(ctx);
-	if (displayName) {
-		ctx.ui.setTitle(`π - ${displayName} - ${cwdBasename}`);
-	} else {
-		ctx.ui.setTitle(`π - ${cwdBasename}`);
-	}
+	const title = displayName
+		? `π - ${displayName} - ${cwdBasename}`
+		: `π - ${cwdBasename}`;
+	ctx.ui.setTitle(title);
 }
 
 export default function sessionTabTitle(pi: ExtensionAPI) {
-	// Update title after resuming a session
-	pi.on("session_start", async (event, ctx) => {
+	// Every ctx access below (hasUI, cwd, sessionManager, ui.setTitle) is an
+	// assertActive-guarded getter or action in pi 0.74. Wrapping the whole
+	// updateTitle call in safeAction silently no-ops if the runtime was
+	// invalidated since this handler was scheduled.
+	pi.on("session_start", (event, ctx) => {
 		if (event.reason !== "resume" && event.reason !== "fork") return;
-		updateTitle(ctx);
+		safeAction(() => updateTitle(ctx));
 	});
 
-	// Update title after agent finishes (covers first message in new sessions)
-	pi.on("agent_end", async (_event, ctx) => {
-		updateTitle(ctx);
+	pi.on("agent_end", (_event, ctx) => {
+		safeAction(() => updateTitle(ctx));
 	});
 }
