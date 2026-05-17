@@ -1,0 +1,23 @@
+README.md
+  s_1190a2e6abc475::t_a96163ab1cf82d 42-53
+packages/pi-mesh/extension/pi-mesh.ts
+  s_1190a2e6abc475::t_6390e6f5fb8c8c 1147-1152,1166-1175
+packages/ouija/extensions/ouija.ts
+  s_1190a2e6abc475::t_da5b384ee1859e 15,18-61,64,66,72-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3057951d56a27bee6b5d3628bbf2d0e3e66eda40",
+  "prompts": {},
+  "sessions": {
+    "s_1190a2e6abc475": {
+      "agent_id": {
+        "tool": "Henrietta Comet Biller",
+        "id": "019e3589-c362-71de-9ef9-5701ce20a495",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
