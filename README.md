@@ -7,12 +7,12 @@
 <p align="center"><strong>32 extensions that makes pi <code>bananas</code>, faster, and multi-agent.</strong></p>
 
 <p align="center">
-  <a href="#install">Install</a> · <a href="#packages">Packages</a> · <a href="https://github.com/mariozechner/pi-coding-agent">pi</a>
+  <a href="#install">Install</a> · <a href="#packages">Packages</a> · <a href="https://github.com/earendil-works/pi-mono">pi</a>
 </p>
 
 ---
 
-**pi-extensions** is a flat monorepo of extension packages for [pi](https://github.com/mariozechner/pi-coding-agent). Each package does one thing. Install what you need, skip what you don't.
+**pi-extensions** is a flat monorepo of extension packages for [pi](https://github.com/earendil-works/pi-mono). Each package does one thing. Install what you need, skip what you don't.
 
 ## What you get
 
@@ -50,6 +50,15 @@ pi install git:https://github.com/cygnusfear/pi-extensions
 > ```
 >
 > Make sure [bun](https://bun.sh) is on your PATH (`bun --version`).
+
+> **If you're on nix-installed Node, also fix the npm global prefix first.** Pi 0.74+ runs `npm install -g <pkg>` for any `npm:`-scoped entry in `settings.json` `packages: [...]`. The default prefix on nix is read-only (`/nix/store/...`), so every spawn fails with `EACCES` and workers crash with `npm install -g <pkg> failed with code 243`. Fix once per machine:
+>
+> ```bash
+> mkdir -p ~/.npm-global
+> echo 'prefix=/Users/<you>/.npm-global' >> ~/.npmrc
+> ```
+>
+> Then restart any running pi coordinator — it caches `process.env` at start, so the new prefix only takes effect for fresh processes.
 
 Each package is independently installable, testable, and removable via `~/.pi/agent/settings.json` or project `.pi/settings.json`.
 
