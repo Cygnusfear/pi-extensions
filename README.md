@@ -39,6 +39,18 @@ Full workspace (run once after changing dependencies):
 pi install git:https://github.com/cygnusfear/pi-extensions
 ```
 
+> **Heads up — this workspace is bun-only.** [`@ff-labs/fff-bun`](packages/fff/) declares `engines.bun >=1.0.0` and ships a bun-specific postinstall, so the install fails under plain `npm install`. If `pi install` shells out to npm and fails with `Bun's postinstall script was not run`, clone manually and run `bun install` instead:
+>
+> ```bash
+> # pi install will still clone into ~/.pi/agent/git/...
+> cd ~/.pi/agent/git/github.com/cygnusfear/pi-extensions
+> bun install
+> # then register the packages you want in ~/.pi/agent/settings.json:
+> #   "git/github.com/cygnusfear/pi-extensions/packages/<name>"
+> ```
+>
+> Make sure [bun](https://bun.sh) is on your PATH (`bun --version`).
+
 Each package is independently installable, testable, and removable via `~/.pi/agent/settings.json` or project `.pi/settings.json`.
 
 ## Packages
@@ -66,7 +78,7 @@ Each package is independently installable, testable, and removable via `~/.pi/ag
 
 | Package                                            | Description                                                        |
 | -------------------------------------------------- | ------------------------------------------------------------------ |
-| [foresight](packages/foresight/)                   | Semantic memory — persistent knowledge graph across sessions       |
+| [ouija](packages/ouija/)                           | Session-history search — raw conversations, dead sessions, BM25 recall |
 | [context](packages/context/)                       | TUI view showing loaded extensions, skills, context usage          |
 | [worktree-summaries](packages/worktree-summaries/) | Injects current worktree path into context for compaction survival |
 

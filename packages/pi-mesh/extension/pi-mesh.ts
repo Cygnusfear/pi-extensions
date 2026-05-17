@@ -1144,16 +1144,15 @@ function getInboundDeliveryOptions(
 export default function piMeshExtension(pi: ExtensionAPI) {
   let binPath = resolveBinPath();
   if (!binPath) {
-    // Binary missing — kick off a background build and notify the user.
+    // Binary missing — kick off a background build now and notify the user
+    // once the extension runtime is initialized. We cannot call pi.sendMessage
+    // synchronously from inside the load callback: pi 0.74+ rejects action
+    // methods during loading with "Extension runtime not initialized". The
+    // build kickoff itself is just a child process spawn and is safe at load
+    // time. The user-facing notice is deferred to the next session_start.
     const extensionDir = dirname(fileURLToPath(import.meta.url));
     const nativeDir = resolve(extensionDir, "..", "native");
     const buildScript = resolve(nativeDir, "build.sh");
-    pi.sendMessage({
-      customType: "mesh-build",
-      content:
-        "[pi-mesh] Binary not found — building now (~2 min). Restart pi when done.\n\nRun manually: cd packages/pi-mesh/native && ./build.sh",
-      display: true,
-    });
     const proc = spawn("bash", [buildScript], { cwd: nativeDir, stdio: "inherit" });
     proc.on("exit", (code) => {
       if (code === 0) {
@@ -1163,6 +1162,17 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           `[pi-mesh] Build failed (exit ${code}). Run: cd packages/pi-mesh/native && ./build.sh`,
         );
       }
+    });
+    let buildNoticeSent = false;
+    pi.on("session_start", () => {
+      if (buildNoticeSent) return;
+      buildNoticeSent = true;
+      pi.sendMessage({
+        customType: "mesh-build",
+        content:
+          "[pi-mesh] Binary not found — building now (~2 min). Restart pi when done.\n\nRun manually: cd packages/pi-mesh/native && ./build.sh",
+        display: true,
+      });
     });
     return;
   }
