@@ -1,0 +1,19 @@
+packages/code-mode/src/tool-reference.ts
+  s_1190a2e6abc475::t_69db4c48203664 85-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "44ea48e3d07fa03113ba56d1d547883bb1d78ee4",
+  "prompts": {},
+  "sessions": {
+    "s_1190a2e6abc475": {
+      "agent_id": {
+        "tool": "Henrietta Comet Biller",
+        "id": "019e3589-c362-71de-9ef9-5701ce20a495",
+        "model": "openai-codex/gpt-5.4"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
