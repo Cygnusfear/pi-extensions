@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
-  bashToolDefinition,
   createBashToolDefinition,
   createEditToolDefinition,
   createFindToolDefinition,
@@ -8,12 +7,6 @@ import {
   createLsToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
-  editToolDefinition,
-  findToolDefinition,
-  grepToolDefinition,
-  lsToolDefinition,
-  readToolDefinition,
-  writeToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
 export function buildOutput(warnings: string[], logs: string[]): string {
@@ -89,14 +82,14 @@ export function initBuiltinToolRefs(): void {
   // We don't care about the per-tool specifics here — `buildToolRef` only
   // consumes the structural shape — so widen the element generic params to
   // `any` and assert at the array boundary.
-  const builtinDefs: Array<[string, ToolDefinition<any, any, any> | undefined]> = [
-    ["bash", bashToolDefinition ?? createBashToolDefinition(cwd)],
-    ["read", readToolDefinition ?? createReadToolDefinition(cwd)],
-    ["write", writeToolDefinition ?? createWriteToolDefinition(cwd)],
-    ["edit", editToolDefinition ?? createEditToolDefinition(cwd)],
-    ["grep", grepToolDefinition ?? createGrepToolDefinition(cwd)],
-    ["find", findToolDefinition ?? createFindToolDefinition(cwd)],
-    ["ls", lsToolDefinition ?? createLsToolDefinition(cwd)],
+  const builtinDefs: Array<[string, ToolDefinition<any, any, any>]> = [
+    ["bash", createBashToolDefinition(cwd)],
+    ["read", createReadToolDefinition(cwd)],
+    ["write", createWriteToolDefinition(cwd)],
+    ["edit", createEditToolDefinition(cwd)],
+    ["grep", createGrepToolDefinition(cwd)],
+    ["find", createFindToolDefinition(cwd)],
+    ["ls", createLsToolDefinition(cwd)],
   ];
 
   for (const [name, def] of builtinDefs) {
