@@ -1,0 +1,41 @@
+packages/shared/src/tool-availability.ts
+  s_1190a2e6abc475::t_64265c126080ed 64-83,85-87,92-105,107
+  s_1190a2e6abc475::t_0e18c34c9aa2bc 58-63,84,88-91,106,108-111
+  s_1190a2e6abc475::t_b736213d281496 139,143-144,146,148-150,154-155,159-160
+packages/defaults/hooks/terminal-title.ts
+  s_1190a2e6abc475::t_cbb2fcc7ef3b67 83-84
+  s_1190a2e6abc475::t_40b75364acb030 96-99,101,105,109,114,118
+  s_1190a2e6abc475::t_a9454f47ee2046 11
+  s_1190a2e6abc475::t_147a6292b5b538 85-87
+  s_1190a2e6abc475::t_531cac4168543e 100,104,108,113,117
+packages/session-tab-title/package.json
+  s_1190a2e6abc475::t_9701e152993716 20-23
+packages/session-tab-title/extensions/session-tab-title.ts
+  s_1190a2e6abc475::t_ccc42dc6678e77 56,60-63,66,70
+  s_1190a2e6abc475::t_fb1d547bbf01f6 11,41-48,53-55,64,69
+packages/defaults/hooks/agents-discovery.ts
+  s_1190a2e6abc475::t_a248fc29811632 14,24-26,37-44,50-57,70-80
+packages/defaults/hooks/session-name.ts
+  s_1190a2e6abc475::t_0764019a3fa8bc 2,21-30,35-46
+packages/defaults/lib/title.ts
+  s_1190a2e6abc475::t_908c89af4623ea 197,208-221,223-224,230,233,240-252
+  s_1190a2e6abc475::t_03d589ee6de48a 13
+packages/defaults/hooks/index.ts
+  s_1190a2e6abc475::t_b3cf9a11ab2990 20-28,30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "44ce6a2f8654b0a0662af6b1b999849ec91c3ee7",
+  "prompts": {},
+  "sessions": {
+    "s_1190a2e6abc475": {
+      "agent_id": {
+        "tool": "Henrietta Comet Biller",
+        "id": "019e3589-c362-71de-9ef9-5701ce20a495",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
