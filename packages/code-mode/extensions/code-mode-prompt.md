@@ -7,7 +7,7 @@ const env = await Read({ path: 'skills/environment/SKILL.md' });
 console.log(env);
 ```
 
-This covers code-mode, ` persistence, ouija search, foresight memory, teams delegation, context management, and the tool boundary.
+This covers code-mode, ` persistence, ouija session-history search, teams delegation, context management, and the tool boundary.
 
 You have an `execute_code` tool that runs JavaScript with typed async functions for calling tools.
 
@@ -148,12 +148,12 @@ Promises stashed on `$` survive across `execute_code` calls. The vm.Context pers
 ```javascript
 // Call 1 — fire slow calls, don't await
 $.search = braveSearch({ query: 'node vm performance', numResults: 3 });
-$.memory = recall({ query: 'architecture decisions', limit: 5 });
+$.history = ouija({ action: 'search', query: 'architecture decisions', limit: 5 });
 // continue with other work immediately...
 const files = await Glob({ pattern: '**/*.ts' });
 
 // Call 2 — pick up results (instant if already resolved)
-const [search, memory] = await Promise.allSettled([$.search, $.memory]);
+const [search, history] = await Promise.allSettled([$.search, $.history]);
 ```
 
 This enables parallel I/O across calls — fire multiple slow operations, do other work, collect results later.

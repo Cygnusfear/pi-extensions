@@ -6,7 +6,7 @@ BM25 search across all pi session history.
 
 ## Why
 
-Agents forget between sessions. Foresight saves curated memories — not the raw conversation: the debug trails, the rejected alternatives, the "why did we do X" that never made it into a memory node.
+Agents forget between sessions when they cannot recover the raw trail: the debug steps, rejected alternatives, and "why did we do X" moments that never made it into a summary.
 
 Ouija searches that raw history. Every session. Every project.
 

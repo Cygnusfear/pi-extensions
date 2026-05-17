@@ -344,8 +344,8 @@ declare function recall(input: {
 }): Promise<string>;
 
 /**
- * memory — Foresight semantic memory. Methods for context, create, unfold, etc.
- * Use recall() for search queries.
+ * memory — semantic memory helpers for explicit context/create/unfold operations.
+ * Prefer ouija/session-history search for remembering prior conversations; use recall() only for semantic-memory queries.
  *
  * @example
  * // Search memory
@@ -379,7 +379,7 @@ declare const memory: {
   /** Unfold a memory node for more detail. Pass full node ID (e.g. "fs:..."). */
   unfold(input: { nodeId: string; depth?: "summary" | "full" | "raw"; bank?: string }): Promise<string>;
 
-  /** Get Foresight database status. */
+  /** Get semantic memory backend status. */
   status(): Promise<string>;
 
   /** Subscribe to a memory node, entity, or topic. */

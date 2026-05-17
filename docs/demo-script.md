@@ -65,25 +65,21 @@ No re-reading files. No lost work. The `$` store survives everything except a se
 
 ## Act 3: The Extension Ecosystem (90s)
 
-### Demo 3.1: Semantic Memory (Foresight)
+### Demo 3.1: Session History Memory (Ouija 🔮)
 
 ```javascript
-// Remember something across sessions
-await memoryCreate({
-  factType: "experience",
-  oneLiner: "Bun VM panics on async closures from execute_code",
-  summary: "Use sync wrappers or route through sandbox functions instead."
-});
+// Search every conversation you've ever had
+const hits = await ouija({ action: "search", query: "Bun VM async closures execute_code" });
+// → Finds the exact session where you debugged it
 
-// Next day, different session:
-const memories = await recall({ query: "Bun VM async problems" });
-// → Instantly surfaces yesterday's discovery
+// Drill into the raw trail, not a summary
+const context = await ouija({ action: "view", session: hits[0].session, start: -10, end: 0 });
 ```
 
-**Narration:** "Foresight gives the agent long-term memory. Discoveries, decisions, dead ends — 
-they survive across sessions. No more re-learning the same lesson."
+**Narration:** "Ouija gives the agent practical memory by searching the raw session trail. Discoveries, decisions, dead ends — 
+they stay recoverable across sessions without turning them into curated summaries."
 
-### Demo 3.2: Session History Search (Ouija 🔮)
+### Demo 3.2: Dead Session Search (Ouija 🔮)
 
 ```javascript
 // Search every conversation you've ever had
@@ -171,7 +167,6 @@ Quick montage of extensions in action:
 | Extension | What it does |
 |-----------|-------------|
 | **code-mode** | JavaScript as the universal tool interface |
-| **foresight** | Semantic memory across sessions |
 | **ouija** | BM25 search across all session history |
 | **teams** | Multi-agent orchestration with git worktrees |
 | **pi-mesh** | P2P networking between sessions (Rust/Zenoh) |
@@ -289,14 +284,14 @@ This isn't a chatbot with tools. This is an engineering platform."
 
 ### For Live Demo
 - Pre-load a pi session with interesting project state
-- Have foresight populated with real memories
+- Have ouija-indexed session history with real prior decisions
 - Have 2-3 worker sessions ready to spawn
 - Keep a mesh peer running for the pi-mesh demo
 - Tag context at start so you can recover if demo goes sideways
 
 ### Key messages to land
 1. **Code mode eliminates tool-call round-trips** — 11 calls → 1 block
-2. **Memory persists** — across blocks ($), across sessions (foresight), across history (ouija)
+2. **Memory persists** — across blocks ($) and across sessions/history (ouija)
 3. **Multi-agent is real** — teams + mesh + worktrees = parallel work
 4. **Developer experience matters** — context management, git safety, attribution
 5. **It's an ecosystem** — 32 packages that compose, not a monolith

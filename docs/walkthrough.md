@@ -111,37 +111,13 @@ const [files, readme, config] = await Promise.all([
 
 ---
 
-## Step 2: Never learn the same lesson twice 🧠
+## Step 2: Never lose the trail twice 🔮
 
-Yesterday you discovered that `sessions.token_hash` is NOT `sessions.token`. By tomorrow you'll have forgotten. Unless...
+Yesterday you discovered that `sessions.token_hash` is NOT `sessions.token`. By tomorrow you'll have forgotten the exact thread unless you can search the raw conversation.
 
-### Foresight — memory across session restarts
+### Ouija — search every conversation you've ever had
 
-```javascript
-// Today: save the gotcha
-await memoryCreate({
-  factType: "experience",
-  oneLiner: "sessions.token_hash is the column, NOT sessions.token",
-  summary: "Migration script at migrate.ts:47 uses wrong column name. token_hash is the FK target, not token."
-});
-
-// Tomorrow, different session: instant recall
-const memories = await recall({ query: "sessions table column name" });
-// → Surfaces yesterday's discovery with full context
-```
-
-Four fact types cover everything:
-
-| Type | Use for |
-|------|---------|
-| 🌍 World | API docs, architecture facts |
-| 🔧 Experience | What worked, what didn't |
-| 💭 Opinion | Decisions, tradeoffs |
-| 👁️ Observation | Events, changes, things noticed |
-
-### Ouija — search every conversation you've ever had 🔮
-
-Foresight saves what you *curate*. Ouija saves *everything* — every raw conversation, every debug trail, every "why did we do X" moment. Even sessions that ended hours ago.
+Ouija searches the real session trail: every raw conversation, every debug step, every rejected alternative, every "why did we do X" moment. Even sessions that ended hours ago.
 
 ```javascript
 // "What did we decide about auth last Tuesday?"
@@ -156,7 +132,7 @@ const self = await ouija({ action: "self", query: "database migration gotcha" })
 
 **Your debugging history is a gold mine. Ouija lets you mine it.**
 
-> **Packages:** [foresight](packages/foresight/) · [ouija](packages/ouija/) · [context](packages/context/) · [mid-mortem](packages/mid-mortem/) · [worktree-summaries](packages/worktree-summaries/)
+> **Packages:** [ouija](packages/ouija/) · [context](packages/context/) · [mid-mortem](packages/mid-mortem/) · [worktree-summaries](packages/worktree-summaries/)
 
 ---
 
@@ -324,7 +300,7 @@ Each package is independently installable, testable, and removable via `~/.pi/ag
 | Layer | What you get | Key packages |
 |-------|-------------|-------------|
 | **Tool** | Write JS, not tool calls. One block = 11 turns. | code-mode, file-tools |
-| **Memory** | Remember across sessions. Search dead conversations. | foresight, ouija |
+| **Memory** | Remember by searching raw session history and dead conversations. | ouija |
 | **Team** | Spawn parallel agents. P2P mesh networking. | teams, pi-mesh |
 | **Intelligence** | Semantic search, call graphs, dead code detection. | tldr-code, fff, git-ai |
 | **Polish** | Themes, shortcuts, notifications, safety rails. | 20+ utility packages |

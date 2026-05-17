@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Context percentage now shows unknown (`?`) immediately after compaction when pi reports post-compaction usage as unknown, instead of falling back to the last pre-compaction assistant usage.
+
 ## [0.2.23] - 2026-02-06
 
 ### Fixed

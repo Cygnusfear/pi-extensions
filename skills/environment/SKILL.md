@@ -2,7 +2,7 @@
 name: environment
 description: Working in the pi-extensions environment — code-mode, persistence, memory, search, delegation, and context management. Read this first.
 metadata:
-  summary: "Orientation guide for agents working in pi-extensions. Code-mode paradigm, $ persistence, ouija search, foresight memory, teams delegation, context hygiene."
+  summary: "Orientation guide for agents working in pi-extensions. Code-mode paradigm, $ persistence, ouija session-history search, teams delegation, context hygiene."
   type: guide
   domains: [onboarding, tools]
   audience: worker
@@ -71,26 +71,22 @@ const hits = await ouija(tickets, ouija.tickets, "ghost debris");
 
 **When to use it:** Before starting work on a topic you think might have come up before. Someone may have already debugged it, decided against it, or left notes about it.
 
-## Remember across sessions: foresight
+## Remember by searching session history: ouija 🔮
 
-Foresight is your long-term memory. Decisions, learnings, gotchas — they survive session restarts.
+Ouija is the default way to remember what happened before. It searches raw session history, including compacted and dead sessions, so future agents can recover the actual conversation instead of relying on a curated summary.
 
 ```javascript
-// Search what you've learned
-const memories = await recall({ query: "authentication decision", limit: 5 });
+// Search prior sessions before starting work
+const prior = await ouija({ action: "search", query: "authentication decision", limit: 5 });
 
-// Store something important
-await memoryCreate({
-  factType: "experience",
-  oneLiner: "Bun VM crashes on async closures from execute_code",
-  summary: "Bun's vm.runInContext panics when async host closures are called. Use sync methods only, or route through the sandbox fn."
-});
+// Search this session when the user says "as mentioned before"
+const local = await ouija({ action: "self", query: "token_hash column" });
 
-// Get relevant context at the start of a task
-const ctx = await memoryContext({ task: "implementing JWT auth" });
+// Record durable decisions in mai, then make them easy to find later
+await mai.note(ticketId, "ADR breadcrumb: auth uses sessions.token_hash, not token");
 ```
 
-**When to use it:** Anytime you learn something non-obvious. Failed approaches, surprising constraints, "the column is token_hash not token." Future you will thank you.
+**When to use it:** Before starting work, when a topic may have come up before, or when you need a prior decision/gotcha. Put durable records in `mai`; use `ouija` to recover the raw trail later.
 
 ## Delegate work: teams
 
@@ -283,8 +279,8 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 |---|---|
 | Read files | `Read({ path })` in execute_code |
 | Search session history | `ouija({ action: "search", query })` |
-| Search long-term memory | `recall({ query })` |
-| Store a learning | `memoryCreate({ factType, oneLiner, summary })` |
+| Search prior context | `ouija({ action: "search", query })` |
+| Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |
 | Spawn a worker | `teams.delegate([{ text, assignee, model }])` |
 | Wait for worker to finish | `teams.on(name, "completed").preventDefault().then(e => console.wake(...))` — no polling |
 | Check worker status | `teams.list()` or `teams.view(name)` |

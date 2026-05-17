@@ -245,6 +245,44 @@ describe("executeInSession — whitelist", () => {
 	});
 });
 
+describe("executeInSession — context guard", () => {
+	test("does not block tools while post-compaction context usage is unknown", async () => {
+		const sess = createCodeModeSession();
+		const result = await executeInSession(
+			sess,
+			"const result = await Bash({ command: 'printf ok' }); console.log(result.stdout);",
+			makeDeps({
+				getContextUsage: () => ({ tokens: null, contextWindow: 200_000, percent: null }),
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			}),
+		);
+
+		expect(result.error).toBeUndefined();
+		expect(result.output).toContain("ok");
+	});
+
+	test("blocks tools when context usage is known above the guard threshold", async () => {
+		const sess = createCodeModeSession();
+		const result = await executeInSession(
+			sess,
+			"await Bash({ command: 'printf should-not-run' });",
+			makeDeps({
+				getContextUsage: () => ({ tokens: 190_000, contextWindow: 200_000, percent: 95 }),
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			}),
+		);
+
+		expect(result.error).toContain("Context guard active");
+		expect(result.output).toContain("95.0% used");
+	});
+});
+
 describe("executeInSession — runbookRun gate", () => {
 	test("V15: injectRunbookRun=false hides runbookRun", async () => {
 		const sess = createCodeModeSession();
