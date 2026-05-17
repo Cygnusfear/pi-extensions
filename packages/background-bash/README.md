@@ -154,7 +154,7 @@ IDs are randomly generated: `bg-` + 8 hex characters (e.g. `bg-a3f2c1b7`).
 
 ## Dependencies
 
-- `@mariozechner/pi-coding-agent` — core extension API (`ExtensionAPI`, `truncateHead`, `formatSize`)
+- `@earendil-works/pi-coding-agent` — core extension API (`ExtensionAPI`, `truncateHead`, `formatSize`)
 - `@sinclair/typebox` — parameter schema types
 
 ## Setup

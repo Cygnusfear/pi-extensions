@@ -11,9 +11,9 @@
  * over built-in ones for rendering.
  */
 
-import { createEditToolDefinition, keyHint } from "@mariozechner/pi-coding-agent";
-import type { ExtensionAPI, ToolRenderResultOptions, Theme } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { createEditToolDefinition, keyHint } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolRenderResultOptions, Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 // Eagerly start Shiki loading on import
 import "../../shared/src/tui-diff-renderer.ts";
 

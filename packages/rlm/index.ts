@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerContextualSandboxFn, type SandboxCallContext } from "@pi-extensions/shared/sandbox-registry";
 import { cancelAllRlmHandles, createRlmHandle } from "./src/handle";
 import type { RlmDeps, RlmHandle, RlmOptions } from "./src/types";

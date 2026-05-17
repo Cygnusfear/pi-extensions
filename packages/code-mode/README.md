@@ -89,11 +89,11 @@ Promises stashed on `$` survive across calls. The VM context persists, so pendin
 ```javascript
 // Call 1 — fire slow calls, don't await
 $.search = braveSearch({ query: 'node vm performance', numResults: 3 });
-$.memory = recall({ query: 'architecture decisions', limit: 5 });
+$.history = ouija({ action: 'search', query: 'architecture decisions', limit: 5 });
 const files = await Glob({ pattern: '**/*.ts' });
 
 // Call 2 — pick up results (instant if already resolved)
-const [search, memory] = await Promise.allSettled([$.search, $.memory]);
+const [search, history] = await Promise.allSettled([$.search, $.history]);
 ```
 
 ## Background self-wake: `console.wake()`
@@ -245,7 +245,8 @@ All of these are available inside `execute_code` as typed async functions:
 | `mai.ticketLink(ticketId)` | Create a short Maiboard ticket link |
 | `mai.reviewLink({ commits, ... })` | Create a short Maiboard review handoff link backed by `~/.maitake/review-handoffs/<token>.json` |
 | `maiTicket({...})` | Create tickets |
-| `recall({...})` | Search Foresight memory |
+| `ouija({...})` | Search prior session history and dead conversations |
+| `recall({...})` | Search semantic memory for explicit memory queries |
 | `memoryCreate({...})` | Create memory nodes |
 | `memoryUnfold({...})` | Expand memory nodes |
 | `memoryContext({...})` | Get contextual memories |
@@ -384,8 +385,8 @@ These remain as **direct LLM tools**: execute_code, context_*, start_supervision
 
 ## Dependencies
 
-- `@mariozechner/pi-coding-agent` — core extension API
-- `@mariozechner/pi-tui` — TUI rendering for code previews
+- `@earendil-works/pi-coding-agent` — core extension API
+- `@earendil-works/pi-tui` — TUI rendering for code previews
 - `@sinclair/typebox` — parameter schema types
 - `@pi-extensions/shared` — diff renderer (Shiki), sandbox registry, tool UI utils
 

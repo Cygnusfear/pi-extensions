@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AgentsDiscoveryManager } from "../lib/agents-discovery";
 import { setupAgentsDiscoveryHook } from "./agents-discovery";
 import { setupChromeHook } from "./chrome";

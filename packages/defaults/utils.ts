@@ -12,7 +12,7 @@ export function getPiVersion(): string {
       devDependencies?: Record<string, string>;
     }>(fs.readFileSync(packageJsonPath, "utf8"));
     return (
-      packageJson.devDependencies?.["@mariozechner/pi-coding-agent"] ||
+      packageJson.devDependencies?.["@earendil-works/pi-coding-agent"] ||
       "unknown"
     );
   } catch {

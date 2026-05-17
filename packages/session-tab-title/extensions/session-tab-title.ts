@@ -6,7 +6,7 @@
  * or a new session starts.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 
 function getSessionDisplayName(ctx: { sessionManager: { getSessionName(): string | undefined; getEntries(): any[] } }): string | undefined {

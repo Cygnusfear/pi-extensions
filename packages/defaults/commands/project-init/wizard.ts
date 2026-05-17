@@ -12,7 +12,7 @@ import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type Theme,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   Container,
   type Focusable,
@@ -22,7 +22,7 @@ import {
   matchesKey,
   Spacer,
   Text,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 import type { CatalogEntry } from "./catalog";
 import { scanCatalog } from "./catalog";
 import { getInstalled, readSettings } from "./installer";

@@ -42,4 +42,4 @@ Install the extension — no configuration needed. It auto-detects the worktree 
 
 ## Dependencies
 
-- **@mariozechner/pi-coding-agent** ≥ 0.65.0
+- **@earendil-works/pi-coding-agent** ≥ 0.65.0

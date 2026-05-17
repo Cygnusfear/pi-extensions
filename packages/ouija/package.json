@@ -7,7 +7,7 @@
     "extensions": ["./extensions/ouija.ts"]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.66.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
     "@sinclair/typebox": "*"
   },
   "files": ["extensions"],

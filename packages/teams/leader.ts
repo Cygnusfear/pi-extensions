@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMaiBin } from "../shared/src/mai-binary.js";
 import type { ChildProcess } from "node:child_process";
 import crypto from "node:crypto";

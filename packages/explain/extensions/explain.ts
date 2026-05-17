@@ -10,10 +10,10 @@
  * The working model gets a short confirmation — no parroting.
  */
 
-import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { convertToLlm, getMarkdownTheme, serializeConversation } from "@mariozechner/pi-coding-agent";
-import { Box, Markdown, Text } from "@mariozechner/pi-tui";
+import { complete, type Message } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, getMarkdownTheme, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 let communicatorProvider = "zai";

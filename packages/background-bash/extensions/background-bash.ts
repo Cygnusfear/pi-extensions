@@ -5,7 +5,7 @@ import {
 	truncateHead,
 	type ExtensionAPI,
 	type ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { randomBytes } from "node:crypto";
 import type { ChildProcess } from "node:child_process";

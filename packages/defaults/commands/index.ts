@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerProjectInitCommand } from "./project-init";
 import { registerDefaultsSettings } from "./settings";
 import { registerSystemPromptCommand } from "./system-prompt";

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   bashToolDefinition,
   createBashToolDefinition,
@@ -14,7 +14,7 @@ import {
   lsToolDefinition,
   readToolDefinition,
   writeToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 export function buildOutput(warnings: string[], logs: string[]): string {
   const parts: string[] = [];

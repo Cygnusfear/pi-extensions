@@ -1,5 +1,5 @@
-import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 // Side-effect import: starts Shiki loading at extension load time
 import "./tui-diff-renderer.ts";
 

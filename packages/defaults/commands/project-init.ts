@@ -5,7 +5,7 @@
  * calls scout for recommendations, and applies selections.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { configLoader } from "../config";
 import { buildAgentsPrompt } from "./project-init/agents-prompt";
 import {

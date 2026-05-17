@@ -5,7 +5,7 @@
  * Toggle via supervise(true/false) in code_mode, or /supervise on|off in chat.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 
 let enabled = false;

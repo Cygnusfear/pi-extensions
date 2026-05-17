@@ -11,8 +11,8 @@
  * Set CONTEXT7_API_KEY env var for higher rate limits (free at context7.com/dashboard).
  */
 
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
 
 const ENDPOINT = "https://mcp.context7.com/mcp";

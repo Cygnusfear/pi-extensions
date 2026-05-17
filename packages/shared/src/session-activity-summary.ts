@@ -1,5 +1,5 @@
-import { complete, type Message, type UserMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
+import { complete, type Message, type UserMessage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { safeJsonParse } from "./safe-json.js";
 
 const ACTIVITY_SUMMARY_TYPE = "pi-activity-summary";

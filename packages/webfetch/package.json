@@ -11,12 +11,12 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.66.0",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@earendil-works/pi-tui": "*",
     "@sinclair/typebox": "*"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "*",
+    "@earendil-works/pi-ai": "*",
     "turndown": "*"
   },
   "files": [

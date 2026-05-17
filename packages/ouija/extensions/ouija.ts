@@ -11,7 +11,7 @@
  * Also accepts an entries[] array for ad-hoc BM25 over arbitrary text.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { createOuijaExecutor } from "../../shared/src/ouija-core.js";
 

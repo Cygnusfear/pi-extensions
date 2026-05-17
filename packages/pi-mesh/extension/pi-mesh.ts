@@ -6,7 +6,7 @@
  * If the sidecar isn't running, we spawn it on demand.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import {
   claimNickname,

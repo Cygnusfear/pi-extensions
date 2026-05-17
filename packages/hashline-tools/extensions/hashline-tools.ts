@@ -1,8 +1,8 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { renderToolResult, renderDiffResult } from "@pi-extensions/shared/tool-ui-utils";
-import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 // Side-effect import: starts Shiki loading immediately so it's ready by renderResult time
 import "../../shared/src/tui-diff-renderer.ts";
 import crypto from "node:crypto";

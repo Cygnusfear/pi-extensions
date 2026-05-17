@@ -1,5 +1,5 @@
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@mariozechner/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
 
 export type RlmCompleteFn = (model: Model<any>, request: Context, auth?: ProviderStreamOptions) => Promise<AssistantMessage>;
 

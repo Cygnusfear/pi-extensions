@@ -17,14 +17,19 @@
 
 import vm from "node:vm";
 import * as acorn from "acorn";
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { createPersistentStore } from "./persistent-store";
 import { loadRunbook } from "@pi-extensions/runbooks/engine";
 import {
 	getSandboxFnsForCall,
 	type SandboxCallContext,
 } from "@pi-extensions/shared/sandbox-registry";
-
+import {
+	CONTEXT_GUARD_THRESHOLD,
+	getKnownContextPercent,
+	isContextGuardActive,
+	readContextUsage,
+} from "./context-usage";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Session shape
@@ -320,25 +325,8 @@ function injectConsoleWake(session: CodeModeSession, deps: ExecutionDeps): void 
 // Context guard — wraps tool fns so they throw when context is critically full
 // ───────────────────────────────────────────────────────────────────────────────
 
-const CONTEXT_GUARD_THRESHOLD = 0.94;
-
 /** Tools allowed through the context guard (context management + safe reads). */
 const CONTEXT_GUARD_ALLOWED = new Set(["Read", "read", "sleep", "man"]);
-
-function isContextGuardActive(
-	enabled: boolean,
-	getUsage?: (() => any) | undefined,
-): boolean {
-	if (!enabled) return false;
-	if (!getUsage) return false;
-	try {
-		const usage = getUsage();
-		if (!usage || usage.percent === null) return false;
-		return usage.percent >= CONTEXT_GUARD_THRESHOLD * 100;
-	} catch {
-		return false;
-	}
-}
 
 function wrapWithContextGuard(
 	bindings: Record<string, unknown>,
@@ -354,13 +342,7 @@ function wrapWithContextGuard(
 		} else if (typeof value === "function") {
 			wrapped[key] = (...args: unknown[]) => {
 				if (isContextGuardActive(enabled, getUsage)) {
-					const pct = (() => {
-						try {
-							return getUsage().percent.toFixed(1);
-						} catch {
-							return "?";
-						}
-					})();
+					const pct = getKnownContextPercent(readContextUsage(getUsage))?.toFixed(1) ?? "?";
 					throw new Error(
 						"\ud83d\udeab Context guard active (" +
 							pct +

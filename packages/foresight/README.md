@@ -127,6 +127,6 @@ await recall({ query: "deployment strategy", bank: "other-project" });
 ## Dependencies
 
 - **Foresight CLI** — knowledge graph backend (must be on PATH)
-- **@mariozechner/pi-ai** — string enum support
+- **@earendil-works/pi-ai** — string enum support
 - **@pi-extensions/shared** — foresight read/write utilities
-- **@mariozechner/pi-coding-agent** ≥ 0.65.0
+- **@earendil-works/pi-coding-agent** ≥ 0.65.0

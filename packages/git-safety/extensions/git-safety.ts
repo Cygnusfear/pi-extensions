@@ -14,7 +14,7 @@
  * - Injects GIT_EDITOR=true for `git rebase --continue` to prevent hanging
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
 
 const REBASE_CONTINUE_RE = /\bgit\s+rebase\s+--continue\b/;

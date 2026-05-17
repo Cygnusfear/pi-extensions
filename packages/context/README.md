@@ -34,7 +34,7 @@ System:   ~3,200 tok (AGENTS ~1,800)
 Tools:    ~2,100 tok (14 active)
 AGENTS:   AGENTS.md, src/AGENTS.md
 
-Extensions (3): foresight.ts, pi-mesh.ts, worktree-summaries.ts
+Extensions (3): ouija.ts, pi-mesh.ts, worktree-summaries.ts
 Skills (12): how-to-communicate ✅, writing-clearly-and-concisely, ...
 
 Session:  45,230 tokens · $0.0342
@@ -63,5 +63,5 @@ Disables itself in headless mode (`PI_HEADLESS=1`).
 
 ## Dependencies
 
-- **@mariozechner/pi-coding-agent** ≥ 0.65.0
-- **@mariozechner/pi-tui** — TUI component rendering
+- **@earendil-works/pi-coding-agent** ≥ 0.65.0
+- **@earendil-works/pi-tui** — TUI component rendering

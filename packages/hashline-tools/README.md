@@ -150,7 +150,7 @@ Both can coexist — use `hash_read`/ `hash_edit` for safety-critical edits on a
 
 ## Dependencies
 
-- `@mariozechner/pi-coding-agent` — core extension API, TUI rendering
+- `@earendil-works/pi-coding-agent` — core extension API, TUI rendering
 - `@pi-extensions/shared` — diff renderer, tool UI utils
 - `@sinclair/typebox` — parameter schema types
 - `crypto` (Node.js built-in) — SHA-1 hash computation

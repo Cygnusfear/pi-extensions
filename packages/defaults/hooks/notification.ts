@@ -5,11 +5,11 @@
  * The actual OSC sequences and sounds are handled by the presenter extension.
  */
 
-import type { ToolResultMessage } from "@mariozechner/pi-ai";
+import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ToolCallEvent,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 // Event channel for notifications
 const NOTIFICATION_EVENT = "ad:notification";

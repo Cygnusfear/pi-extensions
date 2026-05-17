@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ReadonlyFooterDataProvider, Theme } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ReadonlyFooterDataProvider, Theme } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { onStableIdChange } from "@pi-extensions/shared/session-nickname";
 
 
@@ -331,14 +331,26 @@ export default function powerlineFooter(pi: ExtensionAPI) {
         lastAssistant.usage.cacheRead +
         lastAssistant.usage.cacheWrite
       : 0;
-    const contextTokens = typeof usageContext?.tokens === "number" ? usageContext.tokens : fallbackContextTokens;
     const contextWindow = usageContext?.contextWindow ?? safeContextRead(() => model?.contextWindow ?? 0, 0);
-    const contextPercent =
-      typeof usageContext?.percent === "number"
+    const runtimeTokens =
+      typeof usageContext?.tokens === "number" && Number.isFinite(usageContext.tokens)
+        ? usageContext.tokens
+        : undefined;
+    const runtimePercent =
+      typeof usageContext?.percent === "number" && Number.isFinite(usageContext.percent)
         ? usageContext.percent
+        : undefined;
+    const contextTokens =
+      usageContext !== undefined ? runtimeTokens ?? null : fallbackContextTokens;
+    const contextPercent =
+      runtimePercent ??
+      (usageContext !== undefined
+        ? runtimeTokens !== undefined && contextWindow > 0
+          ? (runtimeTokens / contextWindow) * 100
+          : null
         : contextWindow > 0
-          ? (contextTokens / contextWindow) * 100
-          : 0;
+          ? (fallbackContextTokens / contextWindow) * 100
+          : 0);
 
     // Git status is lazy — fetched only when the git segment renders
     const gitBranch = footerDataRef?.getGitBranch() ?? null;
@@ -395,7 +407,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
   function setupCustomEditor(ctx: any) {
     // Import CustomEditor dynamically and create wrapper
-    import("@mariozechner/pi-coding-agent").then(({ CustomEditor }) => {
+    import("@earendil-works/pi-coding-agent").then(({ CustomEditor }) => {
       let currentEditor: any = null;
       let autocompleteFixed = false;
 

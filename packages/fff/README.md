@@ -173,8 +173,8 @@ src/auth/actor.ts
 ## Dependencies
 
 - `@ff-labs/fff-bun` — Rust-native fuzzy finder (loaded via FFI in the subprocess)
-- `@mariozechner/pi-coding-agent` — core extension API
-- `@mariozechner/pi-tui` — TUI rendering for tool call/result display
+- `@earendil-works/pi-coding-agent` — core extension API
+- `@earendil-works/pi-tui` — TUI rendering for tool call/result display
 - `@sinclair/typebox` — parameter schema types
 - `bun` runtime — required for FFI access to the native library
 

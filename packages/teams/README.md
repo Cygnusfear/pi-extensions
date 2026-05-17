@@ -369,6 +369,6 @@ See [TEAMS_V2_ARCHITECTURE.md](./TEAMS_V2_ARCHITECTURE.md) for the full design d
 
 - **@pi-extensions/pi-mesh** — mesh transport for coordinator↔worker communication
 - **@pi-extensions/shared** — shared utilities
-- **@mariozechner/pi-coding-agent** ≥ 0.65.0
-- **@mariozechner/pi-tui** — runtime widget rendering
+- **@earendil-works/pi-coding-agent** ≥ 0.65.0
+- **@earendil-works/pi-tui** — runtime widget rendering
 - **mai CLI** — ticket management

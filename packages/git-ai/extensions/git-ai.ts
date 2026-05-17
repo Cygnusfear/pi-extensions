@@ -11,7 +11,7 @@
  * Requires: git-ai installed (https://usegitai.com)
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { execFile, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";

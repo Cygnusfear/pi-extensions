@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { setupGetCurrentTimeTool } from "../tools/get-current-time";
 
 export function setupTools(pi: ExtensionAPI): void {

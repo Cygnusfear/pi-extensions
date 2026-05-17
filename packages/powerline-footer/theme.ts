@@ -7,7 +7,7 @@
  * 3. Default colors
  */
 
-import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
+import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

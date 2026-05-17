@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
 import { buildPredicate, TeamsSubscription, type EventFilter, type PollEventType } from "./subscription.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";

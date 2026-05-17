@@ -1,6 +1,6 @@
 import { ScrollablePanel } from "@aliou/pi-utils-ui";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import type { Component, TUI } from "@mariozechner/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 
 type ContentBuilder = (width: number, theme: Theme) => string[];
 

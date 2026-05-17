@@ -115,7 +115,7 @@ Inside the code-mode sandbox, `readImage()` stashes the base64-encoded image dat
 
 ## Dependencies
 
-- `@mariozechner/pi-coding-agent` — core extension API
+- `@earendil-works/pi-coding-agent` — core extension API
 - `@pi-extensions/shared` — `tool-ui-utils` (diff rendering, timing)
 - `diff` (npm) — unified diff generation
 - `@sinclair/typebox` — parameter schema types

@@ -6,7 +6,7 @@
  * on every agent start so agents see roles instead of hardcoded model IDs.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerContextualSandboxFn } from "@pi-extensions/shared/sandbox-registry";
 import {
 	resolve,

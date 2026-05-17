@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerCommands } from "./commands";
 import { generateAndSetTitle } from "./lib/title";
 import { getAllDeps } from "../shared/src/tool-availability";

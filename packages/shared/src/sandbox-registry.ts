@@ -16,7 +16,7 @@
  * getSandboxFnNames keep their original semantics.
  */
 
-import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 const REGISTRY_KEY = "__pi_sandbox_fn_registry_v2__";
 

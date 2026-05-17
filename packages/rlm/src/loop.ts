@@ -1,5 +1,5 @@
-import { runAgentLoop, type AgentMessage, type AgentTool } from "@mariozechner/pi-agent-core";
-import { createAssistantMessageEventStream, streamSimple, type AssistantMessage, type Model } from "@mariozechner/pi-ai";
+import { runAgentLoop, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
+import { createAssistantMessageEventStream, streamSimple, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { createCodeModeSession, executeInSession } from "@pi-extensions/code-mode/session-factory";
 import { combineSignals } from "./combine-signals";

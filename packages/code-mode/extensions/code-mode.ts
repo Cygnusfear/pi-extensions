@@ -12,9 +12,9 @@ import type {
   ExtensionAPI,
   Theme,
   ToolRenderResultOptions,
-} from "@mariozechner/pi-coding-agent";
-import { keyHint } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import fs from "node:fs";
@@ -34,6 +34,11 @@ import {
   executeInSession,
   type CodeModeSession,
 } from "../src/session-factory";
+import {
+  buildContextFooter,
+  CONTEXT_GUARD_THRESHOLD,
+  isContextGuardActive,
+} from "../src/context-usage";
 import { installCodeModeProcessGuard } from "../src/process-guard";
 
 // =============================================================================
@@ -120,40 +125,6 @@ function formatArg(arg: unknown): string {
   }
 }
 
-/** Build context usage footer for execute_code output. Returns null when usage is low. */
-function buildContextFooter(ctx: {
-  sessionManager?: any;
-  getContextUsage?: () => any;
-}): string | null {
-  const getUsage = ctx.getContextUsage;
-  if (!getUsage) return null;
-  try {
-    const usage = getUsage();
-    if (!usage || usage.percent === null || usage.percent < 30) return null;
-
-    const pct = usage.percent.toFixed(1);
-    const totalTokens = usage.tokens ?? usage.used ?? 0;
-    const maxTokens = usage.contextWindow ?? usage.limit ?? 0;
-    const usedK = totalTokens > 0 ? Math.round(totalTokens / 1024) : 0;
-    const maxK = maxTokens > 0 ? Math.round(maxTokens / 1024) : 0;
-    const context = maxK > 0 ? `${usedK}k/${maxK}k CONTEXT` : `${pct}% CONTEXT`;
-
-    if (usage.percent >= 90) {
-      const guard = isContextGuardActive(getUsage) ? " \u{1F6AB} CONTEXT GUARD ACTIVE — save thick context to $.ctx FIRST, then session.squash()" : "";
-      return `\u{1F480} ${pct}% (${context}) MAINTENANCE NOW \u2014 session.squash() or contextCheckout() to reclaim context${guard}`;
-    }
-    if (usage.percent >= 70) {
-      return `🚨 ${pct}% (${context}) URGENT — session.squash() to compact, or contextCheckout() to squash a segment`;
-    }
-    if (usage.percent >= 40) {
-      return `🙈 ${pct}% (${context}) idiot threshold — start distilling state into $ vars + session.save()`;
-    }
-    return `📊 ${pct}% (${context})`;
-  } catch {
-    return null;
-  }
-}
-
 // =============================================================================
 // Session + execution — extracted into ./src/session-factory.ts.
 //
@@ -175,21 +146,6 @@ let currentOuijaSessionFile: string | null = null;
 // When context usage exceeds the threshold (default 94%), only context-management
 // tools are allowed. The guard auto-disarms when usage drops back below threshold.
 let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
-
-const CONTEXT_GUARD_THRESHOLD = 0.94;
-
-/** Check if context usage exceeds the guard threshold. */
-function isContextGuardActive(getUsage?: (() => any) | undefined): boolean {
-  if (!contextGuardEnabled) return false;
-  if (!getUsage) return false;
-  try {
-    const usage = getUsage();
-    if (!usage || usage.percent === null) return false;
-    return usage.percent >= CONTEXT_GUARD_THRESHOLD * 100;
-  } catch {
-    return false;
-  }
-}
 
 function getSession(): CodeModeSession {
   if (!session) session = createCodeModeSession();
@@ -545,7 +501,7 @@ export default function (pi: ExtensionAPI) {
       } else {
         // status (default)
         const state = contextGuardEnabled ? "ON" : "OFF";
-        const active = isContextGuardActive(getUsage) ? " 🚫 ACTIVE (context critical)" : "";
+        const active = isContextGuardActive(contextGuardEnabled, getUsage) ? " 🚫 ACTIVE (context critical)" : "";
         ctx.ui.notify(`Context guard: ${state} (threshold ${(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0)}%). Current: ${pct}%${active}`, "info");
       }
     },
@@ -672,7 +628,10 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Context usage footer (shown when ≥ 30%, warning at ≥ 40%)
-      const ctxFooter = buildContextFooter(ctx as any);
+      const ctxFooter = buildContextFooter(ctx as any, {
+        contextGuardEnabled,
+        suppressBecauseCompactionScheduled: pendingSquash !== null,
+      });
       if (ctxFooter) {
         text += "\n\n" + ctxFooter;
       }

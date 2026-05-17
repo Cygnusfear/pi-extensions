@@ -5,7 +5,7 @@
  * tool result. Sits right after the code the LLM just saw.
  */
 
-import type { ExtensionAPI, ToolResultEvent } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 

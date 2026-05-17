@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { writeFile, unlink } from "node:fs/promises";
 import { getMaiBin, maiDep } from "../shared/src/mai-binary.js";
 import { tmpdir } from "node:os";

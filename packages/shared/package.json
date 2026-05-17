@@ -26,6 +26,6 @@
     "shiki": "^4.0.2"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*"
+    "@earendil-works/pi-ai": "*"
   }
 }
