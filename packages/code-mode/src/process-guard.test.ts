@@ -108,6 +108,52 @@ describe("code-mode process guard", () => {
 		await Promise.resolve();
 	});
 
+	test("sandbox-origin rejection does not write to console.error", () => {
+		const { sent, pi } = makeFakePi();
+		installCodeModeProcessGuard(pi);
+
+		const calls: unknown[][] = [];
+		const originalConsoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			calls.push(args);
+		};
+		try {
+			const fauxErr = new Error("contained user-code failure");
+			fauxErr.stack = `Error: contained user-code failure\n    at <anonymous> (code-mode.js:120:22)`;
+			process.emit("unhandledRejection", fauxErr, Promise.resolve());
+		} finally {
+			console.error = originalConsoleError;
+		}
+
+		expect(sent.length).toBe(1);
+		expect(calls.length).toBe(0);
+	});
+
+	test("failed sandbox crash surfacing still does not fall back to console.error", () => {
+		installCodeModeProcessGuard({
+			sendMessage() {
+				throw new Error("sendMessage unavailable");
+			},
+		} as never);
+
+		const calls: unknown[][] = [];
+		const originalConsoleError = console.error;
+		console.error = (...args: unknown[]) => {
+			calls.push(args);
+		};
+		try {
+			const fauxErr = new Error("contained user-code failure");
+			fauxErr.stack = `Error: contained user-code failure\n    at <anonymous> (code-mode.js:120:22)`;
+			expect(() =>
+				process.emit("unhandledRejection", fauxErr, Promise.resolve()),
+			).not.toThrow();
+		} finally {
+			console.error = originalConsoleError;
+		}
+
+		expect(calls.length).toBe(0);
+	});
+
 	test("runbook-origin rejection is also surfaced (filename: runbook:<name>)", () => {
 		const { sent, pi } = makeFakePi();
 		installCodeModeProcessGuard(pi);

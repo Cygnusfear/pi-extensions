@@ -96,8 +96,11 @@ export default function (pi: ExtensionAPI) {
     const header = theme.fg("accent", "💬 ") + theme.fg("dim", `[${modelLabel}]`);
     container.addChild(new Text(header, 0, 0));
 
-    // The explained content as markdown
-    container.addChild(new Markdown(message.content || "(no content)", 0, 0, mdTheme));
+    // The explained content as markdown. Custom messages are usually strings,
+    // but the core message type also allows content blocks; render only text
+    // here so Markdown never receives a non-string payload.
+    const messageContent = typeof message.content === "string" ? message.content : "(no content)";
+    container.addChild(new Markdown(messageContent || "(no content)", 0, 0, mdTheme));
 
     // Collapsed: show original if expanded
     if (expanded && details?.originalText) {
@@ -231,18 +234,19 @@ export default function (pi: ExtensionAPI) {
           .map((c) => c.text)
           .join("\n");
 
-        if (!explained.trim()) {
-          console.error("[explain] Communicator returned empty response, stopReason:", response.stopReason);
-        }
+        const finalExplained = explained.trim() ? explained : params.text;
+        const finalModel = explained.trim()
+          ? `${communicatorProvider}/${communicatorModelId}`
+          : `fallback-empty-response (${communicatorProvider}/${communicatorModelId}, stopReason: ${response.stopReason ?? "unknown"})`;
 
         // Return short confirmation to the LLM — the full glm output is in details
         // and rendered to the user via renderResult (no sendMessage to avoid retriggering)
         return {
           content: [{ type: "text", text: "✓ Communicated to user via communicator model." }],
           details: {
-            explained,
+            explained: finalExplained,
             originalText: params.text,
-            model: `${communicatorProvider}/${communicatorModelId}`,
+            model: finalModel,
             contextTokensEstimate,
           },
         };
@@ -449,7 +453,7 @@ export default function (pi: ExtensionAPI) {
 
       if (input === "on" || input === "enable") {
         communicatorEnabled = true;
-        ctx.ui.notify(`Communicator enabled: ${communicatorProvider}/${communicatorModelId}`, "success");
+        ctx.ui.notify(`Communicator enabled: ${communicatorProvider}/${communicatorModelId}`, "info");
         return;
       }
 
@@ -476,7 +480,7 @@ export default function (pi: ExtensionAPI) {
       communicatorProvider = provider;
       communicatorModelId = modelId;
       communicatorEnabled = true;
-      ctx.ui.notify(`Communicator set to ${provider}/${modelId}`, "success");
+      ctx.ui.notify(`Communicator set to ${provider}/${modelId}`, "info");
     },
   });
 

@@ -85,16 +85,17 @@ export function installCodeModeProcessGuard(pi: ExtensionAPI): void {
 		const fromSandbox = isFromCodeMode(stack);
 		const tag = fromSandbox ? "[code-mode]" : "[host]";
 
-		// Always log to stderr first — guarantees visibility even if sendMessage
-		// throws or the agent isn't listening.
-		try {
-			console.error(`${tag} ${kind}: ${message}\n${stack}`);
-		} catch { /* never let logging itself bubble */ }
-
-		// Only surface sandbox-origin failures to the agent. Host-origin failures
-		// log to stderr but stay quiet so we don't spam the conversation with
-		// noise the agent can't act on.
-		if (!fromSandbox) return;
+		// Sandbox-origin failures are user-code/code-mode failures. Do NOT write
+		// them with console.error: in pi, stderr is a host/TUI error channel, so a
+		// contained sandbox rejection would still look like the app itself broke.
+		// Surface those as in-session messages instead. Host-origin failures still
+		// go to stderr because they are actual host failures.
+		if (!fromSandbox) {
+			try {
+				console.error(`${tag} ${kind}: ${message}\n${stack}`);
+			} catch { /* never let logging itself bubble */ }
+			return;
+		}
 
 		const sendMessage = (pi as unknown as {
 			sendMessage?: (
@@ -124,10 +125,10 @@ export function installCodeModeProcessGuard(pi: ExtensionAPI): void {
 				{ customType: "code-mode-crash", content: body, display: true },
 				{ deliverAs: "followUp", triggerTurn: true },
 			);
-		} catch (err) {
-			try {
-				console.error("[code-mode] failed to surface crash to agent:", err);
-			} catch { /* noop */ }
+		} catch {
+			// Never fall back to console.error for sandbox failures. The process
+			// guard already contained the exception; logging it to stderr would
+			// reclassify a contained user-code failure as a host/TUI error.
 		}
 	};
 

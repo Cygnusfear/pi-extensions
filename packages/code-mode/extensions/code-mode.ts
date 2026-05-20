@@ -50,6 +50,44 @@ const MAX_EXECUTION_TIMEOUT_MS = 600_000; // 10 minutes hard cap
 const SYNC_TIMEOUT_MS = 5_000; // 5s for parsing/setup
 const MAX_OUTPUT_LENGTH = 200_000; // 200KB output cap
 
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.stack ?? error.message;
+  return String(error);
+}
+
+function surfaceCodeModeInternalError(
+  pi: ExtensionAPI,
+  title: string,
+  error: unknown,
+): void {
+  const sendMessage = (pi as unknown as {
+    sendMessage?: (
+      message: { customType: string; content: string; display?: boolean },
+      options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
+    ) => void;
+  }).sendMessage;
+  if (typeof sendMessage !== "function") return;
+
+  const body = [
+    "[CODE-MODE INTERNAL ERROR]",
+    "",
+    title,
+    "",
+    formatUnknownError(error),
+  ].join("\n");
+
+  try {
+    sendMessage(
+      { customType: "code-mode-crash", content: body, display: true },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  } catch {
+    // Do not fall back to console.error. In pi, stderr is a host/TUI error
+    // channel; contained code-mode failures must surface as messages or stay
+    // contained.
+  }
+}
+
 // =============================================================================
 // TypeScript Declarations (injected into system prompt)
 // =============================================================================
@@ -824,8 +862,8 @@ export default function (pi: ExtensionAPI) {
         messageCount: preparation.messagesToSummarize.length,
         outline: outline.join("\n"),
       };
-    } catch (e: any) {
-      console.error("[code-mode] preCompact outline error:", e?.message || e);
+    } catch (e: unknown) {
+      surfaceCodeModeInternalError(pi, "Failed to build preCompact outline.", e);
     }
     // Let compaction proceed normally
     return undefined;
@@ -835,14 +873,15 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_compact", async (event) => {
     try {
       const sess = getSession();
-      const existing = sess.store.proxy.preCompact || {};
+      const rawExisting = sess.store.proxy.preCompact;
+      const existing = rawExisting && typeof rawExisting === "object" ? rawExisting : {};
       sess.store.proxy.preCompact = {
         ...existing,
         summary: event.compactionEntry.summary,
       };
 
-    } catch (e: any) {
-      console.error("[code-mode] preCompact summary error:", e?.message || e);
+    } catch (e: unknown) {
+      surfaceCodeModeInternalError(pi, "Failed to store preCompact summary.", e);
     }
   });
 

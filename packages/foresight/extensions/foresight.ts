@@ -133,8 +133,8 @@ function foresightRun(args: string[]): Promise<string> {
 	});
 }
 
-/** Fire-and-forget foresight CLI call — silent unless spawn itself fails */
-function foresightFireAndForget(args: string[], label: string): void {
+/** Fire-and-forget foresight CLI call — silent by design. */
+function foresightFireAndForget(args: string[]): void {
 	if (!dep.ok) return;
 	try {
 		const child = spawn(FORESIGHT_BIN, args, {
@@ -143,14 +143,11 @@ function foresightFireAndForget(args: string[], label: string): void {
 			env: { ...process.env, ...FS_ENV },
 		});
 
-		child.once("error", (error) => {
-			console.error(`[foresight] failed to launch ${label}: ${error.message}`);
-		});
+		child.once("error", () => {});
 
 		child.unref();
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(`[foresight] failed to start ${label}: ${message}`);
+	} catch {
+		// Optional session-ingest background work must not write to stderr/TUI.
 	}
 }
 
@@ -158,7 +155,7 @@ function foresightFireAndForget(args: string[], label: string): void {
 function ingestSessionFile(sessionFile: string | undefined): void {
 	if (!sessionFile || sessionFile.length === 0) return;
 	if (!existsSync(sessionFile)) return;
-	foresightFireAndForget(["session-ingest-file", sessionFile], `session ingest for ${sessionFile}`);
+	foresightFireAndForget(["session-ingest-file", sessionFile]);
 }
 
 /** Check if Foresight is reachable (health check via CLI) */

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { safeAction } from "@pi-extensions/shared/tool-availability";
 
 const SKILLS_STATUS_KEY = "skills";
 const DEFAULT_SKILLS_SOURCE =
@@ -48,12 +49,19 @@ async function getPackageUpdateStatus(pi: ExtensionAPI, pkgDir: string) {
 export default function skillsExtension(pi: ExtensionAPI) {
   // Check for skill + package updates on session start (non-blocking)
   pi.on("session_start", (_event, ctx) => {
-    (async () => {
+    // ctx accessors are assertActive-guarded. Snapshot cwd before the
+    // background task awaits, and guard the later UI write so a session
+    // replacement/reload cannot turn this fire-and-forget check into a host
+    // unhandledRejection.
+    const cwd = safeAction(() => ctx.cwd);
+    if (!cwd) return;
+
+    void (async () => {
       const updates: string[] = [];
 
       // Check skills (skip if no skills installed via CLI)
       try {
-        const r = await runSkills(pi, ["check"], ctx.cwd);
+        const r = await runSkills(pi, ["check"], cwd);
         if (r.code === 0) {
           const out = cleanOutput(r.stdout);
           // Only flag if there are actual updates, not "no skills tracked"
@@ -75,11 +83,13 @@ export default function skillsExtension(pi: ExtensionAPI) {
         }
       } catch {}
 
-      if (updates.length > 0) {
-        ctx.ui.setStatus(SKILLS_STATUS_KEY, `⬆ ${updates.join(" + ")} updates available`);
-      } else {
-        ctx.ui.setStatus(SKILLS_STATUS_KEY, undefined);
-      }
+      safeAction(() => {
+        if (updates.length > 0) {
+          ctx.ui.setStatus(SKILLS_STATUS_KEY, `⬆ ${updates.join(" + ")} updates available`);
+        } else {
+          ctx.ui.setStatus(SKILLS_STATUS_KEY, undefined);
+        }
+      });
     })();
   });
 

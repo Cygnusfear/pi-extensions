@@ -29,6 +29,7 @@ let requestId = 0;
 let pendingRequests = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 let serverReady = false;
 let startError: string | null = null;
+let lastServerStderr: string | null = null;
 let currentBasePath = "";
 
 function startServer(): boolean {
@@ -36,6 +37,7 @@ function startServer(): boolean {
 
 	serverReady = false;
 	startError = null;
+	lastServerStderr = null;
 	pendingRequests.clear();
 
 	try {
@@ -83,14 +85,18 @@ function startServer(): boolean {
 			}
 		});
 
-		// Log server stderr (startup messages, errors)
+		// Capture server stderr for tool-returned diagnostics. Do not write to
+		// console.error: in pi that is a host/TUI error channel, while fff server
+		// stderr is an extension dependency diagnostic that tools should surface in
+		// their normal result path.
 		child.stderr?.on("data", (chunk: Buffer) => {
 			const text = chunk.toString().trim();
 			if (text.includes("ready")) {
 				serverReady = true;
 			}
 			if (text && !text.includes("ready")) {
-				console.error(`[fff] ${text}`);
+				lastServerStderr = text;
+				if (!serverReady) startError = text;
 			}
 		});
 
@@ -124,7 +130,7 @@ async function rpc(method: string, params?: any, timeoutMs = 10_000): Promise<an
 			await new Promise((r) => setTimeout(r, 50));
 		}
 		if (!serverReady) {
-			return { ok: false, error: "fff server did not become ready" };
+			return { ok: false, error: lastServerStderr ? `fff server did not become ready: ${lastServerStderr}` : "fff server did not become ready" };
 		}
 	}
 

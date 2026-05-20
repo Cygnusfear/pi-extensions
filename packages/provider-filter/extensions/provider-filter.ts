@@ -33,7 +33,16 @@ function saveDisabledProviders(disabled: Set<string>): void {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify([...disabled], null, 2) + "\n", "utf-8");
 }
 
-function disableProvider(pi: ExtensionAPI, provider: string): void {
+interface ProviderChangeResult {
+  ok: boolean;
+  error?: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function disableProvider(pi: ExtensionAPI, provider: string): ProviderChangeResult {
   try {
     // Register with a single placeholder model to trigger built-in model removal.
     // The placeholder uses a bogus API key so it never appears in getAvailable().
@@ -53,17 +62,19 @@ function disableProvider(pi: ExtensionAPI, provider: string): void {
         },
       ],
     });
+    return { ok: true };
   } catch (err) {
-    console.error(`[provider-filter] Failed to disable ${provider}:`, err);
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
-function enableProvider(pi: ExtensionAPI, provider: string): void {
+function enableProvider(pi: ExtensionAPI, provider: string): ProviderChangeResult {
   try {
     // unregisterProvider triggers refresh() which reloads built-in models
     pi.unregisterProvider(provider);
+    return { ok: true };
   } catch (err) {
-    console.error(`[provider-filter] Failed to restore ${provider}:`, err);
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -111,10 +122,14 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`${provider} is already disabled`, "info");
           return;
         }
+        const result = disableProvider(pi, provider);
+        if (!result.ok) {
+          ctx.ui.notify(`Failed to disable ${provider}: ${result.error ?? "unknown error"}`, "error");
+          return;
+        }
         disabled.add(provider);
         saveDisabledProviders(disabled);
-        disableProvider(pi, provider);
-        ctx.ui.notify(`Disabled provider: ${provider}`, "success");
+        ctx.ui.notify(`Disabled provider: ${provider}`, "info");
         return;
       }
 
@@ -127,10 +142,14 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`${provider} is not disabled`, "info");
           return;
         }
+        const result = enableProvider(pi, provider);
+        if (!result.ok) {
+          ctx.ui.notify(`Failed to enable ${provider}: ${result.error ?? "unknown error"}`, "error");
+          return;
+        }
         disabled.delete(provider);
         saveDisabledProviders(disabled);
-        enableProvider(pi, provider);
-        ctx.ui.notify(`Enabled provider: ${provider}`, "success");
+        ctx.ui.notify(`Enabled provider: ${provider}`, "info");
         return;
       }
 

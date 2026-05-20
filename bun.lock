@@ -423,6 +423,9 @@
     "packages/skills": {
       "name": "@pi-extensions/skills",
       "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
       "peerDependencies": {
         "@earendil-works/pi-coding-agent": ">=0.74.0",
         "@earendil-works/pi-tui": "*",
