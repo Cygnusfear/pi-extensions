@@ -1,0 +1,41 @@
+packages/code-mode/src/process-guard.ts
+  s_4ec76b0ccd2125::t_889e8989025d92 88-98,128-131
+packages/skills/skills.test.ts
+  s_4ec76b0ccd2125::t_adf737be1f399a 6-8,19-21,46-48
+  s_4ec76b0ccd2125::t_8d16b6b8bc6378 1-5,9-18,22-45,49-75
+packages/skills/extensions/skills.ts
+  s_4ec76b0ccd2125::t_05c4e551f18f69 2,52-59,64,86-92
+packages/provider-filter/extensions/provider-filter.ts
+  s_4ec76b0ccd2125::t_ba4ffd8c2452c1 132,152
+  s_4ec76b0ccd2125::t_4000f612e68422 36-45,65,67,71,75,77,125-129,145-147
+packages/skills/package.json
+  s_4ec76b0ccd2125::t_05c4e551f18f69 20-23
+packages/explain/extensions/explain.ts
+  s_4ec76b0ccd2125::t_d489498579f352 237-240,247,249
+  s_4ec76b0ccd2125::t_ba4ffd8c2452c1 99-103,456,483
+packages/fff/extensions/fff.ts
+  s_4ec76b0ccd2125::t_eb6c55726484e0 32,40,88-91,98-99,133
+packages/foresight/extensions/foresight.ts
+  s_4ec76b0ccd2125::t_d0e1d3cfd6ff9c 136-137,146,149-150,158
+packages/code-mode/extensions/code-mode.ts
+  s_4ec76b0ccd2125::t_d489498579f352 53-90,865-866,883-884
+  s_4ec76b0ccd2125::t_ba4ffd8c2452c1 876-877
+packages/code-mode/src/process-guard.test.ts
+  s_4ec76b0ccd2125::t_cfcf0c8bd73f79 111-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "452127373a50b606549c4d0fa8a4ff55a8ac47d7",
+  "prompts": {},
+  "sessions": {
+    "s_4ec76b0ccd2125": {
+      "agent_id": {
+        "tool": "Charles Quasar Winn",
+        "id": "019e45bc-1e65-7d76-b530-81eb82e9dd80",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
