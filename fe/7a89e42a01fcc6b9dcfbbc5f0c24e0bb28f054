@@ -1,0 +1,32 @@
+packages/defaults/lib/agents-discovery.test.ts
+  s_54ae7339ce5c7c::t_29be8df24dba08 184
+  s_54ae7339ce5c7c::t_3df4137559c46d 179
+  s_54ae7339ce5c7c::t_ae97fddd193ef2 1-114,116-178,180-183,185-210
+  s_54ae7339ce5c7c::t_4b4d3afdf0a851 115
+packages/defaults/lib/agents-discovery.ts
+  s_54ae7339ce5c7c::t_ed953a8b8e6b09 1,6-12,17-19,22-38,40,43-52,57-58,62-63,65-66,68,76,78-83,86,89-90,93-94,97,124-226,255-258,262-263,267-269,281,283-293,305,307,312-313,320-347
+  s_54ae7339ce5c7c::t_c08fcd90b1ab26 261,266,270,272,282
+packages/defaults/config.ts
+  s_54ae7339ce5c7c::t_7e1f12efe831ef 9,15-18,25-26,33-34
+packages/defaults/hooks/agents-discovery.ts
+  s_54ae7339ce5c7c::t_83a677ff57e3c9 2,4-7,15,19-28,30-42,56,58-60,71-72,74,76,79-81,84,86,96-142
+  s_54ae7339ce5c7c::t_a514761a1cc74d 29
+packages/defaults/index.ts
+  s_54ae7339ce5c7c::t_5e51dcbadfe84f 14-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "fe7a89e42a01fcc6b9dcfbbc5f0c24e0bb28f054",
+  "prompts": {},
+  "sessions": {
+    "s_54ae7339ce5c7c": {
+      "agent_id": {
+        "tool": "Lars Nova Rieke",
+        "id": "019e448c-92ac-78cb-91f6-9e7678fc2d8c",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
