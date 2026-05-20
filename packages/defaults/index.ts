@@ -11,6 +11,8 @@ export default async function (pi: ExtensionAPI) {
 
   const agentsDiscovery = new AgentsDiscoveryManager(
     () => configLoader.getConfig().agentsIgnorePaths,
+    configLoader.getConfig().conventionFiles,
+    { replaceDefaults: configLoader.getConfig().conventionFilesReplace },
   );
 
   setupHooks(pi, agentsDiscovery);
