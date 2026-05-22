@@ -57,7 +57,8 @@
       "./packages/git-ai/extensions/git-ai.ts",
       "./packages/zai-key-rotate/extensions/zai-key-rotate.ts",
       "./packages/supervisor/src/index.ts",
-      "./packages/runbooks/extensions/runbooks.ts"
+      "./packages/runbooks/extensions/runbooks.ts",
+      "./packages/exit-command/extensions/exit-command.ts"
     ],
     "prompts": [
       "./packages/prompt-templates/prompts"

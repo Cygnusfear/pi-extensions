@@ -1,0 +1,19 @@
+{
+  "name": "@pi-extensions/exit-command",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/exit-command.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
+  },
+  "files": [
+    "extensions"
+  ]
+}
