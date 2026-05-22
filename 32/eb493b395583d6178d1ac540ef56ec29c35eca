@@ -1,0 +1,23 @@
+package.json
+  s_44a4c37c45774e::t_2c30e241e9e6fb 60-61
+packages/exit-command/extensions/exit-command.ts
+  s_44a4c37c45774e::t_1e51b90d2b579e 1-104
+packages/exit-command/package.json
+  s_44a4c37c45774e::t_ef073102865ac6 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "32eb493b395583d6178d1ac540ef56ec29c35eca",
+  "prompts": {},
+  "sessions": {
+    "s_44a4c37c45774e": {
+      "agent_id": {
+        "tool": "Johannes Muon Porco",
+        "id": "019e4fb6-6d6d-7652-8306-cfdb14353c4a",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
