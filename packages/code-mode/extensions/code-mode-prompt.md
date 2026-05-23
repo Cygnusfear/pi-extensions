@@ -116,30 +116,60 @@ teams.on("fixer", "completed")
 console.log("Subscription armed — going idle until fixer completes.");
 ```
 
-**Pattern 2 — watch a mesh peer or anything non-event-driven (polling loop):**
+**Pattern 2 — watch a mesh peer or anything non-event-driven (background poll + wake):**
+
+The mesh has no typed event subscription for peer sessions. To wait on a mesh peer's
+work (e.g. a commit, a deploy, a review finishing), you **background-poll into `$` and
+surface via `console.wake`**. You do **NOT** block the agent in the foreground, and you
+do **NOT** ask the peer to ping you back.
 
 ```javascript
-// Fire a monitor, wake yourself when something changes
-$.monitor = (async () => {
-  for (let i = 0; i < 20; i++) {
-    await sleep(240000); // 4 minutes
-    const view = await meshView({ sessionId: 'deploy-worker', start: -2, end: 0 });
-    if (view.includes('deployed')) {
-      console.wake("Deploy finished: " + view.slice(0, 500));
+// RIGHT — fire monitor into $, agent goes idle, wakes when something changes
+$.ralphMonitor = (async () => {
+  for (let i = 0; i < 18; i++) {
+    await sleep(20_000); // 20s × 18 = 6 min budget
+    const raw = await meshView({ sessionId: '019e54c9-...', start: -3, end: 0, timeoutMs: 8000 });
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const recent = (parsed.entries || []).slice(-3);
+    const blob = JSON.stringify(recent);
+    if (/committed|finished|done|completed/i.test(blob)) {
+      console.wake(`ralph done: ${blob.slice(0, 500)}`);
       return;
     }
   }
-  console.wake("Monitor timed out after 80 minutes.");
+  console.wake("ralph still working after 6 min — check in.");
 })();
-console.log("Monitor started — will wake me when the deploy finishes.");
+console.log("Monitor armed — going idle until ralph commits.");
+```
+
+**WRONG patterns — do not do these:**
+
+```javascript
+// WRONG #1 — foreground sleep-loop. Burns the parent agent's turn for the full
+// wait window. The agent sits idle, blocked, doing nothing useful, while a
+// background monitor would have let it do other work or just sleep cheaply.
+for (let i = 0; i < 9; i++) {
+  await sleep(20_000);
+  const v = await mesh.view({ sessionId: '...', start: -3, end: 0 });
+  // ...
+}
+
+// WRONG #2 — push / ping-me-back. Mesh peers are linear synchronous agents.
+// Asking them to ping you when done sets up a babble-loop: they reply, you
+// reply, they reply, eventually two agents are out of sync producing noise.
+// Even when the peer is well-behaved, you've coupled their turn cadence to
+// your turn cadence. Always pull (background-poll their session view); never
+// push (ask them to mesh.tell you back).
+await mesh.tell({ sessionId: 'ralph', message: "ping me when committed" }); // ❌
 ```
 
 **Rules:**
-- If the agent is idle → triggers a turn immediately.
+- If the agent is idle → `console.wake` triggers a turn immediately.
 - If the agent is currently streaming a response → `console.wake` passes `deliverAs: "followUp"` to `pi.sendUserMessage`, which queues the wake safely. The wake lands as the next turn when the current one finishes. **Do NOT** call `pi.sendUserMessage` directly — it requires the explicit `deliverAs` option and throws `"Agent is already processing"` otherwise, silently losing your wake.
 - Multiple wakes from the same block are ALL delivered (each becomes its own follow-up turn trigger). There's no one-wake-per-block limit anymore — pi's own queue serializes them correctly.
 - For **team workers**, always prefer `teams.on(name, type)` over sleep-polling `teams.list()`. It's event-driven, faster, and the canonical pattern.
-- For non-event sources (file tails, generic command output, mesh broadcasts without a typed channel), the polling-loop pattern above is fine.
+- For **mesh peers**, the background-poll + `console.wake` pattern above is **the** canonical shape. Foreground sleep-loops and "ping me back" tells are both banned — the former blocks the agent, the latter creates babble-loops between linear synchronous agents.
+- For non-event sources (file tails, generic command output), use the same background-poll + `console.wake` shape.
 
 ### Async across calls
 
