@@ -1,0 +1,45 @@
+packages/frontpage/partials/shell.html
+  s_c92e786476c411::t_21608c2d23201d 20
+packages/frontpage/scripts/smoketest.ts
+  s_c92e786476c411::t_c4a0125138ea42 14-17
+  s_c92e786476c411::t_734a48b1dcb033 107-124
+  s_c92e786476c411::t_5aa6c9ab5e9df7 6
+packages/frontpage/skills/frontpage/SKILL.md
+  s_c92e786476c411::t_5a34b748c2a839 169-198
+packages/frontpage/extensions/frontpage.ts
+  s_c92e786476c411::t_8b8ad44d5ca4e5 316-317
+  s_c92e786476c411::t_4df404cf84f55c 416-417
+  s_c92e786476c411::t_fbe67779a11bc9 264,266
+  s_c92e786476c411::t_16285bb61fd7b4 220-228
+  s_c92e786476c411::t_07b23aa6ff4a3b 33
+  s_c92e786476c411::t_5f75fef651fe0d 446
+  s_c92e786476c411::t_cc625284cc912d 246-247
+  s_c92e786476c411::t_633ff7df64866a 281
+  s_c92e786476c411::t_96d06c49dc8ad3 260-263,265,267-280,282-295
+  s_c92e786476c411::t_409593bd9ff4b4 21
+packages/frontpage/package.json
+  s_c92e786476c411::t_677142af25aaa5 17-19
+packages/frontpage/scripts/byline.test.ts
+  s_c92e786476c411::t_7200f5d28bd9f2 1-127
+packages/frontpage/extensions/render.ts
+  s_c92e786476c411::t_495203305ac9e1 397,403-440
+  s_c92e786476c411::t_226c3c2a244930 27-41
+packages/frontpage/partials/css/base.css
+  s_c92e786476c411::t_d329604d31b40a 58-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "df82d667a12af74a576730cd84d241f336d159c6",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
