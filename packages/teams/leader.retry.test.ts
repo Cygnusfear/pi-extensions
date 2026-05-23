@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { TeamLeader, assessWorkerExit, getRecoverableToolRetry } from "./leader.ts";
+import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableToolRetry } from "./leader.ts";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
 const cleanupDirs: string[] = [];
@@ -281,6 +281,162 @@ describe.skip("TeamLeader malformed tool JSON recovery", () => {
 
 			const sent = fs.readFileSync(sendMessageLog, "utf-8");
 			expect(sent).toContain("auto-retrying once after malformed tool JSON");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+});
+
+describe.skip("TeamLeader auto-resume after mid-turn compaction", () => {
+	test("resumes once when pi -p died after writing a CompactionEntry", async () => {
+		// Mirrors β2's actual scenario on gso-ftezsc1t: worker grew to ~203k tokens,
+		// pi auto-compaction aborted the in-flight LLM request and wrote a
+		// CompactionEntry to the session, print mode then exited 1 on the aborted
+		// stopReason before the compacted session could be consumed.
+		const baseDir = makeTempDir("teams-resume-compact-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "comp-recover", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "working" }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+				JSON.stringify({ type: "compaction", tokensBefore: 203040, fromHook: false, firstKeptEntryId: "abc", summary: "## Goal\nresume me" }),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "Request was aborted\n", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const invocationLog = path.join(baseDir, "pi-invocation.log");
+		const binDir = path.join(baseDir, "bin");
+		makeFakePiBinary(binDir, invocationLog);
+
+		const originalPath = process.env.PATH ?? "";
+		process.env.PATH = `${binDir}:${originalPath}`;
+
+		try {
+			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
+			const worker: WorkerHandle = {
+				workerInstanceId: "comp-worker-1",
+				name: "comp-recover-worker",
+				pid: 999990,
+				ticketId: "tk-comp",
+				ticketStatus: "open",
+				lastNote: undefined,
+				sessionDir,
+				sessionFile,
+				worktreePath: null,
+				model: "openai-codex/gpt-5.5",
+				hasTools: false,
+				status: "running",
+				spawnedAt: Date.now() - 1000,
+				lastActivityAt: Date.now() - 1000,
+				lastProcessActivityAt: Date.now() - 1000,
+				hasActiveChildProcess: false,
+				activeChildProcessCount: 0,
+				lastSeenCommentCount: 0,
+				routeState: "linked",
+			};
+
+			await leader.handleWorkerExit("comp-recover-worker", worker, 1);
+
+			// Worker should be relaunched once, not buried as a warning. Status
+			// is "spawning" post-respawn pre-worker_hello (v2 reducer classifies
+			// from spawn_started fact only at this point).
+			expect(worker.recoveryAttempts).toBe(1);
+			expect(worker.status).toBe("spawning");
+			expect(worker.routeState).toBe("pending");
+			expect(worker.lastNote).toContain("AUTO-RESUME");
+
+			const piArgs = await waitForFile(invocationLog);
+			const child = leader.childProcesses.get("comp-recover-worker");
+			expect(child).toBeDefined();
+			if (child) {
+				child.removeAllListeners();
+				if (child.pid) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
+				cleanupPids.push(child.pid);
+			}
+			expect(piArgs).toContain("--session");
+			expect(piArgs).toContain(sessionFile);
+			expect(piArgs).toContain("auto-compacted mid-flight");
+			expect(piArgs).toContain("team_finish");
+
+			const noteLog = fs.readFileSync(maiNoteLog, "utf-8");
+			expect(noteLog).toContain("AUTO-RESUME");
+			expect(noteLog).toContain("auto-compaction");
+
+			const sent = fs.readFileSync(sendMessageLog, "utf-8");
+			expect(sent).toContain("auto-resuming once after mid-turn compaction");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	test("does NOT auto-resume when the session continued past the compaction", async () => {
+		// Defensive: if the worker compacted earlier in its life and then did
+		// more real work before dying, we should NOT silently re-prompt — the
+		// post-compaction message indicates the abort was something else.
+		const baseDir = makeTempDir("teams-resume-no-trigger-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "no-trigger", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+				JSON.stringify({ type: "compaction", tokensBefore: 100000, fromHook: false, firstKeptEntryId: "x", summary: "..." }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "did work after compact, then died from something else" }] } }),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const invocationLog = path.join(baseDir, "pi-invocation.log");
+		const binDir = path.join(baseDir, "bin");
+		makeFakePiBinary(binDir, invocationLog);
+
+		const originalPath = process.env.PATH ?? "";
+		process.env.PATH = `${binDir}:${originalPath}`;
+
+		try {
+			const { leader } = makeLeaderHarness(baseDir);
+			const events: any[] = [];
+			leader.notifyLLM = (event: any) => { events.push(event); };
+
+			const worker: WorkerHandle = {
+				workerInstanceId: "no-trigger-1",
+				name: "no-trigger-worker",
+				pid: 999991,
+				ticketId: "tk-nt",
+				ticketStatus: "open",
+				lastNote: undefined,
+				sessionDir,
+				sessionFile,
+				worktreePath: null,
+				hasTools: false,
+				status: "running",
+				spawnedAt: Date.now() - 1000,
+				lastActivityAt: Date.now() - 1000,
+				lastProcessActivityAt: Date.now() - 1000,
+				hasActiveChildProcess: false,
+				activeChildProcessCount: 0,
+				lastSeenCommentCount: 0,
+				routeState: "linked",
+			};
+
+			await leader.handleWorkerExit("no-trigger-worker", worker, 1);
+
+			// Should fall through to normal warning emission, NOT auto-resume.
+			expect(worker.recoveryAttempts ?? 0).toBe(0);
+			expect(worker.status).toBe("warning");
+			expect(events).toHaveLength(1);
+			expect(events[0].type).toBe("warning");
+			// pi binary should NOT have been invoked
+			expect(fs.existsSync(invocationLog)).toBe(false);
 		} finally {
 			process.env.PATH = originalPath;
 		}
@@ -817,6 +973,54 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(events[0].type).toBe("warning");
 		expect(events[0].reason).toContain("worker exited without explicit team_finish");
 		expect(events[0].reason).toContain(`Worktree preserved for inspection: ${worktreePath}`);
+	});
+
+	test("endedWithUnresolvedCompaction matches β2's compaction-died-mid-turn shape", () => {
+		const sessionDir = makeTempDir("teams-endedcomp-match-");
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "endedcomp-1", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				// Normal in-flight assistant turn ...
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "working" }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } }),
+				// Pi aborts in-flight request to make room for compaction
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+				// Pi writes the compaction entry (in print mode, process then exits 1)
+				JSON.stringify({ type: "compaction", tokensBefore: 203040, fromHook: false, firstKeptEntryId: "abc", summary: "## Goal\n..." }),
+			].join("\n") + "\n",
+		);
+		expect(endedWithUnresolvedCompaction(sessionDir)).toBe(true);
+	});
+
+	test("endedWithUnresolvedCompaction does NOT match when work continued after compaction", () => {
+		const sessionDir = makeTempDir("teams-endedcomp-nomatch-");
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "endedcomp-2", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+				JSON.stringify({ type: "compaction", tokensBefore: 100000, fromHook: false, firstKeptEntryId: "abc", summary: "..." }),
+				// Worker resumed and did more work
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "continued post-compact" }] } }),
+			].join("\n") + "\n",
+		);
+		expect(endedWithUnresolvedCompaction(sessionDir)).toBe(false);
+	});
+
+	test("endedWithUnresolvedCompaction does NOT match when no compaction occurred", () => {
+		const sessionDir = makeTempDir("teams-endedcomp-nocomp-");
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "endedcomp-3", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "user kill", content: [] } }),
+			].join("\n") + "\n",
+		);
+		expect(endedWithUnresolvedCompaction(sessionDir)).toBe(false);
 	});
 
 	test("warning without explicit team_finish folds session diagnostics into the event reason", async () => {

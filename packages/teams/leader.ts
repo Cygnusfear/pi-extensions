@@ -441,6 +441,90 @@ function readSessionDiagnostics(sessionDir: string): string {
   return parts.join("");
 }
 
+/**
+ * Detect the "auto-compaction mid-turn" pattern that kills `pi -p` workers.
+ *
+ * Pi auto-compaction works by aborting the in-flight LLM request to free
+ * context, writing a CompactionEntry to the session, and then (in interactive
+ * mode) re-prompting with the summarized context. Teams workers run in print
+ * mode (`pi -p`), which is one-shot: an aborted assistant message exits 1
+ * BEFORE the compacted session can be consumed. The compaction is correct;
+ * the surrounding process just dies.
+ *
+ * Returns true when the session ends with a CompactionEntry whose position
+ * is after the last assistant message in the tail — i.e. compaction wrote
+ * successfully and there was no follow-up turn before exit. In that state
+ * the session is safe to resume via `resumeWorker`.
+ *
+ * Conservative — only matches the exact post-compaction-shutdown shape. Will
+ * NOT trigger on a session that compacted earlier and then did more real work.
+ */
+export function endedWithUnresolvedCompaction(sessionDir: string): boolean {
+  let sessionFile: string | undefined;
+  try {
+    const files = fs.readdirSync(sessionDir)
+      .filter(f => f.endsWith(".jsonl"))
+      .map(f => path.join(sessionDir, f));
+    if (files.length === 0) return false;
+    sessionFile = files.length === 1
+      ? files[0]
+      : files.map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime)[0].f;
+  } catch {
+    return false;
+  }
+
+  // 32KB tail is enough — a CompactionEntry is small and we're looking at
+  // the very end of the file. Same budget as readSessionDiagnostics.
+  const TAIL_BYTES = 32768;
+  let tail: string;
+  try {
+    const stat = fs.statSync(sessionFile);
+    const size = stat.size;
+    if (size === 0) return false;
+    const start = Math.max(0, size - TAIL_BYTES);
+    const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+    const fd = fs.openSync(sessionFile, "r");
+    try {
+      fs.readSync(fd, buf, 0, buf.length, start);
+    } finally {
+      fs.closeSync(fd);
+    }
+    tail = buf.toString("utf8");
+  } catch {
+    return false;
+  }
+
+  const lines = tail.split("\n");
+  let lastMessageIdx = -1;
+  let lastCompactionIdx = -1;
+  let lastAssistantAborted = false;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lastMessageIdx >= 0 && lastCompactionIdx >= 0) break;
+    const line = lines[i].trim();
+    if (!line) continue;
+    let entry: Record<string, unknown>;
+    try { entry = safeJsonParse<Record<string, unknown>>(line); } catch { continue; }
+    if (entry.type === "compaction" && lastCompactionIdx === -1) {
+      lastCompactionIdx = i;
+    } else if (entry.type === "message" && lastMessageIdx === -1) {
+      lastMessageIdx = i;
+      const msg = entry.message as Record<string, unknown> | undefined;
+      if (msg && msg.role === "assistant" && msg.stopReason === "aborted") {
+        lastAssistantAborted = true;
+      }
+    }
+  }
+
+  // Match only if: compaction exists, comes after the last message in the tail,
+  // and the last message was an aborted assistant turn. That's the exact
+  // pi-print-mode-died-after-compaction shape.
+  return lastCompactionIdx > lastMessageIdx
+    && lastMessageIdx >= 0
+    && lastAssistantAborted;
+}
+
 export function readWorkerFailureDiagnostics(sessionDir: string): string {
   return [
     readSessionDiagnostics(sessionDir),
@@ -1807,6 +1891,89 @@ export class TeamLeader {
           );
           return;
         }
+      }
+    }
+
+    // ── Auto-resume after mid-turn compaction ────────────────────────
+    // `pi -p` (print mode) is one-shot: an aborted assistant message exits 1.
+    // Pi auto-compaction aborts the in-flight LLM request to free context,
+    // writes a CompactionEntry to the session, and then in interactive mode
+    // continues with the summarized context. In print mode there is no
+    // continuation — the abort fires print mode's "stopReason aborted →
+    // exitCode 1" branch (modes/print-mode.js) before the compacted session
+    // can be used. The session is correctly compacted on disk; the surrounding
+    // process just dies. Resume the worker once with a continuation prompt.
+    //
+    // Detection: structural — session tail ends with a CompactionEntry that
+    // is after the last assistant message AND that message had
+    // stopReason=aborted. This is the exact compaction-died-after-write
+    // shape. Anything else (real errors, normal turn end, explicit
+    // team_finish) falls through.
+    if (
+      isAmbiguousWarning
+      && (worker.recoveryAttempts ?? 0) < 1
+      && endedWithUnresolvedCompaction(worker.sessionDir)
+    ) {
+      const resumePrompt = [
+        "Your previous turn was auto-compacted mid-flight.",
+        "Pi auto-compaction aborts the in-flight LLM request to free context, then writes a CompactionEntry to the session — that is what just happened. Your session is now compacted; previous progress is preserved in the summary.",
+        "Continue the work you started. Use team_comment to report progress as needed.",
+        "When you are done, call team_finish(status=\"done\", summary=...). If you cannot continue, call team_finish(status=\"quit\", summary=...). team_finish is the authoritative terminal signal — do not exit silently.",
+      ].join("\n");
+      // Regenerate the worker instance id so the v2 attempt for this resume is
+      // distinct from the original attempt's facts (which include process_exit).
+      // resumeWorker pushes onto handle.attempts using the current instance id;
+      // upsertV2WorkerFromHandle then creates a fresh v2 attempt under that id,
+      // and the reducer classifies it from spawn_started only — not from the
+      // prior exit. Mirrors the no-session respawn pattern at line ~2011.
+      worker.workerInstanceId = crypto.randomUUID();
+      const child = resumeWorker(worker, resumePrompt, this.buildWorkerResumeEnv(worker));
+      if (child) {
+        worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
+        worker.routeState = "pending";
+        worker.meshClientId = undefined;
+        worker.lastActivityAt = Date.now();
+        worker.lastProcessActivityAt = Date.now();
+        worker.lastNote = "AUTO-RESUME: continuing after mid-turn auto-compaction";
+        this.upsertV2WorkerFromHandle(worker);
+        this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
+
+        await this.pi.exec(
+          getMaiBin(),
+          [
+            "add-note",
+            worker.ticketId,
+            "AUTO-RESUME: previous turn aborted mid-flight by pi's auto-compaction (print-mode `pi -p` exits 1 on aborted stopReason before the compacted session can be reused). Session is compacted on disk; resuming once with a continuation prompt.",
+          ],
+          { cwd: this.ctx.cwd, timeout: 5000 },
+        ).catch(() => {});
+
+        this.childProcesses.set(name, child);
+        child.on("exit", (code) => {
+          worker.exitCode = code;
+          const attempt = getCurrentAttempt(worker);
+          if (attempt) attempt.exitCode = code;
+          void this.handleWorkerExit(name, worker, code);
+        });
+        child.on("error", (err) => {
+          worker.exitCode = null;
+          worker.spawnError = err.message;
+          const attempt = getCurrentAttempt(worker);
+          if (attempt) attempt.spawnError = err.message;
+          void this.handleWorkerExit(name, worker, null);
+        });
+
+        this.startActivityMonitor(name, worker);
+        this.renderWidget();
+        this.pi.sendMessage(
+          {
+            customType: "team-event",
+            content: `${ICONS.warn} ${workerTag(worker)}:\nauto-resuming once after mid-turn compaction (print-mode aborted before continuation)`,
+            display: true,
+          },
+          { deliverAs: "followUp", triggerTurn: false },
+        );
+        return;
       }
     }
 
