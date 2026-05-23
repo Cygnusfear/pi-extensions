@@ -24,6 +24,21 @@ export interface FrontpageSpec {
   register: Register;
   description?: string;
   extra_head?: string;
+  /**
+   * Author shown in the page byline. Auto-populated from the stable agent
+   * nickname when omitted. Sticky across updates — set once on create.
+   */
+  byline?: string;
+  /**
+   * Subsequent editors, in order of first contribution. Auto-appended on
+   * update when the editing agent's stable nickname differs from byline.
+   */
+  contributors?: string[];
+  /**
+   * Optional ISO-8601 timestamp shown alongside the byline. Auto-populated
+   * by the create/update tools.
+   */
+  byline_date?: string;
   sections: SectionSpec[];
 }
 
@@ -379,9 +394,50 @@ mermaid.initialize({
     palette_css: read(`css/palettes/${spec.palette}.css`),
     register_css: read(`css/registers/${spec.register}.css`),
     extra_head: spec.extra_head ?? "",
+    byline_block: bylineBlock(spec),
     sections,
     scripts,
   });
+}
+
+// ---- Byline ----
+
+/**
+ * Render the byline element. Returns empty string when no author is known so
+ * existing frontpages without bylines render exactly as before.
+ *
+ * Shape:
+ *   <p class="byline">
+ *     By <span class="byline-author">{author}</span>
+ *     · <span class="byline-edits">edits by {c1}, {c2}</span>
+ *     · <time class="byline-date" datetime="ISO">{pretty}</time>
+ *   </p>
+ */
+function bylineBlock(spec: FrontpageSpec): string {
+  const author = spec.byline?.trim();
+  const contributors = (spec.contributors ?? []).map(c => c.trim()).filter(Boolean);
+  const iso = spec.byline_date?.trim();
+  if (!author && contributors.length === 0 && !iso) return "";
+
+  const parts: string[] = [];
+  if (author) {
+    parts.push(`By <span class="byline-author">${escapeHtml(author)}</span>`);
+  }
+  if (contributors.length > 0) {
+    const list = contributors.map(c => escapeHtml(c)).join(", ");
+    parts.push(`<span class="byline-edits">edits by ${list}</span>`);
+  }
+  if (iso) {
+    const pretty = formatBylineDate(iso);
+    parts.push(`<time class="byline-date" datetime="${escapeHtml(iso)}">${escapeHtml(pretty)}</time>`);
+  }
+  return `<p class="byline">${parts.join(' <span class="byline-sep">·</span> ')}</p>`;
+}
+
+function formatBylineDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
 // Assign IDs to sections that don't have one, preserving existing IDs for round-trip safety.

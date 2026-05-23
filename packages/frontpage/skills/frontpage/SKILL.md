@@ -166,6 +166,36 @@ If a developer sees the page and immediately thinks "AI made this," you defaulte
 - `/frontpage-reload` flushes the partials cache during extension development.
 - Slide deck mode is out of scope for this skill — `mai` ticket it separately if you want a slide renderer.
 
+## Byline — who wrote the page
+
+Every page renders a byline beneath the thesis showing **author**, **contributors** (later editors), and **date**. Auto-derived from the stable agent nickname (e.g. `Gerard Stargate Freedman`) so the hooman always knows who wrote any given frontpage — no manual attribution required.
+
+| Behaviour | When |
+|-----------|------|
+| `byline` auto-set | First `frontpage_create` for a slug |
+| `byline` sticky | Subsequent updates never overwrite the original author |
+| `contributors` appended | A different agent edits a page; nickname appended once, deduped |
+| `byline_date` refreshed | Every create/update (ISO-8601) |
+
+You can override any field explicitly in the spec — useful for pseudonyms or shared authorship:
+
+```ts
+frontpage_create({
+  spec: {
+    slug: "...",
+    title: "...",
+    thesis: "...",
+    palette: "navy",
+    register: "nyt-editorial",
+    byline: "Pi Squad",                // overrides auto-detected nickname
+    contributors: ["Alex", "Reviewer X"],
+    sections: [...],
+  },
+});
+```
+
+If pi-mesh is not loaded (no stable agent identity available), the byline is omitted entirely and the page renders exactly as before — backwards compatible.
+
 ---
 
 ## Credits

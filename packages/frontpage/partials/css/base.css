@@ -55,6 +55,35 @@ body {
   text-wrap: balance;
 }
 
+/* ============ BYLINE ============ */
+.page-head .byline {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-dim);
+  max-width: var(--measure);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  align-items: baseline;
+}
+.page-head .byline .byline-author {
+  color: var(--ink);
+  font-weight: 500;
+  letter-spacing: 1.4px;
+}
+.page-head .byline .byline-edits,
+.page-head .byline .byline-date {
+  color: var(--text-dim);
+}
+.page-head .byline .byline-sep {
+  color: var(--rule-bright);
+}
+
 .sections > * + * { margin-top: var(--gap-lg); }
 
 /* ============ SECTION LABELS (small-caps metadata) ============ */

@@ -3,6 +3,7 @@ import { render, assignIds, type FrontpageSpec } from "../extensions/render.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import assert from "node:assert/strict";
 
 const spec: FrontpageSpec = {
   slug: "frontpage-extension-smoketest",
@@ -10,6 +11,10 @@ const spec: FrontpageSpec = {
   thesis: "Move the chrome into the tool; keep the craft in the model. Six-to-one on ingestion, three-to-one on output.",
   palette: "navy",
   register: "nyt-editorial",
+  // Exercise the byline path: original author + later editor + ISO date.
+  byline: "Gerard Stargate Freedman",
+  contributors: ["Vera Rubin"],
+  byline_date: "2026-05-23T12:34:56Z",
   sections: [
     { type: "lead", text: "Every frontpage today pays a boilerplate tax. This one doesn't." },
     { type: "prose", label: "WHY", body: [
@@ -99,3 +104,21 @@ const outPath = path.join(outDir, withIds.slug + ".html");
 fs.writeFileSync(outPath, html, "utf8");
 console.log("WROTE:", outPath);
 console.log("bytes:", html.length, "tokens est:", Math.round(html.length / 4));
+
+// ---- Byline regression checks ----
+assert.match(html, /<p class="byline">/, "byline block must render");
+assert.match(html, /<span class="byline-author">Gerard Stargate Freedman<\/span>/, "author span must render");
+assert.match(html, /edits by Vera Rubin/, "contributors must render");
+assert.match(html, /<time class="byline-date" datetime="2026-05-23T12:34:56Z">/, "date must render with datetime attr");
+
+// And: no-byline pages must render no byline element.
+const bareHtml = render({
+  slug: "bare-no-byline",
+  title: "Bare",
+  thesis: "Spec without byline must render no byline element.",
+  palette: "navy",
+  register: "nyt-editorial",
+  sections: [{ type: "lead", text: "x" }],
+});
+assert.doesNotMatch(bareHtml, /<p class="byline">/, "no byline data → no byline element");
+console.log("byline checks: OK");

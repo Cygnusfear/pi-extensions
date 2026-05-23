@@ -18,6 +18,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import { render, assignIds, reloadPartials, type FrontpageSpec, type SectionSpec } from "./render.js";
 
 // ---- storage paths ----
@@ -29,7 +30,7 @@ async function ensureStoreDir(): Promise<void> {
   await fsp.mkdir(STORE_DIR, { recursive: true });
 }
 
-interface Meta {
+export interface Meta {
   slug: string;
   artifactId?: string;
   createdAt: number;
@@ -216,6 +217,15 @@ const SpecSchema = Type.Object({
   ]),
   description: Type.Optional(Type.String()),
   extra_head: Type.Optional(Type.String()),
+  byline: Type.Optional(Type.String({
+    description: "Author shown in byline. Auto-populated from the stable agent nickname (e.g. 'Gerard Stargate Freedman') when omitted. Sticky across updates.",
+  })),
+  contributors: Type.Optional(Type.Array(Type.String(), {
+    description: "Later editors. Auto-appended on update when a different agent edits.",
+  })),
+  byline_date: Type.Optional(Type.String({
+    description: "ISO-8601 timestamp shown beside the byline. Auto-populated on create/update.",
+  })),
   sections: Type.Array(SectionSchema),
 });
 
@@ -233,6 +243,8 @@ const PatchOp = Type.Union([
     thesis: Type.Optional(Type.String()),
     palette: Type.Optional(Type.String()),
     register: Type.Optional(Type.String()),
+    byline: Type.Optional(Type.String()),
+    contributors: Type.Optional(Type.Array(Type.String())),
   }),
 ]);
 
@@ -244,6 +256,42 @@ const UpdateParams = Type.Object({
 });
 
 const OpenParams = Type.Object({ slug: Type.String() });
+
+// ---- Byline ----
+// Author = creator (sticky). Contributors = anyone else who has edited.
+// Auto-derived from the stable agent nickname so the hooman always knows
+// who wrote any given frontpage, even without explicit attribution.
+// Exported for unit testing.
+
+export function applyBylineForCreate(spec: FrontpageSpec, existing: Meta | null): void {
+  // Recreating an existing slug → preserve original byline + contributors.
+  if (existing) {
+    spec.byline = spec.byline ?? existing.spec.byline;
+    spec.contributors = spec.contributors ?? existing.spec.contributors;
+    applyBylineForUpdate(spec); // recreates are edits — track editor
+    return;
+  }
+  if (!spec.byline) {
+    const nick = getStableNickname();
+    if (nick) spec.byline = nick;
+  }
+  spec.byline_date = new Date().toISOString();
+}
+
+export function applyBylineForUpdate(spec: FrontpageSpec): void {
+  const nick = getStableNickname();
+  spec.byline_date = new Date().toISOString();
+  if (!nick) return;
+  if (!spec.byline) {
+    // Frontpage predates byline tracking — claim authorship for this update.
+    spec.byline = nick;
+    return;
+  }
+  if (nick === spec.byline) return;
+  const existing = spec.contributors ?? [];
+  if (existing.includes(nick)) return;
+  spec.contributors = [...existing, nick];
+}
 
 // ---- Extension entry ----
 
@@ -265,12 +313,13 @@ export default function (pi: ExtensionAPI) {
     parameters: CreateParams,
     async execute(_id, params) {
       const spec = assignIds(params.spec as FrontpageSpec);
+      const existingMeta = await readMeta(spec.slug);
+      applyBylineForCreate(spec, existingMeta);
       await ensureStoreDir();
       const html = render(spec);
       const filePath = pagePath(spec.slug);
       await fsp.writeFile(filePath, html, "utf8");
 
-      const existingMeta = await readMeta(spec.slug);
       let artifactId = existingMeta?.artifactId;
       if (!artifactId) {
         artifactId = await createArtifact(spec, filePath);
@@ -364,6 +413,8 @@ export default function (pi: ExtensionAPI) {
             if (op.thesis) { spec.thesis = op.thesis; fields.push("thesis"); }
             if (op.palette) { spec.palette = op.palette as FrontpageSpec["palette"]; fields.push("palette"); }
             if (op.register) { spec.register = op.register as FrontpageSpec["register"]; fields.push("register"); }
+            if (typeof op.byline === "string") { spec.byline = op.byline; fields.push("byline"); }
+            if (Array.isArray(op.contributors)) { spec.contributors = op.contributors; fields.push("contributors"); }
             if (fields.length > 0) {
               applied.push(`update_meta (${fields.join(",")})`);
             } else {
@@ -392,6 +443,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const withIds = assignIds(spec);
+      applyBylineForUpdate(withIds);
       const html = render(withIds);
       const filePath = pagePath(withIds.slug);
       await fsp.writeFile(filePath, html, "utf8");

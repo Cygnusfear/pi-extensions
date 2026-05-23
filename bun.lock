@@ -139,6 +139,13 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/exit-command": {
+      "name": "@pi-extensions/exit-command",
+      "version": "0.0.1",
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.74.0",
+      },
+    },
     "packages/explain": {
       "name": "@pi-extensions/explain",
       "version": "0.0.1",
@@ -197,6 +204,9 @@
     "packages/frontpage": {
       "name": "@pi-extensions/frontpage",
       "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
       "peerDependencies": {
         "@earendil-works/pi-coding-agent": ">=0.74.0",
         "@sinclair/typebox": "*",
@@ -682,6 +692,8 @@
     "@pi-extensions/default-prompt": ["@pi-extensions/default-prompt@workspace:packages/default-prompt"],
 
     "@pi-extensions/defaults": ["@pi-extensions/defaults@workspace:packages/defaults"],
+
+    "@pi-extensions/exit-command": ["@pi-extensions/exit-command@workspace:packages/exit-command"],
 
     "@pi-extensions/explain": ["@pi-extensions/explain@workspace:packages/explain"],
 
