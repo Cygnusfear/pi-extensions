@@ -90,7 +90,7 @@ function makeLeaderHarness(baseDir: string) {
 	return { leader: leaderAny, maiNoteLog, sendMessageLog };
 }
 
-async function waitForFile(pathname: string, timeoutMs = 2000): Promise<string> {
+async function waitForFile(pathname: string, timeoutMs = 5000): Promise<string> {
 	const started = Date.now();
 	while (Date.now() - started < timeoutMs) {
 		if (fs.existsSync(pathname)) {
@@ -212,7 +212,7 @@ describe("assessWorkerExit", () => {
 	});
 });
 
-describe.skip("TeamLeader malformed tool JSON recovery", () => {
+describe("TeamLeader malformed tool JSON recovery", () => {
 	test("retries once by resuming the worker session with escape guidance", async () => {
 		const baseDir = makeTempDir("teams-retry-test-");
 		const sessionDir = path.join(baseDir, "session");
@@ -220,7 +220,12 @@ describe.skip("TeamLeader malformed tool JSON recovery", () => {
 		const sessionFile = writeWorkerSession(
 			sessionDir,
 			"Bad escaped character in JSON at position 111 (line 1 column 112)",
-			"Step 3: malformed hash_edit call",
+			// Short text (under workerProducedMeaningfulOutput's 20-char substantive
+			// threshold) so no hasSubstantiveText → no meaningful output → assessWorkerExit
+			// classifies as failure, which is the only path where the malformed-JSON
+			// recovery branch fires. Real-world equivalent: model emits invalid JSON
+			// in a toolCall before producing any substantial text.
+			"x",
 		);
 
 		const invocationLog = path.join(baseDir, "pi-invocation.log");
@@ -235,7 +240,7 @@ describe.skip("TeamLeader malformed tool JSON recovery", () => {
 			const worker: WorkerHandle = {
 				workerInstanceId: "worker-1",
 				name: "retry-worker",
-				pid: process.pid,
+				pid: 999992, // fake pid — process.pid is alive and triggers handleWorkerExit's early-return guard
 				ticketId: "tk-1",
 				ticketStatus: "open",
 				lastNote: undefined,
@@ -257,7 +262,9 @@ describe.skip("TeamLeader malformed tool JSON recovery", () => {
 			await leader.handleWorkerExit("retry-worker", worker, 1);
 
 			expect(worker.recoveryAttempts).toBe(1);
-			expect(worker.status).toBe("running");
+			// Status is "spawning" post-respawn pre-worker_hello — v2 reducer
+			// classifies from spawn_started fact only at this point.
+			expect(worker.status).toBe("spawning");
 			expect(worker.routeState).toBe("pending");
 			expect(worker.lastNote).toContain("AUTO-RETRY");
 
@@ -287,7 +294,7 @@ describe.skip("TeamLeader malformed tool JSON recovery", () => {
 	});
 });
 
-describe.skip("TeamLeader auto-resume after mid-turn compaction", () => {
+describe("TeamLeader auto-resume after mid-turn compaction", () => {
 	test("resumes once when pi -p died after writing a CompactionEntry", async () => {
 		// Mirrors β2's actual scenario on gso-ftezsc1t: worker grew to ~203k tokens,
 		// pi auto-compaction aborted the in-flight LLM request and wrote a
