@@ -229,8 +229,15 @@ const SpecSchema = Type.Object({
   sections: Type.Array(SectionSchema),
 });
 
+// All "required" fields are typed as Optional in the schema so a malformed
+// tool call (e.g. `frontpage_create({})`) does NOT trigger pi's framework
+// validation reject path. That path can emit a tool_use block without a
+// matching tool_result, which breaks the Anthropic API conversation chain
+// with a 400 ("tool_use ids were found without tool_result blocks"). Instead
+// we accept any shape, validate inside execute(), and always return a
+// well-formed tool_result with isError when something is missing.
 const CreateParams = Type.Object({
-  spec: SpecSchema,
+  spec: Type.Optional(SpecSchema),
   open: Type.Optional(Type.Boolean({ description: "Open the file after writing (default true)" })),
 });
 
@@ -248,14 +255,16 @@ const PatchOp = Type.Union([
   }),
 ]);
 
+// Same defensive pattern as CreateParams — schema accepts anything, execute()
+// validates and returns a proper tool_result on missing fields.
 const UpdateParams = Type.Object({
-  slug: Type.String(),
-  patch: Type.Array(PatchOp),
-  note: Type.String({ description: "Short summary of the change, logged to mai" }),
+  slug: Type.Optional(Type.String()),
+  patch: Type.Optional(Type.Array(PatchOp)),
+  note: Type.Optional(Type.String({ description: "Short summary of the change, logged to mai" })),
   open: Type.Optional(Type.Boolean()),
 });
 
-const OpenParams = Type.Object({ slug: Type.String() });
+const OpenParams = Type.Object({ slug: Type.Optional(Type.String()) });
 
 // ---- Byline ----
 // Author = creator (sticky). Contributors = anyone else who has edited.
@@ -293,6 +302,31 @@ export function applyBylineForUpdate(spec: FrontpageSpec): void {
   spec.contributors = [...existing, nick];
 }
 
+// ---- Defensive parameter validation ----
+// Pi's framework validation reject path can emit a tool_use without a matching
+// tool_result, breaking the Anthropic API conversation chain. We accept any
+// shape at the schema layer and validate here so the tool always returns a
+// well-formed tool_result on bad inputs.
+
+function missingParamError(toolName: string, fieldDescription: string, received: unknown) {
+  return {
+    content: [{
+      type: "text" as const,
+      text: [
+        `${toolName}: missing required parameter — ${fieldDescription}.`,
+        `Received: ${JSON.stringify(received) || "(empty)"}`,
+        toolName === "frontpage_create"
+          ? "Call shape: frontpage_create({ spec: { slug, title, thesis, palette, register, sections: [...] } })"
+          : toolName === "frontpage_update"
+          ? "Call shape: frontpage_update({ slug, patch: [...], note })"
+          : "Call shape: frontpage_open({ slug })",
+      ].join("\n"),
+    }],
+    isError: true,
+    details: { error: `missing-parameter`, field: fieldDescription },
+  };
+}
+
 // ---- Extension entry ----
 
 export default function (pi: ExtensionAPI) {
@@ -312,6 +346,17 @@ export default function (pi: ExtensionAPI) {
     ],
     parameters: CreateParams,
     async execute(_id, params) {
+      if (!params || typeof params !== "object" || !params.spec || typeof params.spec !== "object") {
+        return missingParamError("frontpage_create", "spec (object with at minimum slug, title, thesis, palette, register, sections)", params);
+      }
+      const incomingSpec = params.spec as Partial<FrontpageSpec>;
+      const missing: string[] = [];
+      for (const k of ["slug", "title", "thesis", "palette", "register", "sections"] as const) {
+        if (incomingSpec[k] === undefined || incomingSpec[k] === null) missing.push(k);
+      }
+      if (missing.length > 0) {
+        return missingParamError("frontpage_create", `spec.${missing.join(", spec.")}`, params);
+      }
       const spec = assignIds(params.spec as FrontpageSpec);
       const existingMeta = await readMeta(spec.slug);
       applyBylineForCreate(spec, existingMeta);
@@ -368,6 +413,16 @@ export default function (pi: ExtensionAPI) {
     ],
     parameters: UpdateParams,
     async execute(_id, params) {
+      if (!params || typeof params !== "object") {
+        return missingParamError("frontpage_update", "slug, patch, note", params);
+      }
+      const missing: string[] = [];
+      if (typeof params.slug !== "string" || params.slug.length === 0) missing.push("slug (string)");
+      if (!Array.isArray(params.patch)) missing.push("patch (array of ops)");
+      if (typeof params.note !== "string" || params.note.length === 0) missing.push("note (string)");
+      if (missing.length > 0) {
+        return missingParamError("frontpage_update", missing.join(", "), params);
+      }
       const meta = await readMeta(params.slug);
       if (!meta) {
         return {
@@ -475,6 +530,9 @@ export default function (pi: ExtensionAPI) {
     description: "Open an existing frontpage in the default browser.",
     parameters: OpenParams,
     async execute(_id, params) {
+      if (!params || typeof params !== "object" || typeof params.slug !== "string" || params.slug.length === 0) {
+        return missingParamError("frontpage_open", "slug (string)", params);
+      }
       const filePath = pagePath(params.slug);
       if (!fs.existsSync(filePath)) {
         return {
