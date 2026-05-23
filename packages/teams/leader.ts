@@ -1739,7 +1739,22 @@ export class TeamLeader {
       lastNote = assessment.reason;
     }
 
-    const diagnostics = classification === "failure" ? readSessionDiagnostics(worker.sessionDir) : "";
+    // Pull session diagnostics for any exit class where the cause is opaque to the
+    // leader. Failure: always — used for crash reports + auto-recovery routing.
+    // Warning without explicit team_finish: also — surfaces stopReason / last error / last
+    // failing tool so the coordinator does not have to guess (e.g. "context cap" inferences
+    // that are not actually what the leader observed). Done / quit (explicit) need nothing
+    // because the worker chose its own summary via team_finish.
+    const isAmbiguousWarning = classification === "warning" && !assessment.lifecycle.lastTerminalStatus;
+    const diagnostics = classification === "failure" || isAmbiguousWarning
+      ? readSessionDiagnostics(worker.sessionDir)
+      : "";
+    if (isAmbiguousWarning && diagnostics) {
+      // Fold diagnostics into the warning message so the team-event content carries the
+      // real reason ("stopReason: aborted" / "error: ..." / etc.) instead of just the
+      // generic "worker exited without explicit team_finish" string.
+      lastNote = `${lastNote}${diagnostics}`;
+    }
 
     if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       const recovery = getRecoverableToolRetry(diagnostics);

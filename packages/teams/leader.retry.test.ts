@@ -819,6 +819,81 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(events[0].reason).toContain(`Worktree preserved for inspection: ${worktreePath}`);
 	});
 
+	test("warning without explicit team_finish folds session diagnostics into the event reason", async () => {
+		// Mirrors β2's actual scenario: context overflow → request aborted → process exit 1
+		// without team_finish. Leader must surface stopReason + error so coordinators don't
+		// have to guess (and don't invent inferences like 'hit context cap').
+		const baseDir = makeTempDir("teams-ambig-warning-diag-");
+		const sessionDir = path.join(baseDir, "session");
+		const worktreePath = path.join(baseDir, "worktree");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.mkdirSync(worktreePath, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "ambig-warn", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({
+					type: "message",
+					timestamp: new Date().toISOString(),
+					message: {
+						role: "assistant",
+						stopReason: "aborted",
+						errorMessage: "Request was aborted",
+						content: [{ type: "text", text: "doing thoughtful work…" }],
+					},
+				}),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const { leader } = makeLeaderHarness(baseDir);
+		const events: any[] = [];
+		leader.notifyLLM = (event: any) => { events.push(event); };
+		leader.pi.exec = async (cmd: string, args: string[]) => {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
+				return { stdout: JSON.stringify({ id: args[2], status: "open", comments: [] }) };
+			}
+			if (path.basename(cmd) === "mai" && args[0] === "close") return { stdout: "" };
+			return { stdout: "" };
+		};
+
+		const worker: WorkerHandle = {
+			workerInstanceId: "wx-1",
+			name: "ambig-warning-diag",
+			pid: 999998,
+			ticketId: "tk-ambig",
+			ticketStatus: "open",
+			lastNote: undefined,
+			sessionDir,
+			sessionFile,
+			worktreePath,
+			hasTools: false,
+			status: "running",
+			spawnedAt: Date.now() - 1000,
+			lastActivityAt: Date.now() - 1000,
+			lastProcessActivityAt: Date.now() - 1000,
+			hasActiveChildProcess: false,
+			activeChildProcessCount: 0,
+			lastSeenCommentCount: 0,
+			routeState: "linked",
+		};
+
+		await leader.handleWorkerExit("ambig-warning-diag", worker, 1);
+
+		expect(worker.status).toBe("warning");
+		expect(events).toHaveLength(1);
+		expect(events[0].type).toBe("warning");
+		// Generic reason preserved (existing assertion path)
+		expect(events[0].reason).toContain("worker exited without explicit team_finish");
+		// NEW: diagnostics folded in — stopReason + errorMessage from the session's last assistant
+		expect(events[0].reason).toContain("stopReason: aborted");
+		expect(events[0].reason).toContain("Request was aborted");
+		// Worktree preservation hint still appended last
+		expect(events[0].reason).toContain(`Worktree preserved for inspection: ${worktreePath}`);
+	});
+
 	test("crash report should prefer earlier informative attempt over later empty respawn dir", async () => {
 		const baseDir = makeTempDir("teams-best-attempt-");
 		const firstDir = path.join(baseDir, "first");
