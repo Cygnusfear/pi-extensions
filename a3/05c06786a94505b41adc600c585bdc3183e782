@@ -1,0 +1,24 @@
+packages/teams/leader.retry.test.ts
+  s_c92e786476c411::t_5dcb95de96c6b4 297
+  s_c92e786476c411::t_4933030f328ab2 223-228
+  s_c92e786476c411::t_d73d0faa5c5ee9 215
+  s_c92e786476c411::t_00c98638685cdd 243
+  s_c92e786476c411::t_c181e49c62afa1 93
+  s_c92e786476c411::t_c14580ae03de7b 265-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "a305c06786a94505b41adc600c585bdc3183e782",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
