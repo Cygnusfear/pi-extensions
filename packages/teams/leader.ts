@@ -1843,6 +1843,12 @@ export class TeamLeader {
     if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       const recovery = getRecoverableToolRetry(diagnostics);
       if (recovery) {
+        // Regenerate workerInstanceId so the v2 reducer classifies the resumed
+        // attempt from spawn_started only, not from the prior process_exit fact
+        // (same pattern as the compaction auto-resume below and the no-session
+        // respawn at line ~2011). Without this, v2 lifecycle stays "failed"
+        // even though the new pi process is spawning.
+        worker.workerInstanceId = crypto.randomUUID();
         const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
         if (child) {
           worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
