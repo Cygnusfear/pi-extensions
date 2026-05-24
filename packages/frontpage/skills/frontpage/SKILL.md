@@ -14,11 +14,13 @@ When chat becomes a wall of structured text, call `frontpage_create` with a spec
 
 ## The tools
 
-- `frontpage_create({ spec })` — compose + write + mai artifact
-- `frontpage_update({ slug, patch, note })` — patch sections, log note
+- `frontpage_create({ spec })` — compose + write + mai artifact (does NOT auto-open)
+- `frontpage_update({ slug, patch, note })` — patch sections, log note (does NOT auto-open)
 - `frontpage_open({ slug })` — open in default browser
 
 All three are thin wrappers. The work is in the spec.
+
+**Open is opt-in.** `frontpage_create` and `frontpage_update` write the file silently. When the hooman should see it now, follow up with a separate `frontpage_open({ slug })` call. Don't also pass `{ open: true }` to create/update — that opens twice (two browser tabs, surprise tab spam). Pick one: explicit `frontpage_open` (preferred — your instinct controls timing) OR `{ open: true }` on create (single call, but you lose the chance to write quietly).
 
 ---
 

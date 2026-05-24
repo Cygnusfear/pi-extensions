@@ -238,7 +238,13 @@ const SpecSchema = Type.Object({
 // well-formed tool_result with isError when something is missing.
 const CreateParams = Type.Object({
   spec: Type.Optional(SpecSchema),
-  open: Type.Optional(Type.Boolean({ description: "Open the file after writing (default true)" })),
+  // Opt-IN open. Was opt-out (default true). Reason: agents who write a
+  // frontpage often follow up with an explicit `frontpage_open` call —
+  // an auto-open here makes the file open TWICE (two browser tabs, surprise
+  // open). Default false so the agent's own instinct controls when the
+  // file shows up in front of the hooman. Pass `{ open: true }` to keep the
+  // old behavior in a single call.
+  open: Type.Optional(Type.Boolean({ description: "Open the file after writing (default false — call frontpage_open explicitly when you want the hooman to see it)" })),
 });
 
 const PatchOp = Type.Union([
@@ -343,6 +349,7 @@ export default function (pi: ExtensionAPI) {
       "Write a thesis (the argument) as a full sentence — not 'here is the data'.",
       "Use Tier 1 sections by default. Use d3/chartjs/svg/raw_html only when Tier 1 cannot express the shape.",
       "Slug is kebab-case, short. Tell the user the file path after creating.",
+      "frontpage_create does NOT auto-open the file. If the hooman should see it now, follow up with a separate frontpage_open call. Do NOT also pass { open: true } — that opens twice.",
     ],
     parameters: CreateParams,
     async execute(_id, params) {
@@ -383,7 +390,9 @@ export default function (pi: ExtensionAPI) {
       };
       await writeMeta(meta);
 
-      if (params.open !== false) void osOpen(filePath);
+      // Opt-in: default false (agents typically follow up with frontpage_open;
+      // double-opening on every create surprised the hooman with extra tabs).
+      if (params.open === true) void osOpen(filePath);
 
       return {
         content: [{
