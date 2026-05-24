@@ -1,0 +1,27 @@
+packages/frontpage/extensions/frontpage.ts
+  s_c92e786476c411::t_3672e937784d5a 352
+  s_c92e786476c411::t_504f1aad2bdcde 241-247
+  s_c92e786476c411::t_b1da2db24e1607 393-395
+packages/frontpage/scripts/open-default.test.ts
+  s_c92e786476c411::t_325ca08d553d56 1,4,8-22,24,76
+  s_c92e786476c411::t_f0a9041ca3763c 3,5-7,23,25-28,48-51,53,58-59,64-65,70-71,74-75,77-80
+  s_c92e786476c411::t_0ffaa83bf2f5c5 2,29-47,52,54-57,60-63,66-69,72-73
+packages/frontpage/skills/frontpage/SKILL.md
+  s_c92e786476c411::t_f7950f71ce65ee 17-18,23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "5d0c5a8e360aa0b4c489a3aaa68c8ae81ff1fe09",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
