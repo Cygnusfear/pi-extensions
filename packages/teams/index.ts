@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
-import { buildPredicate, TeamsSubscription, type EventFilter, type PollEventType } from "./subscription.js";
+import { buildPredicate, setTeamsNotifyFn, TeamsSubscription, type EventFilter, type PollEventType } from "./subscription.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
 import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
@@ -216,6 +216,14 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		leader.setContext(ctx);
 		sessionCtx = ctx;
+		// Route teams.on safety-net rejections to the TUI notification surface
+		// instead of letting them surface as raw host `unhandledRejection` output.
+		// See subscription.ts setTeamsNotifyFn for the contract.
+		if (ctx.hasUI) {
+			setTeamsNotifyFn((message, level = "warning") => {
+				try { ctx.ui.notify(message, level); } catch {}
+			});
+		}
 		// Share the pi-mesh extension's mesh instance (avoids duplicate connections)
 		const mesh = (globalThis as any).__piMesh;
 		if (mesh) leader.setMesh(mesh);
@@ -224,6 +232,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		// Detach the notify hook so a reloaded session installs a fresh one
+		// against the new ExtensionContext instead of a stale closure.
+		setTeamsNotifyFn(null);
 		leader.stopPolling();
 	});
 }

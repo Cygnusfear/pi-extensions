@@ -18,7 +18,8 @@
     "./foresight-read": "./src/foresight-read.ts",
     "./foresight-write": "./src/foresight-write.ts",
     "./tool-availability": "./src/tool-availability.ts",
-    "./mai-binary": "./src/mai-binary.ts"
+    "./mai-binary": "./src/mai-binary.ts",
+    "./tui-safe": "./src/tui-safe.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",

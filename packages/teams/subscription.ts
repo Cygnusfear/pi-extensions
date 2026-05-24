@@ -16,6 +16,35 @@
 import type { TeamLeader } from "./leader.js";
 import type { PollEvent, WorkerHandle } from "./types.js";
 
+// ─── TUI-safe rejection routing ──────────────────────────────────────────
+// Set by index.ts on session_start. When a TeamsSubscription's .then() is
+// called without an explicit onrejected handler and the subscription later
+// rejects (typically from .timeout()), the safety-net handler routes the
+// error here instead of letting it bubble to the host process as an
+// `unhandledRejection` (which prints raw stderr output like
+// "[host] unhandledRejection: teams.on timeout after 2700000ms").
+//
+// TUI extensions should NEVER let raw promise rejections reach the host's
+// console. Always route through the user's notification surface.
+
+type TeamsNotifyLevel = "info" | "warning" | "error";
+let notifyFn: ((message: string, level?: TeamsNotifyLevel) => void) | null = null;
+
+export function setTeamsNotifyFn(fn: ((message: string, level?: TeamsNotifyLevel) => void) | null): void {
+  notifyFn = fn;
+}
+
+function routeRejectionToTui(err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (notifyFn) {
+    try { notifyFn(`teams.on: ${msg}`, "warning"); } catch {}
+  }
+  // If no TUI is wired (test contexts, headless), silently swallow. The
+  // explicit goal here is "do not surface as host console output". Users
+  // that need to observe the rejection should pass an explicit onrejected
+  // handler to .then() or use .catch() / try-await.
+}
+
 export type PollEventType = PollEvent["type"];
 
 /**
@@ -253,7 +282,22 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 			this.resolvers.push(resolve);
 			this.rejecters.push(reject);
 		});
-		return p.then(onfulfilled ?? undefined, onrejected ?? undefined);
+		// Safety net: if the caller did NOT pass an explicit onrejected handler,
+		// inject one that routes the rejection to the TUI notify surface instead
+		// of letting it bubble up as an unhandledRejection on the host process.
+		// Without this, `sub.then(e => ...)` (no second arg) on a subscription
+		// that times out crashes the host's stderr with raw error text.
+		//
+		// Users that want to observe the rejection MUST either pass an explicit
+		// onrejected (`sub.then(onfulfilled, onrejected)`), call `.catch(...)`,
+		// or use `try/await`. The await pattern translates internally to
+		// .then(resolve, reject) — onrejected IS provided — so the safety net
+		// does not interfere.
+		const safeOnRejected = onrejected ?? ((err: unknown) => {
+			routeRejectionToTui(err);
+			return undefined as unknown as TResult2;
+		});
+		return p.then(onfulfilled ?? undefined, safeOnRejected);
 	}
 
 	/** Catch rejection. Returns a native Promise so it integrates with await/try-catch. */
