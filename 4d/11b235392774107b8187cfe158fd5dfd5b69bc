@@ -1,0 +1,27 @@
+packages/pi-mesh/extension/rebirth-wake.ts
+  s_c92e786476c411::t_7233f47848f9b0 1-92
+packages/pi-mesh/extension/rebirth-wake.test.ts
+  s_c92e786476c411::t_5f04fc89de061b 1-121
+packages/pi-mesh/extension/mesh-constants.ts
+  s_c92e786476c411::t_89412244fb0449 1-9
+packages/pi-mesh/extension/pi-mesh.ts
+  s_c92e786476c411::t_afd9e411b165bc 789-798
+  s_c92e786476c411::t_c0e4bdcc9b9db7 930
+  s_c92e786476c411::t_d876fce8fcb5c3 1443-1457
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "4d11b235392774107b8187cfe158fd5dfd5b69bc",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
