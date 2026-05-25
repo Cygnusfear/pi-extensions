@@ -1,0 +1,22 @@
+packages/shared/src/git-guards.ts
+  s_c92e786476c411::t_84d412ffc3e8ea 94-137
+  s_c92e786476c411::t_8d73a247930243 139-144
+packages/shared/src/git-guards.message-bodies.test.ts
+  s_c92e786476c411::t_aa504758d40d30 1-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "bb051a9c5b57fd01dfab186e96a6457b07562845",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
