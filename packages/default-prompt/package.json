@@ -15,6 +15,9 @@
     "@earendil-works/pi-tui": "*",
     "@sinclair/typebox": "*"
   },
+  "dependencies": {
+    "@pi-extensions/shared": "*"
+  },
   "files": [
     "extensions",
     "prompts"

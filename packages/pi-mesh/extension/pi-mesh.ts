@@ -52,6 +52,14 @@ import type {
   MeshMessage,
   MeshTellAckEnvelope,
   MeshTellEnvelope,
+} from "./types.ts";
+import {
+  formatInboundAskContent,
+  formatInboundChatContent,
+  formatInboundTellContent,
+  formatPendingTellsBatch,
+} from "./inbound-format.ts";
+import type {
   MeshTellReceiptPhase,
   PeerInfo,
   RequestEvent,
@@ -1370,19 +1378,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const flushPendingTells = () => {
     if (agentBusy || pendingTells.length === 0) return;
     const batch = pendingTells.splice(0, pendingTells.length);
-    const header =
-      batch.length === 1
-        ? "1 direct mesh-tell arrived while you were busy."
-        : `${batch.length} direct mesh-tells arrived while you were busy.`;
-    const blob = [
-      header,
-      "These are direct messages targeted at this session — read, decide, act.",
-      "",
-      ...batch.map(
-        ({ senderLabel, payloadText }, idx) =>
-          `${idx + 1}. ${MI.tell} ${MI.sep} ${senderLabel}:\n${payloadText}`,
-      ),
-    ].join("\n");
+    const blob = formatPendingTellsBatch(MI, batch);
     pi.sendMessage(
       {
         customType: "mesh-inbound-batch",
@@ -1683,10 +1679,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
         const requestVisible = ackRequested === "visible";
         const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
+        // Append a bottom signature so an agent who only reads the END of
+        // the message (which is most of them) still sees the actual mesh
+        // sender, not whatever fake name the sender signed with in the
+        // body. Top label + bottom signature = same answer either way.
+        // See default-prompt's identity block for the matching mitigation
+        // on the SEND side. Format helpers in inbound-format.ts.
         pi.sendMessage(
           {
             customType: "mesh-inbound",
-            content: `${MI.tell} ${MI.sep} ${senderLabel}\n${payloadText}`,
+            content: formatInboundTellContent(MI, senderLabel, payloadText),
             display: true,
             details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
           },
@@ -1715,7 +1717,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         const text = formatPayloadForDisplay(msg.payload);
         pi.sendMessage({
           customType: "mesh-chat",
-          content: `${MI.chat} ${MI.sep} #${msg.channel} ${MI.sep} ${senderLabel}\n${text}`,
+          content: formatInboundChatContent(MI, msg.channel, senderLabel, text),
           display: true,
         });
         pendingAmbientChat.push({ channelId: msg.channel, senderLabel, text });
@@ -1782,7 +1784,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         pi.sendMessage(
           {
             customType: "mesh-inbound-ask",
-            content: `${MI.ask} ${MI.sep} ${senderLabel} asks\n${payloadText}\n\n${replyHint}`,
+            content: formatInboundAskContent(MI, senderLabel, payloadText, replyHint),
             display: true,
           },
           deliveryOptions,
