@@ -91,8 +91,57 @@ const ANSI_DOT_GIT_RE = /\$['"]\\(?:x2e|056)['"]\s*git/i;
  * - { type: "git_write", reason }   — writes to .git dir, needs human confirmation
  * - null                             — safe, let it through
  */
+/**
+ * Strip the contents of git message-body arguments (`-m`, `--message=`,
+ * `-m="..."`, `--message="..."`) so subsequent destructive-pattern matching
+ * does NOT false-positive on dangerous-looking strings embedded inside commit,
+ * tag, stash, or notes messages.
+ *
+ * Real-world false positive this fixes: an agent runs
+ *   git tag -a backup -m "Backup before rebase. To recover: git reset --hard <tag>"
+ * The literal "git reset --hard" inside the tag's message body triggered the
+ * destructive-command guard, blocking what is structurally just a tag.
+ *
+ * Handles:
+ *   -m "..."       (double-quoted; preserves escaped \" inside)
+ *   -m '...'       (single-quoted; no escapes in single-quoted shell strings)
+ *   --message="..."
+ *   --message='...'
+ *   --message "..."
+ *
+ * Replaces the body with a placeholder so the surrounding command shape stays
+ * intact (count of args, position of subsequent flags, etc.).
+ *
+ * Does NOT handle (rare; left as-is, may still false-positive if you hit them):
+ *   $'...' ANSI-C quoting
+ *   heredocs (`git commit -F- <<EOF ... EOF`)
+ *   unquoted -m arg (`-m word` — but this is single-token so no shell parser
+ *     would put "git reset --hard" inside it anyway)
+ */
+export function stripMessageBodies(cmd: string): string {
+	let out = cmd;
+	// Double-quoted: -m "..." | --message="..." | --message "..."
+	// Match until an unescaped closing double-quote; the s-flag lets . span newlines.
+	out = out.replace(
+		/(-m|--message)(=|\s+)"((?:[^"\\]|\\.)*?)"/gs,
+		(_m, flag, sep) => `${flag}${sep}"<MSG>"`,
+	);
+	// Single-quoted: -m '...' | --message='...' | --message '...'
+	// Single quotes in shell have no escapes — match anything except a single quote.
+	out = out.replace(
+		/(-m|--message)(=|\s+)'([^']*?)'/gs,
+		(_m, flag, sep) => `${flag}${sep}'<MSG>'`,
+	);
+	return out;
+}
+
 export function isGitUnsafeBash(cmd: string): { type: "destructive" | "git_write"; reason: string } | null {
-	const normalized = cmd.replace(/\s+/g, " ").trim();
+	// Strip message-body contents BEFORE normalization so dangerous-looking
+	// strings inside commit/tag/notes/stash messages do not trip the destructive
+	// pattern matchers. The shape of the command (flags, subcommand, paths) is
+	// preserved so all other guard logic still works.
+	const sanitized = stripMessageBodies(cmd);
+	const normalized = sanitized.replace(/\s+/g, " ").trim();
 	const segments = normalized.split(/\s*(?:&&|\|\||[;|])\s*/);
 
 	// ── git init — can corrupt worktrees ──
