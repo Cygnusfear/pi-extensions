@@ -786,10 +786,16 @@ export class PiMesh {
 
 // ── Identity resolution ──────────────────────────────────────────────────────
 
-const MESH_IDENTITY_TYPE = "mesh_identity";
-const MESH_CHANNELS_TYPE = "mesh_channels";
-const MESH_BROADCAST_ALLOWED_TYPE = "mesh_broadcast_allowed";
-const MESH_REBIRTH_TYPE = "mesh_rebirth";
+// Constants live in mesh-constants.ts so helper modules (rebirth-wake.ts,
+// inbound-format.ts, etc.) can import them without pulling the whole
+// pi-mesh.ts module graph.
+import {
+	MESH_IDENTITY_TYPE,
+	MESH_CHANNELS_TYPE,
+	MESH_BROADCAST_ALLOWED_TYPE,
+	MESH_REBIRTH_TYPE,
+} from "./mesh-constants.ts";
+import { buildRebirthWakeMessage, extractRebirthMarker } from "./rebirth-wake.ts";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -844,19 +850,6 @@ function resolveChannelsFromSession(ctx: {
  * explicitly opt-in per session via `/mesh allow-broadcast on`. We persist
  * the decision so /reload and resume keep the setting.
  */
-// Check whether the session contains a rebirth marker (set by /rebirth)
-// to signal that this "new" session should inherit the old mesh identity.
-function hasRebirthMarker(ctx: {
-  sessionManager: {
-    getEntries: () => Array<{ type: string; customType?: string; data?: unknown }>;
-  };
-}): boolean {
-  for (const entry of ctx.sessionManager.getEntries()) {
-    if (entry.type === "custom" && entry.customType === MESH_REBIRTH_TYPE) return true;
-  }
-  return false;
-}
-
 function resolveBroadcastAllowedFromSession(ctx: {
   sessionManager: {
     getEntries: () => Array<{ type: string; customType?: string; data?: unknown }>;
@@ -934,7 +927,7 @@ function resolveAndSetIdentity(
       setStableId(existing.id);
       return;
     }
-  } else if (reason === "new" && hasRebirthMarker(ctx) && existing) {
+  } else if (reason === "new" && extractRebirthMarker(ctx) && existing) {
     // REBIRTH: new session created by /rebirth — reuse old identity
     // so peers on the mesh still recognise this agent.
     mesh.setIdentity(existing);
@@ -1446,6 +1439,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       return;
     }
     started = true;
+
+    // Rebirth wake — fire AFTER first session_start so the freshly-rebirthed
+    // agent is actively nudged to read its TPV before doing anything else.
+    // Gated on reason === "new" so subsequent /reloads of the same rebirthed
+    // session don't re-wake (the wake message is already in their history).
+    // See rebirth-wake.ts for the orientation contract.
+    if (reason === "new") {
+      const rebirthMarker = extractRebirthMarker(ctx);
+      if (rebirthMarker) {
+        pi.sendMessage(
+          buildRebirthWakeMessage(rebirthMarker),
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+      }
+    }
 
     // Register sandbox-callable functions for code-mode (ESM import to share module instance)
     try {
