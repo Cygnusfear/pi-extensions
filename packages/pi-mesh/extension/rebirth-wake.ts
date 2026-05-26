@@ -1,3 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
+
 /**
  * Rebirth wake — surfaces a one-shot system message that nudges a freshly
  * rebirthed agent to read their TPV and orient themselves before doing
@@ -15,13 +21,57 @@
  * Fix: detect rebirth at session_start (reason="new" AND mesh_rebirth
  * marker present) and send a triggerTurn message that wakes the agent
  * with explicit orientation instructions.
+ *
+ * Prompt content lives in `packages/pi-mesh/prompts/rebirth-wake.md` so
+ * the agent-facing UX surface is editable by non-coders without touching
+ * TypeScript. Template tokens `{{parentShort}}` and `{{transferedAt}}`
+ * are substituted at render time. The file is mtime-cached so dev edits
+ * pick up on the next call without a restart.
  */
-
-import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
 
 export interface RebirthMarker {
 	fromSession: string;
 	transferedAt: string;
+}
+
+const promptPath = path.resolve(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+	"prompts",
+	"rebirth-wake.md",
+);
+
+let cached: { mtime: number; content: string } | null = null;
+
+/**
+ * Load the rebirth wake prompt template from disk with mtime-based caching.
+ * Falls back to a minimal hard-coded message if the file is missing or
+ * unreadable — never throws (this runs inside a critical session_start
+ * path and must not crash the extension).
+ */
+function loadPromptTemplate(): string {
+	try {
+		const stat = fs.statSync(promptPath);
+		if (cached && cached.mtime === stat.mtimeMs) return cached.content;
+		const content = fs.readFileSync(promptPath, "utf-8");
+		cached = { mtime: stat.mtimeMs, content };
+		return content;
+	} catch {
+		// Hard fallback so a missing/broken prompt file does not break rebirth.
+		return [
+			"# You have just been REBIRTHED",
+			"",
+			"Your previous self rebirthed this session at {{transferedAt}} (parent: {{parentShort}}).",
+			"Read the `rebirth-handoff` message in your session history before doing anything else.",
+		].join("\n");
+	}
+}
+
+/**
+ * Reload the prompt cache from disk (test/dev helper).
+ */
+export function reloadRebirthPromptCache(): void {
+	cached = null;
 }
 
 /**
@@ -54,9 +104,10 @@ export function extractRebirthMarker(ctx: {
  * to it — without that, the agent would sit idle with the TPV in context
  * but no impetus to read it.
  *
- * Prefixed with the parent session id (short form) so the agent has an
- * explicit pointer for searching session history (ouija) if the TPV
- * leaves anything ambiguous.
+ * Loads the markdown template from disk and substitutes `{{parentShort}}`
+ * and `{{transferedAt}}` tokens. Prefixed with the parent session id
+ * (short form) so the agent has an explicit pointer for searching session
+ * history (ouija) if the TPV leaves anything ambiguous.
  */
 export function buildRebirthWakeMessage(marker: RebirthMarker | null): {
 	customType: string;
@@ -65,25 +116,10 @@ export function buildRebirthWakeMessage(marker: RebirthMarker | null): {
 } {
 	const parentShort = marker ? marker.fromSession.slice(0, 8) : "(unknown)";
 	const transferedAt = marker ? marker.transferedAt : "(unknown)";
-	const content = [
-		"# 🔄 You have just been REBIRTHED",
-		"",
-		`A previous instance of you (running on the same mesh identity) ran \`/rebirth\` at ${transferedAt} to compact this session. They synthesized a Total Perspective Vortex (TPV) handoff and started this new session for you. Parent session: \`${parentShort}\`.`,
-		"",
-		"**Your TPV is the `rebirth-handoff` custom_message entry in your session history above.** It contains everything your previous self learned, decided, and planned. Read it carefully before doing anything else.",
-		"",
-		"## What to do RIGHT NOW",
-		"",
-		"1. Read your TPV (the `rebirth-handoff` message in your context).",
-		"2. Identify: what task were you in the middle of? What were the open questions? What was the next step?",
-		`3. Check the mesh for context: \`mesh()\` for peers, \`ouija({ action: "view", session: "${parentShort}" })\` to skim the last entries of the parent session, \`mai ls\` for tickets, recent commits, etc.`,
-		"4. THEN continue the work, or if you're stuck, ask the hooman with a clear \"I just rebirthed — here's where I am, here's what I think the next step is, [OK]?\".",
-		"",
-		"Do NOT pretend you remember things you don't. Your only memory is the TPV — everything else is gone. Be honest about what you can and can't see.",
-		"",
-		"— pi-mesh rebirth wake",
-	].join("\n");
-
+	const template = loadPromptTemplate();
+	const content = template
+		.replace(/\{\{parentShort\}\}/g, parentShort)
+		.replace(/\{\{transferedAt\}\}/g, transferedAt);
 	return {
 		customType: "mesh-rebirth-wake",
 		content,

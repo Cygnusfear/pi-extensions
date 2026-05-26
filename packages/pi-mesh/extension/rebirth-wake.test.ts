@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { extractRebirthMarker, buildRebirthWakeMessage } from "./rebirth-wake.ts";
+import { extractRebirthMarker, buildRebirthWakeMessage, reloadRebirthPromptCache } from "./rebirth-wake.ts";
 import { MESH_REBIRTH_TYPE, MESH_IDENTITY_TYPE } from "./mesh-constants.ts";
 
 function mockCtx(entries: Array<{ type: string; customType?: string; data?: unknown }>) {
@@ -117,5 +117,29 @@ describe("buildRebirthWakeMessage", () => {
     expect(msg.customType).toBe("mesh-rebirth-wake");
     expect(msg.content).toContain("REBIRTHED");
     expect(msg.content).toContain("(unknown)"); // both parent + timestamp default to (unknown)
+  });
+});
+
+describe("rebirth wake prompt file loading", () => {
+  test("token substitution: every {{parentShort}} and {{transferedAt}} is replaced", () => {
+    const msg = buildRebirthWakeMessage({
+      fromSession: "019eABCDEF",
+      transferedAt: "2026-12-25T15:00:00Z",
+    });
+    expect(msg.content).not.toContain("{{parentShort}}");
+    expect(msg.content).not.toContain("{{transferedAt}}");
+    expect(msg.content).toContain("019eABCD"); // 8-char short
+    expect(msg.content).toContain("2026-12-25T15:00:00Z");
+  });
+
+  test("reloadRebirthPromptCache forces re-read on next call", async () => {
+    // First call — populates cache
+    const first = buildRebirthWakeMessage({ fromSession: "first0000", transferedAt: "t1" });
+    expect(first.content).toContain("first000"); // 8-char short
+    // Flush cache — next call must re-read from disk
+    reloadRebirthPromptCache();
+    const second = buildRebirthWakeMessage({ fromSession: "second00", transferedAt: "t2" });
+    expect(second.content).toContain("second00");
+    expect(second.content).toContain("t2");
   });
 });
