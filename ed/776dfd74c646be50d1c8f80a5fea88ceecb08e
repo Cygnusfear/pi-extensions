@@ -1,0 +1,30 @@
+packages/frontpage/extensions/mermaid-lint.ts
+  s_c92e786476c411::t_91dd115faed66e 1-277
+packages/frontpage/scripts/mermaid-lint.test.ts
+  s_c92e786476c411::t_3da4c23fc74c9e 1,3-190
+  s_c92e786476c411::t_3baa80557b9d00 2
+packages/frontpage/extensions/frontpage.ts
+  s_c92e786476c411::t_ae96b7a40e75b6 23-64
+  s_c92e786476c411::t_55df0da574dac1 576-588,590-599
+  s_c92e786476c411::t_aa72d71d7a966d 439-454,456-463
+packages/frontpage/scripts/mermaid-lint.integration.test.ts
+  s_c92e786476c411::t_9eabc4d990c6bd 1-159
+packages/frontpage/skills/frontpage/SKILL.md
+  s_c92e786476c411::t_ca8e31d1af2343 138-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "ed776dfd74c646be50d1c8f80a5fea88ceecb08e",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
