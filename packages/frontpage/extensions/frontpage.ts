@@ -20,6 +20,48 @@ import os from "node:os";
 import path from "node:path";
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import { render, assignIds, reloadPartials, type FrontpageSpec, type SectionSpec } from "./render.js";
+import { lintMermaid, formatMermaidFinding, type MermaidLintFinding } from "./mermaid-lint.js";
+
+/**
+ * Scan every mermaid section in the spec and collect lint findings.
+ * Returns a flat array tagged with the originating section ID so the
+ * agent can locate the problem.
+ *
+ * SOFT validation: findings are reported back to the agent in the tool
+ * result text, but the write is NEVER blocked. The page is always
+ * written; the agent sees the findings and can immediately follow up
+ * with frontpage_update to fix them.
+ */
+function collectMermaidFindings(spec: FrontpageSpec): Array<{ sectionId: string; finding: MermaidLintFinding }> {
+  const out: Array<{ sectionId: string; finding: MermaidLintFinding }> = [];
+  for (const s of spec.sections) {
+    if (s.type !== "mermaid") continue;
+    const findings = lintMermaid(s.source);
+    for (const f of findings) {
+      out.push({ sectionId: s.id ?? "(no-id)", finding: f });
+    }
+  }
+  return out;
+}
+
+/**
+ * Format a findings list for the tool result text. Splits into ERROR
+ * and WARN buckets so the agent's eye lands on the blocking-shape
+ * issues first. Returns null if there are no findings (call sites use
+ * this to skip the section entirely).
+ */
+function formatMermaidFindingsSection(
+  findings: Array<{ sectionId: string; finding: MermaidLintFinding }>,
+): string | null {
+  if (findings.length === 0) return null;
+  const errors = findings.filter((x) => x.finding.level === "error");
+  const warnings = findings.filter((x) => x.finding.level === "warning");
+  const parts: string[] = [];
+  parts.push(`Mermaid lint: ${errors.length} error(s), ${warnings.length} warning(s) — page written, fix and re-run frontpage_update.`);
+  for (const e of errors) parts.push(formatMermaidFinding(e.sectionId, e.finding));
+  for (const w of warnings) parts.push(formatMermaidFinding(w.sectionId, w.finding));
+  return parts.join("\n");
+}
 
 // ---- storage paths ----
 const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
@@ -394,17 +436,31 @@ export default function (pi: ExtensionAPI) {
       // double-opening on every create surprised the hooman with extra tabs).
       if (params.open === true) void osOpen(filePath);
 
+      // Collect mermaid lint findings AFTER the write — SOFT validation, never
+      // blocks. Surfaces back to the agent in the tool result text so they can
+      // immediately follow up with frontpage_update to correct. The page is
+      // already on disk; the hooman can see it AND the agent can see the
+      // findings in the same turn.
+      const mermaidFindings = collectMermaidFindings(spec);
+      const mermaidBlock = formatMermaidFindingsSection(mermaidFindings);
+
+      const textLines = [
+        `Frontpage written: ${filePath}`,
+        artifactId ? `mai artifact: ${artifactId}` : "mai unavailable — no artifact recorded",
+        `Sections: ${spec.sections.length}`,
+        `Palette: ${spec.palette} · Register: ${spec.register}`,
+      ];
+      if (mermaidBlock) textLines.push("", mermaidBlock);
+
       return {
-        content: [{
-          type: "text",
-          text: [
-            `Frontpage written: ${filePath}`,
-            artifactId ? `mai artifact: ${artifactId}` : "mai unavailable — no artifact recorded",
-            `Sections: ${spec.sections.length}`,
-            `Palette: ${spec.palette} · Register: ${spec.register}`,
-          ].join("\n"),
-        }],
-        details: { slug: spec.slug, path: filePath, artifactId, sectionCount: spec.sections.length },
+        content: [{ type: "text", text: textLines.join("\n") }],
+        details: {
+          slug: spec.slug,
+          path: filePath,
+          artifactId,
+          sectionCount: spec.sections.length,
+          mermaidFindings: mermaidFindings.map((x) => ({ sectionId: x.sectionId, ...x.finding })),
+        },
       };
     },
   });
@@ -517,18 +573,30 @@ export default function (pi: ExtensionAPI) {
       if (meta.artifactId) await addNote(meta.artifactId, params.note);
       if (params.open) void osOpen(filePath);
 
+      // Mermaid lint surfaces back to the agent — SOFT, never blocks the write.
+      const mermaidFindings = collectMermaidFindings(withIds);
+      const mermaidBlock = formatMermaidFindingsSection(mermaidFindings);
+
+      const textLines = [
+        `Frontpage updated: ${filePath}`,
+        meta.artifactId ? `mai note added to ${meta.artifactId}` : "mai artifact unknown — no note",
+        `Ops applied: ${applied.length}/${params.patch.length}`,
+        ...applied.map(a => `  ✓ ${a}`),
+        ...(skipped.length > 0 ? [`Skipped: ${skipped.length}`, ...skipped.map(s => `  ✗ ${s.op}${s.section_id ? ` ${s.section_id}` : ""}: ${s.reason}`)] : []),
+      ];
+      if (mermaidBlock) textLines.push("", mermaidBlock);
+
       return {
-        content: [{
-          type: "text",
-          text: [
-            `Frontpage updated: ${filePath}`,
-            meta.artifactId ? `mai note added to ${meta.artifactId}` : "mai artifact unknown — no note",
-            `Ops applied: ${applied.length}/${params.patch.length}`,
-            ...applied.map(a => `  ✓ ${a}`),
-            ...(skipped.length > 0 ? [`Skipped: ${skipped.length}`, ...skipped.map(s => `  ✗ ${s.op}${s.section_id ? ` ${s.section_id}` : ""}: ${s.reason}`)] : []),
-          ].join("\n"),
-        }],
-        details: { slug: withIds.slug, path: filePath, artifactId: meta.artifactId, applied: applied.length, skipped: skipped.length, sectionIds: withIds.sections.map(s => s.id) },
+        content: [{ type: "text", text: textLines.join("\n") }],
+        details: {
+          slug: withIds.slug,
+          path: filePath,
+          artifactId: meta.artifactId,
+          applied: applied.length,
+          skipped: skipped.length,
+          sectionIds: withIds.sections.map(s => s.id),
+          mermaidFindings: mermaidFindings.map((x) => ({ sectionId: x.sectionId, ...x.finding })),
+        },
       };
     },
   });

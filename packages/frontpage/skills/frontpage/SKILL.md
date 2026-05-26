@@ -135,6 +135,17 @@ frontpage_create({
 - Never define `.node` as a page-level class. Mermaid uses it internally. Use card-grid with sections instead.
 - For 15+ nodes: split into simple overview (mermaid) + detail card-grid.
 
+### Mermaid lint — automatic at write time
+
+`frontpage_create` and `frontpage_update` lint every mermaid section after writing and surface findings in the tool result:
+
+```
+Mermaid lint: 1 error(s), 0 warning(s) — page written, fix and re-run frontpage_update.
+  ERROR [s3] mermaid/literal-newline-in-label (line 4): Found \n inside a quoted label...
+```
+
+Findings are SOFT — the page is still written (you can inspect it) and the agent sees the findings in the same turn. Read the finding, follow up with `frontpage_update` to fix. Rules covered: `mermaid/empty`, `mermaid/literal-newline-in-label`, `mermaid/bracket-balance`, `mermaid/quote-balance`, `mermaid/node-class-redefinition`, `mermaid/missing-direction`, `mermaid/too-many-nodes`, `mermaid/state-strict-label`. Structured findings are also in `details.mermaidFindings`.
+
 ---
 
 ## The five tests (run before `frontpage_update` is your last move)
