@@ -1,3 +1,4 @@
+import { loadSharedPrompt } from "@pi-extensions/shared/shared-prompts";
 import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
 import { loadPrompt, reloadPromptCache } from "./prompt-loader.ts";
 
@@ -116,5 +117,19 @@ export function buildRebirthCommandPrompt(opts: { sessionId: string; cwd: string
 		"Session ID: {{sessionId}}",
 		"CWD: {{cwd}}",
 	].join("\n");
-	return loadPrompt("rebirth-command", { sessionId: opts.sessionId, cwd: opts.cwd }, fallback);
+	// Pull the canonical TPV checklist from @pi-extensions/shared so the rebirth
+	// command and the always-on system prompt show the same fields. Single
+	// source of truth — edit once, both surfaces update. Empty fallback so
+	// rebirth still works when shared is unavailable (the steering body is
+	// still useful without the checklist).
+	const tpvChecklist = loadSharedPrompt("tpv-checklist", "");
+	return loadPrompt(
+		"rebirth-command",
+		{
+			sessionId: opts.sessionId,
+			cwd: opts.cwd,
+			tpvChecklist,
+		},
+		fallback,
+	);
 }

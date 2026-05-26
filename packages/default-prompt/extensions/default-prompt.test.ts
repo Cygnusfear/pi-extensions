@@ -70,3 +70,28 @@ describe("default-prompt identity injection", () => {
     expect(result.systemPrompt).toMatch(/Current time: \*\*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),/);
   });
 });
+
+describe("default-prompt TPV checklist injection", () => {
+  beforeEach(clearStableId);
+  afterEach(clearStableId);
+
+  test("system prompt includes the TPV checklist on every turn", async () => {
+    setStableId("test-tpv-injection");
+    const result = await captureSystemPromptResult({ systemPrompt: "BASE" }, { cwd: "/tmp" });
+    expect(result?.systemPrompt).toContain("TPV — what to track for handoff");
+    expect(result?.systemPrompt).toContain("Session context");
+    expect(result?.systemPrompt).toContain("Key decisions");
+    expect(result?.systemPrompt).toContain("Dead ends");
+    expect(result?.systemPrompt).toContain("DEFERRED AND NOT TICKETED IS LOST");
+  });
+
+  test("TPV checklist appears BEFORE the identity block (identity is last)", async () => {
+    setStableId("test-tpv-order");
+    const result = await captureSystemPromptResult({ systemPrompt: "BASE" }, { cwd: "/tmp" });
+    const text = result.systemPrompt;
+    const tpvIdx = text.indexOf("TPV — what to track");
+    const identityIdx = text.indexOf("Your identity (re-anchored every turn)");
+    expect(tpvIdx).toBeGreaterThanOrEqual(0);
+    expect(identityIdx).toBeGreaterThan(tpvIdx);
+  });
+});

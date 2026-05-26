@@ -19,7 +19,8 @@
     "./foresight-write": "./src/foresight-write.ts",
     "./tool-availability": "./src/tool-availability.ts",
     "./mai-binary": "./src/mai-binary.ts",
-    "./tui-safe": "./src/tui-safe.ts"
+    "./tui-safe": "./src/tui-safe.ts",
+    "./shared-prompts": "./src/shared-prompts.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",
@@ -28,5 +29,9 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*"
-  }
+  },
+  "files": [
+    "prompts",
+    "src"
+  ]
 }

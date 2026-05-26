@@ -15,6 +15,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
+import { loadSharedPrompt } from "@pi-extensions/shared/shared-prompts";
 
 /**
  * Build a per-turn identity block that injects the agent's stable mesh
@@ -130,7 +131,16 @@ export default function defaultPromptExtension(pi: ExtensionAPI) {
 		// — the closer to the response, the harder to ignore.
 		const identityBlock = buildIdentityBlock();
 
-		const additions = [globalPrompt, repoPrompt, identityBlock].filter(
+		// TPV (Total Perspective Vortex) checklist — agent-facing context-
+		// management instructions. Single source of truth in
+		// `@pi-extensions/shared/prompts/tpv-checklist.md` so the same
+		// checklist that the /rebirth command shows is the one agents see
+		// in their ongoing system prompt. Loaded fresh on every turn (mtime
+		// caching makes that cheap). Empty string fallback if shared is
+		// missing — extension stays functional without it.
+		const tpvChecklist = loadSharedPrompt("tpv-checklist", "");
+
+		const additions = [globalPrompt, repoPrompt, tpvChecklist, identityBlock].filter(
 			(content): content is string => Boolean(content && content.trim().length > 0),
 		);
 

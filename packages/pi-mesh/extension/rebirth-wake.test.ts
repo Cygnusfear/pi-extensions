@@ -185,3 +185,22 @@ describe("substituteTokens (via prompt-loader)", () => {
     expect(out).toBe("a and a again — a");
   });
 });
+
+describe("buildRebirthCommandPrompt + shared TPV checklist", () => {
+  test("expands {{tpvChecklist}} token with content from shared/prompts/tpv-checklist.md", () => {
+    const text = buildRebirthCommandPrompt({ sessionId: "x", cwd: "y" });
+    // {{tpvChecklist}} was replaced (token gone)
+    expect(text).not.toContain("{{tpvChecklist}}");
+    // Content from shared checklist is present
+    expect(text).toContain("TPV — what to track for handoff");
+    expect(text).toContain("DEFERRED AND NOT TICKETED IS LOST");
+  });
+
+  test("identical TPV checklist content as the system-prompt path", async () => {
+    const { loadSharedPrompt } = await import("@pi-extensions/shared/shared-prompts");
+    const sharedText = loadSharedPrompt("tpv-checklist", "");
+    const rebirthText = buildRebirthCommandPrompt({ sessionId: "x", cwd: "y" });
+    // The full shared content is embedded — single source of truth across surfaces
+    expect(rebirthText).toContain(sharedText);
+  });
+});
