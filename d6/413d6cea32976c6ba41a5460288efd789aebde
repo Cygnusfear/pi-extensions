@@ -1,0 +1,21 @@
+packages/default-prompt/extensions/default-prompt.ts
+  s_c92e786476c411::t_64db812bc962fa 18
+packages/pi-mesh/extension/rebirth-wake.ts
+  s_c92e786476c411::t_dae4b928ce82af 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "d6413d6cea32976c6ba41a5460288efd789aebde",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
