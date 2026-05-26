@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { extractRebirthMarker, buildRebirthWakeMessage, reloadRebirthPromptCache } from "./rebirth-wake.ts";
+import { extractRebirthMarker, buildRebirthWakeMessage, buildRebirthCommandPrompt, reloadRebirthPromptCache } from "./rebirth-wake.ts";
 import { MESH_REBIRTH_TYPE, MESH_IDENTITY_TYPE } from "./mesh-constants.ts";
 
 function mockCtx(entries: Array<{ type: string; customType?: string; data?: unknown }>) {
@@ -141,5 +141,47 @@ describe("rebirth wake prompt file loading", () => {
     const second = buildRebirthWakeMessage({ fromSession: "second00", transferedAt: "t2" });
     expect(second.content).toContain("second00");
     expect(second.content).toContain("t2");
+  });
+});
+
+describe("buildRebirthCommandPrompt", () => {
+  test("loads from prompts/rebirth-command.md and substitutes tokens", () => {
+    const text = buildRebirthCommandPrompt({
+      sessionId: "019eABCDEF12",
+      cwd: "/Users/alex/Projects/foo",
+    });
+    expect(text).toContain("Session ID: 019eABCDEF12");
+    expect(text).toContain("CWD: /Users/alex/Projects/foo");
+    expect(text).toContain("REBIRTH");
+    expect(text).toContain("$.tpv");
+    expect(text).toContain("rebirth({ tpv: $.tpv })");
+    // Tokens fully replaced
+    expect(text).not.toContain("{{sessionId}}");
+    expect(text).not.toContain("{{cwd}}");
+  });
+
+  test("contains the TPV checklist (gushing personality line included)", () => {
+    const text = buildRebirthCommandPrompt({ sessionId: "x", cwd: "y" });
+    expect(text).toContain("Session context");
+    expect(text).toContain("Key decisions");
+    expect(text).toContain("Dead ends");
+    expect(text).toContain("Files modified");
+    expect(text).toContain("Tickets created");
+    expect(text).toContain("Lessons learned");
+    expect(text).toContain("gushing");
+  });
+});
+
+describe("substituteTokens (via prompt-loader)", () => {
+  test("unknown tokens are left as literal {{name}} so missing data is visible", async () => {
+    const { substituteTokens } = await import("./prompt-loader.ts");
+    const out = substituteTokens("hello {{name}}, you said {{message}}", { name: "world" });
+    expect(out).toBe("hello world, you said {{message}}");
+  });
+
+  test("multiple occurrences of the same token all substitute", async () => {
+    const { substituteTokens } = await import("./prompt-loader.ts");
+    const out = substituteTokens("{{x}} and {{x}} again — {{x}}", { x: "a" });
+    expect(out).toBe("a and a again — a");
   });
 });

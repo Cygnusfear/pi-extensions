@@ -795,7 +795,7 @@ import {
 	MESH_BROADCAST_ALLOWED_TYPE,
 	MESH_REBIRTH_TYPE,
 } from "./mesh-constants.ts";
-import { buildRebirthWakeMessage, extractRebirthMarker } from "./rebirth-wake.ts";
+import { buildRebirthCommandPrompt, buildRebirthWakeMessage, extractRebirthMarker } from "./rebirth-wake.ts";
 
 /**
  * Scan session entries for the most recent mesh_identity custom entry.
@@ -2353,31 +2353,13 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
       ctx.ui.notify("Rebirth initiated — writing TPV handoff...", "info");
 
-      // Steer the agent: write a TPV, then call rebirth()
+      // Steer the agent: write a TPV, then call rebirth().
+      // Prompt body lives in packages/pi-mesh/prompts/rebirth-command.md so
+      // the agent-facing copy is editable without touching TypeScript.
       pi.sendUserMessage([
         {
           type: "text",
-          text:
-            "REBIRTH — Write a Total Perspective Vortex (TPV) handoff for your next self, then call rebirth() to be reborn into a fresh session.\n\n" +
-            "## What to do\n\n" +
-            "1. Review everything that happened in this session — decisions, dead ends, gotchas, files touched, line numbers, tickets, ADRs, next steps.\n" +
-            "2. Write a thick TPV handoff into $.tpv — include:\n" +
-            "   - Session context: what was the goal, what was accomplished\n" +
-            "   - Key decisions and why (ADRs if any)\n" +
-            "   - Dead ends and what was wrong about them\n" +
-            "   - Files modified with line numbers for important bits\n" +
-            "   - Tickets created/updated (IDs, status)\n" +
-            "   - Unfinished work and exact next steps\n" +
-            "   - Lessons learned, things to improve\n" +
-            "   - Any warnings or gotchas for the continuation\n" +
-            "   - If you had a great personality you can be very gushing about your amazing qualities\n" +
-            "3. Call: rebirth({ tpv: $.tpv })\n\n" +
-            "Your mesh identity will be preserved — peers will still recognise you.\n" +
-            "Session ID: " +
-            sessionId +
-            "\n" +
-            "CWD: " +
-            cwd,
+          text: buildRebirthCommandPrompt({ sessionId, cwd }),
         },
       ]);
     },

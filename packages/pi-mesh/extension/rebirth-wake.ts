@@ -1,8 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
+import { loadPrompt, reloadPromptCache } from "./prompt-loader.ts";
 
 /**
  * Rebirth wake — surfaces a one-shot system message that nudges a freshly
@@ -25,8 +22,7 @@ import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
  * Prompt content lives in `packages/pi-mesh/prompts/rebirth-wake.md` so
  * the agent-facing UX surface is editable by non-coders without touching
  * TypeScript. Template tokens `{{parentShort}}` and `{{transferedAt}}`
- * are substituted at render time. The file is mtime-cached so dev edits
- * pick up on the next call without a restart.
+ * are substituted at render time via the shared prompt-loader.
  */
 
 export interface RebirthMarker {
@@ -34,44 +30,23 @@ export interface RebirthMarker {
 	transferedAt: string;
 }
 
-const promptPath = path.resolve(
-	path.dirname(fileURLToPath(import.meta.url)),
-	"..",
-	"prompts",
-	"rebirth-wake.md",
-);
-
-let cached: { mtime: number; content: string } | null = null;
+const REBIRTH_WAKE_FALLBACK = [
+	"# You have just been REBIRTHED",
+	"",
+	"Your previous self rebirthed this session at {{transferedAt}} (parent: {{parentShort}}).",
+	"Read the `rebirth-handoff` message in your session history before doing anything else.",
+].join("\n");
 
 /**
- * Load the rebirth wake prompt template from disk with mtime-based caching.
- * Falls back to a minimal hard-coded message if the file is missing or
- * unreadable — never throws (this runs inside a critical session_start
- * path and must not crash the extension).
- */
-function loadPromptTemplate(): string {
-	try {
-		const stat = fs.statSync(promptPath);
-		if (cached && cached.mtime === stat.mtimeMs) return cached.content;
-		const content = fs.readFileSync(promptPath, "utf-8");
-		cached = { mtime: stat.mtimeMs, content };
-		return content;
-	} catch {
-		// Hard fallback so a missing/broken prompt file does not break rebirth.
-		return [
-			"# You have just been REBIRTHED",
-			"",
-			"Your previous self rebirthed this session at {{transferedAt}} (parent: {{parentShort}}).",
-			"Read the `rebirth-handoff` message in your session history before doing anything else.",
-		].join("\n");
-	}
-}
-
-/**
- * Reload the prompt cache from disk (test/dev helper).
+ * Test helper: flush the shared prompt cache so dev edits to the .md
+ * file pick up on the next call without a restart.
+ *
+ * Re-exported from prompt-loader so callers that already imported this
+ * module don't have to know about the shared loader. Cache is shared
+ * across all loaded prompts — calling this flushes ALL of them.
  */
 export function reloadRebirthPromptCache(): void {
-	cached = null;
+	reloadPromptCache();
 }
 
 /**
@@ -114,15 +89,32 @@ export function buildRebirthWakeMessage(marker: RebirthMarker | null): {
 	content: string;
 	display: boolean;
 } {
-	const parentShort = marker ? marker.fromSession.slice(0, 8) : "(unknown)";
-	const transferedAt = marker ? marker.transferedAt : "(unknown)";
-	const template = loadPromptTemplate();
-	const content = template
-		.replace(/\{\{parentShort\}\}/g, parentShort)
-		.replace(/\{\{transferedAt\}\}/g, transferedAt);
+	const tokens = {
+		parentShort: marker ? marker.fromSession.slice(0, 8) : "(unknown)",
+		transferedAt: marker ? marker.transferedAt : "(unknown)",
+	};
+	const content = loadPrompt("rebirth-wake", tokens, REBIRTH_WAKE_FALLBACK);
 	return {
 		customType: "mesh-rebirth-wake",
 		content,
 		display: true,
 	};
+}
+
+/**
+ * Build the steering message that the /rebirth command sends to the
+ * agent in the OUTGOING session. Tells them to write a TPV and call
+ * rebirth().
+ *
+ * Loads from `prompts/rebirth-command.md` with `{{sessionId}}` and
+ * `{{cwd}}` token substitution.
+ */
+export function buildRebirthCommandPrompt(opts: { sessionId: string; cwd: string }): string {
+	const fallback = [
+		"REBIRTH — Write a TPV handoff into `$.tpv` and call `rebirth({ tpv: $.tpv })` to be reborn into a fresh session.",
+		"",
+		"Session ID: {{sessionId}}",
+		"CWD: {{cwd}}",
+	].join("\n");
+	return loadPrompt("rebirth-command", { sessionId: opts.sessionId, cwd: opts.cwd }, fallback);
 }
