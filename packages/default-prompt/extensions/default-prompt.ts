@@ -15,7 +15,7 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
-import { loadSharedPrompt } from "@pi-extensions/shared/shared-prompts";
+import { loadSharedPrompt } from "../../shared/src/shared-prompts.ts";
 
 /**
  * Build a per-turn identity block that injects the agent's stable mesh

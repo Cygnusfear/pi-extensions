@@ -1,4 +1,4 @@
-import { loadSharedPrompt } from "@pi-extensions/shared/shared-prompts";
+import { loadSharedPrompt } from "../../shared/src/shared-prompts.ts";
 import { MESH_REBIRTH_TYPE } from "./mesh-constants.ts";
 import { loadPrompt, reloadPromptCache } from "./prompt-loader.ts";
 
