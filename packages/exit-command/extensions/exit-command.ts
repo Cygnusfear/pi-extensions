@@ -1,6 +1,11 @@
 /**
- * /exit — hard-exit slash command, hot-reloadable companion to the built-in
- * one shipping in @earendil-works/pi-coding-agent (#4707 follow-up).
+ * /force-exit — hard-exit slash command. Hot-reloadable companion to the
+ * built-in /exit shipping in @earendil-works/pi-coding-agent (#4707 follow-up).
+ *
+ * Named distinctly from the built-in /exit on purpose — autocomplete used to
+ * surface a "command conflicts with built-in interactive command" warning when
+ * this extension shadowed the built-in. /force-exit removes the collision and
+ * also reads more clearly at the prompt ("force" signals fire-alarm intent).
  *
  * Why this exists as an extension when there's already a built-in /exit:
  *
@@ -17,17 +22,11 @@
  * update + restart. That defeats the purpose of a "in case it hangs" safety
  * net: the moment they need it is exactly when they cannot restart.
  *
- * This extension bridges that gap: it registers a /exit command at runtime
- * (hot-reloadable) so users on any reasonably recent pi binary get the
- * escape hatch immediately after `/reload`.
+ * This extension bridges that gap: it registers a /force-exit command at
+ * runtime (hot-reloadable) so users on any reasonably recent pi binary get
+ * the escape hatch immediately after `/reload`.
  *
- * If the user upgrades pi later, both the built-in and this extension will
- * register the same command name. Built-in registration runs first; extension
- * registration is rejected by the loader as a collision, so the built-in wins.
- * (If that ordering ever changes, behaviour is identical: same exit code,
- * same terminal-restore sequences.)
- *
- * Hard-exit semantics (mirrors the built-in):
+ * Hard-exit semantics (mirrors the built-in /exit):
  *   1. Synchronous terminal restore — disable raw mode, kitty protocol,
  *      bracketed paste, modifyOtherKeys, show cursor. All wrapped in try/catch
  *      so a single failed escape sequence doesn't strand the agent.
@@ -36,7 +35,8 @@
  *   3. Notice on stderr explaining the hard exit.
  *   4. process.exit(130) — 128 + SIGINT, semantically "user interrupted".
  *
- * NOT for normal shutdown — use /quit for that. /exit is the "fire alarm" path.
+ * NOT for normal shutdown — use /quit for that. /force-exit is the "fire
+ * alarm" path.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -89,12 +89,12 @@ function restoreTerminal(): void {
 }
 
 export default function exitCommandExtension(pi: ExtensionAPI) {
-	pi.registerCommand("exit", {
+	pi.registerCommand("force-exit", {
 		description: "Force-exit immediately, skipping cleanup. Use when the agent is stuck and /quit hangs.",
 		handler: async () => {
 			restoreTerminal();
 			try {
-				process.stderr.write("\nHard exit via /exit — skipping graceful cleanup.\n");
+				process.stderr.write("\nHard exit via /force-exit — skipping graceful cleanup.\n");
 			} catch {
 				// ignore EPIPE — we're exiting either way
 			}
