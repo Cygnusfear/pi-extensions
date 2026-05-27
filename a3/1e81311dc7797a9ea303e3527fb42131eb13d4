@@ -1,0 +1,20 @@
+packages/exit-command/extensions/exit-command.ts
+  s_cc90d1f38ef667::t_1f785f2a18537d 2-8,25-27,29,38-39
+  s_cc90d1f38ef667::t_032b3e6c249530 92,97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a31e81311dc7797a9ea303e3527fb42131eb13d4",
+  "prompts": {},
+  "sessions": {
+    "s_cc90d1f38ef667": {
+      "agent_id": {
+        "tool": "Feryal Io Kaltenegger",
+        "id": "019e69d3-e1f2-7d6f-a8c8-19b05456979d",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
