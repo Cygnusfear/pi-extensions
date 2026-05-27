@@ -45,8 +45,8 @@ import { installCodeModeProcessGuard } from "../src/process-guard";
 // Constants
 // =============================================================================
 
-const DEFAULT_EXECUTION_TIMEOUT_MS = 120_000; // 2 minutes overall
-const MAX_EXECUTION_TIMEOUT_MS = 600_000; // 10 minutes hard cap
+// execute_code is UNBOUNDED by default. Callers opt into a deadline via params.timeout.
+// session-factory only installs the timeout race when executionTimeoutMs is a positive number.
 const SYNC_TIMEOUT_MS = 5_000; // 5s for parsing/setup
 const MAX_OUTPUT_LENGTH = 200_000; // 200KB output cap
 
@@ -582,8 +582,8 @@ export default function (pi: ExtensionAPI) {
       timeout: Type.Optional(
         Type.Number({
           description:
-            "Execution timeout in seconds (default: 120, max: 600). " +
-            "Increase for long-running operations like browser automation or large builds.",
+            "Execution timeout in seconds. UNBOUNDED by default — no timeout race installed unless you set this. " +
+            "Set to opt into a deadline (e.g. browser automation, untrusted code). Minimum 1 second when set.",
           promptGuidelines: [
             "Use man('ToolName') to see detailed help for any sandbox function.",
             "Use $ to persist data across code blocks — no time limit, only 150MB memory cap.",
@@ -592,14 +592,13 @@ export default function (pi: ExtensionAPI) {
             "Prefer one large code block over many small execute_code calls.",
           ],
           minimum: 1,
-          maximum: 600,
         }),
       ),
     }),
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
-      const timeoutMs = params.timeout
-        ? Math.min(params.timeout * 1000, MAX_EXECUTION_TIMEOUT_MS)
-        : DEFAULT_EXECUTION_TIMEOUT_MS;
+      // Unbounded by default. If params.timeout is set, honor exactly — no cap.
+      // session-factory skips the timeout race entirely when timeoutMs is undefined.
+      const timeoutMs = params.timeout ? params.timeout * 1000 : undefined;
       // ── Site 3 escape sync (pe-tk4s AC3 v4 patch — preserve setActiveTools side-effects) ──
       const sess = getSession();
       const wantEscape = sess.store.proxy.__escaped === true;

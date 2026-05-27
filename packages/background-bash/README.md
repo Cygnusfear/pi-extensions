@@ -39,10 +39,9 @@ Without this, the agent has to wait for every command to complete before doing a
 
 > **Note:** Examples below use snake_case tool names (`bash_bg_start`). Inside `execute_code`, use camelCase (`bashBgStart`).
 
-### Start a background job
+### Start a background job (direct tool — for the LLM tool surface)
 
 ```typescript
-// Via dedicated tool (or bashBgStart in execute_code)
 const result = await bash_bg_start({
   command: "npm run dev",
   cwd: "/path/to/project"
@@ -58,6 +57,43 @@ const result = await bash({
   cwd: "/path/to/project"
 });
 ```
+
+### Sandbox: `bashBgStart` returns a thenable handle
+
+Inside `execute_code`, `bashBgStart` returns a **`BashBgHandle`** synchronously. Properties (`id`, `pid`, `cwd`, `logPath`, `status`) are populated immediately as live getters. The handle is **thenable** — `await handle` / `.then(cb)` resolves on child exit (or timeout / abort). Chain setters `.each` and `.timeout` return `this` so the fluent API composes.
+
+```typescript
+// Wait for exit with a deadline. .timeout is a chainable setter; the await
+// triggers the actual wait. Resolves with status: "exited" | "stopped" |
+// "timeout" | "aborted". Never rejects.
+const result = await bashBgStart({ command: "cargo check ..." }).timeout(300_000);
+if (result.status === "exited" && result.exitCode === 0) { /* green */ }
+
+// Fire-and-react: attach .then for completion without awaiting. This is
+// the canonical long-running shape.
+bashBgStart({ command: "cargo build" })
+  .each((line, stream) => console.log(`[${stream}]`, line))
+  .then(result => console.wake(`done: exit=${result.exitCode}`));
+
+// Truly fire-and-forget for a long-lived process — just don't await.
+const dev = bashBgStart({ command: "npm run dev" });
+console.log("dev pid:", dev.pid, "status:", dev.status);
+// ...later
+await dev.stop();
+```
+
+#### Footgun
+
+`await bashBgStart({ command: "npm run dev" })` **blocks until the dev server exits**, which is never. `await` on a thenable means "wait for it to resolve"; the handle resolves on child exit. Don't `await` long-running processes — attach `.then(cb)` for completion, or just call `.stop()` when you're done.
+
+#### Backward-compat note
+
+`bashBgStart` was previously `async` resolving to `{ id, pid, cwd, logPath, status }`. It is now **synchronous** and returns a thenable Handle that exposes those same fields as own properties / live getters. Destructure-style usage keeps working:
+
+- `const { id, pid } = await bashBgStart(...)` — **changes semantics**. The await now waits for child exit and resolves to `BashBgResult` (which still has `{ id, pid }`). For fast-exiting commands, behaves the same. For never-exiting commands, hangs (see footgun above). Recommended migration: drop the await.
+- `job.status === "running"` — works on either the handle (live string getter) or on the resolved BashBgResult (final status).
+
+`bashBgStatus` / `bashBgLogs` / `bashBgStop` / `bashBgList` are unchanged and still accept either `{ id }` or the handle directly.
 
 ### Check status
 
@@ -167,7 +203,7 @@ No additional configuration required. Background bash tools are available immedi
  
  | Sandbox fn | Parameters | Description |
  |-----------|-----------|-------------|
-| `bashBgStart` | `{ command, cwd? }` | Start a background job, returns `{ id, pid, cwd, logPath, status }` |
+| `bashBgStart` | `{ command, cwd? }` | Start a background job. Returns a **thenable `BashBgHandle`** SYNCHRONOUSLY. `await handle` / `.then(cb)` resolves on child exit. Chain `.each(line => ...)` / `.timeout(ms)` (both return `this`). `{ id, pid, cwd, logPath, status }` available as own getters. Footgun: don't await dev servers — they don't exit. |
 | `bashBgStatus` | `jobId` or `{ id }` | Get job status |
 | `bashBgLogs` | `{ id: jobIdOrJob, offset?, limit? }` | Read paginated logs, returns `{ text, offset, nextOffset, totalLines, hasMore, status }` |
 | `bashBgStop` | `{ id: jobIdOrJob, signal? }` | Stop a job |

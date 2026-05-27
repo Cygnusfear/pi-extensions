@@ -916,7 +916,9 @@ function hydrateBareGlobals(session: CodeModeSession): void {
 // executeInSession — the call-time runner
 // ───────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_EXECUTION_TIMEOUT_MS = 120_000;
+// executeInSession is UNBOUNDED by default. The timeout race is only installed
+// when ExecutionDeps.executionTimeoutMs is a positive finite number. Callers
+// (the execute_code tool) decide whether to opt into a deadline at all.
 
 export async function executeInSession(
 	session: CodeModeSession,
@@ -996,23 +998,30 @@ export async function executeInSession(
 
 		const races: Promise<unknown>[] = [promise];
 
-		const timeoutMs = runtimeDeps.executionTimeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
+		// Unbounded by default. Only install the timeout race when caller opts in
+		// with a positive finite executionTimeoutMs. Undefined / 0 / negative all
+		// mean "run until the code itself resolves or aborts".
+		const timeoutMs = runtimeDeps.executionTimeoutMs;
+		const hasTimeout = typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0;
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 		let timeoutRejectHandle: ReturnType<typeof setTimeout> | undefined;
-		const timeoutPromise = new Promise<never>((_, reject) => {
-			timeoutHandle = setTimeout(
-				() => {
-					const timeoutError = new Error("Timed out after " + timeoutMs + "ms");
-					if (!executionAbort.signal.aborted) executionAbort.abort(timeoutError);
-					timeoutRejectHandle = setTimeout(
-						() => reject(new Error("Execution timed out after " + timeoutMs / 1000 + "s")),
-						25,
-					);
-				},
-				timeoutMs,
-			);
-		});
-		races.push(timeoutPromise);
+		if (hasTimeout) {
+			const ms = timeoutMs as number;
+			const timeoutPromise = new Promise<never>((_, reject) => {
+				timeoutHandle = setTimeout(
+					() => {
+						const timeoutError = new Error("Timed out after " + ms + "ms");
+						if (!executionAbort.signal.aborted) executionAbort.abort(timeoutError);
+						timeoutRejectHandle = setTimeout(
+							() => reject(new Error("Execution timed out after " + ms / 1000 + "s")),
+							25,
+						);
+					},
+					ms,
+				);
+			});
+			races.push(timeoutPromise);
+		}
 
 		const signal = deps.signal;
 		const abortPromise = new Promise<never>((_, reject) => {

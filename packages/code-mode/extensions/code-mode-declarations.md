@@ -38,6 +38,8 @@ declare function ouija(input: {
   /** Ad-hoc entries for BM25 (action=grep only). Pass any {text}[] to search over. */
   entries?: Array<{ index?: number; label?: string; text: string }>;
 }): Promise<string>;
+
+/**
  * Execute a bash command in the current working directory.
  * Returns stdout, stderr, and exit code.
  */
@@ -51,15 +53,114 @@ declare function Bash(input: {
 }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
 
 /**
- * Start a bash command in the background and return immediately with a job ID.
- * Use bashBgStatus/bashBgLogs/bashBgStop to manage it.
+ * Terminal status reported by handle.wait / handle.timeout / handle.stop.
+ *  - "exited"  → child exited on its own (read exitCode)
+ *  - "stopped" → child was killed by a signal (read `signal`)
+ *  - "timeout" → .timeout(ms) elapsed; job is still running, NOT killed
+ *  - "aborted" → enclosing execute_code was aborted; job is still running
+ */
+type BashBgWaitStatus = "exited" | "stopped" | "timeout" | "aborted";
+
+/** Stream label for line callbacks attached via handle.each(). */
+type BashBgStream = "stdout" | "stderr";
+
+type BashBgResult = {
+  id: string;
+  pid: number;
+  command: string;
+  cwd: string;
+  logPath: string;
+  status: BashBgWaitStatus;
+  exitCode: number | null;
+  signal?: string;
+  runtimeMs: number;
+};
+
+/**
+ * Thenable handle returned by bashBgStart(). Mirrors execa / teams.on:
+ *  - sync return with properties (id, pid, cwd, logPath, status) ready immediately
+ *  - chain setters (.each, .timeout) return `this`
+ *  - `await handle` / `handle.then(cb)` resolves on child exit
+ *
+ * @example
+ * // Wait for exit with deadline. .timeout is a chainable setter; the await
+ * // (or .then) triggers the actual wait using the configured deadline.
+ * const r = await bashBgStart({ command: "cargo check" }).timeout(120_000);
+ *
+ * // Fire-and-react: attach .then for completion without awaiting.
+ * bashBgStart({ command: "cargo build" })
+ *   .each(line => console.log(line))
+ *   .then(result => console.wake(`done: ${result.exitCode}`));
+ *
+ * // Truly fire-and-forget — just don't await and don't attach .then.
+ * const dev = bashBgStart({ command: "npm run dev" });
+ * console.log(dev.id, dev.pid, dev.status);
+ * await dev.stop();
+ *
+ * FOOTGUN: `await bashBgStart({ command: "npm run dev" })` blocks until the
+ * dev server exits (never). Don't await long-running processes; attach
+ * `.then(cb)` or just `.stop()` when done.
+ */
+interface BashBgHandle extends PromiseLike<BashBgResult> {
+  readonly id: string;
+  readonly pid: number;
+  readonly command: string;
+  readonly cwd: string;
+  readonly logPath: string;
+  /** Live job status string. "running" | "exited" | "stopped". */
+  readonly status: "running" | "exited" | "stopped";
+  /** Resolves once the child has spawned successfully; rejects on spawn error. */
+  readonly started: Promise<void>;
+
+  /** Stream stdout/stderr lines as they are written. Returns the handle (chainable). Late subscribers do NOT receive history; use .logs() to backfill. */
+  each(callback: (line: string, stream: BashBgStream) => void): BashBgHandle;
+  /** Set a deadline for the eventual await/.then. Reject-free; child is NOT killed on timeout (the wait just resolves early with status="timeout"). Last call wins; no-op after the wait has started. */
+  timeout(ms: number): BashBgHandle;
+
+  /** Explicit wait. Resolves (never rejects) with status="exited"/"stopped"/"timeout"/"aborted". */
+  wait(opts?: { timeoutMs?: number }): Promise<BashBgResult>;
+  /** Send a signal. Resolves with the eventual exit result. */
+  stop(signal?: "SIGTERM" | "SIGKILL"): Promise<BashBgResult>;
+  /** Read the persisted log file (paginated). */
+  logs(opts?: { offset?: number; limit?: number }): Promise<{ text: string; offset: number; limit: number; nextOffset: number; totalLines: number; hasMore: boolean; status: string }>;
+
+  /** Full sync snapshot of the current job state. */
+  inspect(): { id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null; signal?: string };
+
+  /** Detach all line-listeners attached via this handle. Does NOT kill the child. */
+  unsubscribe(): void;
+  /** Alias for unsubscribe. */
+  cancel(): void;
+
+  /** Thenable protocol — `await handle` resolves on child exit. */
+  then<TResult1 = BashBgResult, TResult2 = never>(
+    onfulfilled?: ((value: BashBgResult) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
+}
+
+/**
+ * Start a bash command in the background. Returns a thenable BashBgHandle
+ * synchronously.
+ *
+ * @example
+ * const r = await bashBgStart({ command: "cargo check" }).timeout(120_000);
+ *
+ * bashBgStart({...}).each(cb).then(r => console.wake(`done`));
+ *
+ * const dev = bashBgStart({ command: "npm run dev" });
+ * await dev.stop();
+ *
+ * FOOTGUN: don't `await` a long-running process — `await` waits for exit,
+ * dev servers never exit, the await never returns. Attach `.then(cb)` or
+ * just don't await.
  */
 declare function bashBgStart(input: {
   /** Bash command to run in the background */
   command: string;
   /** Working directory (default: current cwd) */
   cwd?: string;
-}): Promise<{ id: string; pid: number; cwd: string; logPath: string; status: string }>;
+}): BashBgHandle;
 
 type BackgroundJobRef = string | { id: string } | { id: { id: string } };
 
