@@ -1,0 +1,34 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  s_cc90d1f38ef667::t_db2793b5442722 41-42
+  s_cc90d1f38ef667::t_a5aff7b826bdf3 56-146,153
+packages/code-mode/src/session-factory.ts
+  s_cc90d1f38ef667::t_8180bbae4105b1 1001-1005,1008-1024
+  s_cc90d1f38ef667::t_fe759bcbb7f9d1 919-921
+packages/background-bash/extensions/background-bash.ts
+  s_cc90d1f38ef667::t_14bfef53ade9aa 13,17-18,26-43,67-117,206-217,220,227-239,252-257,259-264,271,277-283,285-316,320,326-342,344-347,350-365,451-565,572-580,585-667,1031-1045
+packages/code-mode/extensions/code-mode.ts
+  s_cc90d1f38ef667::t_259bdcc5de80e3 585-586
+  s_cc90d1f38ef667::t_edf8a0bb6f17b9 48-49
+  s_cc90d1f38ef667::t_405dc1e103d098 599-601
+packages/background-bash/README.md
+  s_cc90d1f38ef667::t_7ddf6260c1dbdc 200
+  s_cc90d1f38ef667::t_4f3034df771784 42,61-90
+packages/background-bash/extensions/background-bash.test.ts
+  s_cc90d1f38ef667::t_5275c82a1397c6 1-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6afbfdbcc83f0a8b66e3686ec91fedf406cd1740",
+  "prompts": {},
+  "sessions": {
+    "s_cc90d1f38ef667": {
+      "agent_id": {
+        "tool": "Feryal Io Kaltenegger",
+        "id": "019e69d3-e1f2-7d6f-a8c8-19b05456979d",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
