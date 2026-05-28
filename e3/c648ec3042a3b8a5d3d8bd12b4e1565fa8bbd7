@@ -1,0 +1,34 @@
+packages/code-mode/extensions/code-mode.ts
+  s_cc90d1f38ef667::t_ac313b269c9d9a 833,837-840,843,845
+  s_cc90d1f38ef667::t_d43d54c577cdcf 690-699,702-724,726-735,738-829,832,834-836,841-842,844,846-848
+  s_cc90d1f38ef667::t_71bee5a24a619f 655-663
+  s_cc90d1f38ef667::t_a60a51b7b56dba 150-188
+  s_cc90d1f38ef667::t_2959f17b9b3ac1 456-474
+skills/environment/SKILL.md
+  s_cc90d1f38ef667::t_c5496f07fa84a5 336-337
+  s_cc90d1f38ef667::t_a92a6b6e0b8461 313-320
+packages/code-mode/extensions/code-mode-declarations.md
+  s_cc90d1f38ef667::t_2d7722da735d55 228-256
+packages/code-mode/extensions/code-mode.async.test.ts
+  s_cc90d1f38ef667::t_76ed1f311e90b1 1-299
+packages/code-mode/README.md
+  s_cc90d1f38ef667::t_bd2417dad27b4b 99-162
+packages/default-prompt/prompts/default.md
+  s_cc90d1f38ef667::t_2caf73a2bfe9b3 198-218
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e3c648ec3042a3b8a5d3d8bd12b4e1565fa8bbd7",
+  "prompts": {},
+  "sessions": {
+    "s_cc90d1f38ef667": {
+      "agent_id": {
+        "tool": "Feryal Io Kaltenegger",
+        "id": "019e69d3-e1f2-7d6f-a8c8-19b05456979d",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
