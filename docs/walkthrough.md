@@ -96,6 +96,19 @@ teams.on("fixer", "completed")
 
 No polling by a human. No keeping the terminal open. **The agent monitors itself.**
 
+### And when the whole block is heavy — fire it async
+
+`console.wake` is for monitoring while you do other work. When the work IS the block — a cold build, a multi-step deploy, a long bounce — there's nothing to monitor. Fire the whole thing async:
+
+```json
+{ "tool": "execute_code", "args": {
+  "code": "const built = await bashBgStart({ command: 'cargo build --release' }).timeout(900_000);\nawait Bash({ command: 'spacetime publish gso', timeout: 120 });\nawait Bash({ command: './run.sh bounce' });\nconsole.log('bounce complete');",
+  "async": true
+} }
+```
+
+The tool call returns INSTANTLY with a jobId. The work runs in the background, you keep the TUI for typing/scrolling/whatever. When the pipeline finishes, a follow-up turn fires with the result (`[async execute_code <jobId> completed · 12.3s]\n<output>`). Inspect or kill in-flight jobs with the `execute_code_async_list` / `execute_code_async_kill` direct tools.
+
 ### Parallel I/O — stop waiting around
 
 ```javascript

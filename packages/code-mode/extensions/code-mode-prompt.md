@@ -163,6 +163,25 @@ for (let i = 0; i < 9; i++) {
 await mesh.tell({ sessionId: 'ralph', message: "ping me when committed" }); // ❌
 ```
 
+**Pattern 3 — the WHOLE block is heavy work: `execute_code({ async: true })`:**
+
+Patterns 1 and 2 are for monitoring something while you do other work. They put a small monitor on `$` and you return from the current block.
+
+When the work IS the block — a cold build, a multi-step deploy, a long bounce pipeline — there's no monitoring shape. You're just running code that takes minutes. Fire the entire execute_code asynchronously instead:
+
+```json
+{ "tool": "execute_code", "args": {
+  "code": "<long pipeline>",
+  "async": true
+} }
+```
+
+The tool returns INSTANTLY with a jobId. The code runs in the background. When it finishes (or errors), the result is delivered as a follow-up turn (`[async execute_code <jobId> completed · 12.3s]\n<output>`). The TUI stays interactive the entire time; the user can type, scroll, /cancel.
+
+Concurrent execute_code calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it. If you fire async work, react to its follow-up rather than firing more execute_code in the meantime.
+
+To inspect or kill an in-flight async job, use the **direct tools** `execute_code_async_list` and `execute_code_async_kill` (they bypass the mutex). The sandbox functions `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` exist too but they require entering execute_code, which would wait on the mutex — only useful for post-completion cleanup.
+
 **Rules:**
 - If the agent is idle → `console.wake` triggers a turn immediately.
 - If the agent is currently streaming a response → `console.wake` passes `deliverAs: "followUp"` to `pi.sendUserMessage`, which queues the wake safely. The wake lands as the next turn when the current one finishes. **Do NOT** call `pi.sendUserMessage` directly — it requires the explicit `deliverAs` option and throws `"Agent is already processing"` otherwise, silently losing your wake.
@@ -170,6 +189,7 @@ await mesh.tell({ sessionId: 'ralph', message: "ping me when committed" }); // �
 - For **team workers**, always prefer `teams.on(name, type)` over sleep-polling `teams.list()`. It's event-driven, faster, and the canonical pattern.
 - For **mesh peers**, the background-poll + `console.wake` pattern above is **the** canonical shape. Foreground sleep-loops and "ping me back" tells are both banned — the former blocks the agent, the latter creates babble-loops between linear synchronous agents.
 - For non-event sources (file tails, generic command output), use the same background-poll + `console.wake` shape.
+- For a **single execute_code block that just takes too long** to be a foreground tool call, prefer `execute_code({ async: true })` over hand-rolling a `console.wake` monitor — the async path uses the same follow-up channel but the boilerplate is gone.
 
 ### Async across calls
 

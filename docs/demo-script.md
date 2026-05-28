@@ -259,6 +259,29 @@ console.log(tests.exitCode === 0 ? '✅ All tests pass' : '❌ Tests failed');
 **Narration:** "Find dead code. Remove it. Run tests. One block. One decision. 
 This is what coding assistance should feel like."
 
+### Demo 5.3: Long pipelines without a frozen TUI
+
+```json
+{ "tool": "execute_code", "args": {
+  "code": "const built = await bashBgStart({ command: 'cargo build --release' }).timeout(900_000);\nawait Bash({ command: 'spacetime publish gso', timeout: 120 });\nawait Bash({ command: './run.sh bounce' });\nconsole.log('bounce complete:', built.status);",
+  "async": true
+} }
+```
+
+**Result, instant:**
+```
+🚀 async execute_code started — jobId=exec-a3f2c1
+Result will arrive as a follow-up turn when done.
+```
+
+**While the cold build is running, the human keeps typing. Twelve minutes later, a new turn fires:**
+```
+[async execute_code exec-a3f2c1 completed · 12m 4s]
+bounce complete: exited
+```
+
+**Narration:** "A real bounce — cold cargo build, spacetime publish, sidecar restart — takes twelve minutes. With `async: true`, the tool call returns instantly. The TUI stays interactive. The human keeps editing files, scrolling history, queueing follow-ups. When the pipeline finishes, the agent wakes up with the result tagged by job ID. The mutex makes sure no other execute_code touches the shared store mid-flight. The kill switch lives in two direct tools that bypass the mutex. **No frozen TUI. Ever.**"
+
 ---
 
 ## Closing (15s)

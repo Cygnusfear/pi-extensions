@@ -16,7 +16,7 @@
 
 ## What you get
 
-- **Code mode** — write JS that calls 8 (whatever, or 200) tools in parallel from a single block, with variable passthrough between blocks, session management- more whatever.
+- **Code mode** — write JS that calls 8 (whatever, or 200) tools in parallel from a single block, with variable passthrough between blocks, session management- more whatever. Heavy work (cold builds, deploys, long pipelines) can run async — the TUI stays interactive while the result delivers as a follow-up turn.
 - **Mesh networking** — P2P agent communication with zero servers (Zenoh via bun:ffi), between sessions or teams.
 - **Teams** — spawn worker agents across different models, collect results, do work, more whatever ⌨️🐒
 - **Git safety** — blocks destructive commands, tracks AI authorship
