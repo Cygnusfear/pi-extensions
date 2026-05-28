@@ -147,6 +147,45 @@ interface CodeModeDetails {
   error?: string;
   lineCount: number;
   code: string;
+  /** Only set when execute_code is fired with `async: true`. */
+  jobId?: string;
+  /** Only set when execute_code is fired with `async: true`. "running" while in flight. */
+  asyncStatus?: "running";
+}
+
+// ── Async execute_code job tracking ─────────────────────────────────────────
+//
+// When the caller passes `async: true`, execute_code returns a jobId
+// immediately and runs the code in the background. The result is delivered
+// later as a follow-up turn via pi.sendMessage.
+//
+// asyncJobs holds the still-running jobs so executeCodeAsyncList /
+// executeCodeAsyncKill can inspect / cancel them.
+//
+// pendingExecution is the mutex: every execute_code call awaits it before
+// starting, so concurrent calls serialize on the shared vm.Context (only one
+// runInContext at a time, no $-store races).
+
+interface AsyncJobRecord {
+  jobId: string;
+  code: string;
+  startedAt: number;
+  abortController: AbortController;
+  promise: Promise<void>;
+}
+
+const asyncJobs = new Map<string, AsyncJobRecord>();
+let pendingExecution: Promise<void> | null = null;
+
+function nextAsyncJobId(): string {
+  // 6-hex random suffix — enough for human-readability and uniqueness within a process.
+  const hex = Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+  return `exec-${hex}`;
+}
+
+function codePreview(code: string, max = 80): string {
+  const trimmed = code.trim().split("\n")[0]?.trim() ?? "";
+  return trimmed.length > max ? trimmed.slice(0, max - 1) + "…" : trimmed;
 }
 
 // Code Execution Engine (persistent context)
@@ -414,6 +453,25 @@ export default function (pi: ExtensionAPI) {
     };
     for (const [name, preset] of Object.entries(HL_PRESETS)) (hlFn as any)[name] = preset;
     registerSandboxFn("ouija", hlFn);
+
+    // executeCodeAsyncList — inspect pending async execute_code jobs from inside a code block.
+    registerSandboxFn("executeCodeAsyncList", () => {
+      const now = Date.now();
+      return [...asyncJobs.values()].map((j) => ({
+        jobId: j.jobId,
+        codePreview: codePreview(j.code),
+        runtimeMs: now - j.startedAt,
+      }));
+    });
+
+    // executeCodeAsyncKill — abort a runaway async job. Returns true if a job was killed.
+    registerSandboxFn("executeCodeAsyncKill", (jobId: string) => {
+      const job = asyncJobs.get(jobId);
+      if (!job) return false;
+      try { job.abortController.abort(new Error("Killed via executeCodeAsyncKill")); } catch { /* ignore */ }
+      // Don't await; the .finally in the fire path will unregister + deliver the follow-up.
+      return true;
+    });
   }
 
   // Context window management — filter messages before LLM call
@@ -594,6 +652,15 @@ export default function (pi: ExtensionAPI) {
           minimum: 1,
         }),
       ),
+      async: Type.Optional(
+        Type.Boolean({
+          description:
+            "When true, return a jobId immediately and run the code in the background. The result is delivered " +
+            "later as a follow-up turn (same channel as console.wake). Use for long-running work that shouldn't " +
+            "block the TUI. Concurrent execute_code calls serialize on the shared VM context. Manage pending jobs " +
+            "with executeCodeAsyncList() and executeCodeAsyncKill(jobId).",
+        }),
+      ),
     }),
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       // Unbounded by default. If params.timeout is set, honor exactly — no cap.
@@ -619,69 +686,166 @@ export default function (pi: ExtensionAPI) {
       currentOuijaSessionFile = (ctx as any).sessionManager?.getSessionFile?.() ?? null;
 
       const model = (ctx as any).model as { provider: string; id: string } | undefined;
-      const { output, error, duration } = await executeInSession(
+
+      // ── Per-session mutex ────────────────────────────────────────────────
+      // The CodeModeSession shares one vm.Context. Concurrent runInContext
+      // calls would race on the $ store and on injected globals. Serialize
+      // every execute_code call (sync or async) on pendingExecution.
+      //
+      // For SYNC, the natural await of executeInSession satisfies this. For
+      // ASYNC, the bg promise must replace pendingExecution so the next call
+      // waits for it before starting.
+      if (pendingExecution) {
+        try { await pendingExecution; } catch { /* prior job already surfaced its error */ }
+      }
+
+      // Common deps builder — sync and async paths use the same shape.
+      // `runtimeSignal` differs: sync uses the tool-call signal so /cancel
+      // works; async uses a fresh controller so the work outlives the call.
+      const buildDeps = (runtimeSignal: AbortSignal) => ({
+        signal: runtimeSignal,
+        cwd: ctx.cwd,
+        model: model ?? { provider: "unknown", id: "unknown" },
+        modelRegistry: (ctx as any).modelRegistry,
+        executionTimeoutMs: timeoutMs,
+        sessionManager: (ctx as any).sessionManager,
+        getContextUsage: (ctx as any).getContextUsage,
+        confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
+          | ((title: string, body: string) => Promise<boolean>)
+          | undefined,
+        compact: (ctx as any).compact?.bind(ctx),
+        setLabel: (id: string, label: string | undefined) => pi.setLabel(id, label),
+        abort: () => ctx.abort(),
+        sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) =>
+          pi.sendUserMessage(content, options),
+        sendMessage: (
+          message: { customType: string; content: string; display?: boolean },
+          options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
+        ) => (pi as any).sendMessage?.(message, options),
+        contextGuardEnabled,
+        agentGitIdentity: model ? deriveAgentGitIdentity(model) : undefined,
+        requestSquash: (options: { continue?: string } | undefined) => {
+          pendingSquash = { continue: options?.continue };
+        },
+        requestCheckout: (info: { targetId: string; enrichedMessage: string; backupTag?: string }) => {
+          pendingCheckout = info;
+        },
+        setContextSize: (n: number | null) => {
+          contextSize = n;
+        },
+      });
+
+      // Build the text result body from an ExecutionResult. Shared by sync + async.
+      const buildResultText = (output: string, error: string | undefined): string => {
+        let text = output || "";
+        if (error) {
+          text += (text ? "\n\n" : "") + `Error: ${error}`;
+        }
+        if (!text) {
+          text = "(no output — use console.log() to return results)";
+        }
+        const ctxFooter = buildContextFooter(ctx as any, {
+          contextGuardEnabled,
+          suppressBecauseCompactionScheduled: pendingSquash !== null,
+        });
+        if (ctxFooter) {
+          text += "\n\n" + ctxFooter;
+        }
+        if (text.length > MAX_OUTPUT_LENGTH) {
+          const tempFile = path.join(os.tmpdir(), `pi-codemode-${Date.now()}.log`);
+          fs.writeFileSync(tempFile, text, "utf-8");
+          text =
+            text.slice(0, MAX_OUTPUT_LENGTH) +
+            `\n\n[output truncated. Full output saved to: ${tempFile}]`;
+        }
+        return text;
+      };
+
+      // ── ASYNC path ───────────────────────────────────────────────────────
+      if (params.async) {
+        const jobId = nextAsyncJobId();
+        const startedAt = Date.now();
+        // Fresh controller — the tool-call signal would fire when this execute
+        // returns, killing the bg work instantly. We want the work to outlive.
+        const bgAbort = new AbortController();
+        // If the host explicitly aborts (e.g. session shutdown), propagate.
+        if (signal) {
+          const onHostAbort = () => bgAbort.abort(new Error("Host aborted execute_code session"));
+          if (signal.aborted) onHostAbort();
+          else signal.addEventListener("abort", onHostAbort, { once: true });
+        }
+
+        const bgWork = (async () => {
+          const result = await executeInSession(sess, params.code, buildDeps(bgAbort.signal));
+          // Build the follow-up message body. Same shape as a sync result, plus
+          // a jobId tag so the agent can correlate.
+          const body = buildResultText(result.output, result.error);
+          const status = result.error ? "failed" : "completed";
+          const durStr = result.duration < 1000 ? `${result.duration}ms` : `${(result.duration / 1000).toFixed(1)}s`;
+          const followUp = `[async execute_code ${jobId} ${status} · ${durStr}]\n\n${body}`;
+          try {
+            (pi as any).sendMessage?.(
+              { customType: "async-execute-code-result", content: followUp, display: true },
+              { deliverAs: "followUp", triggerTurn: true },
+            );
+          } catch (err) {
+            // sendMessage shouldn't throw, but if it does we don't want to crash the host.
+            // process-guard would catch it anyway, but cleaner to swallow here.
+            const _ignore = err;
+          }
+        })().finally(() => {
+          asyncJobs.delete(jobId);
+          // Only clear the mutex if WE are still the holder. A later async job
+          // may have already overwritten pendingExecution.
+          if (pendingExecution === record.promise) pendingExecution = null;
+        });
+
+        const record: AsyncJobRecord = {
+          jobId,
+          code: params.code,
+          startedAt,
+          abortController: bgAbort,
+          promise: bgWork,
+        };
+        asyncJobs.set(jobId, record);
+        pendingExecution = bgWork;
+
+        const preview = codePreview(params.code);
+        const startedText =
+          `🚀 async execute_code started — jobId=${jobId}\n` +
+          (preview ? `first line: ${preview}\n` : "") +
+          `\nResult will arrive as a follow-up turn when done. ` +
+          `Manage via executeCodeAsyncList() / executeCodeAsyncKill("${jobId}"). ` +
+          `Next execute_code call will wait for this one to finish.`;
+        return {
+          content: [{ type: "text" as const, text: startedText }],
+          details: {
+            duration: 0,
+            lineCount: startedText.split("\n").length,
+            code: params.code,
+            jobId,
+            asyncStatus: "running",
+          } satisfies CodeModeDetails,
+        };
+      }
+
+      // ── SYNC path (default) ──────────────────────────────────────────────
+      const syncPromise = executeInSession(
         sess,
         params.code,
-        {
-          signal: signal ?? new AbortController().signal,
-          cwd: ctx.cwd,
-          model: model ?? { provider: "unknown", id: "unknown" },
-          modelRegistry: (ctx as any).modelRegistry,
-          executionTimeoutMs: timeoutMs,
-          sessionManager: (ctx as any).sessionManager,
-          getContextUsage: (ctx as any).getContextUsage,
-          confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
-            | ((title: string, body: string) => Promise<boolean>)
-            | undefined,
-          compact: (ctx as any).compact?.bind(ctx),
-          setLabel: (id: string, label: string | undefined) => pi.setLabel(id, label),
-          abort: () => ctx.abort(),
-          sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) =>
-            pi.sendUserMessage(content, options),
-          sendMessage: (
-            message: { customType: string; content: string; display?: boolean },
-            options?: { deliverAs?: "steer" | "followUp"; triggerTurn?: boolean },
-          ) => (pi as any).sendMessage?.(message, options),
-          contextGuardEnabled,
-          agentGitIdentity: model ? deriveAgentGitIdentity(model) : undefined,
-          requestSquash: (options) => {
-            pendingSquash = { continue: options?.continue };
-          },
-          requestCheckout: (info) => {
-            pendingCheckout = info;
-          },
-          setContextSize: (n) => {
-            contextSize = n;
-          },
-        },
+        buildDeps(signal ?? new AbortController().signal),
       );
-
-      let text = output || "";
-      if (error) {
-        text += (text ? "\n\n" : "") + `Error: ${error}`;
+      // pendingExecution is a void-typed mirror so callers don't see the result type.
+      const syncMutex = syncPromise.then(() => undefined, () => undefined);
+      pendingExecution = syncMutex;
+      let syncResult: { output: string; error?: string; duration: number };
+      try {
+        syncResult = await syncPromise;
+      } finally {
+        if (pendingExecution === syncMutex) pendingExecution = null;
       }
-      if (!text) {
-        text = "(no output — use console.log() to return results)";
-      }
-
-      // Context usage footer (shown when ≥ 30%, warning at ≥ 40%)
-      const ctxFooter = buildContextFooter(ctx as any, {
-        contextGuardEnabled,
-        suppressBecauseCompactionScheduled: pendingSquash !== null,
-      });
-      if (ctxFooter) {
-        text += "\n\n" + ctxFooter;
-      }
-
-      // Truncate if too large
-      if (text.length > MAX_OUTPUT_LENGTH) {
-        const tempFile = path.join(os.tmpdir(), `pi-codemode-${Date.now()}.log`);
-        fs.writeFileSync(tempFile, text, "utf-8");
-        text =
-          text.slice(0, MAX_OUTPUT_LENGTH) +
-          `\n\n[output truncated. Full output saved to: ${tempFile}]`;
-      }
-
+      const { output, error, duration } = syncResult;
+      const text = buildResultText(output, error);
       const lineCount = text.split("\n").length;
       // Include any images stashed by readImage()
       const imageContent = getSession().images.map((img) => ({

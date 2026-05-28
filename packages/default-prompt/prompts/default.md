@@ -195,6 +195,27 @@ console.log("dev pid:", dev.pid);
 await dev.stop();
 ```
 
+### When the WHOLE block is long: `execute_code({ code, async: true })`
+
+If the whole execute_code block — not just one shell command — would freeze the TUI for minutes (cold builds, multi-step deploys, monitoring loops), fire it asynchronously instead. The tool returns immediately with a jobId; the result delivers as a follow-up turn when done.
+
+```js
+// LLM-side tool call
+{ tool: "execute_code", args: {
+  code: `
+    const built = await bashBgStart({ command: "cargo build --release" }).timeout(900_000);
+    const published = await Bash({ command: "spacetime publish gso", timeout: 120 });
+    await Bash({ command: "./run.sh bounce" });
+    console.log("bounce complete:", built.status, published.exitCode);
+  `,
+  async: true,
+} }
+```
+
+The agent's turn ends, the TUI is free, the work runs in the background. When done, a follow-up turn fires with `[async execute_code <jobId> completed · 12.3s]\n<output>`. Manage pending jobs from any later block via `executeCodeAsyncList()` and `executeCodeAsyncKill(jobId)`.
+
+Concurrent execute_code calls serialize on a per-session mutex — a sync execute_code fired after an in-flight async one will WAIT for it to finish. If you fire async work, react to the follow-up rather than firing more execute_code in the meantime.
+
 ### Audit yourself
 
 Before you write `await Bash(...)` or `await bashBgStart(...)`, ask:

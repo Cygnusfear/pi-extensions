@@ -225,6 +225,35 @@ declare function bashBgStop(input: {
  */
 declare function bashBgList(): Promise<Array<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null }>>;
 
+// =====================================================================
+// Async execute_code job management
+// =====================================================================
+//
+// When the host fires `execute_code({ code, async: true })`, the tool
+// returns immediately with a jobId. The result is delivered later as a
+// follow-up turn (same channel as console.wake). These two primitives
+// let an agent inspect or kill the pending jobs from inside any execute_code
+// block. Concurrent execute_code calls serialize on a single per-session
+// mutex — a subsequent execute_code waits for the in-flight async one.
+
+/**
+ * List async execute_code jobs that have not yet delivered their result.
+ *
+ * Each entry is { jobId, codePreview, runtimeMs }. `runtimeMs` is wall-clock
+ * time since the job started. Returns an empty array if nothing is pending.
+ */
+declare function executeCodeAsyncList(): Array<{ jobId: string; codePreview: string; runtimeMs: number }>;
+
+/**
+ * Abort a pending async execute_code job. Returns true if a job with the given
+ * jobId was found and signalled, false if no such job exists.
+ *
+ * The bg work catches the abort, builds an error result, and still delivers
+ * the follow-up turn so the agent learns the kill landed. Use this for
+ * runaway infinite-loop async blocks.
+ */
+declare function executeCodeAsyncKill(jobId: string): boolean;
+
 /**
  * Execute Python code in a subprocess.
  * Writes code to a temp file and runs `python3` on it — no shell quoting issues.

@@ -96,6 +96,70 @@ const files = await Glob({ pattern: '**/*.ts' });
 const [search, history] = await Promise.allSettled([$.search, $.history]);
 ```
 
+## Async execute_code — long work without freezing the TUI
+
+By default `execute_code` is synchronous from the agent's perspective: the tool call returns when the code finishes, and the agent's turn waits. For long-running work that would otherwise block the TUI for minutes (cold builds, deploys, monitoring), pass `async: true` to return a jobId immediately and have the result delivered as a follow-up turn.
+
+```js
+// LLM-side tool call
+{ tool: "execute_code", args: { code: "<long work>", async: true } }
+```
+
+What you get back instantly:
+
+```text
+🚀 async execute_code started — jobId=exec-a3f2c1
+first line: const r = await Bash({ command: "cargo build --release" })
+
+Result will arrive as a follow-up turn when done. Manage via
+executeCodeAsyncList() / executeCodeAsyncKill("exec-a3f2c1"). Next
+execute_code call will wait for this one to finish.
+```
+
+When the bg work finishes, a follow-up turn fires with:
+
+```text
+[async execute_code exec-a3f2c1 completed · 2.3s]
+
+<output>
+```
+
+Errors deliver the same shape with `failed` instead of `completed`.
+
+### When to use it
+
+Use `async: true` whenever the code might run longer than ~30s. Cold cargo builds, deploys, multi-step bounces, monitors that watch a peer. The TUI stays interactive — the user can type, scroll, switch buffers — while the work runs in the background.
+
+Use the default sync mode for everything else. Reads, edits, quick greps, single shell commands. The follow-up-turn cost only pays for itself when the work would otherwise stall the TUI for a meaningful time.
+
+### Concurrency: per-session mutex
+
+Every `execute_code` call (sync or async) serializes on a single per-session mutex. The CodeModeSession shares one `vm.Context` — concurrent `runInContext` calls would race on the `$` store and on injected globals. The mutex prevents that.
+
+Practical consequence: if you fire async job A, then call execute_code B (sync or async), B waits for A to finish before it starts. The agent's turn for B is blocked until A is done. This is intentional — it makes the shared state honest.
+
+### Managing pending jobs
+
+Two sandbox primitives let any execute_code block inspect or cancel pending async work:
+
+```js
+// List async jobs that haven't delivered yet
+const pending = executeCodeAsyncList();
+// → [{ jobId: "exec-a3f2c1", codePreview: "const r = await Bash(...)", runtimeMs: 12450 }]
+
+// Abort a runaway job
+const killed = executeCodeAsyncKill("exec-a3f2c1");
+// → true if the job was found and signalled, false if no such job
+```
+
+The killed job still delivers a follow-up turn (showing the abort error) so the agent learns the kill landed.
+
+### Footgun and how to avoid it
+
+The agent's turn ENDS after the async tool returns. If the agent calls more tools or generates more text after the async-execute_code returns, those happen in the same turn. The result follow-up arrives in a LATER turn, possibly while the agent is reacting to a new user message. Treat the follow-up like any other interrupting event — it's a fresh turn with the result tagged by jobId.
+
+If you want to wait for the async result in the same turn, don't use async — just use the default sync mode. The async opt-in is specifically for "I want to start this work and let the TUI stay responsive."
+
 ## Background self-wake: `console.wake()`
 
 `console.log()` only writes to the current block output — gone when the block returns. Background promises that fire minutes later would normally write into the void.

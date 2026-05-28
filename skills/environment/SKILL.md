@@ -310,6 +310,14 @@ await bashBgStart({ command: "./bounce.sh" });           // bounce-length TUI fr
 
 If you can't promise "definitely under 30s and definitely exits," default to `bashBgStart` with a `.timeout(ms)` or `.then(cb)`.
 
+If the WHOLE block is long (cold build + deploy + bounce, multi-step monitoring), fire the whole `execute_code` async:
+
+```json
+{ "tool": "execute_code", "args": { "code": "...long pipeline...", "async": true } }
+```
+
+You get a jobId back instantly; the result delivers as a follow-up turn. Manage via `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` from any later block. Concurrent `execute_code` calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it.
+
 ## The tool boundary
 
 Some tools only work inside `execute_code` (Read, Write, Edit, Bash, Glob, etc). Others are direct LLM tools (teams, editor_*, mesh_*, git-ai). Most direct tools have sandbox wrappers with the same name in camelCase: `meshTell`, `editorOpen`, `gitAi`.
@@ -325,6 +333,8 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Read files | `Read({ path })` in execute_code |
 | Short shell command | `Bash({ command })` — 30s default, NEVER raise timeout past ~60s |
 | Long shell command | `bashBgStart({ command }).timeout(ms)` or `.each(cb).then(cb)` — never bare `await` for >30s |
+| Long WHOLE block | `execute_code({ code, async: true })` — returns jobId, result delivered as follow-up turn |
+| Manage async exec jobs | `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` — inspect or cancel pending bg work |
 | Search session history | `ouija({ action: "search", query })` |
 | Search prior context | `ouija({ action: "search", query })` |
 | Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |
