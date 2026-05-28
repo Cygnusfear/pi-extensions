@@ -163,6 +163,14 @@ for (let i = 0; i < 9; i++) {
 await mesh.tell({ sessionId: 'ralph', message: "ping me when committed" }); // ❌
 ```
 
+**Auto-promote safety net (no opt-in required):**
+
+If a default sync `execute_code` is still running 60 seconds in, the tool auto-promotes it to async on its own: it returns a "still running" stub with a jobId, the bg work keeps going, the real result delivers as a follow-up turn tagged `[async execute_code <jobId> ... auto-promoted from sync]`.
+
+When you see a stub like `⏳ execute_code auto-promoted to async after 60s — jobId=exec-xxxxxx`, your previous call was promoted. Wait for the follow-up turn for the actual result. Don't fire another execute_code that depends on the result — the mutex will make it wait anyway, but you'd be paying turns for nothing. To abort the promoted job, call `execute_code_async_kill` with the jobId.
+
+This is a backstop for "agent forgot `async: true` and the TUI was about to freeze." When you KNOW the work is heavy, pass `async: true` from the start — you get the jobId at t=0 instead of t=60s, and the TUI frees earlier.
+
 **Pattern 3 — the WHOLE block is heavy work: `execute_code({ async: true })`:**
 
 Patterns 1 and 2 are for monitoring something while you do other work. They put a small monitor on `$` and you return from the current block.

@@ -131,7 +131,8 @@ describe("execute_code { async: true }", () => {
 		expect(text).toContain(result.details.jobId);
 
 		// Let the bg work resolve, then assert the follow-up was delivered.
-		await flushBackground(500);
+		// 800ms cushion: 300ms sleep + executeInSession overhead + microtask hops.
+		await flushBackground(800);
 		const followUp = pi.sentMessages.find(
 			(m) => m.customType === "async-execute-code-result",
 		);
@@ -390,5 +391,217 @@ describe("execute_code_async_list / execute_code_async_kill (direct tools)", () 
 		expect(result.details.killed).toBe(false);
 		const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
 		expect(text).toContain("No pending async job");
+	});
+});
+
+
+describe("execute_code auto-promote (TUI-freeze safety net)", () => {
+	test("fast sync call (well under threshold) returns inline — no promotion", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "300";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+			const result = await executeCode.execute(
+				"tc-promote-fast",
+				{ code: "await new Promise((r) => setTimeout(r, 50)); console.log('fast');" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(result.details.jobId).toBeUndefined();
+			expect(result.details.asyncStatus).toBeUndefined();
+			const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(text).toContain("fast");
+			// No follow-up sent for inline results.
+			const followUps = pi.sentMessages.filter(
+				(m) => m.customType === "async-execute-code-result",
+			);
+			expect(followUps.length).toBe(0);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
+	test("slow sync call auto-promotes at threshold and delivers a follow-up", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+
+			const t0 = Date.now();
+			const result = await executeCode.execute(
+				"tc-promote-slow",
+				{ code: "await new Promise((r) => setTimeout(r, 600)); console.log('after promote');" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const elapsed = Date.now() - t0;
+
+			// Returned around the threshold — definitely before the 600ms work
+			// would have finished. Allow generous bounds for CI jitter.
+			expect(elapsed).toBeGreaterThanOrEqual(150);
+			expect(elapsed).toBeLessThan(500);
+			expect(result.details.jobId).toMatch(/^exec-/);
+			expect(result.details.asyncStatus).toBe("running");
+			const stub = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(stub).toContain("auto-promoted to async");
+			expect(stub).toContain(result.details.jobId);
+
+			// Wait for the bg work to finish and the follow-up to land.
+			await flushBackground(700);
+			const followUp = pi.sentMessages.find(
+				(m) => m.customType === "async-execute-code-result",
+			);
+			expect(followUp).toBeDefined();
+			expect(followUp?.options?.deliverAs).toBe("followUp");
+			expect(followUp?.options?.triggerTurn).toBe(true);
+			expect(followUp?.content).toContain("auto-promoted from sync");
+			expect(followUp?.content).toContain("completed");
+			expect(followUp?.content).toContain("after promote");
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
+	test("execute_code_async_list shows auto-promoted jobs in-flight", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+			const listTool = pi.tools.get("execute_code_async_list");
+
+			const promotedResult = await executeCode.execute(
+				"tc-promote-list",
+				{ code: "await new Promise((r) => setTimeout(r, 800));" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const jobId = promotedResult.details.jobId as string;
+			expect(jobId).toMatch(/^exec-/);
+
+			// Inspect mid-flight via the direct tool (bypasses mutex)
+			const listResult = await listTool.execute(
+				"tc-promote-list-2",
+				{},
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(listResult.details.jobs.length).toBeGreaterThanOrEqual(1);
+			const found = listResult.details.jobs.find((j: any) => j.jobId === jobId);
+			expect(found).toBeDefined();
+
+			await flushBackground(900);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
+	test("execute_code_async_kill aborts a promoted job", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+			const killTool = pi.tools.get("execute_code_async_kill");
+
+			const promoted = await executeCode.execute(
+				"tc-promote-kill",
+				{ code: "await new Promise((r) => setTimeout(r, 2000));" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const jobId = promoted.details.jobId as string;
+
+			const killResult = await killTool.execute(
+				"tc-promote-kill-2",
+				{ jobId },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(killResult.details.killed).toBe(true);
+
+			await flushBackground(400);
+			const followUp = pi.sentMessages.find(
+				(m) => m.customType === "async-execute-code-result",
+			);
+			expect(followUp).toBeDefined();
+			expect(followUp?.content).toContain(jobId);
+			// The killed job's follow-up contains 'failed' (or aborted)
+			expect(followUp?.content.toLowerCase()).toMatch(/failed|aborted/);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
+	test("a subsequent execute_code waits for the promoted job (mutex still applies)", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+
+			// Promote a job that runs 500ms (will be promoted at 200ms, finishes at 500ms).
+			await executeCode.execute(
+				"tc-promote-mutex-1",
+				{ code: "await new Promise((r) => setTimeout(r, 500)); $.markedByPromoted = true;" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+
+			// Next sync call must wait for the promoted job before starting.
+			const t0 = Date.now();
+			const r2 = await executeCode.execute(
+				"tc-promote-mutex-2",
+				{ code: "console.log('marked=', $.markedByPromoted);" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const elapsed = Date.now() - t0;
+			expect(elapsed).toBeGreaterThanOrEqual(200);
+			const text = r2.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(text).toContain("marked= true");
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
+	test("explicit { async: true } bypasses the race (no promotion threshold delay)", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "5000";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+
+			const t0 = Date.now();
+			const result = await executeCode.execute(
+				"tc-explicit-async",
+				{ code: "await new Promise((r) => setTimeout(r, 300));", async: true },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const elapsed = Date.now() - t0;
+			// Should return immediately — not wait the 5000ms promote threshold.
+			expect(elapsed).toBeLessThan(100);
+			expect(result.details.asyncStatus).toBe("running");
+			const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(text).toContain("async execute_code started");
+			// Specifically NOT the auto-promote message.
+			expect(text).not.toContain("auto-promoted");
+
+			await flushBackground(400);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
 	});
 });

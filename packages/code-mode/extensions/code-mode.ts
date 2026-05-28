@@ -188,6 +188,18 @@ function codePreview(code: string, max = 80): string {
   return trimmed.length > max ? trimmed.slice(0, max - 1) + "…" : trimmed;
 }
 
+// Sync execute_code auto-promotes to async after this threshold. The TUI-freeze
+// safety net: when an agent forgets to pass `async: true` for heavy work, the
+// tool returns a "still running" stub at the threshold so the agent's turn
+// ends and the TUI is freed. The bg work keeps going; result delivers as a
+// follow-up turn when done. Override via PI_CODE_MODE_PROMOTE_MS env var.
+const DEFAULT_SYNC_PROMOTE_THRESHOLD_MS = 60_000;
+function getSyncPromoteThresholdMs(): number {
+  const fromEnv = Number.parseInt(process.env.PI_CODE_MODE_PROMOTE_MS ?? "", 10);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return DEFAULT_SYNC_PROMOTE_THRESHOLD_MS;
+}
+
 // Code Execution Engine (persistent context)
 // =============================================================================
 
@@ -833,22 +845,109 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // ── SYNC path (default) ──────────────────────────────────────────────
+      // ── SYNC path (default) with TUI-freeze safety net ──────────────────
+      //
+      // We race executeInSession against a promotion timer. If the work
+      // finishes first, normal sync return — agent gets the result inline,
+      // zero turn-cost. If the timer fires first (default 60s), we auto-
+      // promote: the work keeps running in the background, but the tool
+      // returns a "still running" stub so the agent's turn ends and the
+      // TUI is freed. The eventual result delivers as a follow-up turn via
+      // the same channel async: true uses.
+      //
+      // Fresh AbortController for the bg path: linking the host signal as a
+      // listener so /cancel still works after promotion. We don't use the
+      // tool-call signal directly because some pi-agent versions dispose it
+      // when the tool call returns (which would instantly kill the promoted
+      // bg work).
+      const bgAbort = new AbortController();
+      if (signal) {
+        const onHostAbort = () => bgAbort.abort(new Error("Host aborted execute_code session"));
+        if (signal.aborted) onHostAbort();
+        else signal.addEventListener("abort", onHostAbort, { once: true });
+      }
+
+      const syncStartedAt = Date.now();
       const syncPromise = executeInSession(
         sess,
         params.code,
-        buildDeps(signal ?? new AbortController().signal),
+        buildDeps(bgAbort.signal),
       );
       // pendingExecution is a void-typed mirror so callers don't see the result type.
       const syncMutex = syncPromise.then(() => undefined, () => undefined);
       pendingExecution = syncMutex;
-      let syncResult: { output: string; error?: string; duration: number };
-      try {
-        syncResult = await syncPromise;
-      } finally {
-        if (pendingExecution === syncMutex) pendingExecution = null;
+
+      const promoteMs = getSyncPromoteThresholdMs();
+      let promoteHandle: ReturnType<typeof setTimeout> | undefined;
+      const promotePromise = new Promise<"PROMOTE">((resolve) => {
+        promoteHandle = setTimeout(() => resolve("PROMOTE"), promoteMs);
+      });
+
+      type RaceWinner =
+        | { kind: "result"; r: { output: string; error?: string; duration: number } }
+        | { kind: "promote" };
+      const winner = await Promise.race<RaceWinner>([
+        syncPromise.then((r) => ({ kind: "result" as const, r })),
+        promotePromise.then(() => ({ kind: "promote" as const })),
+      ]);
+      if (promoteHandle) clearTimeout(promoteHandle);
+
+      if (winner.kind === "promote") {
+        // The sync call took too long. Promote to async: register the
+        // in-flight promise as an async job, attach a delivery handler,
+        // return a "still running" stub.
+        const jobId = nextAsyncJobId();
+        syncPromise
+          .then((result) => {
+            const body = buildResultText(result.output, result.error);
+            const status = result.error ? "failed" : "completed";
+            const durStr =
+              result.duration < 1000 ? `${result.duration}ms` : `${(result.duration / 1000).toFixed(1)}s`;
+            const followUp =
+              `[async execute_code ${jobId} ${status} · ${durStr} · auto-promoted from sync]\n\n${body}`;
+            try {
+              (pi as any).sendMessage?.(
+                { customType: "async-execute-code-result", content: followUp, display: true },
+                { deliverAs: "followUp", triggerTurn: true },
+              );
+            } catch (err) { const _ignore = err; }
+          })
+          .finally(() => {
+            asyncJobs.delete(jobId);
+            if (pendingExecution === syncMutex) pendingExecution = null;
+          });
+
+        const record: AsyncJobRecord = {
+          jobId,
+          code: params.code,
+          startedAt: syncStartedAt,
+          abortController: bgAbort,
+          promise: syncMutex,
+        };
+        asyncJobs.set(jobId, record);
+
+        const preview = codePreview(params.code);
+        const stub =
+          `⏳ execute_code auto-promoted to async after ${promoteMs / 1000}s — jobId=${jobId}\n` +
+          (preview ? `first line: ${preview}\n` : "") +
+          `\nThe code is still running in the background. TUI is now free. Result will arrive as a follow-up turn when done. ` +
+          `Manage via execute_code_async_list / execute_code_async_kill. ` +
+          `Next execute_code call will wait for this one to finish.`;
+        return {
+          content: [{ type: "text" as const, text: stub }],
+          details: {
+            duration: promoteMs,
+            lineCount: stub.split("\n").length,
+            code: params.code,
+            jobId,
+            asyncStatus: "running",
+          } satisfies CodeModeDetails,
+        };
       }
-      const { output, error, duration } = syncResult;
+
+      // winner.kind === "result" — normal sync return path.
+      if (pendingExecution === syncMutex) pendingExecution = null;
+      const { output, error, duration } = winner.r;
       const text = buildResultText(output, error);
       const lineCount = text.split("\n").length;
       // Include any images stashed by readImage()

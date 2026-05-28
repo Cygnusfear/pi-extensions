@@ -310,6 +310,8 @@ await bashBgStart({ command: "./bounce.sh" });           // bounce-length TUI fr
 
 If you can't promise "definitely under 30s and definitely exits," default to `bashBgStart` with a `.timeout(ms)` or `.then(cb)`.
 
+Safety net: a default sync `execute_code` that's still running after 60s **auto-promotes** to async on its own. You get back `⏳ execute_code auto-promoted to async after 60s — jobId=...` and the real result delivers as a follow-up turn. This is a backstop for "you forgot `async: true`"; if you know the work is heavy, pass `async: true` from the start so the TUI frees at t=0 instead of t=60s.
+
 If the WHOLE block is long (cold build + deploy + bounce, multi-step monitoring), fire the whole `execute_code` async:
 
 ```json
@@ -338,6 +340,7 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Short shell command | `Bash({ command })` — 30s default, NEVER raise timeout past ~60s |
 | Long shell command | `bashBgStart({ command }).timeout(ms)` or `.each(cb).then(cb)` — never bare `await` for >30s |
 | Long WHOLE block | `execute_code({ code, async: true })` — returns jobId, result delivered as follow-up turn |
+| Sync execute_code stuck >60s | Auto-promoted: stub returned with jobId, result delivers as follow-up turn |
 | Inspect / kill an IN-FLIGHT async exec | direct tools `execute_code_async_list` and `execute_code_async_kill` — bypass the mutex |
 | Inspect / kill AFTER an async exec delivered | sandbox fns `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` — needs an execute_code call |
 | Search session history | `ouija({ action: "search", query })` |

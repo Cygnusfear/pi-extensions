@@ -162,6 +162,22 @@ The agent's turn ENDS after the async tool returns. If the agent calls more tool
 
 If you want to wait for the async result in the same turn, don't use async — just use the default sync mode. The async opt-in is specifically for "I want to start this work and let the TUI stay responsive."
 
+### Auto-promote: sync execute_code becomes async at 60s
+
+Default sync `execute_code` has a TUI-freeze safety net. If the sync call is still running 60 seconds in, the tool **auto-promotes** to async: returns a "still running" stub, the bg work keeps going, the result delivers as a follow-up turn tagged `[async execute_code <jobId> ... auto-promoted from sync]`.
+
+| When | What happens |
+|---|---|
+| Sync call finishes in <60s | Normal inline return — zero behavior change |
+| Sync call still running at 60s | Auto-promote: stub returned, bg work continues, follow-up later |
+| Explicit `async: true` | Returns jobId at t=0, no 60s wait |
+
+The threshold is configurable via `PI_CODE_MODE_PROMOTE_MS` env var (positive integer milliseconds). Default is 60_000.
+
+**This is a safety net, not a substitute for explicit `async: true`.** If you know the work is heavy (cold build, long deploy), pass `async: true` from the start so the agent gets the jobId at t=0 and the TUI is freed immediately. The auto-promote catches the case where the agent forgot.
+
+Auto-promoted jobs are first-class async jobs: `execute_code_async_list` shows them, `execute_code_async_kill` aborts them, the per-session mutex serializes them like any other async work.
+
 ## Background self-wake: `console.wake()`
 
 `console.log()` only writes to the current block output — gone when the block returns. Background promises that fire minutes later would normally write into the void.

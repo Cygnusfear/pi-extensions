@@ -218,6 +218,19 @@ Concurrent execute_code calls serialize on a per-session mutex — a sync execut
 
 To inspect or kill an in-flight async job, use the **direct tools** `execute_code_async_list` and `execute_code_async_kill` (they bypass the mutex). The sandbox functions `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` exist too but they require entering execute_code, which would wait on the mutex — only useful for post-completion cleanup.
 
+### Safety net: sync execute_code AUTO-PROMOTES at 60s
+
+You don't have to remember `async: true`. If a default sync execute_code is still running 60 seconds in, it auto-promotes to async and returns a "still running" stub instead of blocking the TUI further. The bg work keeps going; the result delivers as a follow-up turn.
+
+When you see a tool result that looks like `⏳ execute_code auto-promoted to async after 60s — jobId=exec-xxxxxx`, that means:
+
+- Your previous execute_code took too long and was promoted — no result yet.
+- The real result is coming as a follow-up turn tagged `[async execute_code <jobId> ... auto-promoted from sync]`.
+- Don't fire another execute_code that depends on the result; wait for the follow-up first.
+- If you change your mind, call `execute_code_async_kill` with the jobId to abort.
+
+The auto-promote is a backstop, not a substitute for explicit `async: true` — if you KNOW the work is heavy, pass `async: true` from the start. The agent gets the jobId at t=0 instead of t=60s, and the TUI is freed earlier.
+
 ### Audit yourself
 
 Before you write `await Bash(...)` or `await bashBgStart(...)`, ask:

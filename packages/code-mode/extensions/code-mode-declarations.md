@@ -235,6 +235,12 @@ declare function bashBgList(): Promise<Array<{ id: string; pid: number; status: 
 // let an agent inspect or kill the pending jobs from inside any execute_code
 // block. Concurrent execute_code calls serialize on a single per-session
 // mutex — a subsequent execute_code waits for the in-flight async one.
+//
+// Auto-promote: even without `async: true`, a default sync execute_code
+// auto-promotes to async if it's still running after 60s (configurable via
+// PI_CODE_MODE_PROMOTE_MS env var). The tool returns a "still running" stub;
+// the bg work keeps going and delivers via follow-up turn. Auto-promoted
+// jobs are first-class — list/kill apply to them too.
 
 /**
  * List async execute_code jobs that have not yet delivered their result.
