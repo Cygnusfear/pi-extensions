@@ -265,6 +265,51 @@ const hits = await fffGrep({ query: "validateToken" });
 const hits = await fffMultiGrep({ patterns: ["validateToken", "validate_token"] });
 ```
 
+## Shell commands: `Bash` vs `bashBgStart` — don't freeze the TUI
+
+`execute_code` runs synchronously from the TUI's perspective. Every `await` you write can block the TUI until it resolves. `execute_code` has **no default timeout** — there's no rescue if your await never returns.
+
+**The trap:** `bashBgStart` now returns a thenable handle. `await bashBgStart({ command: "npm run dev" })` looks like a normal `await Bash(...)` but waits for child exit forever. Dev servers never exit. TUI hangs until `/cancel`.
+
+### Decision matrix
+
+| Command kind | Tool | Pattern |
+|---|---|---|
+| Quick, <30s | `Bash` | `await Bash({ command })` |
+| Medium, 30s–10min, exits | `bashBgStart` + deadline | `await bashBgStart({ command }).timeout(600_000)` |
+| Long, eventually exits | `bashBgStart` + react | `bashBgStart({ command }).each(line=>…).then(r=>console.wake(…))` |
+| Never exits (dev, watcher) | `bashBgStart` no await | `const dev = bashBgStart({ command });` … `await dev.stop()` |
+
+### Do
+
+```javascript
+// Short, foreground
+const r = await Bash({ command: "git rev-parse HEAD" });
+
+// Bounded wait — releases at deadline with status: "timeout" if the child outlives it
+const r = await bashBgStart({ command: "cargo build" }).timeout(600_000);
+
+// Fire-and-react — block ends now, wake when done. supervise(false) is mandatory if you're going idle.
+await supervise(false);
+bashBgStart({ command: "./bounce.sh" })
+  .each(line => console.log(line))
+  .then(r => console.wake(`bounce done: exit=${r.exitCode}`));
+
+// Dev server — no await, no .then
+const dev = bashBgStart({ command: "npm run dev" });
+// later: await dev.stop();
+```
+
+### Don't
+
+```javascript
+await Bash({ command: "cargo build", timeout: 3600 });   // 1-hour TUI freeze
+await bashBgStart({ command: "npm run dev" });           // forever TUI freeze
+await bashBgStart({ command: "./bounce.sh" });           // bounce-length TUI freeze
+```
+
+If you can't promise "definitely under 30s and definitely exits," default to `bashBgStart` with a `.timeout(ms)` or `.then(cb)`.
+
 ## The tool boundary
 
 Some tools only work inside `execute_code` (Read, Write, Edit, Bash, Glob, etc). Others are direct LLM tools (teams, editor_*, mesh_*, git-ai). Most direct tools have sandbox wrappers with the same name in camelCase: `meshTell`, `editorOpen`, `gitAi`.
@@ -278,6 +323,8 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Want to... | Use |
 |---|---|
 | Read files | `Read({ path })` in execute_code |
+| Short shell command | `Bash({ command })` — 30s default, NEVER raise timeout past ~60s |
+| Long shell command | `bashBgStart({ command }).timeout(ms)` or `.each(cb).then(cb)` — never bare `await` for >30s |
 | Search session history | `ouija({ action: "search", query })` |
 | Search prior context | `ouija({ action: "search", query })` |
 | Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |

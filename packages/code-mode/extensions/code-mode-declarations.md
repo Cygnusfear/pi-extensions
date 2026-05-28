@@ -41,14 +41,26 @@ declare function ouija(input: {
 
 /**
  * Execute a bash command in the current working directory.
- * Returns stdout, stderr, and exit code.
+ * Returns stdout, stderr, and exit code. Default timeout is 30 seconds.
+ *
+ * FOOTGUN: the execute_code block is synchronous from the TUI's perspective.
+ * While this await is in flight the user sees a busy TUI. There is NO max
+ * cap on `timeout` — `await Bash({ command, timeout: 3600 })` freezes the
+ * TUI for an hour.
+ *
+ * RULE: if a command might take more than 30s, or might never exit
+ * (dev servers, watchers, daemons), use `bashBgStart` instead. Do NOT
+ * raise `timeout` past 60s without an explicit reason.
+ *
+ * See "Shell commands — DON'T freeze the TUI" in the default prompt for
+ * the full decision matrix.
  */
 declare function Bash(input: {
   /** Bash command to execute */
   command: string;
   /** Working directory override */
   cwd?: string;
-  /** Timeout in seconds (default: 30) */
+  /** Timeout in seconds (default: 30). Raising this past ~60s freezes the TUI for the full duration; prefer bashBgStart for long commands. */
   timeout?: number;
 }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
 
@@ -144,16 +156,33 @@ interface BashBgHandle extends PromiseLike<BashBgResult> {
  * synchronously.
  *
  * @example
+ * // Bounded wait — TUI is busy but guaranteed to release at the deadline.
  * const r = await bashBgStart({ command: "cargo check" }).timeout(120_000);
  *
+ * // Fire-and-react — TUI free immediately, agent woken on exit.
+ * await supervise(false);
  * bashBgStart({...}).each(cb).then(r => console.wake(`done`));
  *
+ * // Truly fire-and-forget dev server — no await, no .then.
  * const dev = bashBgStart({ command: "npm run dev" });
  * await dev.stop();
  *
- * FOOTGUN: don't `await` a long-running process — `await` waits for exit,
- * dev servers never exit, the await never returns. Attach `.then(cb)` or
- * just don't await.
+ * FOOTGUN — READ THIS: the handle is thenable. `await bashBgStart(...)`
+ * waits for child exit. For `npm run dev` and friends, child exit is
+ * NEVER, and the execute_code block hangs forever (execute_code has no
+ * default timeout). This freezes the TUI until the user /cancels.
+ *
+ * The syntax `await bashBgStart(...)` looks identical to `await Bash(...)`
+ * but behaves completely differently — Bash returns when its child exits or
+ * times out; bashBgStart's handle resolves when its child exits. If the
+ * child never exits, the await never returns.
+ *
+ * RULE: never await a bashBgStart handle without either `.timeout(ms)` or
+ * a guarantee the child exits soon. For long or never-exiting commands,
+ * attach `.then(cb) + console.wake(...)` and return from the block.
+ *
+ * See "Shell commands — DON'T freeze the TUI" in the default prompt for
+ * the full decision matrix.
  */
 declare function bashBgStart(input: {
   /** Bash command to run in the background */

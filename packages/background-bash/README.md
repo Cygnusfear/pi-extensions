@@ -13,6 +13,17 @@ Without this, the agent has to wait for every command to complete before doing a
 3. Check test results when ready → read logs
 4. Continue editing code while servers run
 
+## When to use what (sandbox / code-mode)
+
+| Command kind | Tool | Pattern |
+|---|---|---|
+| Quick, < 30s, exits | `Bash` | `await Bash({ command })` (30s default cap) |
+| Medium, 30s–10min, exits | `bashBgStart` + deadline | `await bashBgStart({ command }).timeout(600_000)` |
+| Long, eventually exits | `bashBgStart` + react | `bashBgStart({ command }).each(cb).then(r => console.wake(...))` |
+| Never exits (dev, watcher, daemon) | `bashBgStart` no await | `const dev = bashBgStart({ command });` ... `await dev.stop()` |
+
+**Rule:** `execute_code` has no default timeout. `await Bash({ ..., timeout: 3600 })` freezes the TUI for an hour. `await bashBgStart({ command: "npm run dev" })` freezes the TUI forever (handle is thenable, waits for child exit, dev server never exits). If a command might run longer than 30s or might never exit, use `bashBgStart` with `.timeout(ms)` or `.then(cb)` — never a bare await.
+
 ## Features
 
 - **Detached processes** — commands run via `spawn("sh", ["-c", cmd], { detached: true })` so they survive even if the agent crashes
