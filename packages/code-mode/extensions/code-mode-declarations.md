@@ -251,6 +251,12 @@ declare function executeCodeAsyncList(): Array<{ jobId: string; codePreview: str
  * The bg work catches the abort, builds an error result, and still delivers
  * the follow-up turn so the agent learns the kill landed. Use this for
  * runaway infinite-loop async blocks.
+ *
+ * IMPORTANT: this sandbox version is fine when you're inspecting/cleaning up
+ * AFTER an async job has delivered its follow-up. To inspect or kill an
+ * IN-FLIGHT async job (mutex would block any new execute_code call), use the
+ * direct tools instead: `execute_code_async_list` and `execute_code_async_kill`.
+ * They bypass the mutex.
  */
 declare function executeCodeAsyncKill(jobId: string): boolean;
 

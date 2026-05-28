@@ -297,3 +297,98 @@ describe("execute_code { async: true }", () => {
 		await flushBackground(200);
 	});
 });
+
+
+describe("execute_code_async_list / execute_code_async_kill (direct tools)", () => {
+	test("execute_code_async_list returns pending jobs WITHOUT waiting on the mutex", async () => {
+		const pi = makePi();
+		codeModeExt(pi as any);
+		const executeCode = pi.tools.get("execute_code");
+		const listTool = pi.tools.get("execute_code_async_list");
+		expect(listTool).toBeDefined();
+
+		// Fire an async job that sleeps 500ms
+		await executeCode.execute(
+			"tc-direct-list-1",
+			{ code: "await new Promise((r) => setTimeout(r, 500));", async: true },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+
+		// Immediately list — must NOT wait for the bg job to finish.
+		const t0 = Date.now();
+		const listResult = await listTool.execute(
+			"tc-direct-list-2",
+			{},
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		const elapsed = Date.now() - t0;
+		expect(elapsed).toBeLessThan(100); // No mutex wait.
+		expect(listResult.details.jobs).toBeDefined();
+		expect(listResult.details.jobs.length).toBeGreaterThanOrEqual(1);
+		expect(listResult.details.jobs[0].jobId).toMatch(/^exec-/);
+		expect(typeof listResult.details.jobs[0].runtimeMs).toBe("number");
+
+		await flushBackground(600);
+	});
+
+	test("execute_code_async_kill aborts a pending job and returns killed=true", async () => {
+		const pi = makePi();
+		codeModeExt(pi as any);
+		const executeCode = pi.tools.get("execute_code");
+		const killTool = pi.tools.get("execute_code_async_kill");
+		expect(killTool).toBeDefined();
+
+		// Fire an async job that sleeps 1s
+		const started = await executeCode.execute(
+			"tc-direct-kill-1",
+			{ code: "await new Promise((r) => setTimeout(r, 1000));", async: true },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		const jobId = started.details.jobId as string;
+
+		// Kill immediately — must NOT wait on the mutex.
+		const t0 = Date.now();
+		const killResult = await killTool.execute(
+			"tc-direct-kill-2",
+			{ jobId },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		const elapsed = Date.now() - t0;
+		expect(elapsed).toBeLessThan(100);
+		expect(killResult.details.killed).toBe(true);
+		expect(killResult.details.jobId).toBe(jobId);
+
+		// Follow-up should still arrive (showing the aborted result).
+		await flushBackground(300);
+		const followUp = pi.sentMessages.find(
+			(m) => m.customType === "async-execute-code-result",
+		);
+		expect(followUp).toBeDefined();
+		expect(followUp?.content).toContain(jobId);
+	});
+
+	test("execute_code_async_kill returns killed=false for an unknown jobId", async () => {
+		const pi = makePi();
+		codeModeExt(pi as any);
+		const killTool = pi.tools.get("execute_code_async_kill");
+
+		const result = await killTool.execute(
+			"tc-direct-kill-unknown",
+			{ jobId: "exec-nonexistent" },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		expect(result.details.killed).toBe(false);
+		const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
+		expect(text).toContain("No pending async job");
+	});
+});

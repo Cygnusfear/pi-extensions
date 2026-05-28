@@ -140,19 +140,21 @@ Practical consequence: if you fire async job A, then call execute_code B (sync o
 
 ### Managing pending jobs
 
-Two sandbox primitives let any execute_code block inspect or cancel pending async work:
+Two **direct tools** are available for inspecting and cancelling async jobs while they're in flight:
 
-```js
-// List async jobs that haven't delivered yet
-const pending = executeCodeAsyncList();
-// → [{ jobId: "exec-a3f2c1", codePreview: "const r = await Bash(...)", runtimeMs: 12450 }]
+```json
+{ "tool": "execute_code_async_list", "args": {} }
+// → { jobs: [{ jobId: "exec-a3f2c1", codePreview: "const r = await Bash(...)", runtimeMs: 12450 }] }
 
-// Abort a runaway job
-const killed = executeCodeAsyncKill("exec-a3f2c1");
-// → true if the job was found and signalled, false if no such job
+{ "tool": "execute_code_async_kill", "args": { "jobId": "exec-a3f2c1" } }
+// → { killed: true, jobId: "exec-a3f2c1" }
 ```
 
-The killed job still delivers a follow-up turn (showing the abort error) so the agent learns the kill landed.
+These bypass the per-session mutex so they work even while async work is still running. **Always prefer the direct tools for in-flight management** — they're the only way to actually catch a runaway async job.
+
+The sandbox functions `executeCodeAsyncList()` and `executeCodeAsyncKill(jobId)` are also exposed for use AFTER an async job has delivered its follow-up (e.g. cleanup logic in a reaction-turn execute_code). They have the same semantics but require entering an execute_code block, which waits on the mutex — so they're not useful for in-flight management.
+
+A killed job still delivers a follow-up turn (showing the abort error) so the agent learns the kill landed.
 
 ### Footgun and how to avoid it
 

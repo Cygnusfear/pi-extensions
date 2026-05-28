@@ -212,9 +212,11 @@ If the whole execute_code block — not just one shell command — would freeze 
 } }
 ```
 
-The agent's turn ends, the TUI is free, the work runs in the background. When done, a follow-up turn fires with `[async execute_code <jobId> completed · 12.3s]\n<output>`. Manage pending jobs from any later block via `executeCodeAsyncList()` and `executeCodeAsyncKill(jobId)`.
+The agent's turn ends, the TUI is free, the work runs in the background. When done, a follow-up turn fires with `[async execute_code <jobId> completed · 12.3s]\n<output>`.
 
 Concurrent execute_code calls serialize on a per-session mutex — a sync execute_code fired after an in-flight async one will WAIT for it to finish. If you fire async work, react to the follow-up rather than firing more execute_code in the meantime.
+
+To inspect or kill an in-flight async job, use the **direct tools** `execute_code_async_list` and `execute_code_async_kill` (they bypass the mutex). The sandbox functions `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` exist too but they require entering execute_code, which would wait on the mutex — only useful for post-completion cleanup.
 
 ### Audit yourself
 

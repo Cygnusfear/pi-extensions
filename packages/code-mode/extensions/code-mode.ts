@@ -268,6 +268,10 @@ const PASSTHROUGH_TOOLS = new Set([
   "ouija",
   // Heredoc injection (bypasses code-mode JS escaping)
   "code_heredoc",
+  // Async execute_code job management — must be callable while an async job
+  // is in flight, so they bypass the per-session mutex (they don't touch the VM).
+  "execute_code_async_list",
+  "execute_code_async_kill",
 ]);
 
 // Tools the LLM must NOT call directly — they exist only inside code-mode sandbox
@@ -937,6 +941,71 @@ export default function (pi: ExtensionAPI) {
       }
 
       return new Text(`${header}\n\n${styled}`, 0, 0);
+    },
+  });
+
+  // ── execute_code_async_list / _kill: direct tools for async-job management ─────────
+  //
+  // The sandbox versions (executeCodeAsyncList / executeCodeAsyncKill) are useful from
+  // INSIDE an execute_code block. But to call them you must enter a new execute_code call,
+  // which waits on the per-session mutex — and the mutex is held by the very async job you
+  // want to inspect or kill. Catch-22.
+  //
+  // These direct tools bypass the mutex by reading the asyncJobs map directly. Use them
+  // while an async execute_code is in flight to peek at progress or kill a runaway.
+
+  pi.registerTool({
+    name: "execute_code_async_list",
+    label: "async list",
+    description:
+      "List pending async execute_code jobs (jobs fired with \`async: true\` whose results " +
+      "have not yet been delivered). Returns { jobs: [{ jobId, codePreview, runtimeMs }] }. " +
+      "Safe to call while an async execute_code is in flight — does NOT wait on the mutex.",
+    parameters: Type.Object({}),
+    async execute() {
+      const now = Date.now();
+      const jobs = [...asyncJobs.values()].map((j) => ({
+        jobId: j.jobId,
+        codePreview: codePreview(j.code),
+        runtimeMs: now - j.startedAt,
+      }));
+      const text =
+        jobs.length === 0
+          ? "(no pending async jobs)"
+          : jobs
+              .map((j) => `${j.jobId} · ${j.runtimeMs}ms · ${j.codePreview}`)
+              .join("\n");
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { jobs },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "execute_code_async_kill",
+    label: "async kill",
+    description:
+      "Abort a pending async execute_code job by jobId. Returns { killed: boolean, jobId }. " +
+      "The killed job still delivers a follow-up turn (showing the abort error) so the agent " +
+      "learns the kill landed. Safe to call while async work is in flight — does NOT wait on " +
+      "the mutex.",
+    parameters: Type.Object({
+      jobId: Type.String({ description: "jobId returned by the original async execute_code call (e.g. exec-a3f2c1)." }),
+    }),
+    async execute(_toolCallId, params: { jobId: string }) {
+      const job = asyncJobs.get(params.jobId);
+      if (!job) {
+        return {
+          content: [{ type: "text" as const, text: `No pending async job with jobId=${params.jobId}` }],
+          details: { killed: false, jobId: params.jobId },
+        };
+      }
+      try { job.abortController.abort(new Error("Killed via execute_code_async_kill")); } catch { /* ignore */ }
+      return {
+        content: [{ type: "text" as const, text: `✅ killed jobId=${params.jobId} — follow-up turn will deliver the abort result` }],
+        details: { killed: true, jobId: params.jobId },
+      };
     },
   });
 

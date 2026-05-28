@@ -316,7 +316,11 @@ If the WHOLE block is long (cold build + deploy + bounce, multi-step monitoring)
 { "tool": "execute_code", "args": { "code": "...long pipeline...", "async": true } }
 ```
 
-You get a jobId back instantly; the result delivers as a follow-up turn. Manage via `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` from any later block. Concurrent `execute_code` calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it.
+You get a jobId back instantly; the result delivers as a follow-up turn.
+
+To inspect or kill an in-flight job, use the **direct tools** `execute_code_async_list` / `execute_code_async_kill` (they bypass the mutex). The sandbox-function equivalents `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` are also exposed but only useful AFTER a job has delivered, since a fresh execute_code call would wait on the mutex.
+
+Concurrent `execute_code` calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it.
 
 ## The tool boundary
 
@@ -334,7 +338,8 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Short shell command | `Bash({ command })` — 30s default, NEVER raise timeout past ~60s |
 | Long shell command | `bashBgStart({ command }).timeout(ms)` or `.each(cb).then(cb)` — never bare `await` for >30s |
 | Long WHOLE block | `execute_code({ code, async: true })` — returns jobId, result delivered as follow-up turn |
-| Manage async exec jobs | `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` — inspect or cancel pending bg work |
+| Inspect / kill an IN-FLIGHT async exec | direct tools `execute_code_async_list` and `execute_code_async_kill` — bypass the mutex |
+| Inspect / kill AFTER an async exec delivered | sandbox fns `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` — needs an execute_code call |
 | Search session history | `ouija({ action: "search", query })` |
 | Search prior context | `ouija({ action: "search", query })` |
 | Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |
