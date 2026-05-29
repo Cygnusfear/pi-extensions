@@ -1,0 +1,27 @@
+package.json
+  s_2bc2d6fa41a682::t_ec1102c47578dd 61
+README.md
+  s_2bc2d6fa41a682::t_558697ea3a6bf5 127
+packages/reload/README.md
+  s_2bc2d6fa41a682::t_184a8dfbe6527c 3,7,9,11,15,17,19,21,25-26,29-31,34-35
+packages/reload/extensions/reload.ts
+  s_2bc2d6fa41a682::t_997c283490fa38 4-15,20-21,23-24,26-31
+packages/reload/package.json
+  s_2bc2d6fa41a682::t_d0c1012b38ff26 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d022fdd79b998f6f33e99b91cda45d9354afbc15",
+  "prompts": {},
+  "sessions": {
+    "s_2bc2d6fa41a682": {
+      "agent_id": {
+        "tool": "Rebecca Sputnik Batalha",
+        "id": "019e7158-6adf-7e1f-98b4-41006a47b48c",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
