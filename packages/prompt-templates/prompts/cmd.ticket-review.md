@@ -1,3 +1,5 @@
+First, set your workspace stage so the hooman can triage your pane: `await status("review")`.
+
 Run DEI reviewers on the ticket. Remind them of the ticket rules:
 
 The only acceptable ticket is the one that is exact about HOW to fix it, with lines to edit, changes to make, EXACT IMPLEMENATION DETAILS. Everything left open means an LLM can do guesswork or hack around the correct impl. It needs to mention EXACTLY what to wire, what to refactor, what to remove, what to add. etc.

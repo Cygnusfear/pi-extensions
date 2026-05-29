@@ -116,7 +116,7 @@ Each package is independently installable, testable, and removable via `~/.pi/ag
 | [core-edit-ui](packages/core-edit-ui/)           | Shiki syntax-highlighted diffs for the edit tool        |
 | [core-read-ui](packages/core-read-ui/)           | Collapsible UI + timing for the read tool               |
 | [notify](packages/notify/)                       | Desktop notification when agent finishes (OSC 777)      |
-| [session-tab-title](packages/session-tab-title/) | Terminal tab title shows session name                   |
+| [session-tab-title](packages/session-tab-title/) | Tab title = stage icon + topic + agent identity (`status()`) |
 | [image-links](packages/image-links/)             | Clickable `file://` links for images (OSC 8 hyperlinks) |
 
 ### Session Control

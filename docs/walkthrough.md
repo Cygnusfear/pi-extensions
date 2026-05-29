@@ -273,7 +273,7 @@ The stuff that makes you smile because someone actually cared.
 | [core-edit-ui](packages/core-edit-ui/) | Syntax-highlighted diffs |
 | [core-read-ui](packages/core-read-ui/) | Collapsible read output with timing |
 | [notify](packages/notify/) | Desktop notification when agent finishes |
-| [session-tab-title](packages/session-tab-title/) | Terminal tab shows session name |
+| [session-tab-title](packages/session-tab-title/) | Tab title = lifecycle stage icon + topic + agent identity; agent self-drives via `status()` |
 | [image-links](packages/image-links/) | Clickable `file://` links for images |
 | [lock-mode](packages/lock-mode/) | `/lock` — read-only mode for safe exploration |
 | [reload](packages/reload/) | Hot-reload extensions without restarting |

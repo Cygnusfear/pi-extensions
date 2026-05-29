@@ -53,32 +53,35 @@ What happened here is that the agent then waited 8 hours for me to actually 'mak
 
 The hooman runs many pi panes in a terminal multiplexer (cmux) and reads each tab's lifecycle stage from an icon in the title. The tab title renders as `<icon> <session-name> <agent-identity> - <folder>` (e.g. `🏭 NPC Gerard S. - my-repo`), where the agent identity is derived automatically from your stable mesh name — the hooman's `/name` only sets the topic. You drive that icon yourself by calling `status(stage)` from code-mode as your work moves through phases. The hooman sets the session NAME (their mnemonic via `/name`); you set the STAGE.
 
-Call it at every phase transition — it is cheap and the hooman relies on it to triage panes at a glance:
+You MUST call `status(stage)` the moment your phase changes — this is not optional housekeeping, it is how the hooman triages a wall of panes. A stale 🧶 on a pane that has been implementing for an hour is a lie. The call is cheap (one code-mode line); make it the first thing you do when you cross into a new phase.
+
+Set it the instant the trigger fires — do not batch it, do not wait for the work to finish:
+
+| call | icon | set it the moment you… |
+|------|------|------------------------|
+| `status("planning")` | 🧶 | start a session / are scoping, reading, writing a ticket or plan (the default — you begin here) |
+| `status("implementing")` | 🏭 | write your first line of code / start editing files for the task |
+| `status("blocked")` | 🚦 | hit something you need the hooman for and expect to resolve soon |
+| `status("blocked-long")` | ⛔ | are blocked on something that will not clear today |
+| `status("review")` | 🕵️ | kick off a review (6-pass, DEI, `/async-review`, `/review.rust`, `/ticket-review`) |
+| `status("landing")` | 🛬 | start a 20.01 landing / ship process |
+| `status("bugfix")` | 🪲 | start fixing a bug in something already landed |
+| `status("cleaning")` | 🧼 | take a cleaner / dedup / SRP-unification job (`/dedup`) |
+| `status("coordinator")` | 👩‍🚀 | are coordinating workers or maintaining the harness (`/harness`) |
+| `status("bhakti")` | 📡 | are the bhakti deploy manager |
 
 ```js
-await status("implementing");  // when you start writing code
-await status("review");        // when you kick off a 6-pass review
-await status("blocked");       // when you're stuck and need the hooman soon
-await status("landing");       // when you start a 20.01 landing process
+await status("implementing");  // first code edit
+await status("review");        // review kicked off
+await status("blocked");       // need the hooman, soon
+await status("landing");       // 20.01 started
 ```
 
-| call | icon | stage |
-|------|------|-------|
-| `status("planning")` | 🧶 | planning (the default — you start here) |
-| `status("implementing")` | 🏭 | implementing |
-| `status("blocked")` | 🚦 | blocked, will resolve soon |
-| `status("blocked-long")` | ⛔ | blocked, long haul |
-| `status("review")` | 🕵️ | running a review (6-pass etc) |
-| `status("landing")` | 🛬 | landing (started a 20.01 process) |
-| `status("bugfix")` | 🪲 | fixing a bug in something already landed |
-| `status("cleaning")` | 🧼 | assigned cleaner role |
-| `status("coordinator")` | 👩‍🚀 | you are the coordinator |
-| `status("bhakti")` | 📡 | you are the bhakti deploy manager |
-
 Rules:
-- Update your status as soon as your phase changes. A stale 🧶 on a pane that's been implementing for an hour is a lie that wastes the hooman's attention.
-- Do NOT touch the session name — that's the hooman's. Only set the stage.
-- If you're not sure which stage fits, stay on the closest match; don't thrash between icons.
+- Update your status as soon as your phase changes — the FIRST action of the new phase, before you dig in. Do not let it go stale.
+- When the hooman runs a workflow command that maps to a stage (`/async-review`, `/review.rust`, `/ticket-review` → review; `/dedup` → cleaning; `/harness` → coordinator), the command already reminds you to set it — but set it yourself the moment you recognise the phase, do not wait to be told.
+- Do NOT touch the session name — that's the hooman's. You set ONLY the stage.
+- If you're unsure which stage fits, stay on the closest match; don't thrash between icons.
 
 ## Memory model
 
