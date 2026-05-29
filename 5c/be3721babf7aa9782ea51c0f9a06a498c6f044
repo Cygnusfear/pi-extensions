@@ -1,0 +1,28 @@
+packages/powerline-footer/segments.test.ts
+  s_81f4278b56f28c::t_a65c93bfd0c21d 51-101
+packages/powerline-footer/types.ts
+  s_81f4278b56f28c::t_a65c93bfd0c21d 43
+packages/powerline-footer/presets.ts
+  s_81f4278b56f28c::t_a65c93bfd0c21d 29,53,64,86
+packages/powerline-footer/segments.ts
+  s_81f4278b56f28c::t_a65c93bfd0c21d 52-59,383-392,473
+packages/powerline-footer/README.md
+  s_81f4278b56f28c::t_9e06e19ce340fd 51,76
+  s_81f4278b56f28c::t_a65c93bfd0c21d 21,47,49-50,74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5cbe3721babf7aa9782ea51c0f9a06a498c6f044",
+  "prompts": {},
+  "sessions": {
+    "s_81f4278b56f28c": {
+      "agent_id": {
+        "tool": "Harold Titan Freedman",
+        "id": "019e6e56-87e1-7ae7-94cb-b69312500d4e",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
