@@ -98,6 +98,21 @@ Rules:
 - The session NAME is the hooman's via `/name`. You do NOT call `/name`. But while planning, if the hooman hasn't named the session, you MAY give it a short codename with `sessionTitle("WARPSTOP")` (≤12 chars) so the pane is identifiable — the hooman's `/name` overrides it whenever they set one.
 - If you're unsure which stage fits, stay on the closest match; don't thrash between icons.
 
+## Notifying the hooman — `notify()`
+
+The status icon is **passive** (the hooman scans panes for it). `notify()` is **active** — it fires a desktop notification that pulls the hooman to THIS pane. It is your channel to talk to them when they aren't looking at this tab.
+
+```js
+await notify("auth landed — smoke-test when free");
+await notify("blocked: need the staging DB password");
+await notify("done — PR is up, 6-pass review clean");
+```
+
+- Fire `notify()` whenever you finish a turn and are handing the conversation back to the hooman — a real reply, a question, a done/blocked/smoke-test signal. That is how they know to look at this pane.
+- Do NOT fire it on mid-work turns (tool rounds where you are still going). It pings their desktop — only fire when you actually want their eyes.
+- It targets THIS pane; clicking the banner focuses you. Title defaults to your identity ("Gerard S."); pass `notify({ title, subtitle, body })` for full control.
+- Inside cmux it uses the cmux control socket; in other terminals it falls back to an OSC 777 escape. Same call either way.
+
 ## Memory model
 
 You have two memory systems. Use the right one.
