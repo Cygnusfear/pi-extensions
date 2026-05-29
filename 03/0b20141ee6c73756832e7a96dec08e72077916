@@ -1,0 +1,23 @@
+packages/notify/README.md
+  s_c92e786476c411::t_1461c16cb48a6b 3,5,7,9,11-15,17,19-20,23-31,33,35,37
+packages/notify/extensions/notify.ts
+  s_c92e786476c411::t_2c0a10da054d9f 2,4-9,11-20,24-28,30-41,44,46-54,56-60,62-66,68-84,87-112
+packages/notify/package.json
+  s_c92e786476c411::t_9c61f191194baa 20-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "030b20141ee6c73756832e7a96dec08e72077916",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
