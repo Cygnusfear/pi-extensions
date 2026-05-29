@@ -12,24 +12,34 @@
  * `status(stage)` function as their work moves through phases.
  *
  * Stage → icon (the canonical map; cmux colors the tab from the emoji):
- *   planning      🧶  planning / default               (no color)
- *   implementing  🏭  implementing                      (amber)
- *   blocked       🚦  blocked, resolve soon             (red)
- *   blocked-long  ⛔  blocked, long                     (charcoal)
- *   review        🕵️  running review (6-pass etc)       (teal)
- *   landing       🛬  landing (a 20.01 process started) (teal)
- *   bugfix        🪲  fixing an already-landed bug       (green)
- *   cleaning      🧼  assigned cleaner role             (green)
- *   coordinator   👩‍🚀  coordinator                       (purple)
- *   bhakti        📡  bhakti deploy manager             (purple)
+ *   planning      🧶  actively planning WITH the hooman  (no color)
+ *   implementing  🏭  implementing                       (amber)
+ *   blocked       🚦  blocked, resolve soon              (red)
+ *   blocked-long  ⛔  blocked, long                      (charcoal)
+ *   review        🕵️  running review (6-pass etc)        (teal)
+ *   landing       🛬  landing (a 20.01 process started)  (teal)
+ *   bugfix        🪲  fixing an already-landed bug        (green)
+ *   cleaning      🧼  assigned cleaner role              (green)
+ *   coordinator   👩‍🚀  coordinator                        (purple)
+ *   bhakti        📡  bhakti deploy manager              (purple)
+ *   smoketest     🚬  hooman should smoke-test           (yellow)
+ *   parked        🚏  doing nothing, awaiting direction  (grey)
+ *   attention     🚨  needs hooman attention (urgent)    (red)
+ *
+ * 🧶 planning means ACTIVELY scoping/planning with the hooman — it is NOT an
+ * idle state. When an agent finishes (e.g. after landing) it must go to 🚏
+ * parked (doing nothing, awaiting direction), not snap back to 🧶.
  *
  * The stage persists across reloads/resume via a custom session entry, so
  * an agent who set "implementing" doesn't snap back to "planning" on /reload.
  *
- * Title format is `<icon> <session-name> <stable-short> - <folder>` (NO "π -"
- * prefix) per the hooman's spec, e.g. `"🏭 NPC Gerard S. - my-repo"`. The
- * session-name (topic) and stable-short (mesh identity) are each optional;
- * with neither, falls back to `<icon> <folder>`.
+ * Title format is `<icon> <agent-name> <ses-title> - <folder>` (NO "π -"
+ * prefix), e.g. `"🏭 Gerard S. NPC - my-repo"`. agent-name is the mesh
+ * identity ("Gerard Stargate Freedman" → "Gerard S."), derived automatically.
+ * ses-title is the hooman's `/name` topic OR an agent-set codename
+ * (`sessionTitle("WARPSTOP")`, max 12 chars) — the hooman's /name wins when
+ * both exist. Both subject parts are optional; with neither, falls back to
+ * `<icon> <folder>`.
  *
  * pi core owns WHEN the title refreshes (session rename, reload, switch) and
  * would otherwise clobber us with its default `π - <name> - <cwd>` format.
@@ -67,6 +77,9 @@ export const STAGES: Record<string, StageDef> = {
 	cleaning: { icon: "🧼", label: "cleaner role", color: "green" },
 	coordinator: { icon: "👩‍🚀", label: "coordinator", color: "purple" },
 	bhakti: { icon: "📡", label: "bhakti deploy manager", color: "purple" },
+	smoketest: { icon: "🚬", label: "hooman should smoke-test", color: "yellow" },
+	parked: { icon: "🚏", label: "parked — doing nothing, awaiting direction", color: "grey" },
+	attention: { icon: "🚨", label: "needs hooman attention (urgent)", color: "red" },
 };
 
 /** Ergonomic aliases so the agent's call reads naturally. */
@@ -85,10 +98,24 @@ const STAGE_ALIASES: Record<string, string> = {
 	cleanup: "cleaning",
 	coord: "coordinator",
 	deploy: "bhakti",
+	smoke: "smoketest",
+	"smoke-test": "smoketest",
+	test: "smoketest",
+	idle: "parked",
+	waiting: "parked",
+	park: "parked",
+	done: "parked",
+	urgent: "attention",
+	attn: "attention",
+	alarm: "attention",
+	help: "attention",
 };
 
 const DEFAULT_STAGE = "planning";
 const STAGE_ENTRY_TYPE = "session-status-stage";
+const TITLE_ENTRY_TYPE = "session-status-title";
+/** Max length of an agent-set session title (codename) — keeps narrow cmux tabs readable. */
+const MAX_TITLE_LEN = 12;
 
 /** Resolve a user-supplied stage key (with alias support) to a canonical key, or null. */
 export function resolveStageKey(input: string): string | null {
@@ -105,11 +132,16 @@ export function listStageKeys(): string[] {
 
 // ── Title building ──────────────────────────────────────────────────────────
 
-function getSessionDisplayName(ctx: {
-	sessionManager: { getSessionName(): string | undefined; getEntries(): any[] };
-}): string | undefined {
+function getSessionDisplayName(
+	ctx: {
+		sessionManager: { getSessionName(): string | undefined; getEntries(): any[] };
+	},
+	agentTitle?: string,
+): string | undefined {
+	// Precedence: hooman /name (authoritative) > agent-set codename > first message.
 	const name = ctx.sessionManager.getSessionName();
 	if (name) return name;
+	if (agentTitle && agentTitle.length > 0) return agentTitle;
 
 	// Fall back to first user message (truncated) when no explicit /name.
 	for (const entry of ctx.sessionManager.getEntries()) {
@@ -145,11 +177,11 @@ export function shortStableName(full: string | null | undefined): string | undef
 }
 
 /**
- * Build the title string: `<icon> <session-name> <stable-short> - <folder>`,
- * e.g. `"🏭 NPC Gerard S. - my-repo"`. The session name is the hooman's topic
- * (`/name NPC`); the stable-short is the agent's mesh identity ("Gerard S.").
- * Either subject part may be absent: with neither, falls back to
- * `<icon> <folder>` so the title is never a bare icon nor a redundant
+ * Build the title string: `<icon> <agent-name> <ses-title> - <folder>`,
+ * e.g. `"🏭 Gerard S. NPC - my-repo"`. The agent-name is the mesh identity
+ * ("Gerard S."); the ses-title is the hooman's `/name` topic OR an agent-set
+ * codename ("WARPSTOP"). Either subject part may be absent: with neither, falls
+ * back to `<icon> <folder>` so the title is never a bare icon nor a redundant
  * `<icon> <folder> - <folder>`. Exported for testability.
  */
 export function buildTitle(
@@ -159,12 +191,26 @@ export function buildTitle(
 	cwdBasename: string,
 ): string {
 	const stage = STAGES[stageKey] ?? STAGES[DEFAULT_STAGE];
-	const subject = [displayName, stableShort]
+	// Order: agent identity first, then the session title/topic.
+	const subject = [stableShort, displayName]
 		.map((s) => s?.trim())
 		.filter((s): s is string => !!s && s.length > 0)
 		.join(" ");
 	if (subject) return `${stage.icon} ${subject} - ${cwdBasename}`;
 	return `${stage.icon} ${cwdBasename}`;
+}
+
+/**
+ * Normalize an agent-supplied session title (codename): trim, collapse inner
+ * whitespace, and clip to MAX_TITLE_LEN. Returns the normalized title plus
+ * whether it was clipped (so the caller can note it). Empty input → undefined.
+ * Exported for testability.
+ */
+export function normalizeSessionTitle(raw: string | null | undefined): { title?: string; clipped: boolean } {
+	const collapsed = (raw ?? "").trim().replace(/\s+/g, " ");
+	if (!collapsed) return { title: undefined, clipped: false };
+	if (collapsed.length <= MAX_TITLE_LEN) return { title: collapsed, clipped: false };
+	return { title: collapsed.slice(0, MAX_TITLE_LEN).trimEnd(), clipped: true };
 }
 
 // ── Stage persistence ─────────────────────────────────────────────────────────
@@ -182,6 +228,20 @@ function readPersistedStage(ctx: {
 	return latest;
 }
 
+/** Restore the latest agent-set session title from custom session entries. */
+function readPersistedTitle(ctx: {
+	sessionManager: { getEntries(): Array<{ type: string; customType?: string; data?: unknown }> };
+}): string | undefined {
+	let latest: string | undefined;
+	for (const entry of ctx.sessionManager.getEntries()) {
+		if (entry.type === "custom" && entry.customType === TITLE_ENTRY_TYPE && entry.data) {
+			const data = entry.data as { title?: unknown };
+			if (typeof data.title === "string") latest = data.title || undefined;
+		}
+	}
+	return latest;
+}
+
 // ── Extension ───────────────────────────────────────────────────────────────
 
 export default function sessionTabTitle(pi: ExtensionAPI) {
@@ -189,6 +249,9 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	// the title against the live context.
 	let currentCtx: any = null;
 	let currentStage = DEFAULT_STAGE;
+	// Agent-set session codename (e.g. "WARPSTOP"). Fills the ses-title slot only
+	// when the hooman has not /name'd the session (hooman /name wins).
+	let currentTitle: string | undefined;
 	// True once core accepted our title formatter (new pi). When true, the
 	// /name input-event fallback below stays inert to avoid a double render.
 	let formatterRegistered = false;
@@ -209,7 +272,7 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 				const displayName =
 					info.sessionName && info.sessionName.length > 0
 						? info.sessionName
-						: getSessionDisplayName(currentCtx);
+						: getSessionDisplayName(currentCtx, currentTitle);
 				const stableShort = shortStableName(getStableNickname());
 				return buildTitle(currentStage, displayName, stableShort, info.cwdBasename);
 			}),
@@ -221,7 +284,7 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		if (!currentCtx?.hasUI) return;
 		safeAction(() => {
 			const cwdBasename = path.basename(currentCtx.cwd);
-			const displayName = getSessionDisplayName(currentCtx);
+			const displayName = getSessionDisplayName(currentCtx, currentTitle);
 			const stableShort = shortStableName(getStableNickname());
 			currentCtx.ui.setTitle(buildTitle(currentStage, displayName, stableShort, cwdBasename));
 		});
@@ -256,9 +319,36 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		return setStage(raw);
 	});
 
+	/**
+	 * Set (or clear) the agent's session codename — the ses-title slot. Clips to
+	 * MAX_TITLE_LEN, persists (survives reload), re-renders. The hooman's /name
+	 * still wins over this when set. Pass an empty string to clear it.
+	 */
+	const setSessionTitle = (rawTitle: string): string => {
+		const { title, clipped } = normalizeSessionTitle(rawTitle);
+		currentTitle = title;
+		safeAction(() => currentCtx?.sessionManager?.appendCustomEntry?.(TITLE_ENTRY_TYPE, { title: title ?? "" }));
+		render();
+		if (!title) return "Session title cleared.";
+		const note = clipped ? ` (clipped to ${MAX_TITLE_LEN} chars)` : "";
+		const overridden =
+			currentCtx?.sessionManager?.getSessionName?.() ? " — note: the hooman's /name is set, so it shows instead until cleared" : "";
+		return `Session title → "${title}"${note}${overridden}`;
+	};
+
+	// Code-mode callable: during planning, give your session a short codename so
+	// the pane is identifiable before the hooman /names it.
+	//   await sessionTitle("WARPSTOP")
+	// Accepts a bare string or { title }. Max 12 chars (clipped).
+	registerSandboxFn("sessionTitle", (arg: unknown) => {
+		const raw = typeof arg === "string" ? arg : (arg as { title?: string })?.title ?? "";
+		return setSessionTitle(raw);
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		currentCtx = ctx;
 		currentStage = safeAction(() => readPersistedStage(ctx)) ?? DEFAULT_STAGE;
+		currentTitle = safeAction(() => readPersistedTitle(ctx)) ?? undefined;
 		// Core owns refresh timing via the formatter; registering it also applies
 		// the title immediately, so render() is only the fallback for pi builds
 		// without the setTitleFormatter API.
@@ -317,6 +407,16 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 			}
 			const result = setStage(raw);
 			if (ctx.hasUI) ctx.ui.notify(result, result.startsWith("Unknown") ? "warning" : "info");
+		},
+	});
+
+	// Manual override for the hooman/agent: /title WARPSTOP  (or /title to clear)
+	pi.registerCommand("title", {
+		description: `Set your session codename (ses-title slot, max ${MAX_TITLE_LEN} chars): /title <CODENAME>`,
+		handler: (args, ctx) => {
+			currentCtx = ctx;
+			const result = setSessionTitle((args ?? "").trim());
+			if (ctx.hasUI) ctx.ui.notify(result, "info");
 		},
 	});
 }

@@ -1,20 +1,16 @@
 import { describe, test, expect } from "bun:test";
-import { buildTitle, shortStableName, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
+import { buildTitle, shortStableName, normalizeSessionTitle, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
 
 describe("STAGES table", () => {
-  test("has all 10 hooman-specified stages", () => {
+  test("has all 13 hooman-specified stages", () => {
     const keys = listStageKeys();
-    expect(keys).toContain("planning");
-    expect(keys).toContain("implementing");
-    expect(keys).toContain("blocked");
-    expect(keys).toContain("blocked-long");
-    expect(keys).toContain("review");
-    expect(keys).toContain("landing");
-    expect(keys).toContain("bugfix");
-    expect(keys).toContain("cleaning");
-    expect(keys).toContain("coordinator");
-    expect(keys).toContain("bhakti");
-    expect(keys).toHaveLength(10);
+    for (const k of [
+      "planning", "implementing", "blocked", "blocked-long", "review", "landing",
+      "bugfix", "cleaning", "coordinator", "bhakti", "smoketest", "parked", "attention",
+    ]) {
+      expect(keys).toContain(k);
+    }
+    expect(keys).toHaveLength(13);
   });
 
   test("icons match the hooman's spec", () => {
@@ -28,6 +24,9 @@ describe("STAGES table", () => {
     expect(STAGES.cleaning.icon).toBe("🧼");
     expect(STAGES.coordinator.icon).toBe("👩‍🚀");
     expect(STAGES.bhakti.icon).toBe("📡");
+    expect(STAGES.smoketest.icon).toBe("🚬");
+    expect(STAGES.parked.icon).toBe("🚏");
+    expect(STAGES.attention.icon).toBe("🚨");
   });
 
   test("colors match the hooman's spec", () => {
@@ -41,6 +40,9 @@ describe("STAGES table", () => {
     expect(STAGES.cleaning.color).toBe("green");
     expect(STAGES.coordinator.color).toBe("purple");
     expect(STAGES.bhakti.color).toBe("purple");
+    expect(STAGES.smoketest.color).toBe("yellow");
+    expect(STAGES.parked.color).toBe("grey");
+    expect(STAGES.attention.color).toBe("red");
   });
 });
 
@@ -63,6 +65,10 @@ describe("resolveStageKey", () => {
     expect(resolveStageKey("coord")).toBe("coordinator");
     expect(resolveStageKey("deploy")).toBe("bhakti");
     expect(resolveStageKey("land")).toBe("landing");
+    expect(resolveStageKey("smoke")).toBe("smoketest");
+    expect(resolveStageKey("idle")).toBe("parked");
+    expect(resolveStageKey("done")).toBe("parked");
+    expect(resolveStageKey("urgent")).toBe("attention");
   });
 
   test("returns null for unknown", () => {
@@ -96,10 +102,42 @@ describe("shortStableName", () => {
   });
 });
 
+describe("normalizeSessionTitle", () => {
+  test("short codename passes through", () => {
+    expect(normalizeSessionTitle("WARPSTOP")).toEqual({ title: "WARPSTOP", clipped: false });
+    expect(normalizeSessionTitle("SALVAGE")).toEqual({ title: "SALVAGE", clipped: false });
+  });
+
+  test("exactly 12 chars is kept", () => {
+    expect(normalizeSessionTitle("ABCDEFGHIJKL")).toEqual({ title: "ABCDEFGHIJKL", clipped: false });
+  });
+
+  test("over 12 chars is clipped", () => {
+    expect(normalizeSessionTitle("REFACTOR-AUTH-MIDDLEWARE")).toEqual({ title: "REFACTOR-AUT", clipped: true });
+  });
+
+  test("trims + collapses inner whitespace", () => {
+    expect(normalizeSessionTitle("  warp   stop  ")).toEqual({ title: "warp stop", clipped: false });
+  });
+
+  test("empty / whitespace / null → undefined, not clipped", () => {
+    expect(normalizeSessionTitle("")).toEqual({ title: undefined, clipped: false });
+    expect(normalizeSessionTitle("   ")).toEqual({ title: undefined, clipped: false });
+    expect(normalizeSessionTitle(null)).toEqual({ title: undefined, clipped: false });
+    expect(normalizeSessionTitle(undefined)).toEqual({ title: undefined, clipped: false });
+  });
+});
+
 describe("buildTitle", () => {
-  test("full: <icon> <topic> <stable-short> - <folder>", () => {
+  test("full: <icon> <agent-name> <ses-title> - <folder>", () => {
     expect(buildTitle("implementing", "NPC", "Gerard S.", "my-repo"))
-      .toBe("🏭 NPC Gerard S. - my-repo");
+      .toBe("🏭 Gerard S. NPC - my-repo");
+  });
+
+  test("new stages render their icons", () => {
+    expect(buildTitle("smoketest", "NPC", "Gerard S.", "repo")).toBe("🚬 Gerard S. NPC - repo");
+    expect(buildTitle("parked", undefined, "Gerard S.", "repo")).toBe("🚏 Gerard S. - repo");
+    expect(buildTitle("attention", "NPC", undefined, "repo")).toBe("🚨 NPC - repo");
   });
 
   test("topic only (no stable name)", () => {
