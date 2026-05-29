@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { buildTitle, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
+import { buildTitle, shortStableName, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
 
 describe("STAGES table", () => {
   test("has all 10 hooman-specified stages", () => {
@@ -71,35 +71,65 @@ describe("resolveStageKey", () => {
   });
 });
 
-describe("buildTitle", () => {
-  test("format is <icon> <session-name> - <folder> — no π", () => {
-    expect(buildTitle("implementing", "fixer JWT-auth", "myproject"))
-      .toBe("🏭 fixer JWT-auth - myproject");
+describe("shortStableName", () => {
+  test("triple name → first + initial.", () => {
+    expect(shortStableName("Gerard Stargate Freedman")).toBe("Gerard S.");
   });
 
-  test("default planning icon, with folder", () => {
-    expect(buildTitle("planning", "oracle V2-spec", "gso"))
+  test("two words → first + initial.", () => {
+    expect(shortStableName("Galileo Accretion")).toBe("Galileo A.");
+  });
+
+  test("single word → as-is, no initial", () => {
+    expect(shortStableName("Gerard")).toBe("Gerard");
+  });
+
+  test("empty / null / undefined → undefined", () => {
+    expect(shortStableName("")).toBeUndefined();
+    expect(shortStableName(null)).toBeUndefined();
+    expect(shortStableName(undefined)).toBeUndefined();
+    expect(shortStableName("   ")).toBeUndefined();
+  });
+
+  test("collapses extra whitespace", () => {
+    expect(shortStableName("  Gerard   Stargate   Freedman  ")).toBe("Gerard S.");
+  });
+});
+
+describe("buildTitle", () => {
+  test("full: <icon> <topic> <stable-short> - <folder>", () => {
+    expect(buildTitle("implementing", "NPC", "Gerard S.", "my-repo"))
+      .toBe("🏭 NPC Gerard S. - my-repo");
+  });
+
+  test("topic only (no stable name)", () => {
+    expect(buildTitle("planning", "oracle V2-spec", undefined, "gso"))
       .toBe("🧶 oracle V2-spec - gso");
   });
 
-  test("falls back to <icon> <folder> when no name (no redundant folder - folder)", () => {
-    expect(buildTitle("review", undefined, "pi-extensions"))
+  test("stable name only (no /name topic)", () => {
+    expect(buildTitle("review", undefined, "Gerard S.", "pi-extensions"))
+      .toBe("🕵️ Gerard S. - pi-extensions");
+  });
+
+  test("falls back to <icon> <folder> when neither (no redundant folder - folder)", () => {
+    expect(buildTitle("review", undefined, undefined, "pi-extensions"))
       .toBe("🕵️ pi-extensions");
-    expect(buildTitle("review", "", "pi-extensions"))
+    expect(buildTitle("review", "", "", "pi-extensions"))
       .toBe("🕵️ pi-extensions");
   });
 
   test("unknown stage falls back to default planning icon", () => {
-    expect(buildTitle("does-not-exist", "x", "y")).toBe("🧶 x - y");
+    expect(buildTitle("does-not-exist", "x", undefined, "y")).toBe("🧶 x - y");
   });
 
   test("icon is the first character (survives cmux tab truncation)", () => {
-    const t = buildTitle("coordinator", "lead", "repo");
+    const t = buildTitle("coordinator", "lead", "Gerard S.", "repo");
     expect(t.startsWith("👩‍🚀")).toBe(true);
   });
 
   test("every stage produces a distinct leading icon", () => {
-    const icons = listStageKeys().map((k) => buildTitle(k, "x", "y").split(" ")[0]);
+    const icons = listStageKeys().map((k) => buildTitle(k, "x", undefined, "y").split(" ")[0]);
     // 👩‍🚀 contains a space-free ZWJ sequence; split(" ")[0] still isolates it
     const unique = new Set(icons);
     expect(unique.size).toBe(icons.length);

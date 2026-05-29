@@ -5,9 +5,11 @@
  * terminal multiplexers (cmux, tmux, iTerm tabs, etc.) show at a glance
  * BOTH which session a pane is AND what lifecycle stage the agent is in.
  *
- * The hooman sets the session name manually via `/name <agent> TOPIC`
- * (their mnemonic). The AGENT self-drives the stage icon by calling the
- * code-mode `status(stage)` function as their work moves through phases.
+ * The hooman sets the session topic via `/name TOPIC` (their mnemonic). The
+ * agent's MESH IDENTITY ("Gerard Stargate Freedman" → "Gerard S.") is derived
+ * automatically and shown alongside the topic, so the hooman no longer types
+ * the agent name. The AGENT self-drives the stage icon by calling the code-mode
+ * `status(stage)` function as their work moves through phases.
  *
  * Stage → icon (the canonical map; cmux colors the tab from the emoji):
  *   planning      🧶  planning / default               (no color)
@@ -24,9 +26,10 @@
  * The stage persists across reloads/resume via a custom session entry, so
  * an agent who set "implementing" doesn't snap back to "planning" on /reload.
  *
- * Title format is `<icon> <session-name> - <folder>` (NO "π -" prefix) per
- * the hooman's spec, e.g. `"🏭 fixer auth - my-repo"`. Falls back to
- * `<icon> <folder>` when no name is set.
+ * Title format is `<icon> <session-name> <stable-short> - <folder>` (NO "π -"
+ * prefix) per the hooman's spec, e.g. `"🏭 NPC Gerard S. - my-repo"`. The
+ * session-name (topic) and stable-short (mesh identity) are each optional;
+ * with neither, falls back to `<icon> <folder>`.
  *
  * pi core owns WHEN the title refreshes (session rename, reload, switch) and
  * would otherwise clobber us with its default `π - <name> - <cwd>` format.
@@ -39,6 +42,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { safeAction } from "@pi-extensions/shared/tool-availability";
+import { getStableNickname, onStableIdChange } from "@pi-extensions/shared/session-nickname";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry.ts";
 
 // ── Stage table ───────────────────────────────────────────────────────────
@@ -124,16 +128,42 @@ function getSessionDisplayName(ctx: {
 }
 
 /**
- * Build the title string: `<icon> <session-name> - <folder>`, e.g.
- * `"🏭 fixer auth - my-repo"`. When there is no session name at all, falls
- * back to `<icon> <folder>` so the title is never a bare icon and never a
- * redundant `<icon> <folder> - <folder>`. Exported for testability.
+ * Shorten a stable mesh nickname to "<first> <Initial>." for the tab.
+ *   "Gerard Stargate Freedman" → "Gerard S."
+ *   "Gerard"                   → "Gerard"   (single word, no initial)
+ *   "" / null / undefined      → undefined  (omitted from the title)
+ * Exported for testability.
  */
-export function buildTitle(stageKey: string, displayName: string | undefined, cwdBasename: string): string {
+export function shortStableName(full: string | null | undefined): string | undefined {
+	if (!full) return undefined;
+	const parts = full.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return undefined;
+	if (parts.length === 1) return parts[0];
+	// Spread to take the first *grapheme* of the second word (unicode-safe).
+	const initial = [...parts[1]][0] ?? "";
+	return initial ? `${parts[0]} ${initial}.` : parts[0];
+}
+
+/**
+ * Build the title string: `<icon> <session-name> <stable-short> - <folder>`,
+ * e.g. `"🏭 NPC Gerard S. - my-repo"`. The session name is the hooman's topic
+ * (`/name NPC`); the stable-short is the agent's mesh identity ("Gerard S.").
+ * Either subject part may be absent: with neither, falls back to
+ * `<icon> <folder>` so the title is never a bare icon nor a redundant
+ * `<icon> <folder> - <folder>`. Exported for testability.
+ */
+export function buildTitle(
+	stageKey: string,
+	displayName: string | undefined,
+	stableShort: string | undefined,
+	cwdBasename: string,
+): string {
 	const stage = STAGES[stageKey] ?? STAGES[DEFAULT_STAGE];
-	if (displayName && displayName.length > 0) {
-		return `${stage.icon} ${displayName} - ${cwdBasename}`;
-	}
+	const subject = [displayName, stableShort]
+		.map((s) => s?.trim())
+		.filter((s): s is string => !!s && s.length > 0)
+		.join(" ");
+	if (subject) return `${stage.icon} ${subject} - ${cwdBasename}`;
 	return `${stage.icon} ${cwdBasename}`;
 }
 
@@ -162,6 +192,9 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	// True once core accepted our title formatter (new pi). When true, the
 	// /name input-event fallback below stays inert to avoid a double render.
 	let formatterRegistered = false;
+	// True once we've subscribed to mesh stable-id changes (subscribe once even
+	// across reloads — the listener re-renders against the live currentCtx).
+	let stableIdSubscribed = false;
 
 	// Register a formatter so pi core owns the timing of title refreshes but we
 	// own the format. Core passes the live session name + cwd basename; we add
@@ -177,7 +210,8 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 					info.sessionName && info.sessionName.length > 0
 						? info.sessionName
 						: getSessionDisplayName(currentCtx);
-				return buildTitle(currentStage, displayName, info.cwdBasename);
+				const stableShort = shortStableName(getStableNickname());
+				return buildTitle(currentStage, displayName, stableShort, info.cwdBasename);
 			}),
 		);
 		formatterRegistered = true;
@@ -188,7 +222,8 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		safeAction(() => {
 			const cwdBasename = path.basename(currentCtx.cwd);
 			const displayName = getSessionDisplayName(currentCtx);
-			currentCtx.ui.setTitle(buildTitle(currentStage, displayName, cwdBasename));
+			const stableShort = shortStableName(getStableNickname());
+			currentCtx.ui.setTitle(buildTitle(currentStage, displayName, stableShort, cwdBasename));
 		});
 	};
 
@@ -229,6 +264,14 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		// without the setTitleFormatter API.
 		registerFormatter();
 		if (!formatterRegistered) render();
+		// The mesh stable nickname ("Gerard S.") may not be set yet at
+		// session_start — the mesh sidecar resolves it asynchronously. Subscribe
+		// so the title refreshes the moment it lands. Subscribe once; the closure
+		// re-renders against whatever currentCtx is live at fire time.
+		if (!stableIdSubscribed) {
+			stableIdSubscribed = true;
+			safeAction(() => onStableIdChange(() => render()));
+		}
 	});
 
 	// Keep the title fresh on agent_end (covers the first message in a new

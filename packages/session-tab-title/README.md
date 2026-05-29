@@ -1,26 +1,28 @@
 # session-tab-title
 
-Sets your terminal workspace title to `<stage-icon> <session-name> - <folder>` so terminal multiplexers (cmux, tmux, iTerm tabs) show at a glance BOTH which session a pane is AND what lifecycle stage the agent is in.
+Sets your terminal workspace title to `<stage-icon> <session-name> <stable-short> - <folder>` so terminal multiplexers (cmux, tmux, iTerm tabs) show at a glance which pane it is, who is driving it, AND what lifecycle stage the agent is in.
 
 ```
-🧶 fixer JWT-auth - my-repo      ← planning (default)
-🏭 fixer JWT-auth - my-repo      ← implementing
-🕵️ fixer JWT-auth - my-repo      ← running review
-🛬 fixer JWT-auth - my-repo      ← landing a 20.01 process
+🧶 NPC Gerard S. - my-repo      ← planning (default)
+🏭 NPC Gerard S. - my-repo      ← implementing
+🕵️ NPC Gerard S. - my-repo      ← running review
+🛬 NPC Gerard S. - my-repo      ← landing a 20.01 process
 ```
 
-You set the name (your mnemonic); the agent self-drives the icon.
+You set the topic via `/name NPC` (your mnemonic). The agent's mesh identity
+("Gerard Stargate Freedman" → "Gerard S.") is derived automatically — you no
+longer type the agent name. The agent self-drives the stage icon.
 
 ## Workflow
 
-1. **You** name the session: `/name fixer JWT-auth` — the title becomes `🧶 fixer JWT-auth - my-repo` (default planning).
+1. **You** set the topic: `/name NPC` — the title becomes `🧶 NPC Gerard S. - my-repo` (default planning; "Gerard S." is the agent's mesh identity, derived automatically).
 2. **The agent** moves the stage as work progresses, by calling `status()` from code-mode:
    ```js
-   await status("implementing");  // 🏭 fixer JWT-auth - my-repo
-   await status("review");        // 🕵️ fixer JWT-auth - my-repo
-   await status("landing");       // 🛬 fixer JWT-auth - my-repo
+   await status("implementing");  // 🏭 NPC Gerard S. - my-repo
+   await status("review");        // 🕵️ NPC Gerard S. - my-repo
+   await status("landing");       // 🛬 NPC Gerard S. - my-repo
    ```
-3. **cmux** colors the tab from the emoji (color is a cmux-side concern; this extension only emits the icon + name + folder).
+3. **cmux** colors the tab from the emoji (color is a cmux-side concern; this extension only emits the icon + topic + identity + folder).
 
 You can also drive it manually: `/status implementing`.
 
@@ -49,7 +51,7 @@ The chosen stage is saved as a custom session entry, so `/reload` and resume res
 
 pi core owns *when* the title refreshes (session rename via `/name`, reload, session switch) and would otherwise clobber the title with its default `π - <name> - <cwd>` format. This extension registers a **title formatter** via `ctx.ui.setTitleFormatter` so core asks the extension for the string on every refresh — race-free, no clobber, no flicker. Core supplies the live session name + cwd basename; the extension adds the stage icon and lays it out as `<icon> <name> - <folder>`.
 
-- `session_start` → restore the persisted stage (default 🧶 planning) + register the title formatter (which applies the title immediately)
+- `session_start` → restore the persisted stage (default 🧶 planning) + register the title formatter (which applies the title immediately) + subscribe to mesh stable-id changes (the identity "Gerard S." may resolve slightly after start; the title refreshes the moment it lands)
 - `status(stage)` (code-mode) → set + persist + push an immediate `setTitle` for an instant icon flip (core's later refreshes pick up the new stage via the formatter)
 - `/status <stage>` (slash command) → same, for manual override
 - `agent_end` → re-render (covers the first message in a new session, where the name becomes available after the turn — core does not refresh on plain messages)
