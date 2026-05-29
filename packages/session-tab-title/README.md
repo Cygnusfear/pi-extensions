@@ -1,14 +1,23 @@
 # session-tab-title
 
-Sets your terminal tab title to show what you're working on. No more guessing which tab is which.
+Sets your terminal tab title to show what you're working on AND whether pi is currently busy or idle. No more guessing which tab is which, or which agent is still working.
 
 ```
-π - Implement JWT auth - myproject
+🏭 π - Implement JWT auth - myproject    ← turn in progress
+🛬 π - Implement JWT auth - myproject    ← idle, ready for input
 ```
+
+Visible in any terminal multiplexer that shows per-pane titles — cmux, tmux, iTerm tabs, etc. The icon is the first character so it survives narrow-tab truncation.
 
 ## How It Works
 
-Listens for `session_start` (on resume/fork) and `agent_end` (covers first message in new sessions), then sets the terminal title via pi's `ui.setTitle` API.
+Listens for three pi events and sets the terminal title via `ui.setTitle`:
+
+| Event | Icon | When |
+|---|---|---|
+| `session_start` (resume/fork) | 🛬 idle | Session resumed or forked — agent isn't working yet |
+| `agent_start` | 🏭 busy | Turn in progress |
+| `agent_end` | 🛬 idle | Turn finished — ready for input |
 
 Priority for the display name:
 1. Explicit session name set via `/name`
