@@ -1,0 +1,32 @@
+packages/code-mode/src/persistent-store.ts
+  s_c92e786476c411::t_5e9f0a14463a29 6-12,16
+  s_c92e786476c411::t_4ffc426f07d92b 112-113,115
+  s_c92e786476c411::t_566695999d66eb 125,127,129-130,135-136
+  s_c92e786476c411::t_b0664af70e8400 180-181,187,194
+packages/code-mode/extensions/code-mode-prompt.md
+  s_c92e786476c411::t_4d837d55cad0ee 60,62-63,66-67
+  s_c92e786476c411::t_7112998e04a39f 52
+packages/code-mode/README.md
+  s_c92e786476c411::t_8377006119a416 462
+  s_c92e786476c411::t_e04f0d47d2f7d0 69
+  s_c92e786476c411::t_e584aa39305395 21
+  s_c92e786476c411::t_4364a364453613 61-63
+packages/code-mode/extensions/code-mode-declarations.md
+  s_c92e786476c411::t_dad1970806fc48 900-902,909,911,913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "579a7d9e6eb12ae9bae736bb7fdd6dfcd79b4b95",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
