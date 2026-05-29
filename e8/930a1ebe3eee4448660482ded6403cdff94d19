@@ -1,0 +1,35 @@
+packages/prompt-templates/prompts/cmd.dedup.md
+  s_c92e786476c411::t_b2cfd27b391c6b 1-2
+packages/prompt-templates/prompts/cmd.review.rust.md
+  s_c92e786476c411::t_977e7154386c54 1-2
+README.md
+  s_c92e786476c411::t_c54e6418db6192 119
+docs/walkthrough.md
+  s_c92e786476c411::t_8a57100137ab44 276
+packages/default-prompt/prompts/default.md
+  s_c92e786476c411::t_48b1e540350d3f 56-65,67-71,74-77,81,83-84
+  s_c92e786476c411::t_719fc5ece91a69 82
+  s_c92e786476c411::t_96d9af646e8ac7 66
+packages/prompt-templates/prompts/cmd.harness.md
+  s_c92e786476c411::t_58f4e0c9791a87 1-2
+packages/prompt-templates/prompts/cmd.ticket-review.md
+  s_c92e786476c411::t_4ced98d48e76c9 1-2
+packages/prompt-templates/prompts/cmd.async-review.md
+  s_c92e786476c411::t_1b0feb5b2bb6e6 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e8930a1ebe3eee4448660482ded6403cdff94d19",
+  "prompts": {},
+  "sessions": {
+    "s_c92e786476c411": {
+      "agent_id": {
+        "tool": "Gerard Stargate Freedman",
+        "id": "019e5684-5606-7abc-92f8-004003bcdb25",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
