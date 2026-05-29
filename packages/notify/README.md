@@ -1,17 +1,40 @@
 # notify
 
-Desktop notifications when the agent finishes. Get pinged the moment pi is waiting for input — no more tab-checking.
+**Agent-driven** desktop notifications. The agent fires a notification deliberately when it wants the hooman's attention — a finished reply, a question, "blocked", "smoke-test ready" — instead of auto-pinging on every turn.
 
-Uses OSC 777 escape sequences — zero dependencies, no native binaries.
+> Previous behavior auto-fired on every `agent_end`. In code-mode a single message spawns several agent turns, so the hooman got pinged on random mid-work completions. Now the agent owns the channel.
 
-## How It Works
+## Usage
 
-Listens for the `agent_end` event, extracts the last assistant message text, and sends it as a desktop notification via OSC 777:
+Code-mode:
 
-1. Agent finishes responding
-2. Extension extracts the last assistant text (plain markdown, stripped of formatting)
-3. Sends `ESC]777;notify;π;<message>BEL` to the terminal
-4. Terminal displays a native desktop notification
+```js
+await notify("auth landed — smoke-test when free");
+await notify("blocked: need the staging DB password");
+await notify({ title: "Gerard S.", subtitle: "review", body: "6-pass clean, PR is up" });
+```
+
+Slash command:
+
+```
+/notify <message>
+```
+
+Pass a string (becomes the body) or `{ title, subtitle, body }`. The title defaults to the agent's mesh identity ("Gerard Stargate Freedman" → "Gerard S.") so the hooman knows which pane pinged them.
+
+## Transport
+
+| Environment | Channel | Notes |
+|-------------|---------|-------|
+| **cmux** | `cmux notify` over the control socket | Targets THIS workspace (via `CMUX_WORKSPACE_ID`); supports title/subtitle/body; clicking the banner focuses the pane. The bundled `cmux` CLI is auto-located from `CMUX_SHELL_INTEGRATION_DIR`. |
+| Ghostty / iTerm2 / WezTerm / rxvt | OSC 777 escape | Fallback when not inside cmux. title + body only. |
+| Kitty / Terminal.app / Windows Terminal / Alacritty | — | OSC 777 unsupported; no notification. |
+
+Detection: if `CMUX_SOCKET_PATH` is set and the `cmux` CLI is found, the socket path is used; otherwise it falls back to OSC 777. Zero native dependencies either way.
+
+## When agents should fire it
+
+Fire `notify()` when handing the conversation back to the hooman — a real reply, a question, a done/blocked/smoke-test signal. Do **not** fire it on mid-work tool turns; it pings the desktop, so only use it when you actually want their eyes.
 
 ## Installation
 
@@ -20,21 +43,3 @@ pi install npm:@pi-extensions/notify
 ```
 
 Restart pi to activate.
-
-## Compatibility
-
-| Terminal | Support | Notes |
-|----------|---------|-------|
-| **Ghostty** | ✅ | Full support |
-| **iTerm2** | ✅ | Full support |
-| **WezTerm** | ✅ | Full support |
-| **rxvt-unicode** | ✅ | Full support |
-| Kitty | ❌ | Uses OSC 99 instead |
-| Terminal.app | ❌ | No OSC 777 support |
-| Windows Terminal | ❌ | No OSC 777 support |
-| Alacritty | ❌ | No OSC 777 support |
-
-## Notification Content
-
-- **Title:** `π`
-- **Body:** Last assistant message text, trimmed to 200 characters. Falls back to "Ready for input" if no text is available.

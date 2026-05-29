@@ -1,88 +1,114 @@
 /**
- * Desktop Notification Extension
+ * Agent-driven desktop notifications.
  *
- * Sends a native desktop notification when the agent finishes and is waiting for input.
- * Uses OSC 777 escape sequence - no external dependencies.
+ * Agents call `notify(...)` DELIBERATELY to get the hooman's attention — a
+ * finished reply, a question, "blocked", "smoke-test ready". It does NOT fire
+ * automatically on every turn: the old agent_end auto-fire buried real pings in
+ * mid-work noise (a single message spawns several agent turns in code-mode), so
+ * the hooman got notified on random intermediate completions. Now the agent owns
+ * the channel.
  *
- * Supported terminals: Ghostty, iTerm2, WezTerm, rxvt-unicode
- * Not supported: Kitty (uses OSC 99), Terminal.app, Windows Terminal, Alacritty
+ * Transport:
+ *   - Inside cmux: the bundled `cmux` CLI over cmux's control socket
+ *     (`cmux notify --title … --body …`). Targets THIS workspace (via
+ *     CMUX_WORKSPACE_ID) and shows a native banner. Supports title/subtitle/body.
+ *   - Outside cmux (iTerm2 / WezTerm / rxvt / Ghostty): falls back to the OSC 777
+ *     escape sequence. No native dependencies either way.
+ *
+ * Code-mode:  await notify("auth landed — smoke-test when free")
+ *             await notify({ title: "Gerard S.", subtitle: "blocked", body: "need a key" })
+ * Command:    /notify <message>
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { registerSandboxFn } from "../../shared/src/sandbox-registry.ts";
+import { getStableNickname } from "../../shared/src/session-nickname.ts";
 
-/**
- * Send a desktop notification via OSC 777 escape sequence.
- */
-const notify = (title: string, body: string): void => {
-	// OSC 777 format: ESC ] 777 ; notify ; title ; body BEL
-	process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
-};
-
-const isTextPart = (part: unknown): part is { type: "text"; text: string } =>
-	Boolean(part && typeof part === "object" && "type" in part && part.type === "text" && "text" in part);
-
-const extractLastAssistantText = (messages: Array<{ role?: string; content?: unknown }>): string | null => {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message?.role !== "assistant") {
-			continue;
-		}
-
-		const content = message.content;
-		if (typeof content === "string") {
-			return content.trim() || null;
-		}
-
-		if (Array.isArray(content)) {
-			const text = content.filter(isTextPart).map((part) => part.text).join("\n").trim();
-			return text || null;
-		}
-
-		return null;
+/** Locate the bundled cmux CLI when running inside cmux; null otherwise. */
+function resolveCmuxCli(): string | null {
+	if (!process.env.CMUX_SOCKET_PATH) return null; // not inside cmux
+	const candidates: string[] = [];
+	const sid = process.env.CMUX_SHELL_INTEGRATION_DIR;
+	// <bundle>/Contents/Resources/shell-integration → <...>/Resources/bin/cmux
+	if (sid) candidates.push(path.join(path.dirname(sid), "bin", "cmux"));
+	candidates.push("/Applications/cmux.app/Contents/Resources/bin/cmux");
+	for (const c of candidates) {
+		try {
+			if (fs.existsSync(c)) return c;
+		} catch {}
 	}
-
 	return null;
-};
+}
 
-const plainMarkdownTheme: MarkdownTheme = {
-	heading: (text) => text,
-	link: (text) => text,
-	linkUrl: () => "",
-	code: (text) => text,
-	codeBlock: (text) => text,
-	codeBlockBorder: () => "",
-	quote: (text) => text,
-	quoteBorder: () => "",
-	hr: () => "",
-	listBullet: () => "",
-	bold: (text) => text,
-	italic: (text) => text,
-	strikethrough: (text) => text,
-	underline: (text) => text,
-};
+/** "Gerard Stargate Freedman" → "Gerard S."; single word → as-is; empty → undefined. */
+function shortName(full: string | null | undefined): string | undefined {
+	if (!full) return undefined;
+	const parts = full.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return undefined;
+	if (parts.length === 1) return parts[0];
+	const initial = [...parts[1]][0] ?? "";
+	return initial ? `${parts[0]} ${initial}.` : parts[0];
+}
 
-const simpleMarkdown = (text: string, width = 80): string => {
-	const markdown = new Markdown(text, 0, 0, plainMarkdownTheme);
-	return markdown.render(width).join("\n");
-};
+interface NotifyParts {
+	title?: string;
+	subtitle?: string;
+	body?: string;
+}
 
-const formatNotification = (text: string | null): { title: string; body: string } => {
-	const simplified = text ? simpleMarkdown(text) : "";
-	const normalized = simplified.replace(/\s+/g, " ").trim();
-	if (!normalized) {
-		return { title: "Ready for input", body: "" };
+/** Strip control chars + the OSC field separator so the escape can't be broken. */
+function sanitize(s: string): string {
+	// eslint-disable-next-line no-control-regex
+	return s.replace(/[\u0000-\u001f;]/g, " ").trim();
+}
+
+/** Fire a desktop notification. Returns the transport used. */
+function fireNotification({ title, subtitle, body }: NotifyParts): "cmux" | "osc777" {
+	const resolvedTitle = (title && title.trim()) || shortName(getStableNickname()) || "pi";
+	const cli = resolveCmuxCli();
+	if (cli) {
+		const args = ["notify", "--title", resolvedTitle];
+		if (subtitle) args.push("--subtitle", subtitle);
+		if (body) args.push("--body", body);
+		// Fire-and-forget. A failed notification must never break a turn or
+		// surface a raw error to the host console — swallow it.
+		execFile(cli, args, () => {});
+		return "cmux";
 	}
-
-	const maxBody = 200;
-	const body = normalized.length > maxBody ? `${normalized.slice(0, maxBody - 1)}…` : normalized;
-	return { title: "π", body };
-};
+	// Fallback transport: OSC 777 (ESC ] 777 ; notify ; title ; body BEL).
+	process.stdout.write(`\u001b]777;notify;${sanitize(resolvedTitle)};${sanitize(body || subtitle || "")}\u0007`);
+	return "osc777";
+}
 
 export default function (pi: ExtensionAPI) {
-	pi.on("agent_end", async (event) => {
-		const lastText = extractLastAssistantText(event.messages ?? []);
-		const { title, body } = formatNotification(lastText);
-		notify(title, body);
+	// Code-mode callable. Pass a string (body) or { title, subtitle, body }.
+	registerSandboxFn("notify", (arg: unknown) => {
+		let parts: NotifyParts;
+		if (typeof arg === "string") parts = { body: arg };
+		else if (arg && typeof arg === "object") parts = arg as NotifyParts;
+		else parts = {};
+		if (!parts.body && !parts.subtitle && !parts.title) {
+			return "notify(message): ping the hooman's desktop. Pass a string, or { title, subtitle, body }.";
+		}
+		const transport = fireNotification(parts);
+		const shown = parts.body || parts.subtitle || parts.title || "";
+		return `🔔 notified the hooman via ${transport}: ${shown}`;
+	});
+
+	// Manual: /notify <message>
+	pi.registerCommand("notify", {
+		description: "Send a desktop notification to the hooman: /notify <message>",
+		handler: (args, ctx) => {
+			const msg = (args ?? "").trim();
+			if (!msg) {
+				if (ctx.hasUI) ctx.ui.notify("Usage: /notify <message>", "info");
+				return;
+			}
+			const transport = fireNotification({ body: msg });
+			if (ctx.hasUI) ctx.ui.notify(`🔔 notification sent (${transport})`, "info");
+		},
 	});
 }
