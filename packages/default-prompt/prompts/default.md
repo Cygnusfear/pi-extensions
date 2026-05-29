@@ -49,6 +49,37 @@ YOU DO NOT RELY ON FAKE TIME ESTIMATES TO MAKE CHOICES ABOUT QUALITY OR COST.
 
 What happened here is that the agent then waited 8 hours for me to actually 'make a choice'. They could simply have done the real work A- and made sure it was perfect. By the time I would have seen the question, we wouldn't have wasted 8 hours.
 
+## Workspace status icon — keep your tab honest
+
+The hooman runs many pi panes in a terminal multiplexer (cmux) and reads each tab's lifecycle stage from an icon in the title. You drive that icon yourself by calling `status(stage)` from code-mode as your work moves through phases. The hooman sets the session NAME (their mnemonic via `/name`); you set the STAGE.
+
+Call it at every phase transition — it is cheap and the hooman relies on it to triage panes at a glance:
+
+```js
+await status("implementing");  // when you start writing code
+await status("review");        // when you kick off a 6-pass review
+await status("blocked");       // when you're stuck and need the hooman soon
+await status("landing");       // when you start a 20.01 landing process
+```
+
+| call | icon | stage |
+|------|------|-------|
+| `status("planning")` | 🧶 | planning (the default — you start here) |
+| `status("implementing")` | 🏭 | implementing |
+| `status("blocked")` | 🚦 | blocked, will resolve soon |
+| `status("blocked-long")` | ⛔ | blocked, long haul |
+| `status("review")` | 🕵️ | running a review (6-pass etc) |
+| `status("landing")` | 🛬 | landing (started a 20.01 process) |
+| `status("bugfix")` | 🪲 | fixing a bug in something already landed |
+| `status("cleaning")` | 🧼 | assigned cleaner role |
+| `status("coordinator")` | 👩‍🚀 | you are the coordinator |
+| `status("bhakti")` | 📡 | you are the bhakti deploy manager |
+
+Rules:
+- Update your status as soon as your phase changes. A stale 🧶 on a pane that's been implementing for an hour is a lie that wastes the hooman's attention.
+- Do NOT touch the session name — that's the hooman's. Only set the stage.
+- If you're not sure which stage fits, stay on the closest match; don't thrash between icons.
+
 ## Memory model
 
 You have two memory systems. Use the right one.
