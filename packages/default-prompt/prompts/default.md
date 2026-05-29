@@ -108,7 +108,8 @@ await notify("blocked: need the staging DB password");
 await notify("done — PR is up, 6-pass review clean");
 ```
 
-- Fire `notify()` whenever you finish a turn and are handing the conversation back to the hooman — a real reply, a question, a done/blocked/smoke-test signal. That is how they know to look at this pane.
+- **Asking the hooman anything → `notify()`, always.** A question, a decision you need, a blocking [OK] — the hooman is almost certainly NOT looking at this pane. A question with no notify() sits there unseen; that is exactly how an agent once burned 8 hours waiting on a choice the hooman never saw. When you need the hooman, `notify()` with the actual question AND set the matching icon (🚦 blocking question, 🚨 urgent). Never block silently — if you're waiting on the hooman, they must have been pinged.
+- Also fire `notify()` whenever you finish a turn and hand the conversation back — a real reply, a done/blocked/smoke-test signal. That is how they know to look at this pane.
 - Do NOT fire it on mid-work turns (tool rounds where you are still going). It pings their desktop — only fire when you actually want their eyes.
 - It targets THIS pane; clicking the banner focuses you. Title defaults to your identity ("Gerard S."); pass `notify({ title, subtitle, body })` for full control.
 - Inside cmux it uses the cmux control socket; in other terminals it falls back to an OSC 777 escape. Same call either way.
