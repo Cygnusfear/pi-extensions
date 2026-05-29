@@ -51,7 +51,7 @@ What happened here is that the agent then waited 8 hours for me to actually 'mak
 
 ## Workspace status icon — keep your tab honest
 
-The hooman runs many pi panes in a terminal multiplexer (cmux) and reads each tab's lifecycle stage from an icon in the title. You drive that icon yourself by calling `status(stage)` from code-mode as your work moves through phases. The hooman sets the session NAME (their mnemonic via `/name`); you set the STAGE.
+The hooman runs many pi panes in a terminal multiplexer (cmux) and reads each tab's lifecycle stage from an icon in the title. The tab title renders as `<icon> <session-name> - <folder>` (e.g. `🏭 fixer auth - my-repo`). You drive that icon yourself by calling `status(stage)` from code-mode as your work moves through phases. The hooman sets the session NAME (their mnemonic via `/name`); you set the STAGE.
 
 Call it at every phase transition — it is cheap and the hooman relies on it to triage panes at a glance:
 

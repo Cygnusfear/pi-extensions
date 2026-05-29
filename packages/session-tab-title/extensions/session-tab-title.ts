@@ -24,8 +24,16 @@
  * The stage persists across reloads/resume via a custom session entry, so
  * an agent who set "implementing" doesn't snap back to "planning" on /reload.
  *
- * Title format is `<icon> <session-name>` (NO "π -" prefix, NO cwd) per the
- * hooman's spec. Falls back to the cwd basename only when no name is set.
+ * Title format is `<icon> <session-name> - <folder>` (NO "π -" prefix) per
+ * the hooman's spec, e.g. `"🏭 fixer auth - my-repo"`. Falls back to
+ * `<icon> <folder>` when no name is set.
+ *
+ * pi core owns WHEN the title refreshes (session rename, reload, switch) and
+ * would otherwise clobber us with its default `π - <name> - <cwd>` format.
+ * We register a title FORMATTER via ctx.ui.setTitleFormatter so core asks us
+ * for the string on every refresh — race-free, no clobber. When the running
+ * pi lacks that API (older build), we fall back to re-rendering on the /name
+ * input event. status() pushes an immediate setTitle for instant icon flips.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -116,14 +124,17 @@ function getSessionDisplayName(ctx: {
 }
 
 /**
- * Build the title string: `<icon> <session-name>`. Falls back to the cwd
- * basename only when there is no name at all (so the title is never a bare
- * icon). Exported for testability.
+ * Build the title string: `<icon> <session-name> - <folder>`, e.g.
+ * `"🏭 fixer auth - my-repo"`. When there is no session name at all, falls
+ * back to `<icon> <folder>` so the title is never a bare icon and never a
+ * redundant `<icon> <folder> - <folder>`. Exported for testability.
  */
 export function buildTitle(stageKey: string, displayName: string | undefined, cwdBasename: string): string {
 	const stage = STAGES[stageKey] ?? STAGES[DEFAULT_STAGE];
-	const label = displayName && displayName.length > 0 ? displayName : cwdBasename;
-	return `${stage.icon} ${label}`;
+	if (displayName && displayName.length > 0) {
+		return `${stage.icon} ${displayName} - ${cwdBasename}`;
+	}
+	return `${stage.icon} ${cwdBasename}`;
 }
 
 // ── Stage persistence ─────────────────────────────────────────────────────────
@@ -148,6 +159,29 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	// the title against the live context.
 	let currentCtx: any = null;
 	let currentStage = DEFAULT_STAGE;
+	// True once core accepted our title formatter (new pi). When true, the
+	// /name input-event fallback below stays inert to avoid a double render.
+	let formatterRegistered = false;
+
+	// Register a formatter so pi core owns the timing of title refreshes but we
+	// own the format. Core passes the live session name + cwd basename; we add
+	// the stage icon and lay it out. Captured `currentCtx`/`currentStage` are
+	// read at call time, so status() changes and renames both reflect correctly.
+	const registerFormatter = () => {
+		if (!currentCtx?.hasUI) return;
+		const ui = currentCtx.ui;
+		if (typeof ui.setTitleFormatter !== "function") return;
+		safeAction(() =>
+			ui.setTitleFormatter((info: { sessionName?: string; cwdBasename: string }) => {
+				const displayName =
+					info.sessionName && info.sessionName.length > 0
+						? info.sessionName
+						: getSessionDisplayName(currentCtx);
+				return buildTitle(currentStage, displayName, info.cwdBasename);
+			}),
+		);
+		formatterRegistered = true;
+	};
 
 	const render = () => {
 		if (!currentCtx?.hasUI) return;
@@ -190,7 +224,11 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		currentCtx = ctx;
 		currentStage = safeAction(() => readPersistedStage(ctx)) ?? DEFAULT_STAGE;
-		render();
+		// Core owns refresh timing via the formatter; registering it also applies
+		// the title immediately, so render() is only the fallback for pi builds
+		// without the setTitleFormatter API.
+		registerFormatter();
+		if (!formatterRegistered) render();
 	});
 
 	// Keep the title fresh on agent_end (covers the first message in a new
@@ -207,6 +245,9 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	// value via getSessionName(). Pass-through (no action) so /name still runs
 	// normally.
 	pi.on("input", (event: { text?: string; source?: string }, ctx) => {
+		// When the formatter is registered, pi core re-renders the title on the
+		// rename itself — this fallback would only cause a redundant render.
+		if (formatterRegistered) return;
 		const text = (event?.text ?? "").trim();
 		if (event?.source === "extension") return;
 		if (/^\/name(\s|$)/.test(text)) {

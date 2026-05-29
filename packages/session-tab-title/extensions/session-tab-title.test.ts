@@ -72,17 +72,17 @@ describe("resolveStageKey", () => {
 });
 
 describe("buildTitle", () => {
-  test("format is <icon> <session-name> — no π, no cwd", () => {
+  test("format is <icon> <session-name> - <folder> — no π", () => {
     expect(buildTitle("implementing", "fixer JWT-auth", "myproject"))
-      .toBe("🏭 fixer JWT-auth");
+      .toBe("🏭 fixer JWT-auth - myproject");
   });
 
-  test("default planning icon", () => {
+  test("default planning icon, with folder", () => {
     expect(buildTitle("planning", "oracle V2-spec", "gso"))
-      .toBe("🧶 oracle V2-spec");
+      .toBe("🧶 oracle V2-spec - gso");
   });
 
-  test("falls back to cwd basename when no name", () => {
+  test("falls back to <icon> <folder> when no name (no redundant folder - folder)", () => {
     expect(buildTitle("review", undefined, "pi-extensions"))
       .toBe("🕵️ pi-extensions");
     expect(buildTitle("review", "", "pi-extensions"))
@@ -90,7 +90,7 @@ describe("buildTitle", () => {
   });
 
   test("unknown stage falls back to default planning icon", () => {
-    expect(buildTitle("does-not-exist", "x", "y")).toBe("🧶 x");
+    expect(buildTitle("does-not-exist", "x", "y")).toBe("🧶 x - y");
   });
 
   test("icon is the first character (survives cmux tab truncation)", () => {
