@@ -3,12 +3,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 // ===========================================================================
-// Persistent Store ($) with memory-based eviction
+// Persistent Store ($) — NO eviction.
+//
+// The store NEVER silently drops data. Agents stash load-bearing state here
+// (worktree paths, parsed configs, pending promises); the amount is negligible,
+// and silently evicting e.g. $.wt mid-task caused hard-to-trace failures. So we
+// keep everything until the agent explicitly clears it (delete $.x / $.__reset())
+// or the session ends. $.__status() still reports per-var sizes for diagnostics.
 // ===========================================================================
 
-export const MAX_STORE_MEMORY = 150 * 1024 * 1024; // 150MB — eviction threshold
 const STORE_FILENAME = ".pi/code-mode-store.json";
-const MAX_DISK_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_DISK_SIZE = 5 * 1024 * 1024; // 5MB — on-disk persistence cap (separate from in-memory $)
 
 
 function estimateSizeHuman(value: unknown): string {
@@ -104,38 +109,10 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
     return total;
   }
 
+  // No eviction. Kept as a no-op so the per-turn caller (session-factory) keeps
+  // a stable interface; it never drops data and costs nothing per turn.
   function processExpiry(): string[] {
-    const warnings: string[] = [];
-
-    // Evict unpinned entries when total memory exceeds cap
-    while (totalMemoryBytes() > MAX_STORE_MEMORY) {
-      // Find the least-recently-accessed unpinned entry
-      let oldest: { key: string; turn: number; entry: StoreEntry } | null = null;
-      for (const [key, entry] of store) {
-        if (entry.pinned) continue;
-        if (!oldest || entry.lastAccessTurn < oldest.turn) {
-          oldest = { key, turn: entry.lastAccessTurn, entry };
-        }
-      }
-      if (!oldest) break; // only pinned vars left, can't evict further
-
-      const size = estimateSize(oldest.entry.value);
-      const age = currentTurn - oldest.turn;
-      warnings.push(
-        "\u23f3 $." +
-          oldest.key +
-          " EVICTED to free memory (was " +
-          size +
-          ", last used " +
-          age +
-          " turns ago). Use $.__pin('" +
-          oldest.key +
-          "') to protect.",
-      );
-      store.delete(oldest.key);
-    }
-
-    return warnings;
+    return [];
   }
 
   function getStatus(): string {
@@ -145,27 +122,18 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
       totalBytes < 1024 * 1024
         ? Math.round(totalBytes / 1024) + "KB"
         : (totalBytes / (1024 * 1024)).toFixed(1) + "MB";
-    const pinnedCount = [...store.values()].filter((e) => e.pinned).length;
+    const persistedCount = [...store.values()].filter((e) => e.pinned).length;
     const lines: string[] = [
-      "$ store: " +
-        store.size +
-        " variable(s), " +
-        totalHuman +
-        " used of " +
-        MAX_STORE_MEMORY / (1024 * 1024) +
-        "MB cap",
+      "$ store: " + store.size + " variable(s), " + totalHuman + " (no eviction — nothing is dropped)",
     ];
-    if (pinnedCount > 0) {
-      lines[0] += " (" + pinnedCount + " pinned)";
+    if (persistedCount > 0) {
+      lines[0] += " (" + persistedCount + " persisted to disk)";
     }
     for (const [key, entry] of store) {
       const size = estimateSize(entry.value);
       const age = currentTurn - entry.lastAccessTurn;
-      if (entry.pinned) {
-        lines.push("  $." + key + ": " + size + " (pinned, last used " + age + " turns ago)");
-      } else {
-        lines.push("  $." + key + ": " + size + " (last used " + age + " turns ago)");
-      }
+      const tag = entry.pinned ? " (persisted, last used " + age + " turns ago)" : " (last used " + age + " turns ago)";
+      lines.push("  $." + key + ": " + size + tag);
     }
     return lines.join("\n");
   }
@@ -209,21 +177,21 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
           };
         case "__status":
           return () => getStatus();
+        // The $ store no longer evicts, so pinning is a no-op kept for backward
+        // compatibility (older code/docs call $.__pin). Nothing is ever dropped.
         case "__pin":
           return (name: string) => {
             const entry = store.get(name);
             if (!entry) return "$." + name + " not found";
-            entry.pinned = true;
             entry.lastAccessTurn = currentTurn;
-            return "$." + name + " pinned (will not expire)";
+            return "$." + name + " — note: $ no longer evicts, so pinning is unnecessary (nothing is dropped)";
           };
         case "__unpin":
           return (name: string) => {
             const entry = store.get(name);
             if (!entry) return "$." + name + " not found";
-            entry.pinned = false;
             entry.lastAccessTurn = currentTurn;
-            return "$." + name + " unpinned (subject to memory eviction)";
+            return "$." + name + " — note: $ no longer evicts (nothing is dropped)";
           };
         case "__keys":
           return () => [...store.keys()];

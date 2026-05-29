@@ -49,7 +49,7 @@ for (const f of remaining) {
 }
 ```
 
-Variables inside functions, loops, or if-blocks are local to that block and won't persist. Top-level declarations persist automatically — with no time limit, only a 150MB memory cap.
+Variables inside functions, loops, or if-blocks are local to that block and won't persist. Top-level declarations persist automatically — for the whole session, with no time limit and no eviction. Your stored state (worktree paths, parsed configs, results) is never silently dropped.
 
 Top-level `const`/`let`/`var` declarations are automatically persisted and hydrated as bare names. So `const sm = await Read(...)` in call N means `sm` is available directly in call N+1 — no `$.sm` prefix needed. `$` still works too, but bare names are preferred for readability.
 
@@ -57,17 +57,14 @@ Top-level `function` declarations, `const { stdout: mergeBase } = ...` destructu
 
 ### Memory Management
 
-`$` variables persist indefinitely until total memory exceeds 150MB. When the cap is hit, least-recently-used unpinned variables are evicted first. You'll see:
-```
-⏳ $.bigData EVICTED to free memory (was 12.5MB, last used 30 turns ago). Use $.__pin('bigData') to protect.
-```
+`$` variables persist for the whole session and are **never evicted** — nothing you store is silently dropped. State you depend on (e.g. `$.wt` for a worktree path) stays put until you remove it or the session ends. The data agents keep here is tiny, so there is no cap and no LRU.
 
-- **Variables don't expire from time** — only from memory pressure
-- **`$.__pin('name')`** — protect from eviction (pinned vars survive even at 150MB)
-- **`$.__unpin('name')`** — make subject to memory eviction again
-- **`$.__status()`** — show all variables, sizes, and total memory used
+- **Variables persist for the session** — no time expiry, no memory eviction
+- **`$.__status()`** — show all variables, sizes, and total memory used (diagnostics only)
 - **`$.__reset()`** — clear all persistent state
 - **`$.__keys()`** — list all variable names
+- **`delete $.name`** — drop a single variable you no longer need
+- **`$.__pin('name')` / `$.__unpin('name')`** — legacy no-ops kept for compatibility; eviction no longer exists, so pinning is unnecessary
 
 ```typescript
 {{CODE_MODE_DECLARATIONS}}```

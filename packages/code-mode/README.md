@@ -18,7 +18,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 ## Features
 
 - **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
-- **Persistent `$` store** — variables survive across calls (150MB cap, LRU eviction). No time limit.
+- **Persistent `$` store** — variables survive across calls for the whole session. No time limit, no eviction — nothing is silently dropped.
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
@@ -58,14 +58,15 @@ for (const f of remaining) {
 ### Memory management
 
 ```javascript
-$.__pin('importantData');   // protect from LRU eviction (survives even at 150MB cap)
-$.__unpin('importantData'); // make evictable again
+$.__reset();                // clear all persistent state
+delete $.importantData;     // drop a single variable
+// $.__pin / $.__unpin still exist but are no-ops now — the store never evicts
 $.__status();               // show all variables, sizes, total memory
 $.__keys();                 // list all variable names
 $.__reset();                // clear all persistent state
 ```
 
-Variables don't expire from time — only from memory pressure. When the 150MB cap is hit, least-recently-used unpinned variables are evicted first.
+Variables never expire and are never evicted — the store holds everything for the session until you `delete $.name` or `$.__reset()`. The data agents keep here is tiny, so there is no cap. (`$.__pin`/`$.__unpin` remain as no-ops for backward compatibility.)
 
 ### Auto-persist
 
@@ -458,7 +459,7 @@ These remain as **direct LLM tools**: execute_code, context_*, start_supervision
 | `extensions/code-mode-prompt.md` | System prompt injected into the LLM when code-mode is active |
 | `extensions/code-mode-declarations.md` | Full TypeScript declarations for all sandbox functions |
 | `src/sandbox-tools.ts` | Creates the tool binding functions injected into the VM context |
-| `src/persistent-store.ts` | `$` store implementation — Proxy-backed, LRU eviction, auto-persist |
+| `src/persistent-store.ts` | `$` store implementation — Proxy-backed, no eviction, auto-persist |
 | `src/patch-parser.ts` | `apply_patch` parser and applier (used inside sandbox) |
 | `src/hashline.ts` | Hashline anchor computation (used inside sandbox) |
 | `src/shell-utils.ts` | Shell argument splitting and escaping utilities |

@@ -897,19 +897,20 @@ declare function contextCheckout(input: {
 
 /**
  * Persistent store that survives across execute_code calls within a session.
- * Variables persist indefinitely until total memory exceeds 150MB — then LRU unpinned vars are evicted.
+ * Variables persist for the WHOLE session — no time expiry and NO eviction. State you
+ * depend on (e.g. $.wt) is never silently dropped; clear it yourself with delete $.x
+ * or $.__reset() when done. The data kept here is tiny, so there is no memory cap.
  * Promises stashed on $ survive across calls — fire async work, pick up results later.
- * Use $.__pin('name') to protect from memory eviction, $.__status() to inspect.
  */
 declare const $: {
   [key: string]: unknown;
   /** Clear all persistent state */
   __reset(): string;
-  /** Show all variables, sizes, and total memory used */
+  /** Show all variables, sizes, and total memory used (diagnostics only — nothing is evicted) */
   __status(): string;
-  /** Pin a variable so it survives memory eviction */
+  /** Legacy no-op: the store no longer evicts, so pinning is unnecessary (kept for compatibility) */
   __pin(name: string): string;
-  /** Make a pinned variable subject to memory eviction again */
+  /** Legacy no-op: the store no longer evicts (kept for compatibility) */
   __unpin(name: string): string;
   /** List all variable names */
   __keys(): string[];
