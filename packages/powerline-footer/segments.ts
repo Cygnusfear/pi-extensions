@@ -49,6 +49,14 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
+function formatZmxSession(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+
+  const maxLength = 28;
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Segment Implementations
 // ═══════════════════════════════════════════════════════════════════════════
@@ -372,6 +380,16 @@ const sessionSegment: StatusLineSegment = {
   },
 };
 
+const zmxSessionSegment: StatusLineSegment = {
+  id: "zmx_session",
+  render(ctx) {
+    const zmxSession = formatZmxSession(process.env.ZMX_SESSION ?? "");
+    if (!zmxSession) return { content: "", visible: false };
+
+    return { content: color(ctx, "nickname", `zmx ${zmxSession}`), visible: true };
+  },
+};
+
 const hostnameSegment: StatusLineSegment = {
   id: "hostname",
   render(_ctx) {
@@ -452,6 +470,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
   context_total: contextTotalSegment,
   time_spent: timeSpentSegment,
   time: timeSegment,
+  zmx_session: zmxSessionSegment,
   session: sessionSegment,
   hostname: hostnameSegment,
   cache_read: cacheReadSegment,

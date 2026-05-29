@@ -18,7 +18,7 @@ Restart pi to activate.
 
 ## Features
 
-- **19 segments** — model, thinking, git, tokens, cost, context, time, session, hostname, and more
+- **20 segments** — model, thinking, git, tokens, cost, context, time, session, ZMX session, hostname, and more
 - **6 presets** — from minimal to full nerd dashboard, one command to switch
 - **10 separator styles** — powerline arrows, slashes, dots, chevrons, stars, and plain ASCII
 - **Responsive layout** — segments overflow to a secondary row on narrow terminals
@@ -44,11 +44,11 @@ Activates automatically. Toggle and configure with:
 
 | Preset | Segments | Style |
 |--------|----------|-------|
-| `default` | session, path, context, model, thinking | Dot separators, basename path |
+| `default` | session, ZMX session, path, context, model, thinking | Dot separators, basename path |
 | `minimal` | path, git, context | Slash separators, muted colors |
-| `compact` | model, session, git, cost, context | Thin powerline, tight layout |
-| `full` | pi, hostname, model, thinking, path, git, tokens, cost, context, time, extensions | Full powerline, every stat |
-| `nerd` | Everything — 15+ segments with cache read/write, thinking, extensions | Vibrant colors, Nerd Font icons |
+| `compact` | model, session, ZMX session, git, cost, context | Thin powerline, tight layout |
+| `full` | pi, hostname, ZMX session, model, thinking, path, git, tokens, cost, context, time, extensions | Full powerline, every stat |
+| `nerd` | Everything — 16+ segments with cache read/write, thinking, extensions | Vibrant colors, Nerd Font icons |
 | `ascii` | model, path, git, tokens, cost, context | Plain ASCII, safe for any terminal |
 
 ## Segments
@@ -71,8 +71,9 @@ Activates automatically. Toggle and configure with:
 | `time_spent` | ⟳ 15m32s | Session elapsed time |
 | `time` | ⟳ 14:32 | Current clock time |
 | `session` | id abc12345 | Session name or ID prefix |
+| `zmx_session` | zmx Ghostty-window-14 | `$ZMX_SESSION` value, hidden when unset |
 | `hostname` | host macbook | Machine hostname |
-| `hostname` | AG | Subagent count (reserved) |
+| `subagents` | AG | Subagent count (reserved) |
 | `extension_statuses` | MCP: 6 servers | Compact extension status messages |
 
 ### Segment Options

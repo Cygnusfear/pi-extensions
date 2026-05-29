@@ -26,7 +26,7 @@ const NERD_COLORS: ColorScheme = {
 
 export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   default: {
-    leftSegments: ["session", "path", "context_pct", "model", "thinking"],
+    leftSegments: ["session", "zmx_session", "path", "context_pct", "model", "thinking"],
     rightSegments: [],
     secondarySegments: ["extension_statuses"],
     separator: "dot",
@@ -50,7 +50,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   },
 
   compact: {
-    leftSegments: ["model", "session", "git"],
+    leftSegments: ["model", "session", "zmx_session", "git"],
     rightSegments: ["cost", "context_pct"],
     separator: "powerline-thin",
     colors: DEFAULT_COLORS,
@@ -61,7 +61,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   },
 
   full: {
-    leftSegments: ["pi", "hostname", "model", "thinking", "path", "git", "subagents"],
+    leftSegments: ["pi", "hostname", "zmx_session", "model", "thinking", "path", "git", "subagents"],
     rightSegments: [
       "token_in",
       "token_out",
@@ -83,7 +83,7 @@ export const PRESETS: Record<StatusLinePreset, PresetDef> = {
   },
 
   nerd: {
-    leftSegments: ["pi", "hostname", "model", "thinking", "path", "git", "session", "subagents"],
+    leftSegments: ["pi", "hostname", "model", "thinking", "path", "git", "session", "zmx_session", "subagents"],
     rightSegments: [
       "token_in",
       "token_out",

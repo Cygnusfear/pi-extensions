@@ -48,3 +48,54 @@ describe("powerline context segment", () => {
 		expect(rendered.content).toContain("42.5%/200k");
 	});
 });
+
+describe("powerline zmx session segment", () => {
+	const originalZmxSession = process.env.ZMX_SESSION;
+
+	function restoreZmxSession() {
+		if (originalZmxSession === undefined) {
+			delete process.env.ZMX_SESSION;
+		} else {
+			process.env.ZMX_SESSION = originalZmxSession;
+		}
+	}
+
+	test("hides when ZMX_SESSION is unset", () => {
+		try {
+			delete process.env.ZMX_SESSION;
+
+			const rendered = renderSegment("zmx_session", makeContext({}));
+
+			expect(rendered.visible).toBe(false);
+			expect(rendered.content).toBe("");
+		} finally {
+			restoreZmxSession();
+		}
+	});
+
+	test("hides when ZMX_SESSION is blank", () => {
+		try {
+			process.env.ZMX_SESSION = "   \t  ";
+
+			const rendered = renderSegment("zmx_session", makeContext({}));
+
+			expect(rendered.visible).toBe(false);
+			expect(rendered.content).toBe("");
+		} finally {
+			restoreZmxSession();
+		}
+	});
+
+	test("renders ZMX_SESSION when set", () => {
+		try {
+			process.env.ZMX_SESSION = "Ghostty-window-14";
+
+			const rendered = renderSegment("zmx_session", makeContext({}));
+
+			expect(rendered.visible).toBe(true);
+			expect(rendered.content).toContain("zmx Ghostty-window-14");
+		} finally {
+			restoreZmxSession();
+		}
+	});
+});

@@ -40,6 +40,7 @@ export type StatusLineSegmentId =
   | "context_total"
   | "time_spent"
   | "time"
+  | "zmx_session"
   | "session"
   | "hostname"
   | "cache_read"
