@@ -124,7 +124,7 @@ Each package is independently installable, testable, and removable via `~/.pi/ag
 | Package                            | Description                                                |
 | ---------------------------------- | ---------------------------------------------------------- |
 | [lock-mode](packages/lock-mode/)   | `/lock` disables all write tools — read-only mode          |
-| [reload](packages/reload/)         | `/reload-runtime` to hot-reload extensions                 |
+| [reload](packages/reload/)         | `reload_runtime` tool — agents call pi's built-in `/reload` |
 | [fork-fixes](packages/fork-fixes/) | Extension-level fork patches (drops orphaned tool results) |
 
 ### Skills & Analysis

@@ -1,40 +1,35 @@
 # @pi-ext/reload
 
-Hot-reload extensions, skills, prompts, and themes without restarting pi.
+Expose pi's built-in `/reload` as a tool agents can call themselves.
 
 ## Why
 
-Developing extensions usually means restarting pi every time you change code. The reload extension lets you pick up changes to extensions, skills, prompts, and themes mid-session — saving round-trips during development.
+pi already has a built-in `/reload` slash command that hot-reloads extensions, skills, prompts, and themes. But it's only callable from the TUI — when an agent edits an extension mid-session, the human has to manually `/reload` for the agent to see the change.
 
-## Features
+This extension wraps `/reload` in a `reload_runtime` tool so the agent can trigger it themselves.
 
-- **Full runtime reload** — reloads extensions, skills, prompts, and themes in one action
-- **Dual interface** — available as both a slash command and a tool (agents can trigger reloads)
-- **Non-destructive** — reloads state without losing conversation history
-
-## Commands & Tools
+## What it adds
 
 | Interface | Name | Description |
 |-----------|------|-------------|
-| Command | `/reload-runtime` | Reload all extension runtime components |
-| Tool | `reload_runtime` | Same as above, callable by agents |
+| Tool | `reload_runtime` | Queue pi's built-in `/reload` as a follow-up; reloads after the current turn completes. |
 
-## Usage
+No new slash commands — the built-in `/reload` is the only command, and this extension does not shadow it.
 
-### Interactive
+## How it works
 
-```
-/reload-runtime
-```
-
-### From an agent
-
-The agent can call the `reload_runtime` tool directly, which reloads after the current turn completes.
+The tool calls `pi.sendUserMessage("/reload", { deliverAs: "followUp" })`. The interactive mode's slash-command dispatcher recognizes `/reload`, waits for the current turn to finish, and runs the reload. The agent's next turn sees the new extension surface.
 
 ## Setup
 
+Add the extension to your pi config:
+
 ```json
 {
-  "extensions": ["@pi-ext/reload"]
+  "pi": {
+    "extensions": ["./packages/reload/extensions/reload.ts"]
+  }
 }
 ```
+
+Then `/reload` once to pick up this extension itself.

@@ -58,6 +58,7 @@
       "./packages/zai-key-rotate/extensions/zai-key-rotate.ts",
       "./packages/supervisor/src/index.ts",
       "./packages/runbooks/extensions/runbooks.ts",
+      "./packages/reload/extensions/reload.ts",
       "./packages/exit-command/extensions/exit-command.ts"
     ],
     "prompts": [
