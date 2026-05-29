@@ -200,6 +200,23 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		render();
 	});
 
+	// Re-render when the hooman renames the session via /name. The built-in
+	// /name command routes through the input event but there is NO dedicated
+	// name-change event, so we detect it here. The name is set by pi AFTER
+	// this handler returns, so defer the re-render one tick to read the new
+	// value via getSessionName(). Pass-through (no action) so /name still runs
+	// normally.
+	pi.on("input", (event: { text?: string; source?: string }, ctx) => {
+		const text = (event?.text ?? "").trim();
+		if (event?.source === "extension") return;
+		if (/^\/name(\s|$)/.test(text)) {
+			currentCtx = ctx;
+			// Defer so pi has applied the new session name before we render.
+			setTimeout(() => render(), 0);
+		}
+		// No return → default continue; /name processes as usual.
+	});
+
 	// Manual override for the hooman: /status implementing
 	pi.registerCommand("status", {
 		description: `Set the workspace stage icon: /status <${listStageKeys().join("|")}>`,
