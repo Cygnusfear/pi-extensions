@@ -45,10 +45,18 @@ function errorMessage(error: unknown): string {
 function disableProvider(pi: ExtensionAPI, provider: string): ProviderChangeResult {
   try {
     // Register with a single placeholder model to trigger built-in model removal.
-    // The placeholder uses a bogus API key so it never appears in getAvailable().
+    // The placeholder uses a sentinel env-var reference that never resolves, so the
+    // provider has no usable apiKey and never appears in getAvailable().
+    //
+    // The leading "$" is required by pi >= 0.75 to mark this as an env-var
+    // reference rather than a literal string — without it, the literal
+    // "__DISABLED_PROVIDER_NO_KEY__" would be treated as an actual API key value
+    // and the provider would falsely register as available with our placeholder
+    // model. (Earlier pi versions auto-detected env-var-shaped strings without
+    // the prefix and emitted a deprecation warning.)
     pi.registerProvider(provider, {
       baseUrl: "https://disabled.invalid",
-      apiKey: "__DISABLED_PROVIDER_NO_KEY__",
+      apiKey: "$__DISABLED_PROVIDER_NO_KEY__",
       api: "openai-responses",
       models: [
         {
