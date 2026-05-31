@@ -1,0 +1,36 @@
+packages/code-mode/src/sandbox-tools.ts
+  s_4d4d102ca33017::t_c857b7d59e4928 588-596
+  s_4d4d102ca33017::t_24cfa4038f174f 8
+  s_4d4d102ca33017::t_c3cafe65cd37dc 1099-1107
+  s_4d4d102ca33017::t_bbe8fa6048940b 1333-1342
+  s_4d4d102ca33017::t_b294f00c9f814b 1346-1355
+  s_4d4d102ca33017::t_a3bcc51a215120 1067-1075
+  s_4d4d102ca33017::t_2d237307e38543 823-830
+packages/code-mode/extensions/code-mode.async.test.ts
+  s_4d4d102ca33017::t_e1a41615c5c534 608-705
+packages/code-mode/extensions/code-mode.ts
+  s_4d4d102ca33017::t_80cc080307cb12 967-991
+  s_4d4d102ca33017::t_8746a330dab0bf 28-30
+  s_4d4d102ca33017::t_067bd6babf7670 995
+  s_4d4d102ca33017::t_ef55386138db7d 207-215
+  s_4d4d102ca33017::t_3db1658f07bf04 894-899,901,907-919,930
+  s_4d4d102ca33017::t_a2c74d385252c2 902-905
+packages/default-prompt/prompts/default.md
+  s_4d4d102ca33017::t_32db8ea4fc97e7 299-320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "caec5a0fa9c41aa38e6eddcc04c7605cc3a199bb",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
