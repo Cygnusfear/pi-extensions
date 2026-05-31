@@ -12,6 +12,8 @@ AI agents love running `git push --force`, `rm -rf .git`, and editing internal g
 - **Destructive git command detection** — blocks force-pushes, hard resets, branch deletions, and more
 - **`.git` directory write protection** — prevents write, edit, and patch operations targeting paths inside `.git/`
 - **Code-mode integration** — same interactive confirm dialogs work inside `execute_code` blocks
+- **Desktop notification on popup open** — when a confirm dialog opens, a desktop notification fires *immediately* so the hooman is pulled to the pane even if they are in another tab
+- **Code-mode awareness via `pending-interactions` registry** — code-mode's auto-promote detects an open confirm dialog and emits a 🚦 stub (within ~3s, not 60s) telling the agent the popup is the reason it is stuck, so the agent can call `notify()` for additional context
 - **`sed` blocker** — always blocked (broken on macOS); steers agents toward safe alternatives
 - **Process kill broadcast guard** — always-on, unconfigurable protection against broadcasting `SIGKILL` to user sessions
 - **`GIT_EDITOR` injection** — automatically sets `GIT_EDITOR=true` on `git rebase --continue` to prevent editor hangs
@@ -85,4 +87,16 @@ Add to your `pi.json` extensions list:
 }
 ```
 
-Requires `@pi-extensions/shared` as a dependency (provides `isGitUnsafeBash`, `isGitPath`, `isProcessKillBroadcast` guards).
+Requires `@pi-extensions/shared` as a dependency (provides `isGitUnsafeBash`, `isGitPath`, `isProcessKillBroadcast` guards, plus the `pending-interactions` registry and `desktop-notify` primitive used to surface confirm popups).
+
+## How the blocked-confirm signal reaches the agent
+
+When a destructive operation is detected in `confirm` mode:
+
+1. **`beginConfirm(...)`** is called on the shared `@pi-extensions/shared/pending-interactions` registry, marking a blocking dialog as open.
+2. **`fireNotification(...)`** from `@pi-extensions/shared/desktop-notify` immediately pings the hooman's desktop (cmux native banner where available, OSC 777 fallback otherwise) — independent of any agent action.
+3. **`await ctx.ui.confirm(...)`** blocks waiting for the hooman.
+4. While that is pending, code-mode polls the registry. Within ~3s of any pending confirm, code-mode promotes the in-flight `execute_code` to async and emits a 🚦 stub naming the pending dialog and instructing the agent to call `notify()` and set `status("attention")`.
+5. **`endConfirm(handle)`** runs in a `finally` block so the registry is cleaned up regardless of approve / deny / abort.
+
+This decoupling means any future extension that opens a blocking UI dialog can call `beginConfirm`/`endConfirm` + `fireNotification` and inherit the same agent-side awareness for free.

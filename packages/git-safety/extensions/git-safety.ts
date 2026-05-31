@@ -16,6 +16,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
+// Relative paths (not @pi-extensions/shared/...) for newly-added shared
+// modules. The extension loader caches @pi-extensions/shared's resolved
+// exports map at first load and does not refresh on /reload when
+// shared/package.json gains new export entries — so a package-name import
+// of a newly-added shared module fails to resolve until the host process
+// restarts. Relative paths bypass the cache entirely.
+import { runGuardedConfirm } from "../../shared/src/guarded-confirm.ts";
 
 const REBASE_CONTINUE_RE = /\bgit\s+rebase\s+--continue\b/;
 const HAS_GIT_EDITOR_RE = /\bGIT_EDITOR\s*=/;
@@ -130,8 +137,24 @@ export default function (pi: ExtensionAPI) {
 				? `${result.reason}\n\nAllow?`
 				: `${result.reason}\n\nThis can corrupt your repository. Allow?`;
 
-			const ok = await ctx.ui.confirm(title, body);
-			if (ok) return undefined;
+			// Shared helper: registers a pending-interactions entry, fires
+			// the desktop notification IMMEDIATELY so the hooman is pulled
+			// to this pane even from another tab, awaits the confirm,
+			// always cleans up. SAME helper is called from
+			// code-mode/src/sandbox-tools.ts so sandbox `Bash()` /
+			// `Write()` / `Edit()` / `applyPatch()` / `hashEdit()` paths
+			// also surface the popup the same way.
+			const { approved } = await runGuardedConfirm(
+				{ confirmFn: ctx.ui.confirm.bind(ctx.ui) },
+				{
+					source: "git-safety",
+					tool: String(event.toolName ?? "unknown"),
+					reason: result.reason,
+					title,
+					body,
+				},
+			);
+			if (approved) return undefined;
 		}
 
 		// ── mode=block, or confirm denied, or no UI → hard block ──
