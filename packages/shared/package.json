@@ -20,7 +20,10 @@
     "./tool-availability": "./src/tool-availability.ts",
     "./mai-binary": "./src/mai-binary.ts",
     "./tui-safe": "./src/tui-safe.ts",
-    "./shared-prompts": "./src/shared-prompts.ts"
+    "./shared-prompts": "./src/shared-prompts.ts",
+    "./desktop-notify": "./src/desktop-notify.ts",
+    "./pending-interactions": "./src/pending-interactions.ts",
+    "./guarded-confirm": "./src/guarded-confirm.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",
