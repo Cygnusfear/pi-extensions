@@ -1,28 +1,30 @@
 # @pi-ext/reload
 
-Expose pi's built-in `/reload` as a tool agents can call themselves.
+Surface pi's built-in reload as both a slash command (`/reload-runtime`) and an LLM-callable tool (`reload_runtime`).
 
-## Why
+## What it does
 
-pi already has a built-in `/reload` slash command that hot-reloads extensions, skills, prompts, and themes. But it's only callable from the TUI — when an agent edits an extension mid-session, the human has to manually `/reload` for the agent to see the change.
+| Interface | Name | Mechanism |
+|-----------|------|-----------|
+| Slash command | `/reload-runtime` | `ctx.reload()` from `ExtensionCommandContext` — synonym for built-in `/reload`. |
+| Tool | `reload_runtime` | `pi.reload()` from `ExtensionAPI`. Awaits completion; the next agent turn sees the new extension code. |
 
-This extension wraps `/reload` in a `reload_runtime` tool so the agent can trigger it themselves.
+After an agent edits extension code mid-session, it calls `reload_runtime` and the new code is live on the next turn — no manual `/reload` needed.
 
-## What it adds
+## Host requirement
 
-| Interface | Name | Description |
-|-----------|------|-------------|
-| Tool | `reload_runtime` | Queue pi's built-in `/reload` as a follow-up; reloads after the current turn completes. |
+The tool path requires `pi-coding-agent` to expose `pi.reload()` on `ExtensionAPI`. If your build pre-dates that, the tool returns an `isError: true` result asking you to upgrade or type `/reload` manually. The slash command always works because `ExtensionCommandContext.reload()` is older.
 
-No new slash commands — the built-in `/reload` is the only command, and this extension does not shadow it.
+## History
 
-## How it works
+This tool went through three broken designs before the host was extended to support it:
 
-The tool calls `pi.sendUserMessage("/reload", { deliverAs: "followUp" })`. The interactive mode's slash-command dispatcher recognizes `/reload`, waits for the current turn to finish, and runs the reload. The agent's next turn sees the new extension surface.
+- **v1** called `pi.sendUserMessage("/reload", { deliverAs: "followUp" })`. **Silent no-op** — `sendUserMessage` hardcodes `expandPromptTemplates: false` (see `agent-session.ts:1381`), so the slash dispatcher never sees the text. The tool returned a confident "Queued /reload" message while doing absolutely nothing.
+- **v2** called `ctx.reload()` from tool `execute()`. **Runtime error** — tools receive `ExtensionContext`, not `ExtensionCommandContext`. The runtime intentionally separates the two; only command handlers and TUI input could trigger reload.
+- **v3** fired a desktop notification asking the hooman to type `/reload`. **Honest but wrong** — reload should reload, not pester. The notification was a workaround dressed up as the answer.
+- **v4** (current) waits for the host to expose `pi.reload()` on `ExtensionAPI` and calls it directly. The tool finally does what its name says.
 
 ## Setup
-
-Add the extension to your pi config:
 
 ```json
 {
@@ -32,4 +34,4 @@ Add the extension to your pi config:
 }
 ```
 
-Then `/reload` once to pick up this extension itself.
+Then `/reload` once to pick up the extension itself.
