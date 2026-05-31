@@ -1,0 +1,32 @@
+packages/shared/src/pending-interactions.ts
+  s_4d4d102ca33017::t_ad9b6439504956 1-106
+packages/shared/src/pending-interactions.test.ts
+  s_4d4d102ca33017::t_e5e57f8bc5fe12 1-95
+packages/notify/extensions/notify.ts
+  s_4d4d102ca33017::t_39ebb0f90596d1 11-13,22
+packages/shared/src/guarded-confirm.test.ts
+  s_4d4d102ca33017::t_be2804a1b007a8 1-117
+packages/shared/src/guarded-confirm.ts
+  s_4d4d102ca33017::t_967131abc9b6e5 1-101
+packages/shared/src/desktop-notify.ts
+  s_4d4d102ca33017::t_141591d7eb3ce1 1-85
+packages/shared/package.json
+  s_4d4d102ca33017::t_17267eb087516e 23-24
+  s_4d4d102ca33017::t_05e70ea0ad494e 25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "df1ba1a89bea4682cfbad91392cb2c6ce740bc52",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
