@@ -25,6 +25,10 @@ require("../../shared/src/tui-diff-renderer.ts");
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
 import { createOuijaExecutor } from "../../shared/src/ouija-core";
 import {
+  formatPendingConfirmsForAgent,
+  pendingConfirmCount,
+} from "../../shared/src/pending-interactions";
+import {
   cachedToolReference,
   extendWithAllTools,
   rebuildCachedReference,
@@ -199,6 +203,15 @@ function getSyncPromoteThresholdMs(): number {
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
   return DEFAULT_SYNC_PROMOTE_THRESHOLD_MS;
 }
+
+// When a blocking confirm dialog opens (e.g. git-safety popup), the agent's
+// execute_code is stuck awaiting the popup. Waiting the full 60s before
+// promoting means 60s of silence while the hooman is potentially in another
+// tab and the agent has no idea a popup fired. Promote within ~3s of a
+// pending confirm so the agent gets the explicit "blocked on confirm" stub
+// quickly and can call notify() to pull the hooman in.
+const CONFIRM_BLOCKED_PROMOTE_THRESHOLD_MS = 3_000;
+
 
 // Code Execution Engine (persistent context)
 // =============================================================================
@@ -878,9 +891,32 @@ export default function (pi: ExtensionAPI) {
       pendingExecution = syncMutex;
 
       const promoteMs = getSyncPromoteThresholdMs();
+      // We race two timers:
+      //   - the default promote timer (60s by default)
+      //   - a polling timer that fires every 500ms; once a blocking confirm
+      //     dialog is open AND the work has been running ≥3s, promote early
+      //     so the agent gets the explicit "blocked on confirm" stub fast
+      //     enough to call notify() and pull the hooman in.
       let promoteHandle: ReturnType<typeof setTimeout> | undefined;
+      let pollHandle: ReturnType<typeof setInterval> | undefined;
+      // Widened via cast so TS flow analysis doesn't narrow to the literal
+      // "timeout" — the value is mutated from the setInterval closure below
+      // and read after the race resolves.
+      let promoteReason = "timeout" as "timeout" | "blocked-confirm";
       const promotePromise = new Promise<"PROMOTE">((resolve) => {
-        promoteHandle = setTimeout(() => resolve("PROMOTE"), promoteMs);
+        promoteHandle = setTimeout(() => {
+          promoteReason = "timeout";
+          resolve("PROMOTE");
+        }, promoteMs);
+        pollHandle = setInterval(() => {
+          if (
+            pendingConfirmCount() > 0 &&
+            Date.now() - syncStartedAt >= CONFIRM_BLOCKED_PROMOTE_THRESHOLD_MS
+          ) {
+            promoteReason = "blocked-confirm";
+            resolve("PROMOTE");
+          }
+        }, 500);
       });
 
       type RaceWinner =
@@ -891,6 +927,7 @@ export default function (pi: ExtensionAPI) {
         promotePromise.then(() => ({ kind: "promote" as const })),
       ]);
       if (promoteHandle) clearTimeout(promoteHandle);
+      if (pollHandle) clearInterval(pollHandle);
 
       if (winner.kind === "promote") {
         // The sync call took too long. Promote to async: register the
@@ -927,16 +964,35 @@ export default function (pi: ExtensionAPI) {
         asyncJobs.set(jobId, record);
 
         const preview = codePreview(params.code);
-        const stub =
-          `⏳ execute_code auto-promoted to async after ${promoteMs / 1000}s — jobId=${jobId}\n` +
-          (preview ? `first line: ${preview}\n` : "") +
-          `\nThe code is still running in the background. TUI is now free. Result will arrive as a follow-up turn when done. ` +
-          `Manage via execute_code_async_list / execute_code_async_kill. ` +
-          `Next execute_code call will wait for this one to finish.`;
+        const elapsedMs = Date.now() - syncStartedAt;
+        const elapsedSec = (elapsedMs / 1000).toFixed(1);
+        const pendingBlock = formatPendingConfirmsForAgent();
+        let stub: string;
+        if (promoteReason === "blocked-confirm" && pendingBlock) {
+          // Specific stub: the agent's code is stuck on a blocking dialog
+          // awaiting the hooman, NOT on slow async work. Tell the agent
+          // explicitly so they can call notify() to pull the hooman in.
+          stub =
+            `🚦 execute_code is blocked on a hooman confirm dialog — auto-promoted to async after ${elapsedSec}s (jobId=${jobId}).\n` +
+            (preview ? `first line: ${preview}\n` : "") +
+            `\n${pendingBlock}\n` +
+            `\nThe hooman may be in another tab and not see the popup. ` +
+            `Call \`notify("git operation blocked — confirm in this pane")\` (or similar) to pull them in, and ` +
+            `set \`status("attention")\`. Execution resumes automatically once they answer the dialog; ` +
+            `the result arrives as a follow-up turn. ` +
+            `Manage via execute_code_async_list / execute_code_async_kill.`;
+        } else {
+          stub =
+            `⏳ execute_code auto-promoted to async after ${promoteMs / 1000}s — jobId=${jobId}\n` +
+            (preview ? `first line: ${preview}\n` : "") +
+            `\nThe code is still running in the background. TUI is now free. Result will arrive as a follow-up turn when done. ` +
+            `Manage via execute_code_async_list / execute_code_async_kill. ` +
+            `Next execute_code call will wait for this one to finish.`;
+        }
         return {
           content: [{ type: "text" as const, text: stub }],
           details: {
-            duration: promoteMs,
+            duration: elapsedMs,
             lineCount: stub.split("\n").length,
             code: params.code,
             jobId,

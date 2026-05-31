@@ -605,3 +605,101 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		}
 	});
 });
+
+describe("execute_code blocked-confirm fast-promote (git-safety integration)", () => {
+	// These tests exercise the pending-interactions registry path that lets
+	// code-mode promote within ~3s when a blocking confirm dialog is open
+	// (e.g. git-safety's ctx.ui.confirm popup awaiting hooman approval).
+	// The stub must explicitly tell the agent the popup is the reason so the
+	// agent can fire notify() to pull the hooman in.
+
+	test("pending confirm + slow code → promotes within ~3s with a 🚦 stub mentioning notify()", async () => {
+		// Keep the default-promote timer LARGE (well above 3s) so we can prove
+		// the early promote is driven by the registry check, not the timer.
+		process.env.PI_CODE_MODE_PROMOTE_MS = "60000";
+		const { beginConfirm, endConfirm, __resetForTests } = await import(
+			"../../shared/src/pending-interactions.ts"
+		);
+		__resetForTests();
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+
+			// Simulate the popup opening BEFORE the code runs (real-world: the
+			// tool_call hook fires beginConfirm and then awaits ctx.ui.confirm
+			// while the agent's execute_code is still mid-await on Bash()).
+			const handle = beginConfirm({
+				source: "git-safety",
+				tool: "bash",
+				reason: "git push --force in /repo",
+			});
+
+			const t0 = Date.now();
+			const result = await executeCode.execute(
+				"tc-blocked-confirm",
+				{ code: "await new Promise((r) => setTimeout(r, 6000));" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const elapsed = Date.now() - t0;
+
+			// Should promote within ~3s + one 500ms poll window — DEFINITELY
+			// well under the 60s default promote timer.
+			expect(elapsed).toBeGreaterThanOrEqual(3_000);
+			expect(elapsed).toBeLessThan(5_000);
+
+			expect(result.details.jobId).toMatch(/^exec-/);
+			expect(result.details.asyncStatus).toBe("running");
+
+			const stub = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			// Specific 🚦 stub, NOT the generic ⏳ "auto-promoted to async" one.
+			expect(stub).toContain("blocked on a hooman confirm dialog");
+			expect(stub).toContain("[git-safety]");
+			expect(stub).toContain("git push --force in /repo");
+			// Must point the agent at notify() so they pull the hooman in.
+			expect(stub).toContain("notify(");
+			// Must point at the status helper.
+			expect(stub).toContain('status("attention")');
+
+			// Cleanup the registry; let the bg work resolve so the test doesn't
+			// leak a pending promise.
+			endConfirm(handle);
+			await flushBackground(6_500);
+		} finally {
+			__resetForTests();
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	}, 15_000);
+
+	test("no pending confirm → still uses the regular ⏳ auto-promote stub", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "300";
+		const { __resetForTests, pendingConfirmCount } = await import(
+			"../../shared/src/pending-interactions.ts"
+		);
+		__resetForTests();
+		expect(pendingConfirmCount()).toBe(0);
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+			const result = await executeCode.execute(
+				"tc-no-blocked",
+				{ code: "await new Promise((r) => setTimeout(r, 800));" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(result.details.jobId).toMatch(/^exec-/);
+			const stub = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(stub).toContain("auto-promoted to async");
+			expect(stub).not.toContain("blocked on a hooman confirm dialog");
+			await flushBackground(900);
+		} finally {
+			__resetForTests();
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+});
+

@@ -5,6 +5,7 @@ import {
   foresightUnfold,
 } from "@pi-extensions/shared/foresight-read";
 import { runEditHooks } from "../../shared/src/edit-hooks";
+import { runGuardedConfirm } from "../../shared/src/guarded-confirm.ts";
 import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import {
   isGitPath,
@@ -584,15 +585,15 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
     const resolved = resolvePath(filePath, base);
     if (isGitLockActive() && isGitPath(resolved)) {
-      const title = "⚠️ .git write detected";
-      const body = `hashEdit ${filePath}\n\nThis can corrupt your repository. Allow?`;
-      if (ctx.confirmFn) {
-        const ok = await ctx.confirmFn(title, body);
-        if (!ok) throw new Error(gitGuardError(`hashEdit ${filePath}`));
-        ctx.logFn?.(`✅ Hooman approved hashEdit ${filePath} [OK]`);
-      } else {
-        throw new Error(gitGuardError(`hashEdit ${filePath}`));
-      }
+      const reason = `hashEdit ${filePath}`;
+      const { approved } = await runGuardedConfirm(ctx, {
+        source: "git-safety",
+        tool: "hashEdit",
+        reason,
+        title: "⚠️ .git write detected",
+        body: `${reason}\n\nThis can corrupt your repository. Allow?`,
+      });
+      if (!approved) throw new Error(gitGuardError(reason));
     }
     await runEditHooks({ phase: "pre", toolName: "hashEdit", filePaths: [resolved], cwd, sessionManager, signal });
     const before = fs.readFileSync(resolved, "utf-8");
@@ -819,13 +820,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
             ? gitResult.reason + "\n\nAllow?"
             : gitResult.reason + "\n\nThis can corrupt your repository. Allow?";
 
-          if (ctx.confirmFn) {
-            const ok = await ctx.confirmFn(title, body);
-            if (!ok) throw new Error(gitGuardError(gitResult.reason));
-            ctx.logFn?.("✅ Hooman approved " + gitResult.reason + " [OK]");
-          } else {
-            throw new Error(gitGuardError(gitResult.reason));
-          }
+          const { approved } = await runGuardedConfirm(ctx, {
+            source: "git-safety",
+            tool: "bash",
+            reason: gitResult.reason,
+            title,
+            body,
+          });
+          if (!approved) throw new Error(gitGuardError(gitResult.reason));
         }
       }
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
@@ -1062,15 +1064,15 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
       if (isGitLockActive() && isGitPath(resolved)) {
-        const title = "⚠️ .git write detected";
-        const body = `write to ${filePath}\n\nThis can corrupt your repository. Allow?`;
-        if (ctx.confirmFn) {
-          const ok = await ctx.confirmFn(title, body);
-          if (!ok) throw new Error(gitGuardError(`write to ${filePath}`));
-          ctx.logFn?.(`✅ Hooman approved write to ${filePath} [OK]`);
-        } else {
-          throw new Error(gitGuardError(`write to ${filePath}`));
-        }
+        const reason = `write to ${filePath}`;
+        const { approved } = await runGuardedConfirm(ctx, {
+          source: "git-safety",
+          tool: "write",
+          reason,
+          title: "⚠️ .git write detected",
+          body: `${reason}\n\nThis can corrupt your repository. Allow?`,
+        });
+        if (!approved) throw new Error(gitGuardError(reason));
       }
       await runEditHooks({ phase: "pre", toolName: "Write", filePaths: [resolved], cwd, sessionManager, signal });
       const dir = path.dirname(resolved);
@@ -1094,15 +1096,15 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const resolved = resolvePath(filePath, base);
       if (isGitLockActive() && isGitPath(resolved)) {
-        const title = "⚠️ .git write detected";
-        const body = `edit ${filePath}\n\nThis can corrupt your repository. Allow?`;
-        if (ctx.confirmFn) {
-          const ok = await ctx.confirmFn(title, body);
-          if (!ok) throw new Error(gitGuardError(`edit ${filePath}`));
-          ctx.logFn?.(`✅ Hooman approved edit ${filePath} [OK]`);
-        } else {
-          throw new Error(gitGuardError(`edit ${filePath}`));
-        }
+        const reason = `edit ${filePath}`;
+        const { approved } = await runGuardedConfirm(ctx, {
+          source: "git-safety",
+          tool: "edit",
+          reason,
+          title: "⚠️ .git write detected",
+          body: `${reason}\n\nThis can corrupt your repository. Allow?`,
+        });
+        if (!approved) throw new Error(gitGuardError(reason));
       }
       const content = fs.readFileSync(resolved, "utf-8");
       if (!content.includes(oldText)) {
@@ -1328,27 +1330,29 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       // Guard: check all paths before applying anything
       for (const hunk of hunks) {
         if (isGitLockActive() && isGitPath(hunk.path)) {
-          const title = "⚠️ .git write detected";
-          const body = `applyPatch targets ${hunk.path}\n\nThis can corrupt your repository. Allow?`;
-          if (ctx.confirmFn) {
-            const ok = await ctx.confirmFn(title, body);
-            if (!ok) throw new Error(gitGuardError(`applyPatch targets ${hunk.path}`));
-            ctx.logFn?.(`✅ Hooman approved applyPatch ${hunk.path} [OK]`);
-          } else {
-            throw new Error(gitGuardError(`applyPatch targets ${hunk.path}`));
-          }
+          const reason = `applyPatch targets ${hunk.path}`;
+          const { approved } = await runGuardedConfirm(ctx, {
+            source: "git-safety",
+            tool: "applyPatch",
+            reason,
+            approvalSummary: `applyPatch ${hunk.path}`,
+            title: "⚠️ .git write detected",
+            body: `${reason}\n\nThis can corrupt your repository. Allow?`,
+          });
+          if (!approved) throw new Error(gitGuardError(reason));
         }
         if (hunk.type === "update" && hunk.move_path && isGitPath(hunk.move_path)) {
           if (isGitLockActive()) {
-            const title = "⚠️ .git write detected";
-            const body = `applyPatch move targets ${hunk.move_path}\n\nThis can corrupt your repository. Allow?`;
-            if (ctx.confirmFn) {
-              const ok = await ctx.confirmFn(title, body);
-              if (!ok) throw new Error(gitGuardError(`applyPatch move targets ${hunk.move_path}`));
-              ctx.logFn?.(`✅ Hooman approved applyPatch move ${hunk.move_path} [OK]`);
-            } else {
-              throw new Error(gitGuardError(`applyPatch move targets ${hunk.move_path}`));
-            }
+            const reason = `applyPatch move targets ${hunk.move_path}`;
+            const { approved } = await runGuardedConfirm(ctx, {
+              source: "git-safety",
+              tool: "applyPatch",
+              reason,
+              approvalSummary: `applyPatch move ${hunk.move_path}`,
+              title: "⚠️ .git write detected",
+              body: `${reason}\n\nThis can corrupt your repository. Allow?`,
+            });
+            if (!approved) throw new Error(gitGuardError(reason));
           }
         }
       }

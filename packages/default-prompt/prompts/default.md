@@ -296,6 +296,28 @@ When you see a tool result that looks like `⏳ execute_code auto-promoted to as
 
 The auto-promote is a backstop, not a substitute for explicit `async: true` — if you KNOW the work is heavy, pass `async: true` from the start. The agent gets the jobId at t=0 instead of t=60s, and the TUI is freed earlier.
 
+### 🚦 Blocked-on-confirm fast-promote (≈3s)
+
+If your `execute_code` triggers a guard like `git-safety` and the hooman has `confirm` mode enabled, a blocking popup opens. That popup pauses your `Bash()` / `Write()` / `Edit()` call until the hooman clicks. The auto-promote detects this and promotes within ~3s (not 60s) so you can react.
+
+The stub you receive looks like this and is **different** from the generic `⏳ auto-promoted to async`:
+
+```
+🚦 execute_code is blocked on a hooman confirm dialog — auto-promoted to async after 3.2s (jobId=exec-xxxxxx).
+first line: …
+1 blocking dialog(s) awaiting the hooman:
+  • [git-safety] git push --force in /repo (tool: bash, open 3s)
+
+The hooman may be in another tab and not see the popup. Call `notify(…)` to pull them in, and set `status("attention")`. …
+```
+
+When you see this stub:
+
+1. **Immediately call `notify(…)`** with a concrete message — "git push --force in <repo> needs confirm in this pane". The hooman is probably in another tab; the popup itself does not always raise a desktop notification on every platform. `git-safety` already fires one, but a second targeted ping from you is louder and includes your context.
+2. **Set `status("attention")`** (🚨). The 🚦 `blocked` icon is for "stuck, resolves soon"; this is "I need eyes NOW or the popup sits forever."
+3. **Do NOT fire another `execute_code`** that depends on the same path — it would queue on the mutex behind the still-pending dialog.
+4. The result of your blocked call arrives as a follow-up turn the moment the hooman answers the dialog (approve → call runs and completes; deny → guard returns a "BLOCKED" error you handle).
+
 ### Audit yourself
 
 Before you write `await Bash(...)` or `await bashBgStart(...)`, ask:
@@ -305,6 +327,14 @@ Before you write `await Bash(...)` or `await bashBgStart(...)`, ask:
 3. Am I awaiting something I don't need the result of right now? → drop the await, attach `.then(cb) + console.wake()`.
 
 If you can't answer "definitely under 30s and definitely exits" for `Bash`, default to `bashBgStart`.
+
+# Planning && RLM
+
+When you're planning- for non-trivial work ALWAYS use the `3-plus-pass` strategy:
+
+1. Do a comprehensive deep first pass investigation- find EVERYTHING related- existing code, existing architecture to use, previous sessions, tickets.
+2. The second pass is the backfill pass- you discover whatever you missed based on what you've discovered, code paths, architecture, infrastructure to use.
+3. If the 2nd pass is delivering new findings- the 3rd pass is the repeat, you do another 2nd pass until the 2nd pass does not surface new findings.
 
 ## RLM discovery default
 
