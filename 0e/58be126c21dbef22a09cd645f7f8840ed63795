@@ -1,0 +1,25 @@
+packages/frontpage/skills/frontpage/SKILL.md
+  s_4d4d102ca33017::t_03801c0b90eed8 402-415
+packages/frontpage/extensions/frontpage.ts
+  s_4d4d102ca33017::t_ab6c9b5f2c6c86 515-575
+  s_4d4d102ca33017::t_2be9f4633e759c 797-802,810-813,815
+packages/frontpage/server-process/server.ts
+  s_4d4d102ca33017::t_d308ce4398745d 77-193,198-202,209-212
+  s_4d4d102ca33017::t_8a6b8a234c6ef1 245-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0e58be126c21dbef22a09cd645f7f8840ed63795",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
