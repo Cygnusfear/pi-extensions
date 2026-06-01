@@ -512,6 +512,67 @@ async function triggerHistorySnapshot(slug: string, author: string): Promise<voi
   } catch { /* server not up; non-fatal */ }
 }
 
+interface SectionDiff {
+  ts: number;
+  author: string;
+  /** spec.sections IDs whose JSON content changed between previous and new */
+  changedSectionIds: string[];
+  /** new IDs that didn't exist before */
+  addedSectionIds: string[];
+  /** old IDs that are gone */
+  removedSectionIds: string[];
+  /** Brief human-readable summary */
+  summary: string;
+}
+
+/** Diff old vs new spec sections by id + content. Returns null when there's
+ *  nothing meaningful to report (the diff would be empty). */
+function computeSectionDiff(
+  oldSections: ReadonlyArray<{ id?: string }> | undefined,
+  newSections: ReadonlyArray<{ id?: string }>,
+  author: string,
+): SectionDiff | null {
+  const oldById = new Map<string, unknown>();
+  for (const s of oldSections ?? []) {
+    if (s.id) oldById.set(s.id, s);
+  }
+  const newIds = new Set<string>();
+  const changed: string[] = [];
+  const added: string[] = [];
+  for (const s of newSections) {
+    if (!s.id) continue;
+    newIds.add(s.id);
+    const prev = oldById.get(s.id);
+    if (prev === undefined) {
+      added.push(s.id);
+    } else if (JSON.stringify(prev) !== JSON.stringify(s)) {
+      changed.push(s.id);
+    }
+  }
+  const removed: string[] = [];
+  for (const id of oldById.keys()) {
+    if (!newIds.has(id)) removed.push(id);
+  }
+  if (changed.length === 0 && added.length === 0 && removed.length === 0) return null;
+  const parts: string[] = [];
+  if (changed.length > 0) parts.push(`updated ${changed.join(", ")}`);
+  if (added.length > 0) parts.push(`added ${added.join(", ")}`);
+  if (removed.length > 0) parts.push(`removed ${removed.join(", ")}`);
+  return {
+    ts: Date.now(),
+    author,
+    changedSectionIds: changed,
+    addedSectionIds: added,
+    removedSectionIds: removed,
+    summary: `${author} ${parts.join("; ")}`,
+  };
+}
+
+async function writeSectionDiff(slug: string, diff: SectionDiff): Promise<void> {
+  const diffPath = path.join(STORE_DIR, `${slug}.diff.json`);
+  await fsp.writeFile(diffPath, JSON.stringify(diff, null, 2), "utf8");
+}
+
 /** Clear all canvas annotations (everything except the frontpage-embed shape).
  *  Called after a frontpage_update so a page revision starts with a clean
  *  canvas — the prior annotations belonged to the prior content and would
@@ -733,6 +794,12 @@ export default function (pi: ExtensionAPI) {
       const filePath = pagePath(withIds.slug);
       await fsp.writeFile(filePath, html, "utf8");
       const now = Date.now();
+      // Compute section-level diff BEFORE writing the new meta so we still
+      // have the old spec in hand (`meta.spec` is the on-disk pre-update
+      // version; `withIds` is the post-patch version).
+      const authorTag = `agent:${getStableNickname() ?? "frontpage_update"}`;
+      const sectionDiff = computeSectionDiff(meta.spec.sections, withIds.sections, authorTag);
+
       await writeMeta({ ...meta, spec: withIds, updatedAt: now });
       // 1. Snapshot the WHOLE pre-update surface (html + meta + canvas) so
       //    the hooman can Time Machine back to their annotations on the
@@ -740,8 +807,12 @@ export default function (pi: ExtensionAPI) {
       // 2. Clear the canvas — annotations belonged to the prior content
       //    and would drift visually with content reflow. Fresh canvas for
       //    the new version.
-      await triggerHistorySnapshot(params.slug, `agent:${getStableNickname() ?? "frontpage_update"}`);
+      // 3. Persist the section diff so the next /embed render injects
+      //    "★ updated" badges on changed sections — the "what's new"
+      //    affordance the hooman needs to see at a glance.
+      await triggerHistorySnapshot(params.slug, authorTag);
       await clearCanvasAnnotations(params.slug);
+      if (sectionDiff) await writeSectionDiff(params.slug, sectionDiff);
 
       if (meta.artifactId) await addNote(meta.artifactId, params.note);
       if (params.open) void osOpen(filePath);

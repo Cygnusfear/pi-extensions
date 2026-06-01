@@ -74,15 +74,142 @@ app.get("/page/:slug", async (c) => {
 	return c.html(shellHtml(slug));
 });
 
+interface SectionDiffOnDisk {
+	ts: number;
+	author: string;
+	changedSectionIds: string[];
+	addedSectionIds: string[];
+	removedSectionIds: string[];
+	summary: string;
+}
+
+/** Annotate the rendered HTML with diff state: per-section data-changed
+ *  attributes + a dismiss pill at the top of the body + the CSS that styles
+ *  both. Pure string transform — no DOM parser needed. */
+function injectDiffMarkers(html: string, diff: SectionDiffOnDisk | null): string {
+	if (!diff) return html;
+	const changedSet = new Set(diff.changedSectionIds);
+	const addedSet = new Set(diff.addedSectionIds);
+	const ageS = Math.max(0, Math.round((Date.now() - diff.ts) / 1000));
+	const ageLabel = ageS < 60 ? `${ageS}s ago` : ageS < 3600 ? `${Math.round(ageS / 60)}m ago` : `${Math.round(ageS / 3600)}h ago`;
+	const authorLabel = diff.author.startsWith("agent:") ? diff.author.slice(6) : diff.author === "hooman" ? "you" : diff.author;
+	const totalChanged = diff.changedSectionIds.length + diff.addedSectionIds.length;
+	if (totalChanged === 0 && diff.removedSectionIds.length === 0) return html;
+
+	// 1. Annotate each section element with data-changed when its id matches.
+	// Section markup looks like:  <section ... data-id="s3" ...>
+	const annotated = html.replace(/data-id="([^"]+)"/g, (m, id: string) => {
+		if (addedSet.has(id)) return `${m} data-changed="added" data-change-badge="★ NEW"`;
+		if (changedSet.has(id)) return `${m} data-changed="changed" data-change-badge="★ UPDATED"`;
+		return m;
+	});
+
+	// 2. Inject diff CSS + dismiss pill at the start of <body>.
+	const slug = ""; // we'll fill this in via the script's relative URL
+	const pillHtml = `
+<style>
+section[data-changed] {
+  position: relative !important;
+  border-left: 4px solid var(--fp-diff-color, #eab308) !important;
+  background: linear-gradient(to right, rgba(234,179,8,0.05), transparent 200px) !important;
+  padding-left: 16px !important;
+  transition: opacity 0.3s, border-color 0.3s, background 0.3s;
+}
+section[data-changed="added"] { --fp-diff-color: #10b981; background: linear-gradient(to right, rgba(16,185,129,0.05), transparent 200px) !important; }
+section[data-changed]::after {
+  content: attr(data-change-badge);
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--fp-diff-color, #eab308);
+  color: white;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  z-index: 5;
+}
+#frontpage-diff-pill {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: rgba(255,255,255,0.96);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  padding: 8px 12px 8px 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 12px;
+  color: #1f2937;
+  pointer-events: all;
+}
+#frontpage-diff-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #eab308; flex-shrink: 0; }
+#frontpage-diff-pill button {
+  all: unset;
+  background: #1f2937;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#frontpage-diff-pill button:hover { background: #374151; }
+#frontpage-diff-pill.dismissed { opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+@media (prefers-color-scheme: dark) {
+  #frontpage-diff-pill { background: rgba(30,30,40,0.95); color: #e5e7eb; border-color: #444; }
+  #frontpage-diff-pill button { background: #eab308; color: #1f2937; }
+}
+</style>
+<div id="frontpage-diff-pill">
+  <span class="dot"></span>
+  <span>★ <strong>${totalChanged}</strong> section${totalChanged === 1 ? "" : "s"} updated by <strong>${authorLabel}</strong> · ${ageLabel}</span>
+  <button onclick="frontpageDismissDiff()">Got it</button>
+</div>
+<script>
+function frontpageDismissDiff() {
+  document.querySelectorAll('section[data-changed]').forEach(function (el) {
+    el.removeAttribute('data-changed');
+    el.removeAttribute('data-change-badge');
+  });
+  var pill = document.getElementById('frontpage-diff-pill');
+  if (pill) pill.classList.add('dismissed');
+  fetch('/api/page/${slug}/dismiss-diff', { method: 'POST' }).catch(function () {});
+}
+</script>
+`;
+	return annotated.replace(/<body([^>]*)>/i, (m) => `${m}${pillHtml}`);
+}
+
 app.get("/page/:slug/embed", async (c) => {
 	const slug = c.req.param("slug");
 	try {
 		const html = await fsp.readFile(pagePath(slug), "utf8");
-		const injected = html.replace(/<\/body>/i, `${LAYOUT_BOUNDS_SHIM}\n</body>`);
+		const diff = await readJsonOrEmpty<SectionDiffOnDisk | null>(diffPath(slug), null);
+		// Inject slug into the dismiss script (we templated an empty string above).
+		const withDiff = injectDiffMarkers(html, diff)
+			.replace("/api/page/${slug}/dismiss-diff", `/api/page/${encodeURIComponent(slug)}/dismiss-diff`);
+		const injected = withDiff.replace(/<\/body>/i, `${LAYOUT_BOUNDS_SHIM}\n</body>`);
 		return c.html(injected);
 	} catch {
 		return c.html("Not found", 404);
 	}
+});
+
+app.post("/api/page/:slug/dismiss-diff", async (c) => {
+	const slug = c.req.param("slug");
+	try { await fsp.unlink(diffPath(slug)); } catch { /* didn't exist; fine */ }
+	return c.json({ ok: true, slug });
 });
 
 app.get("/api/page/:slug", async (c) => {
@@ -114,6 +241,9 @@ function layoutPath(slug: string): string {
 }
 function historyPath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.history.jsonl`);
+}
+function diffPath(slug: string): string {
+	return path.join(STORE_DIR, `${slug}.diff.json`);
 }
 
 // Cap on history entries kept per slug. ~50 entries × ~20KB/entry = ~1MB max

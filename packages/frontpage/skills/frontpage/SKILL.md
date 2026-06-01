@@ -399,6 +399,20 @@ POST /api/page/:slug/restore                     ← { ts } atomically reverts h
 GET  /api/page/:slug/embed-versioned?ts=<N>      ← html as it was at that snapshot, for the Time Machine preview
 ```
 
+### "What changed" diff highlight
+
+Every `frontpage_update` computes a section-level diff between the old spec and the new spec (by section ID + JSON-equality content compare). The diff is written to `~/.agent/frontpage/<slug>.diff.json` with timestamp, author, and the set of `changedSectionIds` / `addedSectionIds` / `removedSectionIds`.
+
+Render-time, the server injects:
+- `data-changed="changed"` + `data-change-badge="★ UPDATED"` on each changed section
+- `data-changed="added"` + `data-change-badge="★ NEW"` on each added section
+- A floating dismiss pill at the top of the page: "★ N sections updated by <author> · <relative time> [Got it]"
+- CSS: gold left-border + corner badge for changed; green for added
+
+The hooman clicks "Got it" → POST /api/page/:slug/dismiss-diff → diff.json deleted → next render is clean. The diff persists across browser refreshes until either dismissed or a newer `frontpage_update` replaces it.
+
+For agents: don't hand-craft diff content; let `frontpage_update` compute it. If you want to know what your update changed (e.g. for a tool result message), the diff.json file is readable at `~/.agent/frontpage/<slug>.diff.json` immediately after update.
+
 ### Annotations are version-scoped
 
 `frontpage_update` **clears the canvas** after snapshotting. Rationale: stickies are positioned in absolute canvas coordinates over the rendered page. When the spec changes (section grows, callout moves, new card added), the page content reflows and stickies that were *over section s3* end up floating in empty space or hovering over the wrong content. Trying to reanchor them programmatically is brittle (HTML-position drift is hard to solve cleanly).
