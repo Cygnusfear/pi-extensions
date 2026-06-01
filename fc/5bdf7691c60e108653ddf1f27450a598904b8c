@@ -1,0 +1,42 @@
+packages/frontpage/skills/frontpage/SKILL.md
+  s_4d4d102ca33017::t_49097f0d3957dd 402-413
+  s_4d4d102ca33017::t_689af101adc297 364,366,368,370,372-392,395-399,414-416
+packages/frontpage/server-process/server.ts
+  s_4d4d102ca33017::t_26c7e855b1314c 163-170,175-177,179,183
+  s_4d4d102ca33017::t_8055090b0414f8 132,134-137
+  s_4d4d102ca33017::t_685b8e7655a380 688-709
+  s_4d4d102ca33017::t_2d386584431582 831-841,843-880
+  s_4d4d102ca33017::t_db43782c2664f6 1026-1032
+packages/frontpage/client/tldraw-shell.tsx
+  s_4d4d102ca33017::t_0eff11bde3ac40 58-59
+  s_4d4d102ca33017::t_4d17fa88acf2a2 251
+  s_4d4d102ca33017::t_331ef7890dd974 268
+  s_4d4d102ca33017::t_ae8d1225c547a5 230-231,235,238
+  s_4d4d102ca33017::t_ec00972b696397 40
+  s_4d4d102ca33017::t_f9e2dd7decf0d5 276,279-297
+  s_4d4d102ca33017::t_2c4d2fd13dac42 310,315,321
+  s_4d4d102ca33017::t_2788ab1e3ce49f 243-245
+packages/frontpage/extensions/frontpage.ts
+  s_4d4d102ca33017::t_346112d6a77e50 515-529
+  s_4d4d102ca33017::t_37969006a413e4 504-514
+  s_4d4d102ca33017::t_c9046a839231a5 598
+  s_4d4d102ca33017::t_dc0c71489c55d6 737-744
+packages/frontpage/client/time-machine.tsx
+  s_4d4d102ca33017::t_a61e7d0c44e11a 1-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fc5bdf7691c60e108653ddf1f27450a598904b8c",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
