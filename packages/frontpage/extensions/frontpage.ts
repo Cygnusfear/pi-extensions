@@ -501,6 +501,32 @@ function frontpagePageUrl(slug: string): string {
   return `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/page/${encodeURIComponent(slug)}`;
 }
 
+/** Fire a history snapshot trigger after a spec write. Best-effort; never throws. */
+async function triggerHistorySnapshot(slug: string, author: string): Promise<void> {
+  try {
+    await fetch(`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/history`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ author }),
+    });
+  } catch { /* server not up; non-fatal */ }
+}
+
+/** Clear all canvas annotations (everything except the frontpage-embed shape).
+ *  Called after a frontpage_update so a page revision starts with a clean
+ *  canvas — the prior annotations belonged to the prior content and would
+ *  drift visually with content reflow. The pre-clear state is preserved in
+ *  history (triggerHistorySnapshot is always called BEFORE this), so the
+ *  hooman can Time Machine back if they want their old annotations. */
+async function clearCanvasAnnotations(slug: string): Promise<void> {
+  try {
+    await fetch(`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/clear-annotations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+  } catch { /* server not up; non-fatal */ }
+}
+
 export default function (pi: ExtensionAPI) {
   // Boot the Hono server SUBPROCESS. Non-blocking; if it fails the file://
   // fallback in frontpage_open keeps pages accessible.
@@ -569,6 +595,7 @@ export default function (pi: ExtensionAPI) {
         spec,
       };
       await writeMeta(meta);
+      void triggerHistorySnapshot(spec.slug, `agent:${getStableNickname() ?? "frontpage_create"}`);
 
       // Opt-in: default false (agents typically follow up with frontpage_open;
       // double-opening on every create surprised the hooman with extra tabs).
@@ -707,6 +734,14 @@ export default function (pi: ExtensionAPI) {
       await fsp.writeFile(filePath, html, "utf8");
       const now = Date.now();
       await writeMeta({ ...meta, spec: withIds, updatedAt: now });
+      // 1. Snapshot the WHOLE pre-update surface (html + meta + canvas) so
+      //    the hooman can Time Machine back to their annotations on the
+      //    old content.
+      // 2. Clear the canvas — annotations belonged to the prior content
+      //    and would drift visually with content reflow. Fresh canvas for
+      //    the new version.
+      await triggerHistorySnapshot(params.slug, `agent:${getStableNickname() ?? "frontpage_update"}`);
+      await clearCanvasAnnotations(params.slug);
 
       if (meta.artifactId) await addNote(meta.artifactId, params.note);
       if (params.open) void osOpen(filePath);

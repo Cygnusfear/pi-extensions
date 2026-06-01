@@ -129,7 +129,12 @@ interface HistoryEntry {
 	ts: number;
 	author: string;
 	shapeCount: number;
+	/** tldraw canvas snapshot (document + session) */
 	snapshot: unknown;
+	/** Full rendered frontpage HTML at this point. Restoring writes this back. */
+	html?: string;
+	/** Spec + artifact-id sidecar at this point. */
+	meta?: unknown;
 }
 
 async function readHistory(slug: string): Promise<HistoryEntry[]> {
@@ -155,18 +160,27 @@ async function writeHistory(slug: string, entries: HistoryEntry[]): Promise<void
 	await fsp.rename(tmp, p);
 }
 
+async function readSurfaceState(slug: string): Promise<{ html?: string; meta?: unknown }> {
+	const [html, meta] = await Promise.all([
+		fsp.readFile(pagePath(slug), "utf8").catch(() => undefined),
+		fsp.readFile(metaPath(slug), "utf8").then((t) => JSON.parse(t) as unknown).catch(() => undefined),
+	]);
+	return { html, meta };
+}
+
 async function appendHistoryEntry(slug: string, snapshot: unknown, author: string): Promise<{ appended: boolean; reason?: string }> {
 	const entries = await readHistory(slug);
 	const last = entries[entries.length - 1];
 	const now = Date.now();
+	const surface = await readSurfaceState(slug);
+	const shapeCount = countShapes(snapshot);
+	const entry: HistoryEntry = { ts: now, author, shapeCount, snapshot, html: surface.html, meta: surface.meta };
 	if (last && last.author === author && now - last.ts < HISTORY_COALESCE_MS) {
-		// Coalesce: replace the last entry instead of appending a new one.
-		const shapeCount = countShapes(snapshot);
-		entries[entries.length - 1] = { ts: now, author, shapeCount, snapshot };
+		entries[entries.length - 1] = entry;
 		await writeHistory(slug, entries);
 		return { appended: false, reason: "coalesced into previous entry" };
 	}
-	entries.push({ ts: now, author, shapeCount: countShapes(snapshot), snapshot });
+	entries.push(entry);
 	await writeHistory(slug, entries);
 	return { appended: true };
 }
@@ -671,6 +685,28 @@ function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: 
 	};
 }
 
+app.post("/api/page/:slug/clear-annotations", async (c) => {
+	const slug = c.req.param("slug");
+	const snap = await readJsonOrEmpty<{ document?: { store?: Record<string, unknown> } } | null>(tldrawPath(slug), null);
+	if (!snap) return c.json({ ok: true, slug, cleared: 0 });
+	const store = snap.document?.store;
+	if (!store) return c.json({ ok: true, slug, cleared: 0 });
+	let removed = 0;
+	for (const [id, rec] of Object.entries(store)) {
+		if (typeof rec === "object" && rec !== null) {
+			const r = rec as { typeName?: string; type?: string };
+			// Keep the frontpage-embed shape (the page itself), drop every
+			// other shape (notes, text, arrows, geo, drawings).
+			if (r.typeName === "shape" && r.type !== "frontpage-embed") {
+				delete store[id];
+				removed++;
+			}
+		}
+	}
+	await writeJsonAtomic(tldrawPath(slug), snap);
+	return c.json({ ok: true, slug, cleared: removed });
+});
+
 app.post("/api/page/:slug/annotate", async (c) => {
 	const slug = c.req.param("slug");
 	const body = await c.req.json().catch(() => null);
@@ -792,11 +828,56 @@ app.post("/api/page/:slug/restore", async (c) => {
 	const entries = await readHistory(slug);
 	const entry = entries.find((e) => e.ts === ts);
 	if (!entry) return c.json({ error: "no history entry with that ts" }, 404);
-	await writeJsonAtomic(tldrawPath(slug), entry.snapshot);
-	// Record the restore as a NEW history entry so the user can undo a
-	// restore (and so we don't lose the state we're restoring FROM).
+	// Atomic surface restore: html + meta + tldraw all revert together.
+	// Skip files the entry doesn't carry (older entries without html/meta).
+	const writes: Array<Promise<unknown>> = [writeJsonAtomic(tldrawPath(slug), entry.snapshot)];
+	if (typeof entry.html === "string") {
+		writes.push(fsp.writeFile(pagePath(slug), entry.html, "utf8"));
+	}
+	if (entry.meta !== undefined) {
+		writes.push(writeJsonAtomic(metaPath(slug), entry.meta));
+	}
+	await Promise.all(writes);
+	// Record the restore so the act-of-restoring is itself reversible.
 	await appendHistoryEntry(slug, entry.snapshot, `restore-from:${ts}`);
-	return c.json({ ok: true, slug, restoredTs: ts, shapeCount: entry.shapeCount });
+	return c.json({ ok: true, slug, restoredTs: ts, shapeCount: entry.shapeCount, restoredFiles: writes.length });
+});
+
+// Trigger a history snapshot from outside the canvas write path — used by
+// frontpage_create / frontpage_update in the extension so spec changes also
+// land in history.
+app.post("/api/page/:slug/history", async (c) => {
+	const slug = c.req.param("slug");
+	const body = await c.req.json().catch(() => ({}));
+	const author = typeof (body as { author?: unknown }).author === "string"
+		? (body as { author: string }).author
+		: "agent";
+	const snap = await readJsonOrEmpty<unknown>(tldrawPath(slug), { document: { store: {} } });
+	const result = await appendHistoryEntry(slug, snap, author);
+	return c.json({ ok: true, slug, ...result });
+});
+
+// Versioned embed: ?ts=<historyTs> returns the html from that history entry
+// (used by the Time Machine to render the page as it was at that moment).
+app.get("/api/page/:slug/embed-versioned", async (c) => {
+	const slug = c.req.param("slug");
+	const tsParam = c.req.query("ts");
+	if (!tsParam) {
+		// Default: current. Re-use the /embed handler logic.
+		try {
+			const html = await fsp.readFile(pagePath(slug), "utf8");
+			return c.html(html.replace(/<\/body>/i, `${LAYOUT_BOUNDS_SHIM}\n</body>`));
+		} catch { return c.html("Not found", 404); }
+	}
+	const ts = Number(tsParam);
+	const entries = await readHistory(slug);
+	const entry = entries.find((e) => e.ts === ts);
+	if (!entry || typeof entry.html !== "string") {
+		return c.html(`<p>No HTML stored for ts ${ts}.</p>`, 404);
+	}
+	// No layout shim on versioned embeds — we don't want them mutating
+	// the current layout.json with historical bounds.
+	return c.html(entry.html);
 });
 
 app.get("/client/bundle.js", serveClientAsset("bundle.js", "application/javascript; charset=utf-8"));
@@ -942,7 +1023,13 @@ const LAYOUT_BOUNDS_SHIM = `
         items: collectItems(n),
       });
     });
-    try { parent.postMessage({ type: 'frontpage:layout', sections: sections }, '*'); } catch (_) {}
+    var documentHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.offsetHeight
+    );
+    try { parent.postMessage({ type: 'frontpage:layout', sections: sections, documentHeight: documentHeight }, '*'); } catch (_) {}
   }
   var pending = 0;
   function schedule() {

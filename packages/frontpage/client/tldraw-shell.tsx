@@ -37,6 +37,7 @@ import {
 	useEditor,
 } from "tldraw";
 import "tldraw/tldraw.css";
+import { TimeMachine } from "./time-machine.tsx";
 
 // ---- custom shape: frontpage-embed ----
 
@@ -54,7 +55,8 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 	};
 
 	getDefaultProps(): FrontpageEmbedShape["props"] {
-		return { w: 1200, h: 8000, slug: "" };
+		// Initial guess; auto-resizes on iframe layout via the layout shim.
+		return { w: 1200, h: 1500, slug: "" };
 	}
 
 	override canResize = () => true;
@@ -225,155 +227,28 @@ function StickerToolbarItem() {
 	);
 }
 
-/** Toolbar item — opens the history panel. */
-function HistoryToolbarItem({ onClick, active }: { onClick: () => void; active: boolean }) {
+/** Toolbar item — opens the full-screen Time Machine. */
+function TimeMachineToolbarItem({ onClick }: { onClick: () => void }) {
 	return (
 		<TldrawUiButton
 			type="tool"
-			title="History — restore a prior canvas state"
+			title="Time Machine — browse and restore prior versions"
 			onClick={onClick}
-			data-active={active}
 		>
-			<span style={{ fontSize: 16, lineHeight: 1 }}>⏪</span>
+			<span style={{ fontSize: 16, lineHeight: 1 }}>⏰</span>
 		</TldrawUiButton>
 	);
 }
 
-// ---- history modal ----
-
-interface HistorySummary { ts: number; author: string; shapeCount: number }
-
-function HistoryPanel({ slug, editor, onClose }: { slug: string; editor: Editor | null; onClose: () => void }) {
-	const [entries, setEntries] = React.useState<HistorySummary[]>([]);
-	const [loading, setLoading] = React.useState(true);
-	const [error, setError] = React.useState<string | null>(null);
-
-	React.useEffect(() => {
-		(async () => {
-			try {
-				const r = await fetch(`/api/page/${encodeURIComponent(slug)}/history`);
-				if (!r.ok) throw new Error(`HTTP ${r.status}`);
-				const body = (await r.json()) as { entries: HistorySummary[] };
-				setEntries(body.entries.slice().reverse());
-			} catch (err) {
-				setError(err instanceof Error ? err.message : String(err));
-			} finally { setLoading(false); }
-		})();
-	}, [slug]);
-
-	const restore = React.useCallback(
-		async (ts: number) => {
-			if (!editor) return;
-			try {
-				const r = await fetch(`/api/page/${encodeURIComponent(slug)}/restore`, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ ts }),
-				});
-				if (!r.ok) throw new Error(`restore failed: HTTP ${r.status}`);
-				const sr = await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`);
-				if (!sr.ok) throw new Error(`reload failed: HTTP ${sr.status}`);
-				const body = (await sr.json()) as { snapshot?: unknown };
-				if (body.snapshot) loadSnapshot(editor.store, body.snapshot as Parameters<typeof loadSnapshot>[1]);
-				onClose();
-			} catch (err) {
-				setError(err instanceof Error ? err.message : String(err));
-			}
-		},
-		[editor, slug, onClose],
-	);
-
-	const formatRel = (ts: number) => {
-		const diff = Date.now() - ts;
-		if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
-		if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
-		if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
-		return `${Math.round(diff / 86_400_000)}d ago`;
-	};
-
-	const formatAuthor = (a: string) => {
-		if (a === "hooman") return { text: "you", color: "#1f2937" };
-		if (a.startsWith("agent:")) return { text: a.slice(6) || "agent", color: "#7c3aed" };
-		if (a.startsWith("restore-from:")) return { text: "↩ restore", color: "#0891b2" };
-		return { text: a, color: "#6b7280" };
-	};
-
-	return (
-		<div
-			style={{
-				position: "absolute",
-				left: "50%",
-				bottom: 80,
-				transform: "translateX(-50%)",
-				zIndex: 1001,
-				width: 360,
-				maxHeight: "60vh",
-				background: "white",
-				border: "1px solid #e0e0e0",
-				borderRadius: 10,
-				boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-				display: "flex",
-				flexDirection: "column",
-				overflow: "hidden",
-				pointerEvents: "all",
-			}}
-			onPointerDown={(e) => e.stopPropagation()}
-		>
-			<div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", gap: 8 }}>
-				<strong style={{ flex: 1, fontSize: 13 }}>History</strong>
-				<button onClick={onClose} style={{ background: "transparent", border: 0, cursor: "pointer", fontSize: 18, color: "#888", padding: 0, width: 24 }}>×</button>
-			</div>
-			<div style={{ overflowY: "auto", flex: 1 }}>
-				{loading && <div style={{ padding: 14, color: "#888", fontSize: 12 }}>Loading…</div>}
-				{error && <div style={{ padding: 14, color: "#b91c1c", fontSize: 12 }}>{error}</div>}
-				{!loading && entries.length === 0 && !error && (
-					<div style={{ padding: 14, color: "#888", fontSize: 12 }}>No history yet — every save creates a snapshot.</div>
-				)}
-				{entries.map((e, idx) => {
-					const author = formatAuthor(e.author);
-					const isCurrent = idx === 0;
-					return (
-						<button
-							key={e.ts}
-							onClick={() => restore(e.ts)}
-							disabled={isCurrent}
-							style={{
-								display: "flex",
-								width: "100%",
-								padding: "8px 14px",
-								background: "transparent",
-								border: 0,
-								borderBottom: "1px solid #f1f1f1",
-								cursor: isCurrent ? "default" : "pointer",
-								textAlign: "left",
-								gap: 8,
-								alignItems: "center",
-								opacity: isCurrent ? 0.6 : 1,
-							}}
-							onMouseEnter={(ev) => { if (!isCurrent) (ev.currentTarget as HTMLButtonElement).style.background = "#fafaf7"; }}
-							onMouseLeave={(ev) => { (ev.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-						>
-							<div style={{ flex: 1 }}>
-								<div style={{ fontSize: 12, fontWeight: 500 }}>{formatRel(e.ts)}{isCurrent ? " (current)" : ""}</div>
-								<div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{e.shapeCount} shape{e.shapeCount === 1 ? "" : "s"}</div>
-							</div>
-							<div style={{ fontSize: 11, color: author.color, fontWeight: 500 }}>{author.text}</div>
-						</button>
-					);
-				})}
-			</div>
-			<div style={{ padding: "8px 14px", borderTop: "1px solid #eee", fontSize: 11, color: "#888" }}>
-				Click any prior version to restore. The current state is logged first.
-			</div>
-		</div>
-	);
-}
+// (History UI moved to ./time-machine.tsx — full-screen Apple Time Machine-
+// style overlay with z-stacked previews, vertical timeline rail, and
+// color-coded author markers.)
 
 // ---- app shell ----
 
 function App({ slug }: { slug: string }) {
 	const [editor, setEditor] = React.useState<Editor | null>(null);
-	const [showHistory, setShowHistory] = React.useState(false);
+	const [showTimeMachine, setShowTimeMachine] = React.useState(false);
 
 	const handleMount = React.useCallback(
 		(ed: Editor) => {
@@ -390,7 +265,7 @@ function App({ slug }: { slug: string }) {
 				}
 				const existing = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
 				if (!existing) {
-					ed.createShape<FrontpageEmbedShape>({ type: "frontpage-embed", x: 0, y: 0, props: { w: 1200, h: 8000, slug } });
+					ed.createShape<FrontpageEmbedShape>({ type: "frontpage-embed", x: 0, y: 0, props: { w: 1200, h: 1500, slug } });
 				}
 				if (!saved) ed.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
 				ed.setStyleForNextShapes(DefaultSizeStyle, "s");
@@ -398,9 +273,28 @@ function App({ slug }: { slug: string }) {
 				ed.store.listen(saveSoon, { scope: "document" });
 			})();
 			const onMessage = (ev: MessageEvent) => {
-				const data = ev.data as { type?: string; sections?: unknown };
+				const data = ev.data as { type?: string; sections?: unknown; documentHeight?: number };
 				if (!data || data.type !== "frontpage:layout" || !Array.isArray(data.sections)) return;
 				void postLayout(slug, data.sections as unknown[]);
+				// Resize the embed shape to match the iframe's actual content height.
+				// Adds 40px breathing room. Prevents the huge empty canvas area
+				// below the rendered page (was 8000px default; usually pages are
+				// 500-3000px tall).
+				if (typeof data.documentHeight === "number" && data.documentHeight > 0) {
+					const targetH = Math.max(600, data.documentHeight + 40);
+					const embed = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
+					if (embed) {
+						const cur = (embed.props as { h?: number }).h ?? 0;
+						// Only update if meaningfully different (avoid churn on every shim message)
+						if (Math.abs(cur - targetH) > 20) {
+							ed.updateShape({
+								id: embed.id,
+								type: "frontpage-embed",
+								props: { ...(embed.props as Record<string, unknown>), h: targetH },
+							});
+						}
+					}
+				}
 			};
 			window.addEventListener("message", onMessage);
 			return () => { cancelled = true; window.removeEventListener("message", onMessage); };
@@ -413,18 +307,18 @@ function App({ slug }: { slug: string }) {
 			Toolbar: (props) => (
 				<DefaultToolbar {...props}>
 					<DefaultToolbarContent />
-					<HistoryToolbarItem onClick={() => setShowHistory((v) => !v)} active={showHistory} />
+					<TimeMachineToolbarItem onClick={() => setShowTimeMachine(true)} />
 					<StickerToolbarItem />
 				</DefaultToolbar>
 			),
 		}),
-		[showHistory],
+		[],
 	);
 
 	return (
 		<>
 			<Tldraw shapeUtils={[FrontpageEmbedShapeUtil]} onMount={handleMount} components={components} />
-			{showHistory && <HistoryPanel slug={slug} editor={editor} onClose={() => setShowHistory(false)} />}
+			{showTimeMachine && <TimeMachine slug={slug} onClose={() => setShowTimeMachine(false)} />}
 		</>
 	);
 }

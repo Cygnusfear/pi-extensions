@@ -361,23 +361,59 @@ The agent reads them like any other annotation via `frontpage_read`. Emojis ofte
 
 ---
 
-## History — Time Machine for the canvas
+## History — Time Machine for the surface
 
-Every write to a frontpage's tldraw state (browser persistence OR agent annotate) appends to a per-slug history log at `~/.agent/frontpage/<slug>.history.jsonl`. Last 50 entries kept; entries from the same author within 5 seconds coalesce so a long drag doesn't fill history with frames.
+Every meaningful write to a frontpage's coordination surface — `frontpage_create`, `frontpage_update`, `frontpage_annotate`, hooman canvas edits, and restores — appends a snapshot to a per-slug log at `~/.agent/frontpage/<slug>.history.jsonl`. Each entry captures the **whole surface**: the rendered HTML, the spec/meta, and the tldraw canvas state. Restore atomically reverts all three.
 
-**UI**: ⏪ button in the canvas toolbar (right edge, above the sticker palette). Click → modal lists recent versions newest-first with timestamp, shape count, and author (you / agent name / restore-from). Click any prior version to restore. The act of restoring writes a new history entry tagged `restore-from:<ts>` so you can undo a restore.
+### The Time Machine UI
 
-**Why this exists**: when an agent calls `frontpage_annotate`, the agent's writes land alongside the hooman's stickies. If the placement is awkward or overlaps badly, the hooman can roll back to the pre-agent state. The agent's write is one history entry; the prior hooman state is the entry just before it.
+⏰ button in the bottom toolbar (next to the sticker palette). Click → full-screen Apple Time Machine-style overlay:
 
-**Server routes** (mostly for the UI; agents rarely touch these directly):
+- **Cosmic dark background** with starfield.
+- **Center stage**: a read-only tldraw render of the selected version, including the historical HTML loaded via `/api/page/:slug/embed-versioned?ts=<ts>` — you see the page exactly as it was, with the canvas annotations exactly as they were.
+- **Receding z-stacked ghost panels** behind the focused version (visual depth).
+- **Vertical timeline rail on the right edge**: one entry per snapshot, newest at top, color-coded by author. Hooman = warm yellow. Each agent gets a deterministic hash-derived color from a violet/cyan/green palette. Restore points = cyan. Click any entry → focus animates to that version.
+- **Keyboard / wheel navigation**: ↑/↓ moves between versions.
+- **"Restore to this point"** button at the bottom. Restoring writes a `restore-from:<ts>` history entry first so the restore itself is reversible, then atomically reverts html + meta + tldraw, then hard-refreshes the page.
+- **Cancel** (or Esc) closes without restoring.
+
+### Why entries capture the whole surface
+
+Earlier versions snapshotted ONLY the tldraw state. That meant restoring brought back old stickies but left them sitting on the NEW page — visually misaligned with whatever content the agent had since edited. The full-surface snapshot fixes that: when you restore, the page reverts to its old content, the spec reverts, and the annotations align with the layout they were originally placed against.
+
+### Coalesce
+
+Same-author writes within 5 seconds replace the previous entry instead of appending a new one. Stops a long drag operation (browser PUTs every 500ms) from filling the log with intermediate frames.
+
+### Cap
+
+50 entries per slug. Older entries drop on rotation. Per-entry size is ~50–80KB (snapshot + html + meta), so the cap holds slug history under ~4MB.
+
+### Server routes
 
 ```
-GET  /api/page/:slug/history          ← list of { ts, author, shapeCount }
-GET  /api/page/:slug/history/:ts      ← full snapshot for one entry
-POST /api/page/:slug/restore          ← body { ts } → set current to that entry, record a restore-from
+GET  /api/page/:slug/history                     ← list of { ts, author, shapeCount }
+GET  /api/page/:slug/history/:ts                 ← full entry incl. html + meta + snapshot
+POST /api/page/:slug/history                     ← { author? } trigger a snapshot from outside the canvas path (used by frontpage_update)
+POST /api/page/:slug/restore                     ← { ts } atomically reverts html + meta + tldraw
+GET  /api/page/:slug/embed-versioned?ts=<N>      ← html as it was at that snapshot, for the Time Machine preview
 ```
 
-**For agents writing to the canvas**: don't worry about history — every `frontpage_annotate` call is logged with author `agent:<nickname>` automatically. If you place something the hooman doesn't like, they'll restore. Don't pre-emptively undo your own write; let them choose.
+### Annotations are version-scoped
+
+`frontpage_update` **clears the canvas** after snapshotting. Rationale: stickies are positioned in absolute canvas coordinates over the rendered page. When the spec changes (section grows, callout moves, new card added), the page content reflows and stickies that were *over section s3* end up floating in empty space or hovering over the wrong content. Trying to reanchor them programmatically is brittle (HTML-position drift is hard to solve cleanly).
+
+The shape we picked instead: a page revision is a NEW VERSION. The canvas resets. If the hooman wants their old annotations back (e.g. to compare or to restate), they Time Machine to the prior version — which restores html + meta + canvas as a unit, so the old annotations sit on the old page they were originally drawn against.
+
+This applies to:
+- `frontpage_update` — yes, clears canvas (snapshot first, then clear)
+- `frontpage_create` recreating an existing slug — TBD (currently does NOT clear; treat with care)
+- `frontpage_annotate` — does NOT clear (it's adding annotations, not changing page content)
+- Hooman canvas edits — do NOT clear (incremental editing keeps state)
+
+### For agents
+
+Every `frontpage_create` / `frontpage_update` / `frontpage_annotate` you call automatically lands in history with author `agent:<your-nickname>`. Don't pre-emptively roll back your own writes — let the hooman use Time Machine to choose. If you genuinely need to undo something, use `frontpage_update` to compose the replacement; that lands as a new entry and the hooman can compare both side-by-side.
 
 ---
 
