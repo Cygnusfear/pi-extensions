@@ -18,8 +18,9 @@ When chat becomes a wall of structured text, call `frontpage_create` with a spec
 - `frontpage_update({ slug, patch, note })` — patch sections, log note (does NOT auto-open)
 - `frontpage_open({ slug })` — open in default browser (opens the tldraw canvas wrapper — see "v2" section below)
 - `frontpage_read({ slug })` — **read hooman annotations** (stickies / arrows / drawings) with per-section + per-item attribution. The coordination loop — call this any time the hooman has been annotating
+- `frontpage_annotate({ slug, shapes })` — **write to the canvas yourself**. Drop notes, text, geo shapes (rectangles, ellipses, diamonds, etc.) and arrows. Used for inline answers to hooman stickies, ad-hoc diagrams composed of geo + arrow shapes, and pointing at sections with arrows.
 
-All four are thin wrappers. The composition work is in the spec; the reading work is interpreting the annotations.
+All five are thin wrappers. The composition work is in the spec; the reading work is interpreting the annotations; the writing work is choosing what shape carries your meaning.
 
 **Open is opt-in.** `frontpage_create` and `frontpage_update` write the file silently. When the hooman should see it now, follow up with a separate `frontpage_open({ slug })` call. Don't also pass `{ open: true }` to create/update — that opens twice (two browser tabs, surprise tab spam). Pick one: explicit `frontpage_open` (preferred — your instinct controls timing) OR `{ open: true }` on create (single call, but you lose the chance to write quietly).
 
@@ -289,6 +290,80 @@ Do NOT delete the hooman's stickies as part of the patch. They're their notes. T
 - The page hasn't been opened in the browser yet (no layout bounds posted → mapping will be coarse / section-only).
 - You just wrote the page in the same turn — they haven't seen it yet, no annotations exist.
 - The hooman is asking about a slug you can't identify — ask which page.
+
+---
+
+## Writing to the canvas — `frontpage_annotate`
+
+The agent can place its own shapes on the tldraw canvas: notes, plain text, geo shapes (rectangles, ellipses, diamonds, hexagons, stars, triangles, clouds, etc.), and arrows. Use this for:
+
+- **Inline answers to hooman stickies.** Hooman drops "why X?" over section s3 → agent answers via `frontpage_update` for substantive changes OR via `frontpage_annotate` for a quick "fyi, X because Y" sticky next to the question.
+- **Ad-hoc diagrams.** Combine geo shapes (boxes/ellipses/diamonds) + arrows to draw flowcharts or relationship diagrams ON the canvas. Same primitive set as Mermaid but interactive — the hooman can move boxes, edit labels, drag arrow endpoints.
+- **Pointing.** Draw an arrow from one section's content to another, with an optional label ("depends on" / "see also" / "moved here").
+
+### Shape kinds
+
+```ts
+// Sticky note (default color: violet, default size: s)
+{ kind: "note", text: "agent's reply", anchor: { section: "s3", item: 5 }, color?: "violet", size?: "s" }
+
+// Plain text (auto-sized, no background)
+{ kind: "text", text: "✅ accepted", anchor: { section: "s11" }, color?: "green" }
+
+// Geometric box with optional text (rectangle/ellipse/diamond/hexagon/star/triangle/cloud/check-box/x-box/etc.)
+{ kind: "geo", geo: "rectangle", text: "Component A", xy: { x: 1300, y: 100 }, w: 200, h: 100, color?: "violet" }
+
+// Arrow between two anchors (or explicit coords)
+{ kind: "arrow", from: { section: "s2" }, to: { section: "s7", item: 3 }, text?: "depends on", color?: "violet" }
+```
+
+### Positioning
+
+- **`anchor: { section: "sN", item?: K }`** — server resolves to page-space coords from layout.json bounds. Shape lands OFFSET to the right of the section/item (20px), so it doesn't visually cover what it refers to.
+- **`xy: { x, y }`** — explicit page-space coordinates (relative to the frontpage's top-left, NOT the canvas top-left). Use for free placement, e.g. diagram boxes.
+- Arrows accept either form independently for `from` and `to`.
+
+### Conventions
+
+- **Default color is violet** for agent shapes — distinguishes them from hooman stickies (usually yellow/black). Override with `color` if you have a specific reason.
+- **Default size is "s"** — small, doesn't dominate the page. Override with "m"/"l"/"xl" for emphasis.
+- **Author tag** is auto-set from the stable nickname so the canvas can attribute which agent drew what. Override with explicit `author`.
+
+### When NOT to use `frontpage_annotate`
+
+- **Substantive content changes belong in the spec.** If you're rewriting section s3, use `frontpage_update` with a `replace_section` op. Stickies on the canvas are commentary, not authoritative content.
+- **Don't shadow the hooman's stickies.** If they drop a sticky asking a question, answer with content (frontpage_update) OR a brief sticky next to it — don't pile on with dozens of nearby agent stickies.
+- **The page must have been opened in a browser at least once.** The canvas needs an embed shape (created on first `frontpage_open`) before annotate works.
+
+---
+
+## Stickers — FigJam-style quick reactions (hooman-only UI)
+
+When the hooman has the canvas open, a floating sticker toolbar appears on the right edge with one-click emoji shortcuts:
+
+```
+👍 👎 ❓ ❗ ⚠️ ✅ ❌ 💡 🔥 ⭐ 🚧 ❤️
+```
+
+Each button drops a text shape with that emoji at the viewport center. They're regular tldraw text shapes after that — the hooman can move, edit, delete them like any sticky.
+
+The agent reads them like any other annotation via `frontpage_read`. Emojis often carry strong tonal signals:
+
+- 👍 / ❤️ / ⭐ — approval / endorsement
+- 👎 / ❌ / 🚧 — pushback / blocked
+- ❓ — question
+- ⚠️ / ❗ — heads-up
+- ✅ — done
+- 💡 — idea
+- 🔥 — urgent / important
+
+**Heuristic:** when an emoji sticker sits over a section without other context, treat it as the hooman's verdict on that section. When paired with text or an arrow, the text/arrow is the substance and the emoji is the tonal layer.
+
+---
+
+## Default font size
+
+The tldraw canvas defaults new shapes to **size "s"** (smaller than tldraw's stock default "m"). This matches the FigJam-feel and keeps fresh stickies from dominating the page beneath. Hooman can still pick a larger size from tldraw's standard size picker — the default just changes which size is selected for the next shape.
 
 ---
 

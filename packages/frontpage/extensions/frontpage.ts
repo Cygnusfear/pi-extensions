@@ -891,6 +891,120 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  pi.registerTool({
+    name: "frontpage_annotate",
+    label: "Frontpage · annotate",
+    description:
+      "Place agent-owned shapes onto a frontpage's tldraw canvas: sticky notes, plain text, geometric shapes (rectangles, ellipses, diamonds, etc.), arrows. " +
+      "Use for: answering a hooman sticky inline; drawing an ad-hoc flowchart on the canvas; pointing at sections with arrows; leaving structured notes. " +
+      "Shapes can be anchored to sections/items (server resolves the position from layout bounds) or placed at explicit page-space coordinates. " +
+      "Mermaid-as-tldraw: compose flowcharts from geo + arrow shapes — same primitive set, but interactive on the canvas.",
+    promptSnippet: "Place tldraw shapes on a frontpage canvas (notes / text / geo / arrows).",
+    promptGuidelines: [
+      "Use anchor: { section: 's3' } or anchor: { section: 's3', item: 5 } to drop a shape next to a section/item — the server resolves the page-space position from layout bounds.",
+      "Use xy: { x, y } when you need exact placement. Coords are in PAGE space (relative to the frontpage's top-left, not the canvas).",
+      "Agent-placed shapes use color 'violet' by default so they're distinguishable from the hooman's stickies (usually yellow/black).",
+      "Anchored notes land OFFSET to the right of the section/item — they don't visually cover what they refer to. To replace existing content, use frontpage_update instead.",
+      "For ad-hoc diagrams: combine geo shapes (rectangles/ellipses/diamonds + text) with arrows (from/to anchors). This is the equivalent of mermaid but interactive.",
+      "The page must have been opened in a browser at least once before annotate works (the canvas needs an embed shape to compute offsets).",
+    ],
+    parameters: Type.Object({
+      slug: Type.String({ description: "Frontpage slug" }),
+      shapes: Type.Array(Type.Object({
+        kind: Type.Union([Type.Literal("note"), Type.Literal("text"), Type.Literal("geo"), Type.Literal("arrow")]),
+        text: Type.Optional(Type.String()),
+        anchor: Type.Optional(Type.Object({
+          section: Type.Optional(Type.String()),
+          item: Type.Optional(Type.Number()),
+        })),
+        xy: Type.Optional(Type.Object({ x: Type.Number(), y: Type.Number() })),
+        w: Type.Optional(Type.Number()),
+        h: Type.Optional(Type.Number()),
+        geo: Type.Optional(Type.String({ description: "rectangle | ellipse | diamond | hexagon | star | triangle | cloud | check-box | x-box | etc." })),
+        color: Type.Optional(Type.String({ description: "black | grey | violet | red | orange | yellow | green | blue | light-blue | light-green | light-red | light-violet" })),
+        size: Type.Optional(Type.String({ description: "s | m | l | xl" })),
+        from: Type.Optional(Type.Object({
+          section: Type.Optional(Type.String()),
+          item: Type.Optional(Type.Number()),
+          x: Type.Optional(Type.Number()),
+          y: Type.Optional(Type.Number()),
+        })),
+        to: Type.Optional(Type.Object({
+          section: Type.Optional(Type.String()),
+          item: Type.Optional(Type.Number()),
+          x: Type.Optional(Type.Number()),
+          y: Type.Optional(Type.Number()),
+        })),
+      })),
+      author: Type.Optional(Type.String({ description: "Author tag stored in shape meta. Defaults to the stable nickname." })),
+    }),
+    async execute(_id, params) {
+      if (!params || typeof params !== "object" || typeof params.slug !== "string" || !Array.isArray(params.shapes)) {
+        return missingParamError("frontpage_annotate", "slug (string), shapes (array)", params);
+      }
+      const info = frontpageServerInfo();
+      const author = (typeof params.author === "string" && params.author) ? params.author : (getStableNickname() ?? "agent");
+      const url = `http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/annotate`;
+      try {
+        // Coerce shape input: rename "from/to" embedded {section,item,x,y}
+        // into the union the server expects.
+        const shapes = (params.shapes as Array<Record<string, unknown>>).map((s) => {
+          const out: Record<string, unknown> = { kind: s.kind };
+          if (typeof s.text === "string") out.text = s.text;
+          if (s.anchor && typeof s.anchor === "object") out.anchor = s.anchor;
+          if (s.xy && typeof s.xy === "object") out.xy = s.xy;
+          if (typeof s.w === "number") out.w = s.w;
+          if (typeof s.h === "number") out.h = s.h;
+          if (typeof s.geo === "string") out.geo = s.geo;
+          if (typeof s.color === "string") out.color = s.color;
+          if (typeof s.size === "string") out.size = s.size;
+          if (s.from) {
+            const f = s.from as Record<string, unknown>;
+            out.from = (typeof f.x === "number" && typeof f.y === "number")
+              ? { x: f.x, y: f.y }
+              : { section: f.section, item: f.item };
+          }
+          if (s.to) {
+            const t = s.to as Record<string, unknown>;
+            out.to = (typeof t.x === "number" && typeof t.y === "number")
+              ? { x: t.x, y: t.y }
+              : { section: t.section, item: t.item };
+          }
+          return out;
+        });
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ shapes, author }),
+        });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          return {
+            content: [{ type: "text", text: `frontpage_annotate: server returned HTTP ${resp.status} — ${errText.slice(0, 200)}` }],
+            isError: true,
+            details: { status: resp.status },
+          };
+        }
+        const result = (await resp.json()) as { created: number; createdIds: string[]; skipped: Array<{ index: number; reason: string }> };
+        const lines = [
+          `Placed ${result.created} shape(s) on '${params.slug}'${result.skipped.length > 0 ? ` (${result.skipped.length} skipped)` : ""}.`,
+        ];
+        for (const sk of result.skipped) lines.push(`  ✗ shape[${sk.index}]: ${sk.reason}`);
+        lines.push("Hooman sees the new shapes the next time the canvas re-renders (already-open tab updates within ~1s via the persist-listen loop).");
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: result,
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `frontpage_annotate failed: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+          details: {},
+        };
+      }
+    },
+  });
+
   // /frontpage-reload — dev helper to flush the partials cache
   pi.registerCommand("frontpage-reload", {
     description: "Reload frontpage partials from disk (dev).",

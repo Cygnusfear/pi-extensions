@@ -6,6 +6,11 @@
  * Restores the snapshot on mount. Forwards section bounding boxes from the
  * embedded iframe to the server so the agent can compute spatial overlap
  * (sticky → section) without a browser.
+ *
+ * v3 additions:
+ *   - Default size "s" for new note/text shapes (≈80% of m, FigJam-feel).
+ *   - Sticker toolbar overlay (top-right): one-click thumbs-up / nope /
+ *     warning / question / etc. Drops a small text shape at viewport center.
  */
 
 import * as React from "react";
@@ -21,6 +26,9 @@ import {
 	type Editor,
 	getSnapshot,
 	loadSnapshot,
+	DefaultSizeStyle,
+	DefaultFontStyle,
+	createShapeId,
 } from "tldraw";
 import "tldraw/tldraw.css";
 
@@ -55,8 +63,6 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 
 	component(shape: FrontpageEmbedShape) {
 		const url = `/page/${encodeURIComponent(shape.props.slug)}/embed`;
-		// pointerEvents:"none" so wheel/click pass THROUGH to tldraw's canvas.
-		// The page is a visual; the canvas is the interaction surface.
 		return (
 			<HTMLContainer
 				id={shape.id}
@@ -122,7 +128,7 @@ async function postSnapshot(slug: string, snapshot: unknown): Promise<void> {
 	} catch {}
 }
 
-async function postLayout(slug: string, sections: Array<{ id: string; x: number; y: number; w: number; h: number }>): Promise<void> {
+async function postLayout(slug: string, sections: unknown[]): Promise<void> {
 	try {
 		await fetch(`/api/page/${encodeURIComponent(slug)}/layout`, {
 			method: "PUT",
@@ -132,59 +138,159 @@ async function postLayout(slug: string, sections: Array<{ id: string; x: number;
 	} catch {}
 }
 
+// ---- sticker palette ----
+// FigJam-style quick reactions. Click → drop a text shape at viewport center
+// with the emoji as content. Size "s" so they don't dominate the canvas.
+
+interface StickerSpec {
+	emoji: string;
+	tooltip: string;
+}
+const STICKERS: StickerSpec[] = [
+	{ emoji: "👍", tooltip: "approve" },
+	{ emoji: "👎", tooltip: "nope" },
+	{ emoji: "❓", tooltip: "question" },
+	{ emoji: "❗", tooltip: "attention" },
+	{ emoji: "⚠️", tooltip: "warning" },
+	{ emoji: "✅", tooltip: "done" },
+	{ emoji: "❌", tooltip: "blocked" },
+	{ emoji: "💡", tooltip: "idea" },
+	{ emoji: "🔥", tooltip: "hot" },
+	{ emoji: "⭐", tooltip: "star" },
+	{ emoji: "🚧", tooltip: "wip" },
+	{ emoji: "❤️", tooltip: "love" },
+];
+
+function StickerBar({ editor }: { editor: Editor | null }) {
+	const dropSticker = React.useCallback(
+		(emoji: string) => {
+			if (!editor) return;
+			const vp = editor.getViewportPageBounds();
+			const cx = vp.x + vp.width / 2;
+			const cy = vp.y + vp.height / 2;
+			const id = createShapeId();
+			editor.createShape({
+				id,
+				type: "text",
+				x: cx - 30,
+				y: cy - 20,
+				props: {
+					color: "black",
+					size: "l",
+					font: "draw",
+					textAlign: "middle",
+					autoSize: true,
+					richText: {
+						type: "doc",
+						content: [{ type: "paragraph", attrs: { dir: "auto" }, content: [{ type: "text", text: emoji }] }],
+					},
+				},
+			});
+			editor.select(id);
+		},
+		[editor],
+	);
+
+	return (
+		<div
+			style={{
+				position: "absolute",
+				top: 64,
+				right: 16,
+				zIndex: 1000,
+				display: "flex",
+				flexDirection: "column",
+				gap: 4,
+				background: "rgba(255,255,255,0.92)",
+				border: "1px solid #e0e0e0",
+				borderRadius: 8,
+				padding: 6,
+				boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+				pointerEvents: "all",
+			}}
+		>
+			{STICKERS.map((s) => (
+				<button
+					key={s.emoji}
+					title={s.tooltip}
+					onClick={() => dropSticker(s.emoji)}
+					style={{
+						background: "transparent",
+						border: "1px solid transparent",
+						borderRadius: 6,
+						padding: "4px 6px",
+						cursor: "pointer",
+						fontSize: 20,
+						lineHeight: 1.1,
+						width: 36,
+						transition: "background 0.15s, border 0.15s",
+					}}
+					onMouseEnter={(e) => {
+						(e.currentTarget as HTMLButtonElement).style.background = "#f0f0f0";
+						(e.currentTarget as HTMLButtonElement).style.borderColor = "#d4d4d4";
+					}}
+					onMouseLeave={(e) => {
+						(e.currentTarget as HTMLButtonElement).style.background = "transparent";
+						(e.currentTarget as HTMLButtonElement).style.borderColor = "transparent";
+					}}
+				>
+					{s.emoji}
+				</button>
+			))}
+		</div>
+	);
+}
+
 // ---- app shell ----
 
 function App({ slug }: { slug: string }) {
+	const [editor, setEditor] = React.useState<Editor | null>(null);
 	const handleMount = React.useCallback(
-		(editor: Editor) => {
+		(ed: Editor) => {
 			let cancelled = false;
+			setEditor(ed);
 
-			// Async boot: restore snapshot if present, otherwise seed the embed shape.
+			// v3: smaller default size for new shapes ("s" instead of "m") so
+			// fresh stickies / text don't dominate the page below.
+			ed.setStyleForNextShapes(DefaultSizeStyle, "s");
+			ed.setStyleForNextShapes(DefaultFontStyle, "draw");
+
 			(async () => {
 				const saved = await loadServerSnapshot(slug);
 				if (cancelled) return;
 				if (saved) {
 					try {
-						loadSnapshot(editor.store, saved as Parameters<typeof loadSnapshot>[1]);
+						loadSnapshot(ed.store, saved as Parameters<typeof loadSnapshot>[1]);
 					} catch (err) {
 						console.warn("[frontpage] failed to load saved snapshot, starting fresh:", err);
 					}
 				}
-				// Make sure exactly one frontpage-embed shape exists for this slug.
-				const existing = editor
-					.getCurrentPageShapes()
-					.find((s) => s.type === "frontpage-embed");
+				const existing = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
 				if (!existing) {
-					editor.createShape<FrontpageEmbedShape>({
+					ed.createShape<FrontpageEmbedShape>({
 						type: "frontpage-embed",
 						x: 0,
 						y: 0,
 						props: { w: 1200, h: 8000, slug },
 					});
 				}
-				// Set view to 1:1 with a small padding offset only on FIRST load
-				// (no saved snapshot). With a saved snapshot, tldraw restores
-				// the camera too.
 				if (!saved) {
-					editor.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
+					ed.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
 				}
+				// Re-apply default-size after load (loadSnapshot may restore prior style state).
+				ed.setStyleForNextShapes(DefaultSizeStyle, "s");
 
-				// Persist on every change (debounced).
 				const saveSoon = debounce(() => {
-					const snap = getSnapshot(editor.store);
+					const snap = getSnapshot(ed.store);
 					void postSnapshot(slug, snap);
 				}, 500);
-				editor.store.listen(saveSoon, { scope: "document" });
+				ed.store.listen(saveSoon, { scope: "document" });
 			})();
 
-			// Receive section bounds from the iframe's layout shim and forward.
 			const onMessage = (ev: MessageEvent) => {
 				const data = ev.data as { type?: string; sections?: unknown };
 				if (!data || data.type !== "frontpage:layout" || !Array.isArray(data.sections)) return;
-				void postLayout(
-					slug,
-					data.sections as Array<{ id: string; x: number; y: number; w: number; h: number }>,
-				);
+				void postLayout(slug, data.sections as unknown[]);
 			};
 			window.addEventListener("message", onMessage);
 
@@ -199,11 +305,14 @@ function App({ slug }: { slug: string }) {
 	const components = React.useMemo<TLEditorComponents>(() => ({}), []);
 
 	return (
-		<Tldraw
-			shapeUtils={[FrontpageEmbedShapeUtil]}
-			onMount={handleMount}
-			components={components}
-		/>
+		<>
+			<Tldraw
+				shapeUtils={[FrontpageEmbedShapeUtil]}
+				onMount={handleMount}
+				components={components}
+			/>
+			<StickerBar editor={editor} />
+		</>
 	);
 }
 

@@ -424,6 +424,266 @@ app.get("/api/page/:slug/state", async (c) => {
 	return c.json({ slug, sections, annotations, annotationCount: annotations.length });
 });
 
+// ---- Agent annotation: append shapes to the canvas ----
+
+interface AnchorRef { section?: string; item?: number }
+type AnnotateShapeInput =
+	| { kind: "note"; text: string; anchor?: AnchorRef; xy?: { x: number; y: number }; color?: string; size?: string }
+	| { kind: "text"; text: string; anchor?: AnchorRef; xy?: { x: number; y: number }; color?: string; size?: string }
+	| { kind: "geo"; geo?: string; text?: string; xy: { x: number; y: number }; w: number; h: number; color?: string }
+	| { kind: "arrow"; from: AnchorRef | { x: number; y: number }; to: AnchorRef | { x: number; y: number }; text?: string; color?: string };
+
+function rid(): string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+	let s = "";
+	for (let i = 0; i < 16; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+	return s;
+}
+function shapeId(): string {
+	return `shape:agent-${rid()}`;
+}
+function fractionalIndex(): string {
+	// Tldraw uses fractional indices for shape ordering. "a40pq" is the format.
+	// We just generate a unique-ish low-priority index that sorts after most
+	// existing shapes.
+	return `a${rid().slice(0, 6)}`;
+}
+
+/** Resolve an anchor ({section,item?} | {x,y}) to PAGE-space coords, given the
+ *  current layout.json bounds. Anchored shapes land OFFSET to the right of the
+ *  section/item so they don't visually obscure what they refer to. */
+function resolveAnchor(
+	anchor: AnchorRef | { x: number; y: number },
+	sections: SectionBounds[],
+	offset = 20,
+): { x: number; y: number } | null {
+	if ("x" in anchor && "y" in anchor) {
+		return { x: anchor.x, y: anchor.y };
+	}
+	if (!anchor.section) return null;
+	const section = sections.find((s) => s.id === anchor.section);
+	if (!section) return null;
+	if (typeof anchor.item === "number" && section.items) {
+		const it = section.items.find((i) => i.idx === anchor.item);
+		if (it) return { x: it.x + it.w + offset, y: it.y };
+	}
+	return { x: section.x + section.w + offset, y: section.y };
+}
+
+function richTextDoc(text: string): unknown {
+	return {
+		type: "doc",
+		content: [{ type: "paragraph", attrs: { dir: "auto" }, content: text ? [{ type: "text", text }] : [] }],
+	};
+}
+
+function buildNoteRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string }): Record<string, unknown> {
+	return {
+		typeName: "shape",
+		id: shapeId(),
+		type: "note",
+		x, y,
+		rotation: 0,
+		isLocked: false,
+		opacity: 1,
+		meta: { author: opts.author ?? "agent" },
+		parentId: "page:page",
+		index: fractionalIndex(),
+		props: {
+			color: opts.color ?? "violet",
+			richText: richTextDoc(text),
+			size: opts.size ?? "s",
+			font: "draw",
+			align: "middle",
+			verticalAlign: "middle",
+			labelColor: "black",
+			growY: 0,
+			fontSizeAdjustment: 0,
+			url: "",
+			scale: 1,
+		},
+	};
+}
+
+function buildTextRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string }): Record<string, unknown> {
+	return {
+		typeName: "shape",
+		id: shapeId(),
+		type: "text",
+		x, y,
+		rotation: 0,
+		isLocked: false,
+		opacity: 1,
+		meta: { author: opts.author ?? "agent" },
+		parentId: "page:page",
+		index: fractionalIndex(),
+		props: {
+			color: opts.color ?? "black",
+			size: opts.size ?? "s",
+			w: 200,
+			font: "draw",
+			textAlign: "start",
+			autoSize: true,
+			scale: 1,
+			richText: richTextDoc(text),
+		},
+	};
+}
+
+function buildGeoRecord(geo: string, text: string, x: number, y: number, w: number, h: number, opts: { color?: string; author?: string }): Record<string, unknown> {
+	const validGeos = new Set(["rectangle", "ellipse", "diamond", "hexagon", "octagon", "pentagon", "rhombus", "star", "trapezoid", "triangle", "cloud", "check-box", "x-box", "arrow-right", "arrow-left", "arrow-up", "arrow-down", "heart"]);
+	const safeGeo = validGeos.has(geo) ? geo : "rectangle";
+	return {
+		typeName: "shape",
+		id: shapeId(),
+		type: "geo",
+		x, y,
+		rotation: 0,
+		isLocked: false,
+		opacity: 1,
+		meta: { author: opts.author ?? "agent" },
+		parentId: "page:page",
+		index: fractionalIndex(),
+		props: {
+			geo: safeGeo,
+			w, h,
+			color: opts.color ?? "violet",
+			labelColor: "black",
+			fill: "none",
+			dash: "draw",
+			size: "s",
+			font: "draw",
+			align: "middle",
+			verticalAlign: "middle",
+			growY: 0,
+			url: "",
+			scale: 1,
+			richText: richTextDoc(text),
+		},
+	};
+}
+
+function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: number }, text: string, opts: { color?: string; author?: string }): Record<string, unknown> {
+	return {
+		typeName: "shape",
+		id: shapeId(),
+		type: "arrow",
+		x: 0,
+		y: 0,
+		rotation: 0,
+		isLocked: false,
+		opacity: 1,
+		meta: { author: opts.author ?? "agent" },
+		parentId: "page:page",
+		index: fractionalIndex(),
+		props: {
+			dash: "draw",
+			size: "s",
+			fill: "none",
+			color: opts.color ?? "violet",
+			labelColor: "black",
+			bend: 0,
+			start: { x: start.x, y: start.y },
+			end: { x: end.x, y: end.y },
+			arrowheadStart: "none",
+			arrowheadEnd: "arrow",
+			font: "draw",
+			labelPosition: 0.5,
+			scale: 1,
+			elbowMidPoint: 0.5,
+			richText: richTextDoc(text),
+		},
+	};
+}
+
+app.post("/api/page/:slug/annotate", async (c) => {
+	const slug = c.req.param("slug");
+	const body = await c.req.json().catch(() => null);
+	if (!body || typeof body !== "object" || !Array.isArray((body as { shapes?: unknown }).shapes)) {
+		return c.json({ error: "expected { shapes: [...], author?: string }" }, 400);
+	}
+	const shapes = (body as { shapes: AnnotateShapeInput[]; author?: string }).shapes;
+	const author = typeof (body as { author?: unknown }).author === "string" ? (body as { author: string }).author : "agent";
+
+	// Load layout for anchor resolution + current snapshot for store merge.
+	const [layout, currentSnap] = await Promise.all([
+		readJsonOrEmpty<{ sections: SectionBounds[] }>(layoutPath(slug), { sections: [] }),
+		readJsonOrEmpty<{ document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> } | null>(tldrawPath(slug), null),
+	]);
+
+	const snap = currentSnap ?? null;
+	if (!snap) {
+		return c.json({ error: "no canvas state yet — open the page in a browser first so the embed shape is created" }, 409);
+	}
+	const store = snap.document?.store ?? snap.store;
+	if (!store) {
+		return c.json({ error: "malformed canvas snapshot" }, 500);
+	}
+
+	// Embed offset: agent specifies page-space coords; we add the embed's
+	// canvas position so shapes land relative to the page.
+	const embed = Object.values(store).find(
+		(r): r is Record<string, unknown> & { x?: number; y?: number } =>
+			typeof r === "object" && r !== null && (r as { typeName?: string }).typeName === "shape" && (r as { type?: string }).type === "frontpage-embed",
+	);
+	const ox = (embed?.x as number | undefined) ?? 0;
+	const oy = (embed?.y as number | undefined) ?? 0;
+
+	const created: string[] = [];
+	const skipped: Array<{ index: number; reason: string }> = [];
+
+	shapes.forEach((s, i) => {
+		try {
+			if (!s || typeof s !== "object") {
+				skipped.push({ index: i, reason: "not an object" });
+				return;
+			}
+			if (s.kind === "note" || s.kind === "text") {
+				let pageXY: { x: number; y: number } | null = null;
+				if (s.xy) pageXY = s.xy;
+				else if (s.anchor) pageXY = resolveAnchor(s.anchor, layout.sections);
+				if (!pageXY) {
+					skipped.push({ index: i, reason: "no anchor and no xy" });
+					return;
+				}
+				const canvasX = pageXY.x + ox;
+				const canvasY = pageXY.y + oy;
+				const record = s.kind === "note"
+					? buildNoteRecord(s.text, canvasX, canvasY, { color: s.color, size: s.size, author })
+					: buildTextRecord(s.text, canvasX, canvasY, { color: s.color, size: s.size, author });
+				store[(record as { id: string }).id] = record;
+				created.push((record as { id: string }).id);
+			} else if (s.kind === "geo") {
+				const canvasX = s.xy.x + ox;
+				const canvasY = s.xy.y + oy;
+				const record = buildGeoRecord(s.geo ?? "rectangle", s.text ?? "", canvasX, canvasY, s.w, s.h, { color: s.color, author });
+				store[(record as { id: string }).id] = record;
+				created.push((record as { id: string }).id);
+			} else if (s.kind === "arrow") {
+				const startPage = "x" in s.from && "y" in s.from ? s.from : resolveAnchor(s.from, layout.sections, -10);
+				const endPage = "x" in s.to && "y" in s.to ? s.to : resolveAnchor(s.to, layout.sections, -10);
+				if (!startPage || !endPage) {
+					skipped.push({ index: i, reason: "could not resolve arrow endpoints" });
+					return;
+				}
+				const start = { x: startPage.x + ox, y: startPage.y + oy };
+				const end = { x: endPage.x + ox, y: endPage.y + oy };
+				const record = buildArrowRecord(start, end, s.text ?? "", { color: s.color, author });
+				store[(record as { id: string }).id] = record;
+				created.push((record as { id: string }).id);
+			} else {
+				skipped.push({ index: i, reason: `unknown shape kind: ${(s as { kind?: string }).kind ?? "(none)"}` });
+			}
+		} catch (err) {
+			skipped.push({ index: i, reason: err instanceof Error ? err.message : String(err) });
+		}
+	});
+
+	// Persist the merged snapshot.
+	await writeJsonAtomic(tldrawPath(slug), snap);
+	return c.json({ ok: true, slug, created: created.length, createdIds: created, skipped });
+});
+
 app.get("/client/bundle.js", serveClientAsset("bundle.js", "application/javascript; charset=utf-8"));
 app.get("/client/bundle.css", serveClientAsset("bundle.css", "text/css; charset=utf-8"));
 
