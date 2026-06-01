@@ -18,6 +18,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import { render, assignIds, reloadPartials, type FrontpageSpec, type SectionSpec } from "./render.js";
 import { lintMermaid, formatMermaidFinding, type MermaidLintFinding } from "./mermaid-lint.js";
@@ -376,8 +379,143 @@ function missingParamError(toolName: string, fieldDescription: string, received:
 }
 
 // ---- Extension entry ----
+// The Hono server runs as a CHILD PROCESS (spawned bun) because the compiled
+// pi binary's extension loader uses jiti virtualModules and cannot resolve
+// external packages (hono, react, tldraw) from extension code. The
+// subprocess has its own module resolution and imports whatever it needs.
+
+const FRONTPAGE_SERVER_PORT = 39288;
+const FRONTPAGE_SERVER_HOST = "127.0.0.1";
+
+interface ServerProcessState {
+  child: ReturnType<typeof spawn> | null;
+  pid: number | null;
+  startedAt: number | null;
+  /** True when a peer (different pi process) owns the port. We didn't spawn
+   *  the subprocess but the server IS reachable. */
+  peerDetected: boolean;
+}
+const serverState: ServerProcessState = { child: null, pid: null, startedAt: null, peerDetected: false };
+
+function frontpageServerScript(): string {
+  return path.resolve(__dirname, "..", "server-process", "server.ts");
+}
+
+function frontpageClientBundle(): string {
+  return path.resolve(__dirname, "..", "dist-client", "bundle.js");
+}
+
+function frontpageBuildScript(): string {
+  return path.resolve(__dirname, "..", "scripts", "build-client.ts");
+}
+
+async function ensureClientBundleBuilt(): Promise<void> {
+  if (fs.existsSync(frontpageClientBundle())) return;
+  const scriptPath = frontpageBuildScript();
+  if (!fs.existsSync(scriptPath)) return;
+  await new Promise<void>((resolve) => {
+    const proc = spawn("bun", ["run", scriptPath], { stdio: "ignore" });
+    proc.on("error", () => resolve());
+    proc.on("close", () => resolve());
+  });
+}
+
+/** Probe the running server. Returns true if a healthy peer is on the port. */
+async function probeServer(timeoutMs = 1500): Promise<boolean> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const resp = await fetch(`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/healthz`, { signal: ctrl.signal });
+    clearTimeout(t);
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function startFrontpageServer(): Promise<{ status: "started" | "peer-running" | "error"; message: string }> {
+  // If a peer is already on the port (different pi process or our own
+  // surviving subprocess from before reload), don't spawn — record that one
+  // is reachable so frontpageServerInfo() reports running=true.
+  if (await probeServer(800)) {
+    serverState.peerDetected = true;
+    return { status: "peer-running", message: `Frontpage server peer already on ${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}; not spawning.` };
+  }
+  const script = frontpageServerScript();
+  if (!fs.existsSync(script)) {
+    return { status: "error", message: `Server script missing at ${script}` };
+  }
+  const child = spawn("bun", ["run", script], {
+    stdio: "ignore",
+    detached: false,
+    env: { ...process.env, FRONTPAGE_PORT: String(FRONTPAGE_SERVER_PORT), FRONTPAGE_HOST: FRONTPAGE_SERVER_HOST },
+  });
+  serverState.child = child;
+  serverState.pid = child.pid ?? null;
+  serverState.startedAt = Date.now();
+  child.on("exit", () => {
+    if (serverState.child === child) {
+      serverState.child = null;
+      serverState.pid = null;
+    }
+  });
+  // Verify it actually booted
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (await probeServer(400)) {
+      return { status: "started", message: `Frontpage server pid=${child.pid} on ${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}` };
+    }
+  }
+  return { status: "error", message: `Server child pid=${child.pid} did not become healthy within 1.5s` };
+}
+
+async function stopFrontpageServer(): Promise<void> {
+  const child = serverState.child;
+  if (!child) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+  // wait up to 800ms for graceful exit, then SIGKILL
+  await new Promise<void>((resolve) => {
+    const onExit = () => resolve();
+    child.once("exit", onExit);
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+      resolve();
+    }, 800);
+  });
+  serverState.child = null;
+  serverState.pid = null;
+}
+
+function frontpageServerInfo(): { running: boolean; port: number; host: string; pid: number | null } {
+  return {
+    running: serverState.pid !== null || serverState.peerDetected,
+    port: FRONTPAGE_SERVER_PORT,
+    host: FRONTPAGE_SERVER_HOST,
+    pid: serverState.pid,
+  };
+}
+
+function frontpagePageUrl(slug: string): string {
+  return `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/page/${encodeURIComponent(slug)}`;
+}
 
 export default function (pi: ExtensionAPI) {
+  // Boot the Hono server SUBPROCESS. Non-blocking; if it fails the file://
+  // fallback in frontpage_open keeps pages accessible.
+  void (async () => {
+    try {
+      await ensureClientBundleBuilt();
+      await startFrontpageServer();
+    } catch {}
+  })();
+
+  // Kill the subprocess on session_shutdown so the port releases.
+  pi.on("session_shutdown", async () => {
+    await stopFrontpageServer();
+  });
+
   pi.registerTool({
     name: "frontpage_create",
     label: "Frontpage · create",
@@ -618,11 +756,138 @@ export default function (pi: ExtensionAPI) {
           details: {},
         };
       }
-      void osOpen(filePath);
+      // v2: open via the Hono server when running (tldraw canvas wrapper).
+      // Falls back to file:// if the server failed to start so the page is
+      // never inaccessible.
+      const info = frontpageServerInfo();
+      const target = info.running ? frontpagePageUrl(params.slug) : filePath;
+      void osOpen(target);
       return {
-        content: [{ type: "text", text: `Opening ${filePath}` }],
-        details: { path: filePath },
+        content: [{ type: "text", text: `Opening ${target}` }],
+        details: { path: filePath, url: info.running ? frontpagePageUrl(params.slug) : null },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "frontpage_read",
+    label: "Frontpage · read",
+    description:
+      "Read a frontpage's current annotation state — every sticky note / arrow / drawing the hooman has placed on the tldraw canvas, with each annotation mapped to the section AND specific item it overlaps. " +
+      "Always call this when the hooman says they 'added notes', 'annotated', or 'drew on' a page — it returns the spatial mapping (sticky → section + item) the agent needs to interpret what they're communicating.",
+    promptSnippet: "Read sticky-note annotations on a frontpage with section + item attribution. Call any time the hooman annotates.",
+    promptGuidelines: [
+      "Call frontpage_read whenever the hooman annotates a frontpage. Don't guess what they meant — the tool returns the exact section + item each shape overlaps.",
+      "Item attribution is the gold. When a sticky has '› item#N <tag> \"text\"', the hooman is targeting that specific card / kpi-item / paragraph. Don't generalise to the whole section.",
+      "Arrows ARE the strongest signal: from-section/item → to-section/item is a literal 'these are linked' statement. Read both endpoints.",
+      "After reading, act: patch the page via frontpage_update for substantive changes, or just acknowledge in chat for thumbs-up / agreement stickies.",
+      "Do NOT delete the hooman's stickies as part of any patch — they clear them themselves.",
+    ],
+    parameters: Type.Object({
+      slug: Type.Optional(Type.String({ description: "Frontpage slug" })),
+    }),
+    async execute(_id, params) {
+      if (!params || typeof params !== "object" || typeof params.slug !== "string" || params.slug.length === 0) {
+        return missingParamError("frontpage_read", "slug (string)", params);
+      }
+      const info = frontpageServerInfo();
+      const url = `http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/state`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          return {
+            content: [{ type: "text", text: `frontpage_read: server returned HTTP ${resp.status}` }],
+            isError: true,
+            details: { status: resp.status },
+          };
+        }
+        type ItemAttr = { idx: number; tag: string; cls: string; text: string } | null;
+        type Annotation = {
+          id: string;
+          type: string;
+          text: string | null;
+          color: string | null;
+          refersToSection?: string | null;
+          refersToSectionReason?: string | null;
+          refersToItem?: ItemAttr;
+          refersToItemReason?: string | null;
+          // Arrows have from/to instead of refersToSection
+          from?: { section: string | null; item: ItemAttr } | null;
+          to?: { section: string | null; item: ItemAttr } | null;
+        };
+        const state = (await resp.json()) as {
+          slug: string;
+          sections: Array<{ id: string; label: string | null; type: string | null }>;
+          annotations: Annotation[];
+          annotationCount: number;
+        };
+
+        if (state.annotationCount === 0) {
+          return {
+            content: [{ type: "text", text: `No annotations on '${params.slug}'. Either the hooman hasn't drawn anything yet, or the page hasn't been opened in the browser (which is when section bounds get measured).` }],
+            details: state,
+          };
+        }
+
+        const sectionLabel = (id: string | null | undefined) => {
+          if (!id) return "(unmapped)";
+          const s = state.sections.find((x) => x.id === id);
+          return s?.label ? `${id} "${s.label}"` : id;
+        };
+        const itemSummary = (it: ItemAttr) => {
+          if (!it) return "";
+          const tag = it.cls || it.tag;
+          const snippet = it.text.length > 100 ? it.text.slice(0, 99) + "\u2026" : it.text;
+          return ` › item#${it.idx} <${tag}> "${snippet}"`;
+        };
+
+        // Group non-arrow annotations by section. Arrows render as their own
+        // bullet at the end because they straddle sections.
+        const arrows: Annotation[] = [];
+        const bySection = new Map<string, Annotation[]>();
+        for (const a of state.annotations) {
+          if (a.type === "arrow") {
+            arrows.push(a);
+            continue;
+          }
+          const key = a.refersToSection ?? "__unmapped__";
+          const list = bySection.get(key) ?? [];
+          list.push(a);
+          bySection.set(key, list);
+        }
+
+        const lines: string[] = [`Annotations on '${params.slug}' (${state.annotationCount}):`];
+        for (const [secId, items] of bySection) {
+          lines.push(`  → ${sectionLabel(secId === "__unmapped__" ? null : secId)}`);
+          for (const a of items) {
+            const text = a.text ?? `[${a.type}]`;
+            const colorTag = a.color ? ` [${a.color}]` : "";
+            const item = itemSummary(a.refersToItem ?? null);
+            lines.push(`    • ${a.type}${colorTag}: "${text}"${item}`);
+          }
+        }
+        if (arrows.length > 0) {
+          lines.push(`  → arrows (${arrows.length})`);
+          for (const a of arrows) {
+            const label = a.text ? ` "${a.text}"` : "";
+            const fromS = sectionLabel(a.from?.section ?? null);
+            const toS = sectionLabel(a.to?.section ?? null);
+            const fromI = itemSummary(a.from?.item ?? null);
+            const toI = itemSummary(a.to?.item ?? null);
+            lines.push(`    • arrow${label}: ${fromS}${fromI}  →  ${toS}${toI}`);
+          }
+        }
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
+          details: state,
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `frontpage_read failed: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+          details: {},
+        };
+      }
     },
   });
 
