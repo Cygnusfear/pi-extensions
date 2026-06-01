@@ -16,9 +16,10 @@ When chat becomes a wall of structured text, call `frontpage_create` with a spec
 
 - `frontpage_create({ spec })` — compose + write + mai artifact (does NOT auto-open)
 - `frontpage_update({ slug, patch, note })` — patch sections, log note (does NOT auto-open)
-- `frontpage_open({ slug })` — open in default browser
+- `frontpage_open({ slug })` — open in default browser (opens the tldraw canvas wrapper — see "v2" section below)
+- `frontpage_read({ slug })` — **read hooman annotations** (stickies / arrows / drawings) with per-section + per-item attribution. The coordination loop — call this any time the hooman has been annotating
 
-All three are thin wrappers. The work is in the spec.
+All four are thin wrappers. The composition work is in the spec; the reading work is interpreting the annotations.
 
 **Open is opt-in.** `frontpage_create` and `frontpage_update` write the file silently. When the hooman should see it now, follow up with a separate `frontpage_open({ slug })` call. Don't also pass `{ open: true }` to create/update — that opens twice (two browser tabs, surprise tab spam). Pick one: explicit `frontpage_open` (preferred — your instinct controls timing) OR `{ open: true }` on create (single call, but you lose the chance to write quietly).
 
@@ -208,6 +209,145 @@ frontpage_create({
 ```
 
 If pi-mesh is not loaded (no stable agent identity available), the byline is omitted entirely and the page renders exactly as before — backwards compatible.
+
+---
+
+## v2 — tldraw canvas wrapper
+
+Every frontpage you open via `frontpage_open` now opens inside a **tldraw canvas** served by a small Hono server on `127.0.0.1:39288`. The page renders as a single embedded shape on the canvas; the hooman draws stickies, arrows, and text *on top of it* as the coordination layer.
+
+```
+hooman ──draws sticky─▶ tldraw canvas ──saves─▶ ~/.agent/frontpage/<slug>.tldraw.json
+                                                       │
+                                                       ▼
+agent ◀── frontpage_read({slug}) ◀── /api/page/<slug>/state ◀── server reads JSON
+```
+
+No comment boxes, no Q&A widgets — tldraw stickies ARE the comments and questions. Arrows ARE the "this relates to that". Approve/disagree/redo is conveyed visually.
+
+### The new tool: `frontpage_read`
+
+```ts
+frontpage_read({ slug: "auth-flow" })
+```
+
+Returns every sticky / text / arrow / drawing on the canvas, **already mapped to the specific section AND item it overlaps**. The agent does not do spatial math — the server does, using bounds the iframe shim posts after every layout settle.
+
+Sample output:
+
+```
+Annotations on 'banter-into-system-log' (4):
+  → s11 "PRODUCTION ENGINEER ANALYSIS"
+    • note [yellow]: "this isn't surgical, fix it" › item#6 <ve-card depth-default> "6. Surgical smell ..."
+    • text [black]: "maybe it smells yes"
+  → s2 "BLAST RADIUS"
+    • note [yellow]: "maybe some substrate changes ok" › item#5 <kpi-item> "SUBSTRATE CHANGES None pure FE wiring"
+  → s13 "RECOMMENDED NEXT STEP"
+    • text [black]: "👍"
+  → arrows (1)
+    • arrow: s11 "PRODUCTION ENGINEER ANALYSIS"  →  s11 › item#6 <ve-card> "6. Surgical smell ..."
+```
+
+### How to read it
+
+| Annotation type | What it means in hooman-shorthand |
+|---|---|
+| 🟡 sticky **note** with text | A comment / question / pushback on the section or item it overlaps |
+| 📝 plain **text** | Quick reaction. "👍" = approval. "❌" = nope. Emoji = strong tonal signal |
+| ➡️ **arrow** | "this relates to that" — read endpoint A's section/item AND endpoint B's section/item |
+| ✏️ **draw** (lines) | Free-hand emphasis. Treat the centroid as a "look here" pointer |
+
+**Item attribution is the gold.** When a sticky has `› item#N <tag> "text"`, the hooman is targeting that specific card / kpi-item / paragraph. Don't generalise to the whole section if the item is named.
+
+**Items without attribution** (`refersToItem: null`) — the sticky is somewhere inside the section bounds but didn't land on a specific item. Treat as section-level commentary.
+
+**Arrows are the strongest signal.** When the hooman draws a connection, take it literally: they're saying *A and B are linked*. If A is a sticky-note saying "WTF" and B is a specific card, the WTF is about that card.
+
+### The annotation workflow
+
+When the hooman has been annotating, the loop is:
+
+1. **Read.** Call `frontpage_read({ slug })` for the page they were on.
+2. **Synthesise.** For each annotation, name what the hooman is communicating. Don't paraphrase the sticky text back at them — interpret the move.
+3. **Act.** Three options per annotation:
+   - **Patch the page** via `frontpage_update` (most common). E.g. sticky says "this isn't surgical" on card #6 → `replace_section` for s11 with the surgical-smell card sharpened or removed.
+   - **Update meta** (title / thesis / palette) if the sticky targets the overall argument.
+   - **No-op and tell them why** if the sticky is a thumbs-up / acknowledgement — confirm and move on.
+4. **Tell the hooman what you did**, referencing the sticky text and the section. They'll see the page update on next browser refresh.
+
+Do NOT delete the hooman's stickies as part of the patch. They're their notes. They'll clear them themselves.
+
+### When to read
+
+- **Always**, when the hooman says they "added notes" / "annotated" / "drew on the page" / "added a sticky" / similar.
+- **Always**, when the hooman names a slug and asks "what did I write?" / "what's on the page?" / "what am I asking?"
+- **Always**, after you ship a frontpage update and they say "look again" or similar.
+- **Proactively** at the start of a turn if there's a frontpage you authored recently AND the hooman just made a comment — they might have annotated.
+
+### When NOT to read
+
+- The page hasn't been opened in the browser yet (no layout bounds posted → mapping will be coarse / section-only).
+- You just wrote the page in the same turn — they haven't seen it yet, no annotations exist.
+- The hooman is asking about a slug you can't identify — ask which page.
+
+---
+
+## Lifecycle — keeping the v2 surface working
+
+The server lives in a **bun subprocess** the extension spawns on session start. State of the world:
+
+| Component | Where | What it does |
+|-----------|-------|--------------|
+| Extension factory | `extensions/frontpage.ts` | Spawns subprocess; registers tools; killed by `session_shutdown` |
+| Server subprocess | `server-process/server.ts` | Hono on `127.0.0.1:39288`. Survives `/reload-runtime` (only dies on full pi quit) |
+| Client bundle | `dist-client/bundle.js` | Pre-built React + tldraw bundle. Rebuilt on first boot if missing |
+| Storage | `~/.agent/frontpage/<slug>.*` | `.html` + `.meta.json` + `.tldraw.json` + `.layout.json` |
+
+### Healthchecks
+
+If `frontpage_read` returns "server not running" or a tool returns a transport error:
+
+```bash
+curl -s http://127.0.0.1:39288/healthz
+# Expected: {"ok":true,"version":2,"port":39288,"pid":<N>}
+```
+
+If no response: spawn the server manually for diagnosis (don't leave it running — the extension will own its lifecycle):
+
+```bash
+cd packages/frontpage && bun run server-process/server.ts
+```
+
+If `Bun.serve` errors out / EADDRINUSE that won't release: another pi process owns the port. That's fine — both processes write to the same store dir; the surviving server sees writes from both.
+
+### Rebuilding the client
+
+Only needed if you edit `client/tldraw-shell.tsx`. The extension auto-builds on first boot when `dist-client/bundle.js` is missing, but does NOT auto-rebuild on source change — that's a manual step:
+
+```bash
+cd packages/frontpage && bun run build-client
+```
+
+Browser tabs need a hard refresh (Cmd+Shift+R) to pick up the new bundle.
+
+### Storage layout per slug
+
+```
+~/.agent/frontpage/<slug>.html          ← rendered page (still source of truth for content)
+~/.agent/frontpage/<slug>.meta.json     ← spec + artifact id (used by frontpage_update)
+~/.agent/frontpage/<slug>.tldraw.json   ← canvas state — every sticky/arrow/draw the hooman placed
+~/.agent/frontpage/<slug>.layout.json   ← per-section + per-item bounds (posted by browser shim)
+```
+
+The `.tldraw.json` and `.layout.json` files are **derived** — safe to delete to reset the canvas for a slug. Don't delete `.meta.json` (loses the artifact id linkage).
+
+### Cross-pi-process behavior
+
+When two pi sessions are running, the second pi's extension boot detects the port is taken and noops on spawning. Both extensions write to the same store dir, so:
+
+- `frontpage_create` from session A is visible to `frontpage_read` from session B.
+- Hooman annotations from a tab opened by session A are visible to session B's agent.
+- If pi A exits, pi B's extension does NOT spawn a server (still detects peer ownership) until session_start fires again. Quick fix: `/reload-runtime` in session B re-probes.
 
 ---
 
