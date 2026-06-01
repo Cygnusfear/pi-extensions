@@ -1,0 +1,26 @@
+packages/frontpage/client/tldraw-shell.tsx
+  s_4d4d102ca33017::t_f59acd483934b5 9-13,29-31,131,141-243,247,249,251-256,263,268,270,278,280-281,284,287,293,308-315
+packages/frontpage/skills/frontpage/SKILL.md
+  s_4d4d102ca33017::t_1a182abb7b6a86 296-369
+  s_4d4d102ca33017::t_07d1f5b3a0a10a 21,23
+packages/frontpage/server-process/server.ts
+  s_4d4d102ca33017::t_6711b00e4ebf9e 427-686
+packages/frontpage/extensions/frontpage.ts
+  s_4d4d102ca33017::t_ee906f64efcf07 894-1007
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5721f693e06c0e0e4ba3dd3848b574e9d71cfa57",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
