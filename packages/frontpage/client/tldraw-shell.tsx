@@ -161,7 +161,148 @@ const STICKERS: StickerSpec[] = [
 	{ emoji: "❤️", tooltip: "love" },
 ];
 
-function StickerBar({ editor }: { editor: Editor | null }) {
+// ---- history modal ----
+
+interface HistorySummary {
+	ts: number;
+	author: string;
+	shapeCount: number;
+}
+
+function HistoryPanel({ slug, editor, onClose }: { slug: string; editor: Editor | null; onClose: () => void }) {
+	const [entries, setEntries] = React.useState<HistorySummary[]>([]);
+	const [loading, setLoading] = React.useState(true);
+	const [error, setError] = React.useState<string | null>(null);
+
+	React.useEffect(() => {
+		(async () => {
+			try {
+				const r = await fetch(`/api/page/${encodeURIComponent(slug)}/history`);
+				if (!r.ok) throw new Error(`HTTP ${r.status}`);
+				const body = (await r.json()) as { entries: HistorySummary[] };
+				setEntries(body.entries.slice().reverse()); // newest first
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setLoading(false);
+			}
+		})();
+	}, [slug]);
+
+	const restore = React.useCallback(
+		async (ts: number) => {
+			if (!editor) return;
+			try {
+				const r = await fetch(`/api/page/${encodeURIComponent(slug)}/restore`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ ts }),
+				});
+				if (!r.ok) throw new Error(`restore failed: HTTP ${r.status}`);
+				// Refresh the editor from the now-current server snapshot.
+				const sr = await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`);
+				if (!sr.ok) throw new Error(`reload failed: HTTP ${sr.status}`);
+				const body = (await sr.json()) as { snapshot?: unknown };
+				if (body.snapshot) {
+					loadSnapshot(editor.store, body.snapshot as Parameters<typeof loadSnapshot>[1]);
+				}
+				onClose();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			}
+		},
+		[editor, slug, onClose],
+	);
+
+	const formatRel = (ts: number) => {
+		const diff = Date.now() - ts;
+		if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
+		if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+		if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
+		return `${Math.round(diff / 86_400_000)}d ago`;
+	};
+
+	const formatAuthor = (a: string) => {
+		if (a === "hooman") return { text: "you", color: "#1f2937" };
+		if (a.startsWith("agent:")) return { text: a.slice(6) || "agent", color: "#7c3aed" };
+		if (a.startsWith("restore-from:")) return { text: "↩ restore", color: "#0891b2" };
+		return { text: a, color: "#6b7280" };
+	};
+
+	return (
+		<div
+			style={{
+				position: "absolute",
+				top: 64,
+				right: 76,
+				zIndex: 1001,
+				width: 320,
+				maxHeight: "70vh",
+				background: "white",
+				border: "1px solid #e0e0e0",
+				borderRadius: 10,
+				boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+				display: "flex",
+				flexDirection: "column",
+				overflow: "hidden",
+				pointerEvents: "all",
+			}}
+		>
+			<div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", display: "flex", alignItems: "center", gap: 8 }}>
+				<strong style={{ flex: 1, fontSize: 13 }}>History</strong>
+				<button onClick={onClose} style={{ background: "transparent", border: 0, cursor: "pointer", fontSize: 18, color: "#888", padding: 0, width: 24 }}>×</button>
+			</div>
+			<div style={{ overflowY: "auto", flex: 1 }}>
+				{loading && <div style={{ padding: 14, color: "#888", fontSize: 12 }}>Loading…</div>}
+				{error && <div style={{ padding: 14, color: "#b91c1c", fontSize: 12 }}>{error}</div>}
+				{!loading && entries.length === 0 && !error && (
+					<div style={{ padding: 14, color: "#888", fontSize: 12 }}>No history yet — every save creates a snapshot.</div>
+				)}
+				{entries.map((e, idx) => {
+					const author = formatAuthor(e.author);
+					const isCurrent = idx === 0;
+					return (
+						<button
+							key={e.ts}
+							onClick={() => restore(e.ts)}
+							disabled={isCurrent}
+							style={{
+								display: "flex",
+								width: "100%",
+								padding: "8px 14px",
+								background: "transparent",
+								border: 0,
+								borderBottom: "1px solid #f1f1f1",
+								cursor: isCurrent ? "default" : "pointer",
+								textAlign: "left",
+								gap: 8,
+								alignItems: "center",
+								opacity: isCurrent ? 0.6 : 1,
+							}}
+							onMouseEnter={(ev) => {
+								if (!isCurrent) (ev.currentTarget as HTMLButtonElement).style.background = "#fafaf7";
+							}}
+							onMouseLeave={(ev) => {
+								(ev.currentTarget as HTMLButtonElement).style.background = "transparent";
+							}}
+						>
+							<div style={{ flex: 1 }}>
+								<div style={{ fontSize: 12, fontWeight: 500 }}>{formatRel(e.ts)}{isCurrent ? " (current)" : ""}</div>
+								<div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{e.shapeCount} shape{e.shapeCount === 1 ? "" : "s"}</div>
+							</div>
+							<div style={{ fontSize: 11, color: author.color, fontWeight: 500 }}>{author.text}</div>
+						</button>
+					);
+				})}
+			</div>
+			<div style={{ padding: "8px 14px", borderTop: "1px solid #eee", fontSize: 11, color: "#888" }}>
+				Click any prior version to restore. The current state is saved to history first.
+			</div>
+		</div>
+	);
+}
+
+function StickerBar({ editor, onHistoryToggle, showingHistory }: { editor: Editor | null; onHistoryToggle: () => void; showingHistory: boolean }) {
 	const dropSticker = React.useCallback(
 		(emoji: string) => {
 			if (!editor) return;
@@ -209,6 +350,30 @@ function StickerBar({ editor }: { editor: Editor | null }) {
 				pointerEvents: "all",
 			}}
 		>
+			<button
+				title="History — restore a prior state"
+				onClick={onHistoryToggle}
+				style={{
+					background: showingHistory ? "#e9e6f7" : "transparent",
+					border: "1px solid " + (showingHistory ? "#a78bfa" : "transparent"),
+					borderRadius: 6,
+					padding: "4px 6px",
+					cursor: "pointer",
+					fontSize: 14,
+					lineHeight: 1.1,
+					width: 36,
+					marginBottom: 4,
+					borderBottom: "1px solid #eee",
+				}}
+				onMouseEnter={(e) => {
+					if (!showingHistory) (e.currentTarget as HTMLButtonElement).style.background = "#f0f0f0";
+				}}
+				onMouseLeave={(e) => {
+					(e.currentTarget as HTMLButtonElement).style.background = showingHistory ? "#e9e6f7" : "transparent";
+				}}
+			>
+				⏪
+			</button>
 			{STICKERS.map((s) => (
 				<button
 					key={s.emoji}
@@ -245,6 +410,7 @@ function StickerBar({ editor }: { editor: Editor | null }) {
 
 function App({ slug }: { slug: string }) {
 	const [editor, setEditor] = React.useState<Editor | null>(null);
+	const [showHistory, setShowHistory] = React.useState(false);
 	const handleMount = React.useCallback(
 		(ed: Editor) => {
 			let cancelled = false;
@@ -311,7 +477,14 @@ function App({ slug }: { slug: string }) {
 				onMount={handleMount}
 				components={components}
 			/>
-			<StickerBar editor={editor} />
+			<StickerBar
+				editor={editor}
+				showingHistory={showHistory}
+				onHistoryToggle={() => setShowHistory((v) => !v)}
+			/>
+			{showHistory && (
+				<HistoryPanel slug={slug} editor={editor} onClose={() => setShowHistory(false)} />
+			)}
 		</>
 	);
 }

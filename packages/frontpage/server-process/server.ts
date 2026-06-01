@@ -112,6 +112,75 @@ function tldrawPath(slug: string): string {
 function layoutPath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.layout.json`);
 }
+function historyPath(slug: string): string {
+	return path.join(STORE_DIR, `${slug}.history.jsonl`);
+}
+
+// Cap on history entries kept per slug. ~50 entries × ~20KB/entry = ~1MB max
+// per slug, which is fine for desk use. Older entries get dropped when the
+// file gets rotated below.
+const HISTORY_MAX_ENTRIES = 50;
+// Coalesce window: don't write a NEW history entry if the previous one was
+// less than this many ms ago AND came from the same author. Stops a long
+// drag operation from filling history with frames.
+const HISTORY_COALESCE_MS = 5000;
+
+interface HistoryEntry {
+	ts: number;
+	author: string;
+	shapeCount: number;
+	snapshot: unknown;
+}
+
+async function readHistory(slug: string): Promise<HistoryEntry[]> {
+	try {
+		const raw = await fsp.readFile(historyPath(slug), "utf8");
+		const out: HistoryEntry[] = [];
+		for (const line of raw.split("\n")) {
+			if (!line) continue;
+			try { out.push(JSON.parse(line)); } catch { /* skip bad lines */ }
+		}
+		return out;
+	} catch {
+		return [];
+	}
+}
+
+async function writeHistory(slug: string, entries: HistoryEntry[]): Promise<void> {
+	const trimmed = entries.slice(-HISTORY_MAX_ENTRIES);
+	const text = trimmed.map((e) => JSON.stringify(e)).join("\n") + (trimmed.length > 0 ? "\n" : "");
+	const p = historyPath(slug);
+	const tmp = `${p}.${process.pid}.tmp`;
+	await fsp.writeFile(tmp, text, "utf8");
+	await fsp.rename(tmp, p);
+}
+
+async function appendHistoryEntry(slug: string, snapshot: unknown, author: string): Promise<{ appended: boolean; reason?: string }> {
+	const entries = await readHistory(slug);
+	const last = entries[entries.length - 1];
+	const now = Date.now();
+	if (last && last.author === author && now - last.ts < HISTORY_COALESCE_MS) {
+		// Coalesce: replace the last entry instead of appending a new one.
+		const shapeCount = countShapes(snapshot);
+		entries[entries.length - 1] = { ts: now, author, shapeCount, snapshot };
+		await writeHistory(slug, entries);
+		return { appended: false, reason: "coalesced into previous entry" };
+	}
+	entries.push({ ts: now, author, shapeCount: countShapes(snapshot), snapshot });
+	await writeHistory(slug, entries);
+	return { appended: true };
+}
+
+function countShapes(snapshot: unknown): number {
+	const snap = snapshot as { document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> } | null;
+	const store = snap?.document?.store ?? snap?.store;
+	if (!store) return 0;
+	let n = 0;
+	for (const v of Object.values(store)) {
+		if (typeof v === "object" && v !== null && (v as { typeName?: string }).typeName === "shape" && (v as { type?: string }).type !== "frontpage-embed") n++;
+	}
+	return n;
+}
 
 async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 	await fsp.mkdir(path.dirname(filePath), { recursive: true });
@@ -138,10 +207,16 @@ app.put("/api/page/:slug/tldraw", async (c) => {
 	const slug = c.req.param("slug");
 	const body = await c.req.json().catch(() => null);
 	if (!body || typeof body !== "object" || !("snapshot" in body)) {
-		return c.json({ error: "expected { snapshot: ... }" }, 400);
+		return c.json({ error: "expected { snapshot: ..., author?: string }" }, 400);
 	}
-	await writeJsonAtomic(tldrawPath(slug), (body as { snapshot: unknown }).snapshot);
-	return c.json({ ok: true, slug, savedAt: Date.now() });
+	const snapshot = (body as { snapshot: unknown }).snapshot;
+	// Browser PUTs default to "hooman" — these come from interactive editing.
+	const author = typeof (body as { author?: unknown }).author === "string"
+		? (body as { author: string }).author
+		: "hooman";
+	await writeJsonAtomic(tldrawPath(slug), snapshot);
+	const histResult = await appendHistoryEntry(slug, snapshot, author);
+	return c.json({ ok: true, slug, savedAt: Date.now(), historyAppended: histResult.appended });
 });
 
 app.get("/api/page/:slug/layout", async (c) => {
@@ -679,9 +754,49 @@ app.post("/api/page/:slug/annotate", async (c) => {
 		}
 	});
 
-	// Persist the merged snapshot.
+	// Persist the merged snapshot AND record the agent write in history so
+	// the hooman can roll back if our placement clobbered something.
 	await writeJsonAtomic(tldrawPath(slug), snap);
+	await appendHistoryEntry(slug, snap, `agent:${author}`);
 	return c.json({ ok: true, slug, created: created.length, createdIds: created, skipped });
+});
+
+// ---- History (time-machine) ----
+
+app.get("/api/page/:slug/history", async (c) => {
+	const slug = c.req.param("slug");
+	const entries = await readHistory(slug);
+	// Don't ship the full snapshots in the list view — too heavy. Caller
+	// fetches a specific entry via GET /history/:ts.
+	const summary = entries.map((e) => ({ ts: e.ts, author: e.author, shapeCount: e.shapeCount }));
+	return c.json({ slug, entries: summary, count: summary.length });
+});
+
+app.get("/api/page/:slug/history/:ts", async (c) => {
+	const slug = c.req.param("slug");
+	const ts = Number(c.req.param("ts"));
+	if (!Number.isFinite(ts)) return c.json({ error: "ts must be a number" }, 400);
+	const entries = await readHistory(slug);
+	const entry = entries.find((e) => e.ts === ts);
+	if (!entry) return c.json({ error: "no history entry with that ts" }, 404);
+	return c.json(entry);
+});
+
+app.post("/api/page/:slug/restore", async (c) => {
+	const slug = c.req.param("slug");
+	const body = await c.req.json().catch(() => null);
+	if (!body || typeof body !== "object" || typeof (body as { ts?: unknown }).ts !== "number") {
+		return c.json({ error: "expected { ts: number }" }, 400);
+	}
+	const ts = (body as { ts: number }).ts;
+	const entries = await readHistory(slug);
+	const entry = entries.find((e) => e.ts === ts);
+	if (!entry) return c.json({ error: "no history entry with that ts" }, 404);
+	await writeJsonAtomic(tldrawPath(slug), entry.snapshot);
+	// Record the restore as a NEW history entry so the user can undo a
+	// restore (and so we don't lose the state we're restoring FROM).
+	await appendHistoryEntry(slug, entry.snapshot, `restore-from:${ts}`);
+	return c.json({ ok: true, slug, restoredTs: ts, shapeCount: entry.shapeCount });
 });
 
 app.get("/client/bundle.js", serveClientAsset("bundle.js", "application/javascript; charset=utf-8"));

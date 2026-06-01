@@ -361,6 +361,26 @@ The agent reads them like any other annotation via `frontpage_read`. Emojis ofte
 
 ---
 
+## History — Time Machine for the canvas
+
+Every write to a frontpage's tldraw state (browser persistence OR agent annotate) appends to a per-slug history log at `~/.agent/frontpage/<slug>.history.jsonl`. Last 50 entries kept; entries from the same author within 5 seconds coalesce so a long drag doesn't fill history with frames.
+
+**UI**: ⏪ button in the canvas toolbar (right edge, above the sticker palette). Click → modal lists recent versions newest-first with timestamp, shape count, and author (you / agent name / restore-from). Click any prior version to restore. The act of restoring writes a new history entry tagged `restore-from:<ts>` so you can undo a restore.
+
+**Why this exists**: when an agent calls `frontpage_annotate`, the agent's writes land alongside the hooman's stickies. If the placement is awkward or overlaps badly, the hooman can roll back to the pre-agent state. The agent's write is one history entry; the prior hooman state is the entry just before it.
+
+**Server routes** (mostly for the UI; agents rarely touch these directly):
+
+```
+GET  /api/page/:slug/history          ← list of { ts, author, shapeCount }
+GET  /api/page/:slug/history/:ts      ← full snapshot for one entry
+POST /api/page/:slug/restore          ← body { ts } → set current to that entry, record a restore-from
+```
+
+**For agents writing to the canvas**: don't worry about history — every `frontpage_annotate` call is logged with author `agent:<nickname>` automatically. If you place something the hooman doesn't like, they'll restore. Don't pre-emptively undo your own write; let them choose.
+
+---
+
 ## Default font size
 
 The tldraw canvas defaults new shapes to **size "s"** (smaller than tldraw's stock default "m"). This matches the FigJam-feel and keeps fresh stickies from dominating the page beneath. Hooman can still pick a larger size from tldraw's standard size picker — the default just changes which size is selected for the next shape.
