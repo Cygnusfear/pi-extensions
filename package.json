@@ -45,6 +45,7 @@
       "./packages/notify/extensions/notify.ts",
       "./packages/powerline-footer/index.ts",
       "./packages/session-tab-title/extensions/session-tab-title.ts",
+      "./packages/rate-limit-recovery/extensions/rate-limit-recovery.ts",
       "./packages/skills/extensions/skills.ts",
       "./packages/nested-skills/extensions/nested-skills.ts",
       "./packages/teams/index.ts",

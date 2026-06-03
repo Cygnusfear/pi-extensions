@@ -2,15 +2,16 @@ import { describe, test, expect } from "bun:test";
 import { buildTitle, shortStableName, normalizeSessionTitle, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
 
 describe("STAGES table", () => {
-  test("has all 13 hooman-specified stages", () => {
+  test("has all 14 hooman-specified stages", () => {
     const keys = listStageKeys();
     for (const k of [
       "planning", "implementing", "blocked", "blocked-long", "review", "landing",
       "bugfix", "cleaning", "coordinator", "bhakti", "smoketest", "parked", "attention",
+      "rate-limited",
     ]) {
       expect(keys).toContain(k);
     }
-    expect(keys).toHaveLength(13);
+    expect(keys).toHaveLength(14);
   });
 
   test("icons match the hooman's spec", () => {
@@ -27,6 +28,7 @@ describe("STAGES table", () => {
     expect(STAGES.smoketest.icon).toBe("🚬");
     expect(STAGES.parked.icon).toBe("🚏");
     expect(STAGES.attention.icon).toBe("🚨");
+    expect(STAGES["rate-limited"].icon).toBe("🚓");
   });
 
   test("colors match the hooman's spec", () => {
@@ -43,6 +45,7 @@ describe("STAGES table", () => {
     expect(STAGES.smoketest.color).toBe("yellow");
     expect(STAGES.parked.color).toBe("grey");
     expect(STAGES.attention.color).toBe("red");
+    expect(STAGES["rate-limited"].color).toBe("red");
   });
 });
 
@@ -69,6 +72,9 @@ describe("resolveStageKey", () => {
     expect(resolveStageKey("idle")).toBe("parked");
     expect(resolveStageKey("done")).toBe("parked");
     expect(resolveStageKey("urgent")).toBe("attention");
+    expect(resolveStageKey("tpm")).toBe("rate-limited");
+    expect(resolveStageKey("429")).toBe("rate-limited");
+    expect(resolveStageKey("rate_limit")).toBe("rate-limited");
   });
 
   test("returns null for unknown", () => {

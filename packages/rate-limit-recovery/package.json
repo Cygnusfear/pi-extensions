@@ -1,0 +1,22 @@
+{
+  "name": "@pi-extensions/rate-limit-recovery",
+  "version": "0.0.1",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/rate-limit-recovery.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
+  },
+  "files": [
+    "extensions"
+  ],
+  "dependencies": {
+    "@pi-extensions/shared": "*"
+  }
+}

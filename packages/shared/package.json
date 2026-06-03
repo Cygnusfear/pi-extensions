@@ -23,7 +23,8 @@
     "./shared-prompts": "./src/shared-prompts.ts",
     "./desktop-notify": "./src/desktop-notify.ts",
     "./pending-interactions": "./src/pending-interactions.ts",
-    "./guarded-confirm": "./src/guarded-confirm.ts"
+    "./guarded-confirm": "./src/guarded-confirm.ts",
+    "./stage-control": "./src/stage-control.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",

@@ -54,6 +54,7 @@ import path from "node:path";
 import { safeAction } from "@pi-extensions/shared/tool-availability";
 import { getStableNickname, onStableIdChange } from "@pi-extensions/shared/session-nickname";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry.ts";
+import { registerStageController } from "../../shared/src/stage-control.ts";
 
 // ── Stage table ───────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ export const STAGES: Record<string, StageDef> = {
 	smoketest: { icon: "🚬", label: "hooman should smoke-test", color: "yellow" },
 	parked: { icon: "🚏", label: "parked — doing nothing, awaiting direction", color: "grey" },
 	attention: { icon: "🚨", label: "needs hooman attention (urgent)", color: "red" },
+	"rate-limited": { icon: "🚓", label: "rate limited (provider TPM storm)", color: "red" },
 };
 
 /** Ergonomic aliases so the agent's call reads naturally. */
@@ -109,6 +111,14 @@ const STAGE_ALIASES: Record<string, string> = {
 	attn: "attention",
 	alarm: "attention",
 	help: "attention",
+	ratelimited: "rate-limited",
+	ratelimit: "rate-limited",
+	rate_limit: "rate-limited",
+	"rate-limit": "rate-limited",
+	throttled: "rate-limited",
+	tpm: "rate-limited",
+	"429": "rate-limited",
+	storm: "rate-limited",
 };
 
 const DEFAULT_STAGE = "planning";
@@ -344,6 +354,11 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		const raw = typeof arg === "string" ? arg : (arg as { title?: string })?.title ?? "";
 		return setSessionTitle(raw);
 	});
+
+	// Expose the stage setter/getter on the shared bus so other extensions can
+	// drive the tab icon without importing this package directly. setStage
+	// already resolves aliases and persists; getStage reports the canonical key.
+	registerStageController({ setStage: (s) => setStage(s), getStage: () => currentStage });
 
 	pi.on("session_start", (_event, ctx) => {
 		currentCtx = ctx;
