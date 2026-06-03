@@ -1,0 +1,40 @@
+packages/session-tab-title/extensions/session-tab-title.ts
+  s_4d4d102ca33017::t_805c13add8aeaf 57,84,114-121,358-362
+packages/session-tab-title/extensions/session-tab-title.test.ts
+  s_4d4d102ca33017::t_df7d5b238919c4 48
+  s_4d4d102ca33017::t_379a3faa5e46fa 31
+  s_4d4d102ca33017::t_502821a33c136c 75-77
+  s_4d4d102ca33017::t_9b8dcd64b3fa6c 5,10,14
+packages/rate-limit-recovery/extensions/rate-limit-recovery.test.ts
+  s_4d4d102ca33017::t_96f23491128238 1-51
+packages/shared/src/stage-control.ts
+  s_4d4d102ca33017::t_852e3049f8b35a 1-44
+package.json
+  s_4d4d102ca33017::t_241209056367f9 48
+packages/rate-limit-recovery/package.json
+  s_4d4d102ca33017::t_20437b025945c5 1-22
+packages/shared/package.json
+  s_4d4d102ca33017::t_91ef4f64c8dcfd 26-27
+packages/rate-limit-recovery/extensions/rate-limit-recovery.ts
+  s_4d4d102ca33017::t_52d413c1793521 68-69
+  s_4d4d102ca33017::t_2c503c55b0b652 156-157,164,169
+  s_4d4d102ca33017::t_da2e152ad4c52c 37-67
+  s_4d4d102ca33017::t_b92471ceb5d95e 1-36,70-73,76-155,158-163,165-168,170-190
+  s_4d4d102ca33017::t_83507f1c5f5a9c 74-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7af652189c7f4b09b7d9dc9e9a00671e3c394041",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
