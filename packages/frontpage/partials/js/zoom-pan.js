@@ -97,7 +97,12 @@ export function initZoomPan(shell, opts = {}) {
     if (!svgW) return;
     const usableW = Math.max(280, wrap.getBoundingClientRect().width - 2);
     const idealH = (svgH / svgW) * usableW + config.fitPadding * 2;
-    const maxVp = Math.floor(innerHeight * config.maxHeightVh);
+    // Embedded (tldraw iframe auto-sized to content): the "viewport" IS the
+    // thing we're sizing, so a vh-based height chases itself infinitely. Use a
+    // fixed px cap — idealH is width-driven and stable. Standalone page: keep
+    // the vh-aware cap so big diagrams use the available screen.
+    var embedded = false; try { embedded = window.self !== window.top; } catch (_) { embedded = true; }
+    const maxVp = embedded ? config.maxHeightPx : Math.floor(innerHeight * config.maxHeightVh);
     const hardMax = Math.min(config.maxHeightPx, Math.max(config.minHeight + 40, maxVp));
     wrap.style.height = Math.round(clamp(idealH, config.minHeight, hardMax)) + 'px';
   }

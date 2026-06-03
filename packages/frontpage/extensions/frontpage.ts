@@ -202,7 +202,7 @@ const CardGridSchema = Type.Object({ ...SectionCommon,
 });
 const MermaidSchema = Type.Object({ ...SectionCommon,
   type: Type.Literal("mermaid"),
-  source: Type.String({ description: "Mermaid diagram source, e.g. 'graph TD\\n  A --> B'" }),
+  source: Type.String({ description: `Mermaid diagram source. ONE-SHOT RULES so it renders first try: (1) QUOTE every node AND edge label containing anything beyond letters/digits/spaces — node A["a/b (x)"], edge A -->|"spawn (x)"| B. Labels MUST use DOUBLE quotes — single quotes are NOT valid mermaid. Unquoted ( ) [ ] {} in any label is a hard parse error. (2) Line breaks = <br/>, never a literal newline escape. (3) No accidental self-loops (X-->X). (4) 6-digit hex in classDef. (5) explicit direction TD/LR. Sections are linted at write time.` }),
   fontSize: Type.Optional(Type.Number()),
   initialZoom: Type.Optional(Type.Number()),
 });
@@ -501,15 +501,42 @@ function frontpagePageUrl(slug: string): string {
   return `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/page/${encodeURIComponent(slug)}`;
 }
 
-/** Fire a history snapshot trigger after a spec write. Best-effort; never throws. */
-async function triggerHistorySnapshot(slug: string, author: string): Promise<void> {
+/** Fire a history snapshot trigger. Returns the created entry's ts (or null
+ *  if the server didn't answer). Best-effort; never throws. */
+async function triggerHistorySnapshot(slug: string, author: string): Promise<number | null> {
   try {
-    await fetch(`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/history`, {
+    const r = await fetch(`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/history`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ author }),
     });
-  } catch { /* server not up; non-fatal */ }
+    if (!r.ok) return null;
+    const body = await r.json() as { ts?: number };
+    return typeof body.ts === "number" ? body.ts : null;
+  } catch { return null; }
+}
+
+/** Tell open browsers the page was revised so they freeze the current embed
+ *  at `priorTs` and append a fresh live embed to the right. Retries a few
+ *  times if no client received it (EventSource may be mid-reconnect), so the
+ *  side-by-side reliably lands without the hooman refreshing. Best-effort. */
+async function broadcastRevision(slug: string, priorTs: number | null, author: string, summary?: string): Promise<void> {
+  const url = `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/revised`;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ priorTs, author, summary }),
+      });
+      if (r.ok) {
+        const body = await r.json() as { delivered?: number };
+        if ((body.delivered ?? 0) > 0) return; // a browser got it — done
+      }
+    } catch { /* server not up; non-fatal */ }
+    // No client received it yet — wait and retry (EventSource reconnect window).
+    await new Promise((res) => setTimeout(res, 500));
+  }
 }
 
 interface SectionDiff {
@@ -790,9 +817,7 @@ export default function (pi: ExtensionAPI) {
 
       const withIds = assignIds(spec);
       applyBylineForUpdate(withIds);
-      const html = render(withIds);
       const filePath = pagePath(withIds.slug);
-      await fsp.writeFile(filePath, html, "utf8");
       const now = Date.now();
       // Compute section-level diff BEFORE writing the new meta so we still
       // have the old spec in hand (`meta.spec` is the on-disk pre-update
@@ -800,19 +825,25 @@ export default function (pi: ExtensionAPI) {
       const authorTag = `agent:${getStableNickname() ?? "frontpage_update"}`;
       const sectionDiff = computeSectionDiff(meta.spec.sections, withIds.sections, authorTag);
 
+      // SIDE-BY-SIDE VERSION MODEL:
+      // 1. Snapshot the PRE-update surface (OLD html + meta + canvas-with-
+      //    annotations) into history FIRST, while the old content is still
+      //    on disk. priorTs identifies that frozen version.
+      const priorTs = await triggerHistorySnapshot(params.slug, authorTag);
+      // 2. NOW write the new content to disk.
+      const html = render(withIds);
+      await fsp.writeFile(filePath, html, "utf8");
       await writeMeta({ ...meta, spec: withIds, updatedAt: now });
-      // 1. Snapshot the WHOLE pre-update surface (html + meta + canvas) so
-      //    the hooman can Time Machine back to their annotations on the
-      //    old content.
-      // 2. Clear the canvas — annotations belonged to the prior content
-      //    and would drift visually with content reflow. Fresh canvas for
-      //    the new version.
-      // 3. Persist the section diff so the next /embed render injects
-      //    "★ updated" badges on changed sections — the "what's new"
-      //    affordance the hooman needs to see at a glance.
-      await triggerHistorySnapshot(params.slug, authorTag);
-      await clearCanvasAnnotations(params.slug);
+      // 3. Persist the section diff so the new version's /embed render shows
+      //    "★ UPDATED" / "★ NEW" badges on changed sections.
       if (sectionDiff) await writeSectionDiff(params.slug, sectionDiff);
+      // 4. Broadcast the revision. Open browsers freeze their current live
+      //    embed at priorTs (so the hooman's annotations stay pinned to the
+      //    OLD content, frozen via embed-versioned?ts=priorTs) and append a
+      //    fresh live embed to the RIGHT showing the new content. No
+      //    annotation clearing — they belong to the old frozen doc and never
+      //    drift, because the doc they sit on never changes again.
+      await broadcastRevision(params.slug, priorTs, authorTag, sectionDiff?.summary);
 
       if (meta.artifactId) await addNote(meta.artifactId, params.note);
       if (params.open) void osOpen(filePath);
@@ -863,14 +894,17 @@ export default function (pi: ExtensionAPI) {
         };
       }
       // v2: open via the Hono server when running (tldraw canvas wrapper).
-      // Falls back to file:// if the server failed to start so the page is
-      // never inaccessible.
-      const info = frontpageServerInfo();
-      const target = info.running ? frontpagePageUrl(params.slug) : filePath;
+      // Probe the server LIVE rather than trusting serverState.pid — right
+      // after a /reload the spawn promise may not have resolved yet, so
+      // serverState.pid can be null even though the server is reachable
+      // (or a peer process owns it). Falls back to file:// only if the
+      // server genuinely doesn't answer.
+      const reachable = await probeServer(1200);
+      const target = reachable ? frontpagePageUrl(params.slug) : filePath;
       void osOpen(target);
       return {
         content: [{ type: "text", text: `Opening ${target}` }],
-        details: { path: filePath, url: info.running ? frontpagePageUrl(params.slug) : null },
+        details: { path: filePath, url: reachable ? frontpagePageUrl(params.slug) : null },
       };
     },
   });

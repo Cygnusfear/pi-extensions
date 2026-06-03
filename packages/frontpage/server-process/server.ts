@@ -27,11 +27,13 @@
  */
 
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { injectBeforeBodyClose } from "./html-inject.ts";
 
 // ---- paths ----
 const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
@@ -199,7 +201,7 @@ app.get("/page/:slug/embed", async (c) => {
 		// Inject slug into the dismiss script (we templated an empty string above).
 		const withDiff = injectDiffMarkers(html, diff)
 			.replace("/api/page/${slug}/dismiss-diff", `/api/page/${encodeURIComponent(slug)}/dismiss-diff`);
-		const injected = withDiff.replace(/<\/body>/i, `${LAYOUT_BOUNDS_SHIM}\n</body>`);
+		const injected = injectBeforeBodyClose(withDiff, LAYOUT_BOUNDS_SHIM);
 		return c.html(injected);
 	} catch {
 		return c.html("Not found", 404);
@@ -927,6 +929,70 @@ app.post("/api/page/:slug/annotate", async (c) => {
 	return c.json({ ok: true, slug, created: created.length, createdIds: created, skipped });
 });
 
+// ---- Live revision events (SSE) ----
+// Per-slug set of subscriber callbacks. When the page is revised (agent
+// frontpage_update), we broadcast so open browsers add the new version
+// side-by-side WITHOUT a manual refresh.
+const sseClients = new Map<string, Set<(line: string) => void>>();
+
+function broadcastToSlug(slug: string, payload: Record<string, unknown>): number {
+	const set = sseClients.get(slug);
+	if (!set || set.size === 0) return 0;
+	const line = `data: ${JSON.stringify(payload)}\n\n`;
+	for (const send of set) {
+		try { send(line); } catch { /* dead client; cleaned up on abort */ }
+	}
+	return set.size;
+}
+
+app.get("/api/page/:slug/events", (c) => {
+	const slug = c.req.param("slug");
+	return streamSSE(c, async (stream) => {
+		let set = sseClients.get(slug);
+		if (!set) { set = new Set(); sseClients.set(slug, set); }
+		const send = (line: string) => { void stream.write(line); };
+		set.add(send);
+		await stream.write(`data: ${JSON.stringify({ type: "hello", slug })}\n\n`);
+		const ka = setInterval(() => { void stream.write(": keepalive\n\n"); }, 20000);
+		stream.onAbort(() => {
+			clearInterval(ka);
+			set?.delete(send);
+			if (set && set.size === 0) sseClients.delete(slug);
+		});
+		// Hold the stream open indefinitely.
+		// eslint-disable-next-line no-constant-condition
+		while (true) { await stream.sleep(3600_000); }
+	});
+});
+
+// Called by the extension after frontpage_update writes the new content.
+// priorTs = the history ts of the PRE-update snapshot, so the browser can
+// freeze the currently-live embed at that version and append a fresh live
+// embed to the right.
+app.post("/api/page/:slug/revised", async (c) => {
+	const slug = c.req.param("slug");
+	const body = await c.req.json().catch(() => ({}));
+	let priorTs = typeof (body as { priorTs?: unknown }).priorTs === "number" && (body as { priorTs: number }).priorTs > 0
+		? (body as { priorTs: number }).priorTs
+		: undefined;
+	// Fallback: if the caller didn't supply a usable priorTs, resolve it from
+	// the most recent history entry (the pre-update snapshot). This makes the
+	// freeze robust even if the extension's history POST response was missed.
+	if (priorTs === undefined) {
+		const entries = await readHistory(slug);
+		if (entries.length > 0) priorTs = entries[entries.length - 1].ts;
+	}
+	const delivered = broadcastToSlug(slug, {
+		type: "revised",
+		slug,
+		ts: Date.now(),
+		priorTs,
+		author: (body as { author?: string }).author,
+		summary: (body as { summary?: string }).summary,
+	});
+	return c.json({ ok: true, slug, delivered });
+});
+
 // ---- History (time-machine) ----
 
 app.get("/api/page/:slug/history", async (c) => {
@@ -983,8 +1049,12 @@ app.post("/api/page/:slug/history", async (c) => {
 		? (body as { author: string }).author
 		: "agent";
 	const snap = await readJsonOrEmpty<unknown>(tldrawPath(slug), { document: { store: {} } });
+	const tsBefore = Date.now();
 	const result = await appendHistoryEntry(slug, snap, author);
-	return c.json({ ok: true, slug, ...result });
+	// Return the ts of the entry we just created (the last one in the log).
+	const entries = await readHistory(slug);
+	const createdTs = entries.length > 0 ? entries[entries.length - 1].ts : tsBefore;
+	return c.json({ ok: true, slug, ts: createdTs, ...result });
 });
 
 // Versioned embed: ?ts=<historyTs> returns the html from that history entry
@@ -996,7 +1066,7 @@ app.get("/api/page/:slug/embed-versioned", async (c) => {
 		// Default: current. Re-use the /embed handler logic.
 		try {
 			const html = await fsp.readFile(pagePath(slug), "utf8");
-			return c.html(html.replace(/<\/body>/i, `${LAYOUT_BOUNDS_SHIM}\n</body>`));
+			return c.html(injectBeforeBodyClose(html, LAYOUT_BOUNDS_SHIM));
 		} catch { return c.html("Not found", 404); }
 	}
 	const ts = Number(tsParam);
@@ -1153,12 +1223,28 @@ const LAYOUT_BOUNDS_SHIM = `
         items: collectItems(n),
       });
     });
-    var documentHeight = Math.max(
-      document.body.scrollHeight,
-      document.documentElement.scrollHeight,
-      document.body.offsetHeight,
-      document.documentElement.offsetHeight
-    );
+    // ── Embed height: a PURE FUNCTION of content height ──────────────────
+    // The parent sizes the iframe to whatever height we report. So the height
+    // we report MUST NOT depend on the iframe's current height, or the two
+    // chase each other forever.
+    //
+    // document.body.scrollHeight and documentElement.scrollHeight are POISON
+    // here: they never return less than the iframe viewport height, so they
+    // grow every time the parent resizes us. We measure ONLY the intrinsic
+    // height of the content — the bottom edge of the content container and the
+    // bottom-most section. Both are normal-flow content metrics, independent of
+    // the iframe size, so measure→resize converges in a single step.
+    //
+    // Invariant this relies on: no content element sizes itself to the iframe
+    // (no vh / height:100% that resolves against the viewport). Diagrams honour
+    // this via a fixed px cap when embedded (see zoom-pan.js setAdaptiveHeight).
+    var container = document.querySelector('.container');
+    var documentHeight = 0;
+    if (container) {
+      var cr = container.getBoundingClientRect();
+      documentHeight = Math.ceil(cr.bottom + window.scrollY);
+    }
+    sections.forEach(function (s) { documentHeight = Math.max(documentHeight, Math.ceil(s.y + s.h)); });
     try { parent.postMessage({ type: 'frontpage:layout', sections: sections, documentHeight: documentHeight }, '*'); } catch (_) {}
   }
   var pending = 0;
@@ -1167,10 +1253,25 @@ const LAYOUT_BOUNDS_SHIM = `
     pending = requestAnimationFrame(function () { pending = 0; reportBounds(); });
   }
   window.addEventListener('load', schedule);
+  // Re-measure when the CONTENT changes — observe the container, NOT
+  // documentElement/body (those resize WITH the iframe, so observing them would
+  // re-fire on our own resize). The container resizes only when content does.
   if (window.ResizeObserver) {
-    new ResizeObserver(schedule).observe(document.documentElement);
+    var c = document.querySelector('.container');
+    if (c) new ResizeObserver(schedule).observe(c);
   }
-  window.addEventListener('resize', schedule);
+  // Late-rendering sections (mermaid/d3/svg/chart) insert their SVG/canvas into
+  // the DOM after load. childList (NOT attributes — diagram zoom/pan churns
+  // style constantly) catches the insert so we re-measure once it lands.
+  if (window.MutationObserver) {
+    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(schedule); }
+  // A couple of safety re-measures for diagrams that render slightly late.
+  // These are harmless: the measurement is content-intrinsic and stable, so
+  // re-measuring reports the same value — no growth, no loop.
+  setTimeout(schedule, 400);
+  setTimeout(schedule, 1500);
 })();
 </script>
 `;

@@ -43,7 +43,7 @@ import { TimeMachine } from "./time-machine.tsx";
 
 type FrontpageEmbedShape = TLBaseShape<
 	"frontpage-embed",
-	{ w: number; h: number; slug: string }
+	{ w: number; h: number; slug: string; ts: number; label: string }
 >;
 
 class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
@@ -52,11 +52,15 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 		w: T.number,
 		h: T.number,
 		slug: T.string,
+		// ts=0 → live (current /embed). ts>0 → frozen at that history version
+		// (embed-versioned?ts=). Freezing is how the hooman's annotations stay
+		// pinned: the doc they sit on never changes again.
+		ts: T.number,
+		label: T.string,
 	};
 
 	getDefaultProps(): FrontpageEmbedShape["props"] {
-		// Initial guess; auto-resizes on iframe layout via the layout shim.
-		return { w: 1200, h: 1500, slug: "" };
+		return { w: 1200, h: 1500, slug: "", ts: 0, label: "" };
 	}
 
 	override canResize = () => true;
@@ -66,7 +70,11 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 	override canBind = () => true;
 
 	component(shape: FrontpageEmbedShape) {
-		const url = `/page/${encodeURIComponent(shape.props.slug)}/embed`;
+		const { slug, ts, label } = shape.props;
+		const url = ts > 0
+			? `/api/page/${encodeURIComponent(slug)}/embed-versioned?ts=${ts}`
+			: `/page/${encodeURIComponent(slug)}/embed`;
+		const frozen = ts > 0;
 		return (
 			<HTMLContainer
 				id={shape.id}
@@ -76,14 +84,30 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 					pointerEvents: "none",
 					overflow: "hidden",
 					background: "#fafaf7",
-					boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+					boxShadow: frozen ? "0 2px 12px rgba(0,0,0,0.06)" : "0 4px 24px rgba(0,0,0,0.10)",
 					borderRadius: 6,
+					border: frozen ? "1px solid #d8d8d8" : "2px solid #1f6feb",
+					opacity: frozen ? 0.96 : 1,
 				}}
 			>
+				{label ? (
+					<div style={{
+						position: "absolute", top: 0, left: 0, right: 0,
+						padding: "4px 10px",
+						font: "600 11px -apple-system, BlinkMacSystemFont, sans-serif",
+						letterSpacing: "0.06em",
+						color: frozen ? "#666" : "#fff",
+						background: frozen ? "#ededed" : "#1f6feb",
+						borderBottom: frozen ? "1px solid #ddd" : "none",
+						zIndex: 2,
+						pointerEvents: "none",
+						textTransform: "uppercase",
+					}}>{label}</div>
+				) : null}
 				<iframe
 					src={url}
-					title={shape.props.slug}
-					style={{ width: "100%", height: "100%", border: 0, display: "block", background: "white", pointerEvents: "none" }}
+					title={`${slug}${frozen ? "@" + ts : " (live)"}`}
+					style={{ width: "100%", height: "100%", border: 0, display: "block", background: "white", pointerEvents: "none", marginTop: label ? 24 : 0 }}
 				/>
 			</HTMLContainer>
 		);
@@ -113,14 +137,18 @@ async function loadServerSnapshot(slug: string): Promise<unknown | null> {
 	} catch { return null; }
 }
 
-async function postSnapshot(slug: string, snapshot: unknown): Promise<void> {
+async function postSnapshot(slug: string, snapshot: unknown): Promise<boolean> {
 	try {
-		await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`, {
+		const r = await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`, {
 			method: "PUT",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ snapshot }),
 		});
-	} catch {}
+		return r.ok;
+	} catch (err) {
+		console.error("[frontpage] snapshot save failed:", err);
+		return false;
+	}
 }
 
 async function postLayout(slug: string, sections: unknown[]): Promise<void> {
@@ -253,24 +281,71 @@ function App({ slug }: { slug: string }) {
 	const handleMount = React.useCallback(
 		(ed: Editor) => {
 			let cancelled = false;
+			let hydrated = false; // gate saves until initial load completes
 			setEditor(ed);
-			ed.setStyleForNextShapes(DefaultSizeStyle, "s");
-			ed.setStyleForNextShapes(DefaultFontStyle, "draw");
+
+			// --- PERSISTENCE: attach FIRST, synchronously, before any async
+			// load that could throw and block listener attachment. ---
+			// CHANGE-DRIVEN save, debounced ~350ms. NO polling. store.listen
+			// fires on every store change → debounce → save. We never write
+			// unless something actually changed, and never write stale state
+			// on a timer. Gated behind `hydrated` so the initial loadSnapshot
+			// doesn't immediately re-write what we just loaded.
+			const doSave = () => {
+				if (!hydrated) return;
+				try {
+					void postSnapshot(slug, getSnapshot(ed.store));
+				} catch (err) {
+					console.error("[frontpage] getSnapshot/save threw:", err);
+				}
+			};
+			const saveSoon = debounce(doSave, 350);
+			const unlisten = ed.store.listen(() => { saveSoon(); });
+
+			// Apply default style + load saved snapshot (best-effort; cannot
+			// block persistence anymore since the listener is already live).
+			try {
+				ed.setStyleForNextShapes(DefaultSizeStyle, "s");
+				ed.setStyleForNextShapes(DefaultFontStyle, "draw");
+			} catch (err) { console.warn("[frontpage] setStyle failed:", err); }
+
 			(async () => {
-				const saved = await loadServerSnapshot(slug);
+				let saved: unknown = null;
+				try {
+					saved = await loadServerSnapshot(slug);
+				} catch (err) { console.warn("[frontpage] load failed:", err); }
 				if (cancelled) return;
 				if (saved) {
 					try { loadSnapshot(ed.store, saved as Parameters<typeof loadSnapshot>[1]); }
 					catch (err) { console.warn("[frontpage] failed to load saved snapshot:", err); }
 				}
-				const existing = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
-				if (!existing) {
-					ed.createShape<FrontpageEmbedShape>({ type: "frontpage-embed", x: 0, y: 0, props: { w: 1200, h: 1500, slug } });
-				}
-				if (!saved) ed.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
-				ed.setStyleForNextShapes(DefaultSizeStyle, "s");
-				const saveSoon = debounce(() => { void postSnapshot(slug, getSnapshot(ed.store)); }, 500);
-				ed.store.listen(saveSoon, { scope: "document" });
+				try {
+					// Normalize legacy embeds saved before the ts/label props
+					// existed → treat as the live current version.
+					for (const s of ed.getCurrentPageShapes()) {
+						if (s.type !== "frontpage-embed") continue;
+						const p = s.props as { ts?: number; label?: string };
+						if (p.ts === undefined || p.label === undefined) {
+							ed.updateShape({
+								id: s.id,
+								type: "frontpage-embed",
+								props: { ...(s.props as Record<string, unknown>), ts: p.ts ?? 0, label: p.label ?? "CURRENT" },
+							});
+						}
+					}
+					const existing = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
+					if (!existing) {
+						ed.createShape<FrontpageEmbedShape>({ type: "frontpage-embed", x: 0, y: 0, props: { w: 1200, h: 1500, slug, ts: 0, label: "CURRENT" } });
+					}
+					if (!saved) ed.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
+					ed.setStyleForNextShapes(DefaultSizeStyle, "s");
+				} catch (err) { console.warn("[frontpage] post-load setup failed:", err); }
+				// Initial hydration complete — NOW allow saves. Flush once so
+				// the embed shape (created above if missing) persists, giving
+				// annotate an embed to anchor against even before the first
+				// user edit.
+				hydrated = true;
+				doSave();
 			})();
 			const onMessage = (ev: MessageEvent) => {
 				const data = ev.data as { type?: string; sections?: unknown; documentHeight?: number };
@@ -281,23 +356,90 @@ function App({ slug }: { slug: string }) {
 				// below the rendered page (was 8000px default; usually pages are
 				// 500-3000px tall).
 				if (typeof data.documentHeight === "number" && data.documentHeight > 0) {
-					const targetH = Math.max(600, data.documentHeight + 40);
-					const embed = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
-					if (embed) {
-						const cur = (embed.props as { h?: number }).h ?? 0;
-						// Only update if meaningfully different (avoid churn on every shim message)
-						if (Math.abs(cur - targetH) > 20) {
+					// + 28 fixed pad for the version label ribbon, clamped to a
+					// sane floor. NOT derived from viewport, so no runaway.
+					// +48 pad (label ribbon + a little slack) so content never clips.
+					const targetH = Math.max(400, Math.round(data.documentHeight) + 48);
+					// Only the LIVE embed (ts===0) has the layout shim — the
+					// frozen PREVIOUS embeds use embed-versioned (no shim). So
+					// the height message is always about the live embed.
+					const live = ed.getCurrentPageShapes().find(
+						(s) => s.type === "frontpage-embed" && ((s.props as { ts?: number }).ts ?? 0) === 0,
+					);
+					if (live) {
+						const cur = (live.props as { h?: number }).h ?? 0;
+						if (Math.abs(cur - targetH) > 24) {
 							ed.updateShape({
-								id: embed.id,
+								id: live.id,
 								type: "frontpage-embed",
-								props: { ...(embed.props as Record<string, unknown>), h: targetH },
+								props: { ...(live.props as Record<string, unknown>), h: targetH },
 							});
 						}
 					}
 				}
 			};
 			window.addEventListener("message", onMessage);
-			return () => { cancelled = true; window.removeEventListener("message", onMessage); };
+
+			// --- LIVE REVISION (SSE): when the agent runs frontpage_update,
+			// freeze the current live embed at the prior version (so the
+			// hooman's annotations stay pinned to the OLD content) and append
+			// a fresh live embed to the RIGHT showing the new content. No
+			// refresh required. ---
+			let es: EventSource | null = null;
+			try {
+				es = new EventSource(`/api/page/${encodeURIComponent(slug)}/events`);
+				es.onmessage = (ev) => {
+					let data: { type?: string; priorTs?: number; author?: string; summary?: string } | null = null;
+					try { data = JSON.parse(ev.data); } catch { return; }
+					if (!data || data.type !== "revised") return;
+
+					const allEmbeds = ed.getCurrentPageShapes().filter((s) => s.type === "frontpage-embed");
+					const liveEmbeds = allEmbeds.filter((s) => ((s.props as { ts?: number }).ts ?? 0) === 0);
+					if (liveEmbeds.length === 0) return;
+
+					// Reference geometry = the RIGHTMOST embed (the filmstrip
+					// grows left→right; the newest CURRENT goes furthest right).
+					const rightmost = allEmbeds.reduce((a, b) => ((a as { x: number }).x >= (b as { x: number }).x ? a : b));
+					const rp = rightmost.props as { w: number; h: number };
+					const rightX = (rightmost as { x: number }).x;
+					const rightY = (rightmost as { y: number }).y;
+
+					// 1. Freeze EVERY live embed at the prior version (there
+					//    should be exactly one, but guard against dupes so we
+					//    never end up with two CURRENTs again).
+					if (typeof data.priorTs === "number" && data.priorTs > 0) {
+						for (const le of liveEmbeds) {
+							ed.updateShape({
+								id: le.id,
+								type: "frontpage-embed",
+								props: { ...(le.props as Record<string, unknown>), ts: data.priorTs, label: "PREVIOUS" },
+							});
+						}
+					}
+
+					// 2. Append ONE fresh live embed to the right of the rightmost.
+					const gap = 100;
+					ed.createShape<FrontpageEmbedShape>({
+						type: "frontpage-embed",
+						x: rightX + rp.w + gap,
+						y: rightY,
+						props: { w: 1200, h: 1500, slug, ts: 0, label: "CURRENT" },
+					});
+					doSave();
+
+					// 3. Pan to fit the whole filmstrip.
+					try { ed.zoomToFit({ animation: { duration: 400 } }); } catch {}
+				};
+			} catch (err) { console.warn("[frontpage] SSE subscribe failed:", err); }
+
+			return () => {
+				cancelled = true;
+				window.removeEventListener("message", onMessage);
+				try { unlisten(); } catch {}
+				try { es?.close(); } catch {}
+				// Final flush on unmount so nothing is lost.
+				try { void postSnapshot(slug, getSnapshot(ed.store)); } catch {}
+			};
 		},
 		[slug],
 	);
