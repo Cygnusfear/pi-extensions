@@ -1229,35 +1229,25 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // Ticket management (mai CLI)
     // =====================================================================
 
-    mai: {
-      ticket: mai.ticket,
-      start: mai.start,
-      close: mai.close,
-      show: mai.show,
-      note: mai.note,
-      noteFile: mai.noteFile,
-      ls: mai.ls,
-    },
-    maiCall: mai,  // callable: mai({ args: "ls" }) → use maiCall({ args: "ls" }) or mai.ls()
+    // Spread every public method off the mai callable so this namespace can
+    // never drift. A hand-maintained allow-list here previously dropped
+    // ticketLink/reviewLink when they were added to mai, making them invisible
+    // to agents. Spreading copies the enumerable methods (ticket, start, close,
+    // show, note, noteFile, ls, ticketLink, reviewLink) and excludes the
+    // non-enumerable function internals (length, name), yielding the
+    // non-callable namespace the declarations describe.
+    mai: { ...mai },
+    maiCall: mai,  // raw callable passthrough: maiCall({ args: "ls" })
     maiTicket: mai.ticket,  // backward compat
 
-    // memory — defined below as namespaced callable
-    memory: {
-      context: memory.context,
-      create: memory.create,
-      unfold: memory.unfold,
-      status: memory.status,
-      subscribe: memory.subscribe,
-      unsubscribe: memory.unsubscribe,
-      checkUpdates: memory.checkUpdates,
-    },
-    recall: memory,  // callable: recall({ query }) or memory.query if we add it
+    // memory — spread methods off the callable so this namespace can't drift
+    // (same reasoning as mai above). recall stays the raw callable.
+    memory: { ...memory },
+    recall: memory,  // callable: recall({ query })
 
-    // brave — defined below as namespaced callable
-    brave: {
-      codeSearch: brave.codeSearch,
-    },
-    braveSearch: brave,  // callable: brave({ query })
+    // brave — spread methods off the callable so this namespace can't drift.
+    brave: { ...brave },
+    braveSearch: brave,  // callable: braveSearch({ query })
     braveCodeSearch: brave.codeSearch,  // backward compat
 
     // =====================================================================
