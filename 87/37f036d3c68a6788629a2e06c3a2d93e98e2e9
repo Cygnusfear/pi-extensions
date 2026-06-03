@@ -1,0 +1,21 @@
+packages/code-mode/src/sandbox-tools.ts
+  s_5749d685ac659a::t_1bc70f866950ac 1232-1240
+  s_5749d685ac659a::t_7893f9e22f5fb8 1243-1246
+  s_5749d685ac659a::t_0102fe372a5c43 1248-1250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8737f036d3c68a6788629a2e06c3a2d93e98e2e9",
+  "prompts": {},
+  "sessions": {
+    "s_5749d685ac659a": {
+      "agent_id": {
+        "tool": "Alessandra Rover Hammel",
+        "id": "019e8d68-f3f4-7f02-aa13-9f9bb89c5ae1",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
