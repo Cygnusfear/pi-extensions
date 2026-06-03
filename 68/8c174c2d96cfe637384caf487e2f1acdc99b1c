@@ -1,0 +1,36 @@
+packages/frontpage/extensions/mermaid-lint.test.ts
+  s_4d4d102ca33017::t_413731c60e88d6 25-39
+  s_4d4d102ca33017::t_7c994f49270357 1-24,40-78
+packages/frontpage/extensions/mermaid-lint.ts
+  s_4d4d102ca33017::t_20d2145686d56a 357
+  s_4d4d102ca33017::t_c5354444bd12d9 233-288,290-296
+  s_4d4d102ca33017::t_9b72edd3d8a8aa 289
+  s_4d4d102ca33017::t_4bd28b2e75dd0a 355-356
+  s_4d4d102ca33017::t_1b37b55ac3d23a 297-323
+packages/frontpage/partials/js/mermaid.frag.js
+  s_4d4d102ca33017::t_c7cbc8a85cf795 6-17,19-20,24,30,45,49,58,62
+  s_4d4d102ca33017::t_f6483332ea2b55 1-4,18,21-23,25-29,36-39,46-48,50-57,59-61,63-66
+packages/frontpage/skills/frontpage/SKILL.md
+  s_4d4d102ca33017::t_438f58753b3a97 172
+  s_4d4d102ca33017::t_ce5805ba90af98 132-161
+packages/frontpage/partials/css/base.css
+  s_4d4d102ca33017::t_0fc7b33fd82be4 366-381
+packages/frontpage/extensions/render.ts
+  s_4d4d102ca33017::t_9fd1928ab90e38 362-376
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "688c174c2d96cfe637384caf487e2f1acdc99b1c",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
