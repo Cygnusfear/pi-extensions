@@ -129,13 +129,36 @@ frontpage_create({
 
 ---
 
-## Mermaid — direction and break-points
+## Mermaid — get it right the FIRST time
 
-- Prefer `flowchart TD` / `graph TD` (top-down). Use `LR` only for linear 3–4 node flows.
-- Line breaks inside quoted labels: `<br/>`. Never `\n` (renders literally).
-- State diagrams: transition label parser is strict. If you need colons / parens / HTML entities, use `flowchart TD` with quoted edge labels `|"label"|`.
-- Never define `.node` as a page-level class. Mermaid uses it internally. Use card-grid with sections instead.
-- For 15+ nodes: split into simple overview (mermaid) + detail card-grid.
+Agents routinely ship a broken mermaid and then iterate. Don't. Follow these
+rules up front and it renders on the first write. They are ordered by how often
+they bite:
+
+1. **QUOTE every label.** Wrap node AND edge labels in double quotes whenever
+   they contain anything beyond letters, digits, spaces, and `_`:
+   - Node: `A["L1/L2 ships (raider, cargo)"]` — NOT `A[L1/L2 ships (raider, cargo)]`.
+   - Edge: `A -->|"spawn (x) ship"| B` — NOT `A -->|spawn (x) ship| B`.
+   - The hard breakers in an UNQUOTED edge label are `(` `)` `[` `]` `{` `}` —
+     they're parsed as syntax and kill the diagram. (`/` `:` `*` `,` `…` happen
+     to parse, but quoting is the simple rule — quote and never think about it.)
+2. **Line breaks inside labels: `<br/>`. Never `\n`** (renders as the literal
+   characters `\n`).
+3. **No self-loops by accident.** `X --> X` (same node both ends) is almost
+   always a typo for a different target. Double-check before shipping.
+4. **Use 6-digit hex** in `classDef`/`style` (`#1b5e20`). 3-digit (`#fff`) works
+   in most builds but 6-digit is universally safe.
+5. **Direction explicit:** `flowchart TD` / `graph TD` (top-down). `LR` only for
+   linear 3–4 node flows.
+6. **Never define `.node` as a class** — mermaid uses it internally. Pick another
+   name (`highlight`, `critical`).
+7. **State diagrams** have a strict transition-label parser. If you need colons /
+   parens / entities, use `flowchart TD` with quoted edge labels `|"label"|`.
+8. **For 15+ nodes:** split into a simple overview (mermaid) + a detail card-grid.
+
+If a diagram still fails to render in the browser, the page does NOT show an
+empty box — it falls back to the default layout, and if that also fails it
+prints the error + your source inline so you can see exactly what broke.
 
 ### Mermaid lint — automatic at write time
 
@@ -146,7 +169,7 @@ Mermaid lint: 1 error(s), 0 warning(s) — page written, fix and re-run frontpag
   ERROR [s3] mermaid/literal-newline-in-label (line 4): Found \n inside a quoted label...
 ```
 
-Findings are SOFT — the page is still written (you can inspect it) and the agent sees the findings in the same turn. Read the finding, follow up with `frontpage_update` to fix. Rules covered: `mermaid/empty`, `mermaid/literal-newline-in-label`, `mermaid/bracket-balance`, `mermaid/quote-balance`, `mermaid/node-class-redefinition`, `mermaid/missing-direction`, `mermaid/too-many-nodes`, `mermaid/state-strict-label`. Structured findings are also in `details.mermaidFindings`.
+Findings are SOFT — the page is still written (you can inspect it) and the agent sees the findings in the same turn. Read the finding, follow up with `frontpage_update` to fix. Rules covered: `mermaid/empty`, `mermaid/literal-newline-in-label`, `mermaid/bracket-balance`, `mermaid/quote-balance`, `mermaid/edge-label-needs-quotes`, `mermaid/self-loop`, `mermaid/node-class-redefinition`, `mermaid/missing-direction`, `mermaid/too-many-nodes`, `mermaid/state-strict-label`. Structured findings are also in `details.mermaidFindings`.
 
 ---
 

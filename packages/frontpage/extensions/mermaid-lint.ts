@@ -230,6 +230,97 @@ function checkStateColonsInEdgeLabel(source: string): MermaidLintFinding[] {
 	return out;
 }
 
+function stripComments(source: string): string {
+	return source
+		.split(/\r?\n/)
+		.map((l) => (/^\s*%%/.test(l) ? "" : l))
+		.join("\n");
+}
+
+function checkEdgeLabelBrackets(source: string): MermaidLintFinding[] {
+	// Pipe-form flowchart edge labels — `A -->|label| B`. An UNQUOTED label
+	// containing structural brackets ( ) { } [ ] is a hard parse error
+	// (verified against mermaid.parse: only those chars break; / : * , … etc.
+	// parse fine). Quoting the label — `A -->|"label (x)"| B` — fixes it.
+	if (detectDiagramKind(source) !== "flowchart") return [];
+	const out: MermaidLintFinding[] = [];
+	const lines = stripComments(source).split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		// Each |...| segment on the line.
+		const re = /\|([^|]*)\|/g;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(lines[i]))) {
+			const inner = m[1].trim();
+			if (!inner) continue;
+			const quoted = inner.startsWith('"') && inner.endsWith('"');
+			if (quoted) continue;
+			if (/[()[\]{}]/.test(inner)) {
+				out.push({
+					level: "error",
+					rule: "mermaid/edge-label-needs-quotes",
+					message:
+						`Unquoted edge label \`|${m[1].trim()}|\` contains brackets ( ) [ ] { } — ` +
+						`mermaid parses these as syntax and the diagram breaks. Quote it: \`|"${m[1].trim()}"|\`.`,
+					line: i + 1,
+				});
+			}
+		}
+	}
+	return out;
+}
+
+function checkSelfLoop(source: string): MermaidLintFinding[] {
+	// `X --> X` (same node both ends). Valid syntax, but almost always a
+	// mistake (the agent meant a different target), and some layout engines
+	// (elk) render self-loops poorly. WARN so the author double-checks.
+	if (detectDiagramKind(source) !== "flowchart") return [];
+	const out: MermaidLintFinding[] = [];
+	const lines = stripComments(source).split(/\r?\n/);
+	// node --[arrow][|label|]--> node  → capture both endpoint ids.
+	const edgeRe = /\b([A-Za-z][A-Za-z0-9_]*)\b\s*-[-.=]*-?>\s*(?:\|[^|]*\|\s*)?\b([A-Za-z][A-Za-z0-9_]*)\b/;
+	for (let i = 0; i < lines.length; i++) {
+		const m = edgeRe.exec(lines[i]);
+		if (m && m[1] === m[2]) {
+			out.push({
+				level: "warning",
+				rule: "mermaid/self-loop",
+				message:
+					`Self-loop \`${m[1]} --> ${m[1]}\` — an edge from a node to itself. ` +
+					"Usually a mistake (did you mean a different target?). If intended, ignore.",
+				line: i + 1,
+			});
+		}
+	}
+	return out;
+}
+
+function checkSingleQuotedLabel(source: string): MermaidLintFinding[] {
+	// Mermaid quotes labels with DOUBLE quotes only. A label opener (`[`, `(`,
+	// `{`, or the edge-label `|`) immediately followed by a single quote means
+	// the author tried to delimit a label with single quotes — invalid, and it
+	// breaks the moment the label contains ( ) etc. (verified: A['x (y)'] is a
+	// parse error; A["x (y)"] is fine). We strip double-quoted strings first so
+	// a legitimate apostrophe inside a double-quoted label (A["it's fine"]) is
+	// not flagged.
+	if (detectDiagramKind(source) !== "flowchart") return [];
+	const out: MermaidLintFinding[] = [];
+	const lines = stripComments(source).split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const stripped = lines[i].replace(/"(?:\\.|[^"\\])*"/g, '""');
+		if (/[\[({|]\s*'/.test(stripped)) {
+			out.push({
+				level: "error",
+				rule: "mermaid/single-quoted-label",
+				message:
+					"Single-quoted label (e.g. A['x']) — mermaid only quotes with DOUBLE quotes. " +
+					'Use A["x"] for nodes and -->|"label"| for edges.',
+				line: i + 1,
+			});
+		}
+	}
+	return out;
+}
+
 function checkEmpty(source: string): MermaidLintFinding[] {
 	if (source.trim().length === 0) {
 		return [
@@ -261,6 +352,9 @@ export function lintMermaid(source: string): MermaidLintFinding[] {
 	findings.push(...checkFlowchartDirection(source));
 	findings.push(...checkFlowchartNodeCount(source));
 	findings.push(...checkStateColonsInEdgeLabel(source));
+	findings.push(...checkEdgeLabelBrackets(source));
+	findings.push(...checkSelfLoop(source));
+	findings.push(...checkSingleQuotedLabel(source));
 	return findings;
 }
 

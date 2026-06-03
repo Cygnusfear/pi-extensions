@@ -345,7 +345,6 @@ export function render(spec: FrontpageSpec): string {
   let mermaidPrelude = "";
   if (ctx.needs.mermaid) {
     imports.push(`import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';`);
-    imports.push(`import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs';`);
     const theme = mermaidTheme(spec.palette);
     const registerFontFamily: Record<Register, string> = {
       "nyt-editorial": "'IBM Plex Sans', system-ui, sans-serif",
@@ -354,14 +353,27 @@ export function render(spec: FrontpageSpec): string {
     };
     const themeVars = { fontFamily: registerFontFamily[spec.register], fontSize: "16px", ...theme };
     mermaidPrelude = `
-mermaid.registerLayoutLoaders(elkLayouts);
 mermaid.initialize({
   startOnLoad: false,
   theme: 'base',
   look: 'classic',
-  layout: 'elk',
   themeVariables: ${JSON.stringify(themeVars)},
 });
+// The elk layout is loaded DYNAMICALLY and best-effort: a static top-level
+// import would make a single CDN hiccup blank every diagram on the page. Here a
+// failure (or >4s stall) falls back to mermaid's built-in default layout, so
+// diagrams still render. window.__frontpageLayout records which one won.
+try {
+  const _elkUrl = 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs';
+  const _withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('elk load timeout')), ms))]);
+  const elkLayouts = (await _withTimeout(import(_elkUrl), 4000)).default;
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({ layout: 'elk' });
+  window.__frontpageLayout = 'elk';
+} catch (_elkErr) {
+  console.warn('[frontpage] elk layout unavailable — using default layout:', _elkErr && _elkErr.message);
+  window.__frontpageLayout = 'default';
+}
 `;
     // Put mermaid fragment FIRST so it renders before other scripts that might query canvas.
     ctx.scripts.unshift(read("js/mermaid.frag.js"));
