@@ -23,6 +23,7 @@ import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildSessionTailSnapshot,
   formatSessionViewEntries,
   projectMeaningfulSessionEntries,
   sliceSessionViewEntries,
@@ -52,6 +53,7 @@ import type {
   MeshMessage,
   MeshTellAckEnvelope,
   MeshTellEnvelope,
+  MeshTellPreemptLevel,
 } from "./types.ts";
 import {
   formatInboundAskContent,
@@ -59,6 +61,7 @@ import {
   formatInboundTellContent,
   formatPendingTellsBatch,
 } from "./inbound-format.ts";
+import { planInboundTell } from "./inbound-tell-plan.ts";
 import type {
   MeshTellReceiptPhase,
   PeerInfo,
@@ -262,12 +265,17 @@ export class PiMesh {
     this.myName = name;
   }
 
-  tell(sessionId: string, message: unknown): { deliveryId: string } {
+  tell(
+    sessionId: string,
+    message: unknown,
+    opts?: { preempt?: MeshTellPreemptLevel },
+  ): { deliveryId: string } {
     const deliveryId = createDeliveryId();
     const tellEnvelope: MeshTellEnvelope = {
       kind: "mesh:tell",
       deliveryId,
       from: this.myClientId,
+      ...(opts?.preempt ? { preempt: opts.preempt } : {}),
       payload: message,
       timestamp: Date.now(),
     };
@@ -290,6 +298,7 @@ export class PiMesh {
     message: unknown,
     phase: MeshTellReceiptPhase,
     timeoutMs = 10_000,
+    opts?: { preempt?: MeshTellPreemptLevel },
   ): Promise<MeshTellAckEnvelope> {
     return new Promise((resolve, reject) => {
       const deliveryId = createDeliveryId();
@@ -315,6 +324,7 @@ export class PiMesh {
         deliveryId,
         from: this.myClientId,
         ackRequested: phase,
+        ...(opts?.preempt ? { preempt: opts.preempt } : {}),
         payload: message,
         timestamp: Date.now(),
       };
@@ -1140,6 +1150,28 @@ function getInboundDeliveryOptions(
   return { deliverAs: "followUp", triggerTurn: true };
 }
 
+/**
+ * Render the enriched tell receipt for human/tool display: the receiver's
+ * busy/deafened state plus the bounded "what were they doing" snapshot that
+ * rode back on the ack. This is the "before" window the sender uses to decide
+ * whether to wait, follow up, or preempt.
+ */
+function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
+  const parts: string[] = [];
+  if (ack.receiverDeafened) {
+    parts.push("⚠️ peer is DEAFENED (/mesh deafen) — message dropped, not surfaced.");
+  } else if (ack.receiverBusy) {
+    parts.push("peer was BUSY (mid-turn) when this landed.");
+  } else if (ack.receiverBusy === false) {
+    parts.push("peer was IDLE when this landed.");
+  }
+  const viewText = ack.view?.text;
+  if (viewText && viewText !== "(no meaningful entries in that window)") {
+    parts.push("", "— recent activity on the peer —", viewText);
+  }
+  return parts.join("\n");
+}
+
 // ── Extension entry point ─────────────────────────────────────────────────────
 
 export default function piMeshExtension(pi: ExtensionAPI) {
@@ -1182,7 +1214,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   let started = false;
   let currentCtx: {
     sessionManager: { getBranch: () => unknown[]; getSessionId: () => string };
+    abort: () => void;
+    isIdle: () => boolean;
   } | null = null;
+
+  // Tail-bounded snapshot of THIS session for enriched tell receipts. O(window),
+  // not O(session): buildSessionTailSnapshot slices the raw branch tail before
+  // projecting. Returns undefined when no session context is bound yet.
+  const buildReceiverSnapshot = (): import("./types.ts").MeshTellAckView | undefined => {
+    if (!currentCtx) return undefined;
+    try {
+      return buildSessionTailSnapshot(currentCtx.sessionManager.getBranch());
+    } catch {
+      return undefined;
+    }
+  };
   let rebirthStash: {
     ctx: ExtensionCommandContext;
     sessionId: string;
@@ -1391,11 +1437,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       { deliverAs: "followUp", triggerTurn: true },
     );
     // Send 'visible' acks for queued tells that requested them — the agent is now seeing them.
+    // Enrich with a fresh snapshot (agent is idle at flush time, so receiverBusy: false).
+    const flushView = buildReceiverSnapshot();
     for (const t of batch) {
       if (t.deliveryId && t.originalFrom && t.ackRequested === "visible") {
         mesh.sendTellReceipt(
           t.originalFrom,
-          buildTellReceiptAck(t.deliveryId, mesh.self().id, "visible"),
+          buildTellReceiptAck(t.deliveryId, mesh.self().id, "visible", {
+            receiverBusy: false,
+            view: flushView,
+          }),
         );
       }
     }
@@ -1517,6 +1568,30 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         leaveAndPersist(params.channelId);
         return JSON.stringify({ left: params.channelId });
       };
+      // interrupt: PREEMPT a busy peer's queue. level 'steer' (DEFAULT, safe) lands
+      // your message at the peer's next reasoning boundary without killing in-flight
+      // work — prefer this. level 'abort' (NUCLEAR) cancels the peer's in-flight
+      // tool/build/git/publish and can leave half-done work corrupt — use only when
+      // stopping the peer NOW prevents real damage. Returns the enriched receipt
+      // (receiverBusy + a snapshot of what the peer was doing). Respects /mesh deafen
+      // (a deafened peer drops it; ack reports receiverDeafened).
+      (meshPeers as any).interrupt = async (params: {
+        sessionId: string;
+        message: unknown;
+        level?: MeshTellPreemptLevel;
+        timeoutMs?: number;
+      }) => {
+        const resolved = resolveTargetSessionId(params.sessionId);
+        const level: MeshTellPreemptLevel = params.level === "abort" ? "abort" : "steer";
+        const ack = await mesh.tellAndWaitForReceipt(
+          resolved,
+          params.message,
+          "delivered",
+          params.timeoutMs ?? 10_000,
+          { preempt: level },
+        );
+        return JSON.stringify({ sent: true, sessionId: resolved, level, ack });
+      };
 
       // Register namespace + backward-compat aliases
       registerSandboxFn("mesh", meshPeers);
@@ -1527,6 +1602,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       registerSandboxFn("meshChat", (meshPeers as any).chat);
       registerSandboxFn("meshJoinChannel", (meshPeers as any).joinChannel);
       registerSandboxFn("meshLeaveChannel", (meshPeers as any).leaveChannel);
+      registerSandboxFn("meshInterrupt", (meshPeers as any).interrupt);
 
       // rebirth: creates a fresh session with the agent-written TPV handoff.
       // Called from execute_code after the agent writes a TPV into $ vars.
@@ -1645,7 +1721,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Busy → queue and flush on agent_end so the agent actually wakes up to see it.
       // Idle → deliver immediately.
       mesh.on<MeshMessage>("message", (rawMsg) => {
-        const { message: msg, deliveryId, ackRequested, originalFrom } = unwrapInboundTell(rawMsg);
+        const { message: msg, deliveryId, ackRequested, preempt, originalFrom } =
+          unwrapInboundTell(rawMsg);
         if (isTeamsLifecyclePayload(msg.payload)) return;
         const senderPeer = mesh.peers().find((p) => p.id === msg.from);
         const senderLabel = senderPeer
@@ -1653,19 +1730,34 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           : (msg.from?.slice(0, 8) ?? "unknown");
         const payloadText = formatPayloadForDisplay(msg.payload);
 
-        if (deafened) {
-          // Drop the message silently — still send delivered ack so the sender
-          // knows it arrived at the process, but never surface it to the agent.
+        // Snapshot of what THIS session is doing right now, captured BEFORE we
+        // act — the "before" window the sender uses to decide. Always attached
+        // to the receipt (decision C). Bounded/O(window).
+        const snapshot = buildReceiverSnapshot();
+        const receiverBusy = agentBusy;
+        const plan = planInboundTell({ deafened, preempt, agentBusy, ackRequested });
+
+        // Enriched receipt — only sent when the sender requested one
+        // (waitFor:'none' opted out, so there is no channel to enrich).
+        const sendAck = () => {
           if (deliveryId && originalFrom && ackRequested) {
             mesh.sendTellReceipt(
               originalFrom,
-              buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"),
+              buildTellReceiptAck(deliveryId, mesh.self().id, plan.ackPhase, {
+                receiverBusy,
+                view: snapshot,
+                ...(plan.ackDeafened ? { receiverDeafened: true } : {}),
+              }),
             );
           }
+        };
+
+        if (plan.action === "drop-deafened") {
+          sendAck();
           return;
         }
 
-        if (agentBusy) {
+        if (plan.action === "queue") {
           pendingTells.push({
             senderLabel,
             fromId: msg.from ?? "unknown",
@@ -1676,39 +1768,41 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             ackRequested,
           });
           // We have the message — ack 'delivered' now. 'visible' ack fires on flush.
-          if (deliveryId && originalFrom && ackRequested) {
-            mesh.sendTellReceipt(
-              originalFrom,
-              buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"),
-            );
-          }
+          sendAck();
           return;
         }
 
-        const requestVisible = ackRequested === "visible";
-        const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
-        // Append a bottom signature so an agent who only reads the END of
-        // the message (which is most of them) still sees the actual mesh
-        // sender, not whatever fake name the sender signed with in the
-        // body. Top label + bottom signature = same answer either way.
-        // See default-prompt's identity block for the matching mitigation
-        // on the SEND side. Format helpers in inbound-format.ts.
+        // preempt-abort | preempt-steer | surface → deliver now.
+        const banner =
+          plan.action === "preempt-abort"
+            ? "🛑 MESH INTERRUPT (abort — your in-flight operation was cancelled)\n"
+            : plan.action === "preempt-steer"
+              ? "⚠️ MESH INTERRUPT (steer — jumped the queue)\n"
+              : "";
+        // Append a bottom signature so an agent who only reads the END of the
+        // message still sees the real mesh sender (see default-prompt identity
+        // block + inbound-format.ts). The interrupt banner leads when preempting.
+        const content = `${banner}${formatInboundTellContent(MI, senderLabel, payloadText)}`;
+        const details = {
+          from: msg.from,
+          senderLabel,
+          topic: msg.topic,
+          deliveryId,
+          ackRequested,
+          ...(preempt ? { preempt } : {}),
+        };
+        // NUCLEAR: cancel the receiver's in-flight tool/operation first; the
+        // followUp delivery then lands once the agent settles.
+        if (plan.abortFirst) currentCtx?.abort();
+        const deliveryOptions =
+          plan.deliverAs !== undefined
+            ? { deliverAs: plan.deliverAs, triggerTurn: plan.triggerTurn }
+            : {};
         pi.sendMessage(
-          {
-            customType: "mesh-inbound",
-            content: formatInboundTellContent(MI, senderLabel, payloadText),
-            display: true,
-            details: { from: msg.from, senderLabel, topic: msg.topic, deliveryId, ackRequested },
-          },
+          { customType: "mesh-inbound", content, display: true, details },
           deliveryOptions,
         );
-        if (deliveryId && originalFrom && ackRequested) {
-          const phase: MeshTellReceiptPhase = requestVisible ? "visible" : "delivered";
-          mesh.sendTellReceipt(
-            originalFrom,
-            buildTellReceiptAck(deliveryId, mesh.self().id, phase),
-          );
-        }
+        sendAck();
       });
 
       // Wire inbound channel messages — ambient context, visible immediately.
@@ -1830,7 +1924,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     name: "mesh_tell",
     label: "Mesh Tell",
     description:
-      "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing.",
+      "Send a direct message to another pi session. By default waits for a target-session delivery receipt so direct tells are diagnosable instead of silently vanishing. The receipt is ENRICHED: it reports whether the peer was busy/idle/deafened and includes a snapshot of what the peer was doing when your message landed — so you can decide whether to wait, follow up, or preempt with mesh_interrupt. A busy peer surfaces your message only at the end of its current turn; use mesh_interrupt to jump that queue.",
     parameters: Type.Object({
       sessionId: Type.String({
         description:
@@ -1868,12 +1962,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           content: [{ type: "text", text: `Error: ${e}` }],
           details: {
             sessionId,
-            error: String(e),
+            error: String(e) as string | undefined,
             resolvedSessionId: undefined as string | undefined,
             sent: undefined as boolean | undefined,
             deliveryId: undefined as string | undefined,
             waitFor: undefined as string | undefined,
-            ack: undefined,
+            ack: undefined as MeshTellAckEnvelope | undefined,
           },
           isError: true,
         };
@@ -1895,8 +1989,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             sent: true,
             deliveryId,
             waitFor: "none",
-            error: undefined,
-            ack: undefined as any,
+            error: undefined as string | undefined,
+            ack: undefined as MeshTellAckEnvelope | undefined,
           },
         };
       }
@@ -1908,17 +2002,19 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           receiptMode,
           timeoutMs ?? 10_000,
         );
+        const receiptText = formatTellAckReceipt(ack);
+        const text =
+          `${MI.tell} ${MI.sep} ${peerLabel} (${ack.phase})\n${rendered}` +
+          (receiptText ? `\n\n${receiptText}` : "");
         return {
-          content: [
-            { type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel} (${ack.phase})\n${rendered}` },
-          ],
+          content: [{ type: "text", text }],
           details: {
             sessionId,
             resolvedSessionId: resolved,
             sent: true,
             ack,
             waitFor: receiptMode,
-            error: undefined,
+            error: undefined as string | undefined,
             deliveryId: undefined as string | undefined,
           },
         };
@@ -1928,11 +2024,113 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           details: {
             sessionId,
             resolvedSessionId: resolved,
-            error: String(e),
+            error: String(e) as string | undefined,
             waitFor: receiptMode,
             sent: undefined as boolean | undefined,
             deliveryId: undefined as string | undefined,
-            ack: undefined as any,
+            ack: undefined as MeshTellAckEnvelope | undefined,
+          },
+          isError: true,
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "mesh_interrupt",
+    label: "Mesh Interrupt",
+    description:
+      "PREEMPT a busy peer's queue. A normal mesh_tell to a busy peer only surfaces at the end of its current turn — mesh_interrupt jumps that queue. " +
+      "level='steer' (DEFAULT, SAFE): your message lands at the peer's next reasoning boundary (after its current tool finishes), WITHOUT killing in-flight work. Prefer this for 'wait, not this' corrections. " +
+      "level='abort' (NUCLEAR): cancels the peer's in-flight tool/build/git/publish via the agent abort signal — a half-done operation can be left corrupt. Use abort ONLY when stopping the peer right now prevents real damage. " +
+      "Respects /mesh deafen (a deafened peer drops it; the receipt reports receiverDeafened). Returns the same enriched receipt as mesh_tell (peer busy-state + a snapshot of what it was doing).",
+    parameters: Type.Object({
+      sessionId: Type.String({
+        description:
+          "Peer ID, short ID prefix, or full name (case-insensitive). e.g. 'Galileo Accretion Rubin' or '7e9bb362'",
+      }),
+      message: Type.Unknown({
+        description:
+          "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering.",
+      }),
+      level: Type.Optional(
+        Type.String({
+          description:
+            "Preempt level: 'steer' (default, safe — lands at next reasoning boundary) or 'abort' (NUCLEAR — cancels in-flight work). Prefer 'steer'.",
+        }),
+      ),
+      timeoutMs: Type.Optional(
+        Type.Number({
+          description: "Timeout in ms when waiting for receipt (default: 10000)",
+          minimum: 100,
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const { sessionId, message, level, timeoutMs } = params as {
+        sessionId: string;
+        message: unknown;
+        level?: "steer" | "abort";
+        timeoutMs?: number;
+      };
+      let resolved: string;
+      try {
+        resolved = resolveTargetSessionId(sessionId);
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Error: ${e}` }],
+          details: {
+            sessionId,
+            error: String(e) as string | undefined,
+            resolvedSessionId: undefined as string | undefined,
+            sent: undefined as boolean | undefined,
+            level: undefined as string | undefined,
+            ack: undefined as MeshTellAckEnvelope | undefined,
+          },
+          isError: true,
+        };
+      }
+
+      const preemptLevel: MeshTellPreemptLevel = level === "abort" ? "abort" : "steer";
+      const rendered = formatPayloadForDisplay(message);
+      const peerLabel = (() => {
+        const peer = mesh.peers().find((p) => p.id === resolved);
+        return peer ? getPeerLabel(peer) : resolved.slice(0, 8);
+      })();
+      try {
+        const ack = await mesh.tellAndWaitForReceipt(
+          resolved,
+          message,
+          "delivered",
+          timeoutMs ?? 10_000,
+          { preempt: preemptLevel },
+        );
+        const receiptText = formatTellAckReceipt(ack);
+        const banner = preemptLevel === "abort" ? "🛑 INTERRUPT (abort)" : "⚠️ INTERRUPT (steer)";
+        const text =
+          `${MI.tell} ${MI.sep} ${peerLabel} ${banner}\n${rendered}` +
+          (receiptText ? `\n\n${receiptText}` : "");
+        return {
+          content: [{ type: "text", text }],
+          details: {
+            sessionId,
+            resolvedSessionId: resolved,
+            sent: true,
+            level: preemptLevel,
+            ack,
+            error: undefined as string | undefined,
+          },
+        };
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Error: ${e}` }],
+          details: {
+            sessionId,
+            resolvedSessionId: resolved,
+            error: String(e) as string | undefined,
+            level: preemptLevel,
+            sent: undefined as boolean | undefined,
+            ack: undefined as MeshTellAckEnvelope | undefined,
           },
           isError: true,
         };
@@ -1973,7 +2171,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           content: [{ type: "text", text: `Error: ${e}` }],
           details: {
             sessionId,
-            error: String(e),
+            error: String(e) as string | undefined,
             resolvedSessionId: undefined as string | undefined,
             reply: undefined as Record<string, unknown> | undefined,
           },
@@ -2005,7 +2203,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           details: {
             sessionId,
             resolvedSessionId: resolved,
-            error: String(e),
+            error: String(e) as string | undefined,
             reply: undefined as Record<string, unknown> | undefined,
           },
           isError: true,

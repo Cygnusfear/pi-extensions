@@ -281,6 +281,7 @@ const PASSTHROUGH_TOOLS = new Set([
   "mesh_broadcast",
   "mesh_peers",
   "mesh_view",
+  "mesh_interrupt",
   "mesh_join_channel",
   "mesh_leave_channel",
   "mesh_chat",

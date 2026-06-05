@@ -2,6 +2,8 @@
  * Shared types for pi-mesh extension.
  */
 
+import type { SessionViewEntry } from "../../shared/src/session-view.ts";
+
 export interface PeerInfo {
 	id: string; // Zenoh peer ID
 	sessionId?: string; // pi session ID
@@ -30,11 +32,39 @@ export interface MeshMessage {
 
 export type MeshTellReceiptPhase = "delivered" | "visible";
 
+/**
+ * Preempt level for a tell that should jump the receiver's queue.
+ * - "steer": message lands after the receiver's current tool batch finishes,
+ *   before its next LLM call. Does NOT kill in-flight work. The safe default
+ *   for "wait, not this" corrections.
+ * - "abort": NUCLEAR. Cancels the receiver's in-flight tool/operation via the
+ *   agent AbortSignal (a half-done git/publish/write can be left corrupt),
+ *   then delivers the message and wakes a fresh turn. Use only when stopping
+ *   the peer NOW prevents real damage.
+ */
+export type MeshTellPreemptLevel = "steer" | "abort";
+
+/**
+ * Tail snapshot of the receiver's session at the moment a tell landed.
+ * Rides the existing tell-ack (no extra round-trip). Bounded to a small window
+ * so it stays O(window), not O(session-length).
+ */
+export interface MeshTellAckView {
+	entries: SessionViewEntry[];
+	text: string;
+	/** Count of meaningful entries within the projected tail (not the whole session). */
+	total: number;
+	/** Absolute branch index of the first entry in this window. */
+	windowFrom: number;
+}
+
 export interface MeshTellEnvelope {
 	kind: "mesh:tell";
 	deliveryId: string;
 	from: string;
 	ackRequested?: MeshTellReceiptPhase;
+	/** When set, this tell preempts the receiver's queue at the given level. */
+	preempt?: MeshTellPreemptLevel;
 	payload: unknown;
 	timestamp: number;
 }
@@ -45,6 +75,14 @@ export interface MeshTellAckEnvelope {
 	from: string;
 	phase: MeshTellReceiptPhase;
 	timestamp: number;
+	/** Enriched receipt (always populated by upgraded peers): was the receiver
+	 *  mid-turn when this landed? Optional on the type for back-compat with
+	 *  un-upgraded peers. */
+	receiverBusy?: boolean;
+	/** True when the receiver has /mesh deafen on and dropped this message. */
+	receiverDeafened?: boolean;
+	/** Tail snapshot of what the receiver was doing when the message landed. */
+	view?: MeshTellAckView;
 }
 
 export type MeshAskReceiptWaitForPhase = "delivered" | "visible";

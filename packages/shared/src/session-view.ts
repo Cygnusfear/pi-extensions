@@ -104,15 +104,42 @@ function projectSessionEntry(entry: SessionEntryLike, index: number): SessionVie
 	return null;
 }
 
-export function projectMeaningfulSessionEntries(entries: unknown[]): SessionViewEntry[] {
+export function projectMeaningfulSessionEntries(
+	entries: unknown[],
+	indexOffset = 0,
+): SessionViewEntry[] {
 	const projected: SessionViewEntry[] = [];
 	for (let i = 0; i < entries.length; i++) {
 		const entry = entries[i];
 		if (!entry || typeof entry !== "object") continue;
-		const view = projectSessionEntry(entry as SessionEntryLike, i);
+		const view = projectSessionEntry(entry as SessionEntryLike, indexOffset + i);
 		if (view) projected.push(view);
 	}
 	return projected;
+}
+
+/**
+ * Build a bounded tail snapshot of a session branch — the cheap "what is this
+ * session doing right now" window used by mesh tell receipts. Slices the raw
+ * branch tail BEFORE projecting so the cost is O(window), not O(session-length):
+ * we never project the whole branch. Absolute branch indices are preserved via
+ * the projection offset, so a reader sees true positions.
+ */
+export function buildSessionTailSnapshot(
+	branch: unknown[],
+	tailRaw = 40,
+	windowN = 15,
+): { entries: SessionViewEntry[]; text: string; total: number; windowFrom: number } {
+	const offset = Math.max(0, branch.length - tailRaw);
+	const tail = branch.slice(offset);
+	const projected = projectMeaningfulSessionEntries(tail, offset);
+	const entries = windowN > 0 ? projected.slice(-windowN) : projected;
+	return {
+		entries,
+		text: formatSessionViewEntries(entries),
+		total: projected.length,
+		windowFrom: entries[0]?.index ?? offset,
+	};
 }
 
 export function readMeaningfulSessionEntriesFromFile(sessionFile: string): SessionViewEntry[] {

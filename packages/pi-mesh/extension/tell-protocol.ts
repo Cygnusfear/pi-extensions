@@ -1,4 +1,11 @@
-import type { MeshMessage, MeshTellAckEnvelope, MeshTellEnvelope, MeshTellReceiptPhase } from "./types.ts";
+import type {
+	MeshMessage,
+	MeshTellAckEnvelope,
+	MeshTellAckView,
+	MeshTellEnvelope,
+	MeshTellPreemptLevel,
+	MeshTellReceiptPhase,
+} from "./types.ts";
 
 export function createDeliveryId(): string {
 	return `mesh-tell-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -22,6 +29,11 @@ export function buildTellReceiptAck(
 	deliveryId: string,
 	from: string,
 	phase: MeshTellReceiptPhase,
+	extras?: {
+		receiverBusy?: boolean;
+		receiverDeafened?: boolean;
+		view?: MeshTellAckView;
+	},
 ): MeshTellAckEnvelope {
 	return {
 		kind: "mesh:tell:ack",
@@ -29,6 +41,9 @@ export function buildTellReceiptAck(
 		from,
 		phase,
 		timestamp: Date.now(),
+		...(extras?.receiverBusy !== undefined ? { receiverBusy: extras.receiverBusy } : {}),
+		...(extras?.receiverDeafened !== undefined ? { receiverDeafened: extras.receiverDeafened } : {}),
+		...(extras?.view !== undefined ? { view: extras.view } : {}),
 	};
 }
 
@@ -36,6 +51,7 @@ export function unwrapInboundTell(msg: MeshMessage): {
 	message: MeshMessage;
 	deliveryId?: string;
 	ackRequested?: MeshTellReceiptPhase;
+	preempt?: MeshTellPreemptLevel;
 	originalFrom?: string;
 } {
 	if (!isMeshTellEnvelope(msg.payload)) return { message: msg };
@@ -43,6 +59,7 @@ export function unwrapInboundTell(msg: MeshMessage): {
 		message: { ...msg, from: msg.payload.from, payload: msg.payload.payload },
 		deliveryId: msg.payload.deliveryId,
 		ackRequested: msg.payload.ackRequested,
+		preempt: msg.payload.preempt,
 		originalFrom: msg.payload.from,
 	};
 }

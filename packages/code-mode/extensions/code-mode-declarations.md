@@ -1359,12 +1359,17 @@ interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
 }
 
 /**
- * mesh — inter-session communication. Callable as peers(), plus tell/view/broadcast/chat.
+ * mesh — inter-session communication. Callable as peers(), plus tell/view/interrupt/broadcast/chat.
  *
  * @example
  * const peers = await mesh();                        // list peers
  * const entries = await mesh.view({ sessionId: "worker-1" });
- * await mesh.tell({ sessionId: "fixer", message: "check auth.ts" });
+ * // tell returns an ENRICHED receipt: ack.receiverBusy + ack.view (a snapshot of
+ * // what the peer was doing when your message landed) — so you can decide to wait.
+ * const r = await mesh.tell({ sessionId: "fixer", message: "check auth.ts" });
+ * // interrupt a BUSY peer's queue: 'steer' (default, safe) lands at its next
+ * // reasoning boundary; 'abort' (NUCLEAR) cancels its in-flight work. Prefer steer.
+ * await mesh.interrupt({ sessionId: "fixer", message: "wait — not that file", level: "steer" });
  * await mesh.broadcast({ topic: "status", message: "deploying" });
  * await mesh.chat({ channelId: "team-abc", message: "update" });
  */
@@ -1372,8 +1377,21 @@ declare const mesh: {
   /** List all visible pi sessions. */
   (): Promise<string>;
 
-  /** Send a direct message to another session. */
+  /** Send a direct message to another session. By default waits for a delivery
+   *  receipt. The receipt is ENRICHED: ack.receiverBusy (was the peer mid-turn?),
+   *  ack.receiverDeafened, and ack.view (a bounded snapshot of the peer's recent
+   *  activity when your message landed). A busy peer only surfaces your message at
+   *  the end of its current turn — use mesh.interrupt to jump that queue. */
   tell(params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }): Promise<string>;
+
+  /** PREEMPT a busy peer's queue. level 'steer' (DEFAULT, SAFE): your message lands
+   *  at the peer's next reasoning boundary WITHOUT killing in-flight work — prefer
+   *  this for 'wait, not this' corrections. level 'abort' (NUCLEAR): cancels the
+   *  peer's in-flight tool/build/git/publish and can leave half-done work corrupt —
+   *  use only when stopping the peer right now prevents real damage. Respects /mesh
+   *  deafen (a deafened peer drops it; the receipt reports receiverDeafened). Returns
+   *  the same enriched receipt as tell. */
+  interrupt(params: { sessionId: string; message: unknown; level?: "steer" | "abort"; timeoutMs?: number }): Promise<string>;
 
   /** Read recent entries from another session. */
   view(params: { sessionId: string; start?: number; end?: number; timeoutMs?: number }): Promise<string>;
@@ -1399,6 +1417,9 @@ declare const meshTell: typeof mesh.tell;
 
 /** @deprecated Use `mesh.view()` instead. */
 declare const meshView: typeof mesh.view;
+
+/** @deprecated Use `mesh.interrupt()` instead. */
+declare const meshInterrupt: typeof mesh.interrupt;
 
 /** @deprecated Use `mesh.broadcast()` instead. */
 declare const meshBroadcast: typeof mesh.broadcast;

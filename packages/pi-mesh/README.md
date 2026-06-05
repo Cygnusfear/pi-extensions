@@ -71,12 +71,32 @@ Direct messages support two receipt phases:
 
 This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "peer busy but received."
 
+### Enriched receipts
+
+Every `mesh_tell` receipt is **enriched** so the sender is never blind:
+
+- `receiverBusy` — was the peer mid-turn when the message landed? A busy peer only surfaces a normal tell at the **end of its current turn**.
+- `receiverDeafened` — the peer has `/mesh deafen` on and dropped the message.
+- `view` — a **bounded** tail snapshot (last N meaningful entries) of what the peer was doing when the message landed. This is the "before" window the sender uses to decide: wait, follow up, or preempt. The snapshot rides the existing ack (no extra round-trip) and projects only the branch **tail**, so it stays O(window), not O(session-length).
+
+### Interrupts (preempt a busy peer)
+
+A normal tell to a busy peer waits for that peer's current turn to end. `mesh_interrupt` jumps the queue, at one of two levels:
+
+| Level | Kills in-flight work? | When it lands | Use for |
+|-------|----------------------|---------------|---------|
+| `steer` (default) | No | After the peer's current tool batch, before its next LLM call | "wait, not this" corrections — the safe default |
+| `abort` | **Yes (corrupt risk)** | Immediately — cancels the peer's in-flight tool via the agent abort signal, then delivers | Stop the peer **now** to prevent real damage (rare, nuclear) |
+
+`abort` is not gated, but it is loud and documented as nuclear — a half-done git/publish/write on the peer can be left corrupt. Prefer `steer`. Both levels **respect `/mesh deafen`**: a deafened peer drops the interrupt and the receipt reports `receiverDeafened` so it is never silent.
+
 ## Tools
 
 | Tool | Description |
 |------|-------------|
 | `mesh_peers` | List all visible pi sessions on the mesh |
-| `mesh_tell` | Send a direct message (with optional delivery receipt) |
+| `mesh_tell` | Send a direct message. Returns an **enriched receipt**: the peer's busy/idle/deafened state + a snapshot of what it was doing when the message landed |
+| `mesh_interrupt` | **Preempt** a busy peer's queue — `steer` (safe, default) or `abort` (nuclear). Respects deafen |
 | `mesh_view` | Read recent session entries from another peer |
 | `mesh_broadcast` | Broadcast to all peers on a topic |
 | `mesh_join_channel` | Join a named channel |
