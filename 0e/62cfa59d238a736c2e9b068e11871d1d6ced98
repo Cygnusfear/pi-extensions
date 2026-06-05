@@ -1,0 +1,42 @@
+packages/pi-mesh/extension/inbound-tell-plan.ts
+  s_5bc8f5dd982b26::t_9ab19829935c10 45-48,53
+packages/pi-mesh/extension/types.ts
+  s_5bc8f5dd982b26::t_812944f7c53cf3 55-57
+  s_5bc8f5dd982b26::t_ce92c2079203da 86-90
+packages/pi-mesh/extension/pi-mesh.ts
+  s_5bc8f5dd982b26::t_96f8fb6fc6fd8f 26
+  s_5bc8f5dd982b26::t_41c2f6e15e2928 1754-1757,1763,1771
+  s_5bc8f5dd982b26::t_939557cb518d4b 57-59
+  s_5bc8f5dd982b26::t_2143a1bf7030c5 1913-1917
+  s_5bc8f5dd982b26::t_3f15c27977bd44 1222-1227
+  s_5bc8f5dd982b26::t_4efb0f12210251 1798-1807,1810-1812,1827,1837
+  s_5bc8f5dd982b26::t_cefcf8653615b0 1147-1156,1164-1176
+  s_5bc8f5dd982b26::t_7446eb326ed19c 1231-1235,1239-1243
+packages/pi-mesh/extension/tell-protocol.ts
+  s_5bc8f5dd982b26::t_76b470166897f6 36,48
+packages/shared/src/session-view.test.ts
+  s_5bc8f5dd982b26::t_b457f5a11d071b 2,5,8-13,16-17,21,25-28,33-38,41-43,45,48-49,55-60,63-69
+packages/shared/src/session-view.ts
+  s_5bc8f5dd982b26::t_07aadc875f1b6c 122-129,131-133,137-147
+  s_5bc8f5dd982b26::t_02e4e60aac653b 136
+packages/pi-mesh/extension/pi-mesh.session-envelope.test.ts
+  s_5bc8f5dd982b26::t_63bff576401a28 84-92
+packages/pi-mesh/extension/inbound-tell-plan.test.ts
+  s_5bc8f5dd982b26::t_87036abfb32659 32-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "0e62cfa59d238a736c2e9b068e11871d1d6ced98",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
