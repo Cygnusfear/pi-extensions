@@ -1,0 +1,26 @@
+eval/mesh-interrupt/t2-behavior.runbook.js
+  s_5bc8f5dd982b26::t_d332215c7d51cd 37-39,42-52,55
+  s_5bc8f5dd982b26::t_4014f53018d6da 1-36,40-41,53-54,56-91
+eval/mesh-interrupt/t1-mechanism.runbook.js
+  s_5bc8f5dd982b26::t_f575810b095342 1-105
+eval/mesh-interrupt/README.md
+  s_5bc8f5dd982b26::t_13568a1018bbf8 1-45
+eval/mesh-interrupt/.gitignore
+  s_5bc8f5dd982b26::t_0f369fa8c63d1d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "c8d369c2d4cf3ec80c72e83e456f6a18f8e2af84",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
