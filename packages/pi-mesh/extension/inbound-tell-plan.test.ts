@@ -29,6 +29,20 @@ describe("planInboundTell — inbound direct-tell routing", () => {
 		expect(plan.triggerTurn).toBe(true);
 	});
 
+	test("preempt 'abort' on an IDLE peer does NOT fire abort (nothing in flight) but still delivers", () => {
+		const plan = planInboundTell({ deafened: false, preempt: "abort", agentBusy: false, ackRequested: "delivered" });
+		expect(plan.action).toBe("preempt-abort");
+		expect(plan.abortFirst).toBe(false); // idle → ctx.abort() would be a no-op
+		expect(plan.deliverAs).toBe("followUp"); // message still lands + wakes a turn
+		expect(plan.triggerTurn).toBe(true);
+	});
+
+	test("preempt 'abort' on a BUSY peer fires abort (in-flight work to cancel)", () => {
+		const plan = planInboundTell({ deafened: false, preempt: "abort", agentBusy: true, ackRequested: "delivered" });
+		expect(plan.action).toBe("preempt-abort");
+		expect(plan.abortFirst).toBe(true);
+	});
+
 	test("preempt overrides busy/idle — interrupt jumps the queue regardless of busy state", () => {
 		const busy = planInboundTell({ deafened: false, preempt: "steer", agentBusy: true, ackRequested: "delivered" });
 		const idle = planInboundTell({ deafened: false, preempt: "steer", agentBusy: false, ackRequested: "delivered" });

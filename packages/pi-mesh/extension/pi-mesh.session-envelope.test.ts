@@ -81,6 +81,15 @@ describe("pi-mesh direct tell envelopes", () => {
 		expect(ack.receiverDeafened).toBeUndefined();
 	});
 
+	test("buildTellReceiptAck carries the aborted flag (true=fired, false=no-op, absent=non-abort)", () => {
+		const fired = buildTellReceiptAck("d", "p", "delivered", { receiverBusy: true, aborted: true });
+		expect(fired.aborted).toBe(true);
+		const noop = buildTellReceiptAck("d", "p", "delivered", { receiverBusy: false, aborted: false });
+		expect(noop.aborted).toBe(false);
+		const normal = buildTellReceiptAck("d", "p", "delivered", { receiverBusy: false });
+		expect(normal.aborted).toBeUndefined();
+	});
+
 	test("buildTellReceiptAck flags receiverDeafened so a dropped interrupt is not silent", () => {
 		const ack = buildTellReceiptAck("mesh-tell-123", "peer-b", "delivered", {
 			receiverBusy: true,

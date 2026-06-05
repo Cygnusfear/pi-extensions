@@ -52,10 +52,10 @@ export type MeshTellPreemptLevel = "steer" | "abort";
 export interface MeshTellAckView {
 	entries: SessionViewEntry[];
 	text: string;
-	/** Count of meaningful entries within the projected tail (not the whole session). */
+	/** Count of meaningful entries within the projected TAIL (not the whole session).
+	 *  Indices on entries are window-relative — the snapshot is "recent activity",
+	 *  not an absolute branch coordinate (absolute position would cost O(session)). */
 	total: number;
-	/** Absolute branch index of the first entry in this window. */
-	windowFrom: number;
 }
 
 export interface MeshTellEnvelope {
@@ -83,6 +83,11 @@ export interface MeshTellAckEnvelope {
 	receiverDeafened?: boolean;
 	/** Tail snapshot of what the receiver was doing when the message landed. */
 	view?: MeshTellAckView;
+	/** For a preempt='abort' interrupt: true iff the receiver actually invoked
+	 *  ctx.abort() (i.e. it had a live session context). Absent on non-abort acks
+	 *  and on un-upgraded receivers. false means the abort was a NO-OP (nothing was
+	 *  cancelled) — the sender must NOT assume the peer's work was stopped. */
+	aborted?: boolean;
 }
 
 export type MeshAskReceiptWaitForPhase = "delivered" | "visible";

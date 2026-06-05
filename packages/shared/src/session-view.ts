@@ -119,26 +119,37 @@ export function projectMeaningfulSessionEntries(
 }
 
 /**
- * Build a bounded tail snapshot of a session branch — the cheap "what is this
- * session doing right now" window used by mesh tell receipts. Slices the raw
- * branch tail BEFORE projecting so the cost is O(window), not O(session-length):
- * we never project the whole branch. Absolute branch indices are preserved via
- * the projection offset, so a reader sees true positions.
+ * Build a bounded tail snapshot by walking PARENT POINTERS back from the leaf —
+ * O(window), with NO full-branch materialization. This is the hot-path variant
+ * used by mesh tell receipts: `SessionManager.getBranch()` is O(n^2) (it
+ * `unshift`s the whole parent chain), so calling it on every inbound tell would
+ * be an O(session) regression. Here we follow `parentId` via getEntry for at
+ * most `tailRaw` steps (each getEntry is an O(1) map lookup), then project just
+ * that small tail. Indices are WINDOW-RELATIVE (the absolute branch position is
+ * not knowable without an O(n) length walk, which would defeat the purpose).
  */
-export function buildSessionTailSnapshot(
-	branch: unknown[],
+export function buildSessionTailSnapshotFromLeaf(
+	getLeafEntry: () => unknown,
+	getEntry: (id: string) => unknown,
 	tailRaw = 40,
 	windowN = 15,
-): { entries: SessionViewEntry[]; text: string; total: number; windowFrom: number } {
-	const offset = Math.max(0, branch.length - tailRaw);
-	const tail = branch.slice(offset);
-	const projected = projectMeaningfulSessionEntries(tail, offset);
+): { entries: SessionViewEntry[]; text: string; total: number } {
+	const tail: unknown[] = [];
+	let cur: unknown = getLeafEntry();
+	let steps = 0;
+	while (cur && steps < tailRaw) {
+		tail.push(cur);
+		const pid = (cur as { parentId?: unknown }).parentId;
+		cur = typeof pid === "string" ? getEntry(pid) : undefined;
+		steps++;
+	}
+	tail.reverse(); // oldest -> newest
+	const projected = projectMeaningfulSessionEntries(tail);
 	const entries = windowN > 0 ? projected.slice(-windowN) : projected;
 	return {
 		entries,
 		text: formatSessionViewEntries(entries),
 		total: projected.length,
-		windowFrom: entries[0]?.index ?? offset,
 	};
 }
 

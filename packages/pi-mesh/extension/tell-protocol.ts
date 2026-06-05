@@ -33,6 +33,7 @@ export function buildTellReceiptAck(
 		receiverBusy?: boolean;
 		receiverDeafened?: boolean;
 		view?: MeshTellAckView;
+		aborted?: boolean;
 	},
 ): MeshTellAckEnvelope {
 	return {
@@ -44,6 +45,7 @@ export function buildTellReceiptAck(
 		...(extras?.receiverBusy !== undefined ? { receiverBusy: extras.receiverBusy } : {}),
 		...(extras?.receiverDeafened !== undefined ? { receiverDeafened: extras.receiverDeafened } : {}),
 		...(extras?.view !== undefined ? { view: extras.view } : {}),
+		...(extras?.aborted !== undefined ? { aborted: extras.aborted } : {}),
 	};
 }
 

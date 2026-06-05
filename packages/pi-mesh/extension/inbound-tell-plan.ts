@@ -42,11 +42,15 @@ export function planInboundTell(input: {
 	}
 
 	if (input.preempt === "abort") {
+		// abort = cancel IN-FLIGHT work. If the receiver is idle there is nothing to
+		// cancel, so abortFirst is false (a no-op ctx.abort() would otherwise make the
+		// sender's receipt claim a cancellation that never happened). The message is
+		// still delivered + wakes a turn either way.
 		return {
 			action: "preempt-abort",
 			ackPhase: visiblePhase,
 			ackDeafened: false,
-			abortFirst: true,
+			abortFirst: input.agentBusy,
 			deliverAs: "followUp",
 			triggerTurn: true,
 		};

@@ -23,7 +23,7 @@ import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  buildSessionTailSnapshot,
+  buildSessionTailSnapshotFromLeaf,
   formatSessionViewEntries,
   projectMeaningfulSessionEntries,
   sliceSessionViewEntries,
@@ -54,6 +54,9 @@ import type {
   MeshTellAckEnvelope,
   MeshTellEnvelope,
   MeshTellPreemptLevel,
+  MeshTellReceiptPhase,
+  PeerInfo,
+  RequestEvent,
 } from "./types.ts";
 import {
   formatInboundAskContent,
@@ -62,11 +65,7 @@ import {
   formatPendingTellsBatch,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
-import type {
-  MeshTellReceiptPhase,
-  PeerInfo,
-  RequestEvent,
-} from "./types.js";
+
 
 const ambientChatBatchMsRaw = Number(process.env.PI_MESH_AMBIENT_CHAT_BATCH_MS ?? "750");
 const AMBIENT_CHAT_BATCH_MS =
@@ -1137,19 +1136,6 @@ function isMeshViewRequest(
   );
 }
 
-function getInboundDeliveryOptions(
-  agentBusy: boolean,
-  requestVisible: boolean,
-): { triggerTurn?: boolean; deliverAs?: "followUp" | "steer" | "nextTurn" } {
-  if (agentBusy) {
-    return { deliverAs: "followUp", triggerTurn: false };
-  }
-  if (requestVisible) {
-    return {};
-  }
-  return { deliverAs: "followUp", triggerTurn: true };
-}
-
 /**
  * Render the enriched tell receipt for human/tool display: the receiver's
  * busy/deafened state plus the bounded "what were they doing" snapshot that
@@ -1158,6 +1144,16 @@ function getInboundDeliveryOptions(
  */
 function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
   const parts: string[] = [];
+  // Un-upgraded detection: an upgraded receiver ALWAYS sets at least receiverBusy
+  // (busy→true, idle→false) or receiverDeafened. All three absent ⟹ the peer is on
+  // an older mesh build that ignored the preempt field — your interrupt was
+  // silently downgraded to a normal tell. Surface this loudly; it is the exact
+  // worst case the wire format exists to make visible.
+  const unenriched =
+    ack.receiverBusy === undefined && ack.receiverDeafened === undefined && ack.view === undefined;
+  if (unenriched) {
+    return "⚠️ peer returned a BARE receipt — likely an UN-UPGRADED mesh build. If you sent an interrupt, the preempt level was IGNORED (treated as a normal tell).";
+  }
   if (ack.receiverDeafened) {
     parts.push("⚠️ peer is DEAFENED (/mesh deafen) — message dropped, not surfaced.");
   } else if (ack.receiverBusy) {
@@ -1165,9 +1161,19 @@ function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
   } else if (ack.receiverBusy === false) {
     parts.push("peer was IDLE when this landed.");
   }
-  const viewText = ack.view?.text;
-  if (viewText && viewText !== "(no meaningful entries in that window)") {
-    parts.push("", "— recent activity on the peer —", viewText);
+  // Abort outcome — present only on preempt='abort' acks. false ⟹ no-op (idle peer
+  // or no live ctx); the sender must NOT assume the peer's work was stopped.
+  if (ack.aborted === true) {
+    parts.push("🛑 abort FIRED — the peer's in-flight operation was cancelled.");
+  } else if (ack.aborted === false) {
+    parts.push(
+      "⚠️ abort was a NO-OP — nothing was in flight (peer idle) or the peer had no live session context. The peer's work was NOT stopped.",
+    );
+  }
+  // Empty-window check via entries.length (not a brittle string compare against
+  // formatSessionViewEntries' empty-window prose).
+  if (ack.view && ack.view.entries.length > 0) {
+    parts.push("", "— recent activity on the peer —", ack.view.text);
   }
   return parts.join("\n");
 }
@@ -1213,18 +1219,28 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const mesh = new PiMesh();
   let started = false;
   let currentCtx: {
-    sessionManager: { getBranch: () => unknown[]; getSessionId: () => string };
+    sessionManager: {
+      getBranch: () => unknown[];
+      getSessionId: () => string;
+      getLeafEntry: () => unknown;
+      getEntry: (id: string) => unknown;
+    };
     abort: () => void;
-    isIdle: () => boolean;
   } | null = null;
 
-  // Tail-bounded snapshot of THIS session for enriched tell receipts. O(window),
-  // not O(session): buildSessionTailSnapshot slices the raw branch tail before
-  // projecting. Returns undefined when no session context is bound yet.
+  // Tail-bounded snapshot of THIS session for enriched tell receipts. Walks
+  // parent pointers back from the leaf — O(window), with NO full-branch
+  // materialization. (getBranch() is O(n^2); calling it on every inbound tell
+  // would be an O(session) regression — review finding, ADR perf-constraint #0.)
+  // Returns undefined when no session context is bound yet.
   const buildReceiverSnapshot = (): import("./types.ts").MeshTellAckView | undefined => {
     if (!currentCtx) return undefined;
     try {
-      return buildSessionTailSnapshot(currentCtx.sessionManager.getBranch());
+      const sm = currentCtx.sessionManager;
+      return buildSessionTailSnapshotFromLeaf(
+        () => sm.getLeafEntry(),
+        (id) => sm.getEntry(id),
+      );
     } catch {
       return undefined;
     }
@@ -1731,15 +1747,20 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         const payloadText = formatPayloadForDisplay(msg.payload);
 
         // Snapshot of what THIS session is doing right now, captured BEFORE we
-        // act — the "before" window the sender uses to decide. Always attached
-        // to the receipt (decision C). Bounded/O(window).
-        const snapshot = buildReceiverSnapshot();
+        // act — the "before" window the sender uses to decide. Only built when an
+        // ack will actually be sent (waitFor:'none' opts out), so no-ack tells pay
+        // nothing. O(window) via parentId walk (see buildReceiverSnapshot).
+        const willAck = !!(deliveryId && originalFrom && ackRequested);
+        // Only build the snapshot when an ack will be sent AND the receiver is not
+        // deafened — a heads-down peer drops the message and must NOT leak its
+        // recent activity back to the sender. O(window) via parentId walk.
+        const snapshot = willAck && !deafened ? buildReceiverSnapshot() : undefined;
         const receiverBusy = agentBusy;
         const plan = planInboundTell({ deafened, preempt, agentBusy, ackRequested });
 
         // Enriched receipt — only sent when the sender requested one
         // (waitFor:'none' opted out, so there is no channel to enrich).
-        const sendAck = () => {
+        const sendAck = (aborted?: boolean) => {
           if (deliveryId && originalFrom && ackRequested) {
             mesh.sendTellReceipt(
               originalFrom,
@@ -1747,6 +1768,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
                 receiverBusy,
                 view: snapshot,
                 ...(plan.ackDeafened ? { receiverDeafened: true } : {}),
+                ...(aborted !== undefined ? { aborted } : {}),
               }),
             );
           }
@@ -1773,9 +1795,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         }
 
         // preempt-abort | preempt-steer | surface → deliver now.
+        // NUCLEAR abort: only actually cancels when there is in-flight work
+        // (plan.abortFirst, gated on agentBusy) AND a live session context. When
+        // it cannot (idle peer, or ctx null mid-reload) it is a NO-OP — the ack's
+        // aborted flag reports which happened so the sender never assumes a
+        // cancellation that did not occur.
+        let aborted: boolean | undefined;
+        if (plan.action === "preempt-abort") {
+          aborted = plan.abortFirst && !!currentCtx;
+          if (aborted) currentCtx?.abort();
+        }
         const banner =
           plan.action === "preempt-abort"
-            ? "🛑 MESH INTERRUPT (abort — your in-flight operation was cancelled)\n"
+            ? aborted
+              ? "🛑 MESH INTERRUPT (abort — your in-flight operation was cancelled)\n"
+              : "🛑 MESH INTERRUPT (abort — nothing was in flight to cancel; read this now)\n"
             : plan.action === "preempt-steer"
               ? "⚠️ MESH INTERRUPT (steer — jumped the queue)\n"
               : "";
@@ -1790,10 +1824,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           deliveryId,
           ackRequested,
           ...(preempt ? { preempt } : {}),
+          ...(aborted !== undefined ? { aborted } : {}),
         };
-        // NUCLEAR: cancel the receiver's in-flight tool/operation first; the
-        // followUp delivery then lands once the agent settles.
-        if (plan.abortFirst) currentCtx?.abort();
         const deliveryOptions =
           plan.deliverAs !== undefined
             ? { deliverAs: plan.deliverAs, triggerTurn: plan.triggerTurn }
@@ -1802,7 +1834,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           { customType: "mesh-inbound", content, display: true, details },
           deliveryOptions,
         );
-        sendAck();
+        sendAck(aborted);
       });
 
       // Wire inbound channel messages — ambient context, visible immediately.
@@ -1878,7 +1910,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         }
 
         const requestVisible = req.askReceiptRequested === "visible";
-        const deliveryOptions = getInboundDeliveryOptions(agentBusy, requestVisible);
+        // Reached only when idle (the busy path returned above). A 'visible' waiter
+        // gets pi's default surface; otherwise wake a turn so the ask is read.
+        const deliveryOptions: { deliverAs?: "followUp"; triggerTurn?: boolean } = requestVisible
+          ? {}
+          : { deliverAs: "followUp", triggerTurn: true };
         const replyHint =
           req.from.id !== "unknown"
             ? `Reply with: mesh_tell("${req.from.id}", { askId: "${req.askId}", response: "your reply" })`
