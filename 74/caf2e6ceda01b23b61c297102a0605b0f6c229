@@ -1,0 +1,62 @@
+packages/code-mode/extensions/code-mode.ts
+  s_5bc8f5dd982b26::t_8ad7b072e27667 284
+packages/pi-mesh/extension/pi-mesh.ts
+  s_5bc8f5dd982b26::t_b1d6c208adfcd6 56
+  s_5bc8f5dd982b26::t_790a4b0b714694 64
+  s_5bc8f5dd982b26::t_937016e5b8081a 268-272,278
+  s_5bc8f5dd982b26::t_9d77c553b168ff 1927
+  s_5bc8f5dd982b26::t_d54824540e5537 327
+  s_5bc8f5dd982b26::t_9d7e5599cff2a9 1605
+  s_5bc8f5dd982b26::t_333dbf2b85a417 1571-1594
+  s_5bc8f5dd982b26::t_6695053dc779f0 1734-1735,1738-1742,1746,1749,1755-1756,1760,1771,1775-1800,1802,1805
+  s_5bc8f5dd982b26::t_fc8e22060868c8 1440-1441,1446-1449
+  s_5bc8f5dd982b26::t_abc97490c614a2 1217-1218,1220-1231
+  s_5bc8f5dd982b26::t_b2ae113e8a27ad 2005-2008,2010
+  s_5bc8f5dd982b26::t_b99cd0835f6d68 2040-2083,2085-2087,2089-2129,2131-2132
+  s_5bc8f5dd982b26::t_57a0b2cff6024c 26
+  s_5bc8f5dd982b26::t_22aa53f2eddac5 301
+  s_5bc8f5dd982b26::t_01402b6c54c599 1724-1725,1733,1736-1737,1747-1748,1750,1753-1754
+  s_5bc8f5dd982b26::t_4faa9d9a6f4b58 1153-1174
+packages/pi-mesh/extension/inbound-tell-plan.ts
+  s_5bc8f5dd982b26::t_b3caf8c4ba0ca3 1-81
+packages/default-prompt/prompts/default.md
+  s_5bc8f5dd982b26::t_5d24758c15b4bc 26
+packages/pi-mesh/extension/pi-mesh.session-envelope.test.ts
+  s_5bc8f5dd982b26::t_f551f30e1267f6 27-45
+  s_5bc8f5dd982b26::t_5dc0be3222038c 67-90
+packages/pi-mesh/extension/inbound-tell-plan.test.ts
+  s_5bc8f5dd982b26::t_9f61b0ab110151 1-66
+packages/shared/src/session-view.test.ts
+  s_5bc8f5dd982b26::t_9687b6c760516e 1-65
+packages/pi-mesh/extension/types.ts
+  s_5bc8f5dd982b26::t_a3078cf0b08a9b 35-60,66-67
+  s_5bc8f5dd982b26::t_205c66728c49f7 5-6
+  s_5bc8f5dd982b26::t_5d715f9927665b 78-85
+packages/shared/src/session-view.ts
+  s_5bc8f5dd982b26::t_6b5897dab906c0 107-110,115,121-142
+packages/pi-mesh/README.md
+  s_5bc8f5dd982b26::t_40778a5304cb46 98-99
+  s_5bc8f5dd982b26::t_9101a11e79c79b 74-92
+packages/pi-mesh/extension/tell-protocol.ts
+  s_5bc8f5dd982b26::t_7c4baa9e803745 1-8
+  s_5bc8f5dd982b26::t_80a5122c772aa4 32-36,44-46
+packages/code-mode/extensions/code-mode-declarations.md
+  s_5bc8f5dd982b26::t_b3d4c6bf127b8d 1362,1367-1372,1380-1384,1387-1394
+  s_5bc8f5dd982b26::t_0a4ffec7778128 1421-1423
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "74caf2e6ceda01b23b61c297102a0605b0f6c229",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
