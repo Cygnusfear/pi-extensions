@@ -3,17 +3,30 @@ import fs from "node:fs";
 import path from "node:path";
 
 // ===========================================================================
-// Persistent Store ($) — NO eviction.
+// Persistent Store ($) — NO eviction, durable for the whole session.
 //
-// The store NEVER silently drops data. Agents stash load-bearing state here
-// (worktree paths, parsed configs, pending promises); the amount is negligible,
-// and silently evicting e.g. $.wt mid-task caused hard-to-trace failures. So we
-// keep everything until the agent explicitly clears it (delete $.x / $.__reset())
-// or the session ends. $.__status() still reports per-var sizes for diagnostics.
+// Two guarantees the agents rely on:
+//   1. NO eviction. The store never silently drops data. Agents stash
+//      load-bearing state here (worktree paths, parsed configs); silently
+//      evicting e.g. $.wt mid-task caused hard-to-trace failures. Everything
+//      stays until the agent clears it (delete $.x / $.__reset()).
+//   2. SURVIVES RELOAD/RESUME. The $ store used to live only in a module-level
+//      singleton in the extension. A reload_runtime or a pi restart-with-resume
+//      re-evaluated that module, reset the singleton, and silently wiped every
+//      $ var mid-session — the session continued (same JSONL) but $ came back
+//      empty ("$ flakiness"). To honour "persists for the WHOLE session", the
+//      store now snapshots every JSON-serializable var to a SESSION-SCOPED disk
+//      file and hydrates it back when the store is rebuilt.
+//
+// Inherent limit: promises/functions/class instances can't be JSON-serialized,
+// so they cannot survive a reload — they are recreated on the next run. Only
+// JSON-serializable values are durable across reload/resume. Within a single
+// process (across execute_code calls) ALL values — including promises — persist
+// as before.
 // ===========================================================================
 
 const STORE_FILENAME = ".pi/code-mode-store.json";
-const MAX_DISK_SIZE = 5 * 1024 * 1024; // 5MB — on-disk persistence cap (separate from in-memory $)
+const MAX_DISK_SIZE = 25 * 1024 * 1024; // 25MB — on-disk snapshot cap (separate from in-memory $)
 
 
 function estimateSizeHuman(value: unknown): string {
@@ -54,22 +67,51 @@ function estimateSize(value: unknown): string {
   }
 }
 
-export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?: string }) {
+/**
+ * A value is durable iff it can round-trip through a reload as itself.
+ * Functions and promises/thenables are excluded: a promise serializes to "{}"
+ * (JSON.stringify(Promise.resolve(1)) === "{}") which would "restore" as a dead
+ * empty object, not a working promise — worse than honestly recreating it. Such
+ * values persist across calls in-process but are recreated after a reload.
+ */
+function isDurable(value: unknown): boolean {
+  if (typeof value === "function") return false;
+  if (value !== null && typeof value === "object" && typeof (value as { then?: unknown }).then === "function") {
+    return false; // promise / thenable
+  }
+  try {
+    return JSON.stringify(value) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+export function createPersistentStore(opts?: {
+  getEscaped?: () => boolean;
+  cwd?: string;
+  /** Absolute path to the session-scoped snapshot file. Takes precedence over `cwd`. */
+  storePath?: string;
+}) {
   const store = new Map<string, StoreEntry>();
   let currentTurn = 0;
-  const persisted = new Set<string>();
-  const diskPath = opts?.cwd ? path.join(opts.cwd, STORE_FILENAME) : null;
+  // `diskPath` is mutable so the extension can late-bind a session-scoped path
+  // once the per-call sessionManager is available (see bindPersistence).
+  let diskPath: string | null =
+    opts?.storePath ?? (opts?.cwd ? path.join(opts.cwd, STORE_FILENAME) : null);
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let overflowWarned = false;
 
   function loadFromDisk(): void {
     if (!diskPath) return;
     try {
       if (!fs.existsSync(diskPath)) return;
       const raw = fs.readFileSync(diskPath, "utf-8");
-      const data = JSON.parse(raw) as Record<string, { value: unknown; persistedAt: string }>;
+      const data = JSON.parse(raw) as Record<string, { value: unknown }>;
       for (const [key, entry] of Object.entries(data)) {
-        store.set(key, { value: entry.value, lastAccessTurn: currentTurn, pinned: true });
-        persisted.add(key);
+        if (key.startsWith("__")) continue;
+        // In-memory wins: never clobber a value already set this process.
+        if (store.has(key)) continue;
+        store.set(key, { value: entry.value, lastAccessTurn: currentTurn, pinned: false });
       }
     } catch {}
   }
@@ -77,29 +119,69 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
   function flushToDisk(): void {
     if (!diskPath) return;
     try {
+      // Snapshot EVERY JSON-serializable var (not an opt-in subset) so the whole
+      // store survives reload/resume. Non-serializable values are skipped — they
+      // can't round-trip and are recreated on the next run.
       const data: Record<string, { value: unknown; persistedAt: string }> = {};
-      for (const key of persisted) {
-        const entry = store.get(key);
-        if (!entry) continue;
-        // Skip non-serializable values
-        try { JSON.stringify(entry.value); } catch { continue; }
+      for (const [key, entry] of store) {
+        if (key.startsWith("__")) continue;
+        if (!isDurable(entry.value)) continue;
         data[key] = { value: entry.value, persistedAt: new Date().toISOString() };
       }
       const json = JSON.stringify(data, null, 2);
-      if (Buffer.byteLength(json) > MAX_DISK_SIZE) return; // refuse if too large
+      if (Buffer.byteLength(json) > MAX_DISK_SIZE) {
+        // Refuse oversized snapshot, but make the loss-of-durability VISIBLE
+        // rather than silent (silent non-persistence is the whole footgun).
+        if (!overflowWarned) {
+          overflowWarned = true;
+          console.error(
+            "[code-mode] $ store snapshot exceeds " +
+              Math.round(MAX_DISK_SIZE / (1024 * 1024)) +
+              "MB — NOT persisted to disk; vars will NOT survive reload until the store shrinks.",
+          );
+        }
+        return;
+      }
+      overflowWarned = false;
       const dir = path.dirname(diskPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(diskPath, json, "utf-8");
+      // Atomic write: a process death mid-write (e.g. the very reload we protect
+      // against) must not leave a truncated, unparseable snapshot. Write to a
+      // temp sibling then rename — rename is atomic on POSIX.
+      const tmp = diskPath + ".tmp";
+      fs.writeFileSync(tmp, json, "utf-8");
+      fs.renameSync(tmp, diskPath);
     } catch {}
   }
 
   function debouncedFlush(): void {
+    if (!diskPath) return;
     if (flushTimer) clearTimeout(flushTimer);
-    flushTimer = setTimeout(flushToDisk, 500);
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushToDisk();
+    }, 500);
+    // Don't let a pending snapshot keep the process alive (or leak across tests).
+    (flushTimer as { unref?: () => void }).unref?.();
   }
 
-  // Load persisted vars on creation
+  // Load any pre-existing snapshot for the path bound at construction time.
   loadFromDisk();
+
+  /**
+   * Late-bind a session-scoped snapshot file. Called by the extension on the
+   * first execute_code of a process, once the sessionManager (hence session id)
+   * is known. Hydrates any prior snapshot (in-memory wins) and enables flushing.
+   * Idempotent for a given path.
+   */
+  function bindPersistence(absPath: string): void {
+    if (!absPath || diskPath === absPath) return;
+    diskPath = absPath;
+    loadFromDisk();
+    // Persist current in-memory state immediately so a snapshot exists even if
+    // the process dies before the next debounced write.
+    flushToDisk();
+  }
 
   function totalMemoryBytes(): number {
     let total = 0;
@@ -122,18 +204,27 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
       totalBytes < 1024 * 1024
         ? Math.round(totalBytes / 1024) + "KB"
         : (totalBytes / (1024 * 1024)).toFixed(1) + "MB";
-    const persistedCount = [...store.values()].filter((e) => e.pinned).length;
+    const durable = diskPath
+      ? "durable (survives reload/resume)"
+      : "in-memory only (NOT yet bound to disk)";
     const lines: string[] = [
-      "$ store: " + store.size + " variable(s), " + totalHuman + " (no eviction — nothing is dropped)",
+      "$ store: " + store.size + " variable(s), " + totalHuman + " — no eviction, " + durable,
     ];
-    if (persistedCount > 0) {
-      lines[0] += " (" + persistedCount + " persisted to disk)";
-    }
+    let nonDurable = 0;
     for (const [key, entry] of store) {
       const size = estimateSize(entry.value);
       const age = currentTurn - entry.lastAccessTurn;
-      const tag = entry.pinned ? " (persisted, last used " + age + " turns ago)" : " (last used " + age + " turns ago)";
-      lines.push("  $." + key + ": " + size + tag);
+      const transient = diskPath && !isDurable(entry.value);
+      if (transient) nonDurable++;
+      lines.push(
+        "  $." + key + ": " + size + " (last used " + age + " turns ago)" +
+          (transient ? " [transient — won't survive reload]" : ""),
+      );
+    }
+    if (nonDurable > 0) {
+      lines.push(
+        "note: " + nonDurable + " var(s) are non-serializable (promises/functions) and will be recreated, not restored, after a reload.",
+      );
     }
     return lines.join("\n");
   }
@@ -151,6 +242,7 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
     "__persist",
     "__forget",
     "__persisted",
+    "__bindPersistence",
   ]);
 
   const proxy = new Proxy({} as Record<string, unknown>, {
@@ -163,7 +255,8 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
       if (RESERVED.has(prop)) return false;
       const existing = store.get(prop);
       store.set(prop, { value, lastAccessTurn: currentTurn, pinned: existing?.pinned ?? false });
-      if (persisted.has(prop)) debouncedFlush();
+      // Every write snapshots the whole store (debounced) so $ survives reload.
+      debouncedFlush();
       return true;
     },
     get(_target, prop: string | symbol) {
@@ -173,6 +266,8 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
         case "__reset":
           return () => {
             store.clear();
+            // Persist the cleared state so the wipe survives reload too.
+            flushToDisk();
             return "$ cleared";
           };
         case "__status":
@@ -208,26 +303,32 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
             return "Sandbox mode: tools restricted to execute_code";
           };
 
+        // $ now persists every serializable var by default, so __persist/__forget
+        // are compat no-ops. They report the actual durability of the value.
         case "__persist":
           return (name: string) => {
             const entry = store.get(name);
             if (!entry) return "$." + name + " not found";
-            try { JSON.stringify(entry.value); } catch {
-              return "$." + name + " cannot be persisted (not JSON-serializable)";
-            }
-            persisted.add(name);
-            entry.pinned = true; // persisted vars are always pinned
+            if (!diskPath)
+              return "$." + name + " — store not yet bound to disk; it will persist once bound (automatic).";
+            if (!isDurable(entry.value))
+              return "$." + name + " is non-serializable (promise/function) — cannot survive reload; it is recreated on the next run.";
             flushToDisk();
-            return "$." + name + " persisted to disk (survives reload)";
+            return "$." + name + " — note: all serializable $ vars already persist automatically (survives reload).";
           };
         case "__forget":
-          return (name: string) => {
-            persisted.delete(name);
-            flushToDisk();
-            return "$." + name + " removed from disk persistence";
-          };
+          return (name: string) =>
+            "$." + name + " — note: persistence is automatic and per-var opt-out is gone. Use `delete $." + name + "` to remove it entirely.";
         case "__persisted":
-          return () => [...persisted];
+          return () =>
+            [...store.entries()]
+              .filter(([k, e]) => !k.startsWith("__") && isDurable(e.value))
+              .map(([k]) => k);
+        case "__bindPersistence":
+          return (absPath: string) => {
+            bindPersistence(absPath);
+            return "$ store bound to " + absPath;
+          };
         case "__escaped":
           return store.get("__escaped")?.value ?? !!(opts?.getEscaped?.());
         case "toJSON":
@@ -250,7 +351,8 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
     deleteProperty(_target, prop: string | symbol) {
       if (typeof prop !== "string") return false;
       if (RESERVED.has(prop)) return false;
-      store.delete(prop);
+      const had = store.delete(prop);
+      if (had) debouncedFlush(); // deletions must survive reload too
       return true;
     },
     ownKeys() {
@@ -269,6 +371,22 @@ export function createPersistentStore(opts?: { getEscaped?: () => boolean; cwd?:
     },
   });
 
-  return { proxy, store, processExpiry, getStatus, nextTurn: () => ++currentTurn };
+  return {
+    proxy,
+    store,
+    processExpiry,
+    getStatus,
+    nextTurn: () => ++currentTurn,
+    bindPersistence,
+    /** Synchronous snapshot — call at run-end so vars are durable without waiting for the debounce. No-op until a disk path is bound. */
+    flush: () => flushToDisk(),
+    /** Cancel any pending debounced flush. Use when tearing a store down (tests/disposal). */
+    dispose: () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+    },
+  };
 }
 // =============================================================================

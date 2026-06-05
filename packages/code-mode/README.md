@@ -18,7 +18,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 ## Features
 
 - **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
-- **Persistent `$` store** — variables survive across calls for the whole session. No time limit, no eviction — nothing is silently dropped.
+- **Persistent `$` store** — variables survive across calls for the whole session. No time limit, no eviction — nothing is silently dropped. JSON-serializable vars also survive `reload_runtime` / pi restart-with-resume via a session-scoped disk snapshot (promises/functions are recreated, not restored).
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
 - **Timeout control** — configurable per-call (default 120s, max 600s)
@@ -85,7 +85,7 @@ function extractVersions(pkg) { return Object.keys(pkg.dependencies || {}); }
 
 ### Async across calls
 
-Promises stashed on `$` survive across calls. The VM context persists, so pending promises keep running:
+Promises stashed on `$` survive across calls (the VM context persists, so pending promises keep running). Note: promises do NOT survive a reload/resume — only JSON-serializable `$` vars are snapshotted to disk — so re-fire pending async work after a reload:
 
 ```javascript
 // Call 1 — fire slow calls, don't await
@@ -459,7 +459,7 @@ These remain as **direct LLM tools**: execute_code, context_*, start_supervision
 | `extensions/code-mode-prompt.md` | System prompt injected into the LLM when code-mode is active |
 | `extensions/code-mode-declarations.md` | Full TypeScript declarations for all sandbox functions |
 | `src/sandbox-tools.ts` | Creates the tool binding functions injected into the VM context |
-| `src/persistent-store.ts` | `$` store implementation — Proxy-backed, no eviction, auto-persist |
+| `src/persistent-store.ts` | `$` store implementation — Proxy-backed, no eviction, auto-persist, session-scoped disk snapshot (reload-durable) |
 | `src/patch-parser.ts` | `apply_patch` parser and applier (used inside sandbox) |
 | `src/hashline.ts` | Hashline anchor computation (used inside sandbox) |
 | `src/shell-utils.ts` | Shell argument splitting and escaping utilities |

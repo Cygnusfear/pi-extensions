@@ -900,7 +900,12 @@ declare function contextCheckout(input: {
  * Variables persist for the WHOLE session — no time expiry and NO eviction. State you
  * depend on (e.g. $.wt) is never silently dropped; clear it yourself with delete $.x
  * or $.__reset() when done. The data kept here is tiny, so there is no memory cap.
- * Promises stashed on $ survive across calls — fire async work, pick up results later.
+ * JSON-serializable vars ALSO survive a reload_runtime / pi restart-with-resume: the
+ * store snapshots them to a session-scoped disk file and hydrates them back when it is
+ * rebuilt (the singleton is module-level and would otherwise come back empty).
+ * Promises stashed on $ survive across calls — fire async work, pick up results later —
+ * but a promise/function can't be serialized, so it is recreated (not restored) after a
+ * reload; re-fire pending async work post-reload.
  */
 declare const $: {
   [key: string]: unknown;

@@ -49,6 +49,8 @@ export interface CodeModeSession {
 export interface CreateSessionOptions {
 	/** When set, persistent store reads/writes `<cwd>/.pi/code-mode-store.json`. Omit for in-memory only (RLM sub-context use). */
 	cwd?: string;
+	/** Absolute path to a SESSION-SCOPED snapshot file. Takes precedence over `cwd`. The extension uses store.bindPersistence() for this once the sessionManager is known; this option exists for direct/test construction. */
+	storePath?: string;
 	/** Default false. */
 	initialEscaped?: boolean;
 }
@@ -91,7 +93,7 @@ function formatArg(arg: unknown): string {
  */
 export function createCodeModeSession(opts?: CreateSessionOptions): CodeModeSession {
 	let escaped = opts?.initialEscaped === true;
-	const store = createPersistentStore({ getEscaped: () => escaped, cwd: opts?.cwd });
+	const store = createPersistentStore({ getEscaped: () => escaped, cwd: opts?.cwd, storePath: opts?.storePath });
 	const logs: string[] = [];
 	const images: Array<{ data: string; mimeType: string }> = [];
 
@@ -1041,8 +1043,24 @@ export async function executeInSession(
 		}
 	};
 
+	// Run-end durability: snapshot the $ store synchronously so every var set
+	// during this run is on disk before control returns — without waiting for the
+	// 500ms debounce (which a fast process exit could outrun). No-op until the
+	// store is bound to a disk path (RLM sub-contexts / tests stay in-memory).
+	const finalizeFlush = () => {
+		try {
+			(session.store as { flush?: () => void }).flush?.();
+		} catch {
+			/* best-effort durability */
+		}
+	};
+
 	if (errorMode === "rethrow") {
-		await runVm();
+		try {
+			await runVm();
+		} finally {
+			finalizeFlush();
+		}
 		const output = buildOutput(warnings, session.logs);
 		return { output, duration: Date.now() - start };
 	}
@@ -1077,5 +1095,7 @@ export async function executeInSession(
 			: "\u274c " + error + "\n\n" + recoveryHint;
 
 		return { output, error, duration: Date.now() - start };
+	} finally {
+		finalizeFlush();
 	}
 }

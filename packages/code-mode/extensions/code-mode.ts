@@ -254,6 +254,27 @@ function getSession(): CodeModeSession {
   return session;
 }
 
+// Bind the $ store to a SESSION-SCOPED disk snapshot so it survives a
+// reload_runtime / pi restart-with-resume. The `session` singleton above is
+// module-level: on reload the module re-evaluates, `session` resets to null,
+// and getSession() rebuilds an EMPTY store — silently wiping every $ var
+// mid-session (the "$ flakiness"). bindPersistence() is idempotent and cheap,
+// so we (re)assert the binding on every execute once the sessionManager (hence
+// the durable, session-scoped path) is available. Best-effort: never break a
+// run if the path can't be derived.
+function bindStorePersistence(sess: CodeModeSession, ctx: unknown): void {
+  try {
+    const sessionFile: string | undefined = (ctx as any)?.sessionManager?.getSessionFile?.();
+    if (!sessionFile) return;
+    const storePath = sessionFile.endsWith(".jsonl")
+      ? sessionFile.slice(0, -".jsonl".length) + ".code-mode-store.json"
+      : sessionFile + ".code-mode-store.json";
+    sess.store.bindPersistence(storePath);
+  } catch {
+    /* persistence is best-effort */
+  }
+}
+
 // =============================================================================
 // Tool Exclusivity — tools that remain as direct LLM tools
 // =============================================================================
@@ -698,6 +719,8 @@ export default function (pi: ExtensionAPI) {
       const timeoutMs = params.timeout ? params.timeout * 1000 : undefined;
       // ── Site 3 escape sync (pe-tk4s AC3 v4 patch — preserve setActiveTools side-effects) ──
       const sess = getSession();
+      // Durable $ store: bind to the session-scoped snapshot so $ survives reload.
+      bindStorePersistence(sess, ctx);
       const wantEscape = sess.store.proxy.__escaped === true;
       if (wantEscape !== sess.getEscaped()) {
         sess.setEscaped(wantEscape);

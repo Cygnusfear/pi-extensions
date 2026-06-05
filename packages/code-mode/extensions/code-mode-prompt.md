@@ -198,7 +198,7 @@ To inspect or kill an in-flight async job, use the **direct tools** `execute_cod
 
 ### Async across calls
 
-Promises stashed on `$` survive across `execute_code` calls. The vm.Context persists, so pending promises keep running in the background.
+Promises stashed on `$` survive across `execute_code` calls (the vm.Context persists, so pending promises keep running in the background). They do NOT survive a reload/resume — a promise can't be serialized to disk — so after a reload, re-fire any async work you were awaiting.
 
 ```javascript
 // Call 1 — fire slow calls, don't await
@@ -249,7 +249,7 @@ session.save("ctx", { goal: "...", decisions: [...] });
 const ctx = session.load("ctx");       // restore after reload
 ```
 
-`$` is fast runtime memory (survives compaction). `session.save()` is durable storage (survives reload).
+`$` survives both compaction AND reload/resume: every JSON-serializable var is snapshotted to a session-scoped file and hydrated back when the store is rebuilt, so worktree paths, parsed configs, and results stay put for the whole session. The one limit: promises/functions can't be serialized, so they persist across `execute_code` calls in-process but are recreated (not restored) after a reload — re-fire them if you need them post-reload. `session.save()` remains available for explicit, structured durable records.
 
 ### Context Management
 
