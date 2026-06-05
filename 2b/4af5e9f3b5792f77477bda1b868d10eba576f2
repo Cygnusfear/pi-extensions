@@ -1,0 +1,33 @@
+packages/pi-mesh/README.md
+  s_5bc8f5dd982b26::t_aced362a43c8f0 79-85
+packages/pi-mesh/extension/pi-mesh.ts
+  s_5bc8f5dd982b26::t_0bf5c11d80d060 2190
+  s_5bc8f5dd982b26::t_af80633ca67d24 2100
+  s_5bc8f5dd982b26::t_88dfb0d18c544e 2045
+  s_5bc8f5dd982b26::t_5f70be1595b594 1959-1972
+  s_5bc8f5dd982b26::t_0ba1f14409578e 2057,2138
+  s_5bc8f5dd982b26::t_86cf62586240f4 2169
+  s_5bc8f5dd982b26::t_af954cb7632027 17
+  s_5bc8f5dd982b26::t_37e273d7808f68 1973
+  s_5bc8f5dd982b26::t_a4c9c84765e4be 2013
+  s_5bc8f5dd982b26::t_84f532486d190a 2050
+  s_5bc8f5dd982b26::t_de402c9407fb90 2185
+  s_5bc8f5dd982b26::t_1d9bf4c04c4b12 2131
+  s_5bc8f5dd982b26::t_73066e37d0eb81 2028
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "2b4af5e9f3b5792f77477bda1b868d10eba576f2",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
