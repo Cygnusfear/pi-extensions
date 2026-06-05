@@ -76,8 +76,13 @@ This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "
 Every `mesh_tell` receipt is **enriched** so the sender is never blind:
 
 - `receiverBusy` — was the peer mid-turn when the message landed? A busy peer only surfaces a normal tell at the **end of its current turn**.
-- `receiverDeafened` — the peer has `/mesh deafen` on and dropped the message.
-- `view` — a **bounded** tail snapshot (last N meaningful entries) of what the peer was doing when the message landed. This is the "before" window the sender uses to decide: wait, follow up, or preempt. The snapshot rides the existing ack (no extra round-trip) and projects only the branch **tail**, so it stays O(window), not O(session-length).
+- `receiverDeafened` — the peer has `/mesh deafen` on and dropped the message. A deafened peer does NOT return a `view` (it won't leak its activity).
+- `view` — a **bounded** tail snapshot (last N meaningful entries) of what the peer was doing when the message landed. This is the "before" window the sender uses to decide: wait, follow up, or preempt. The snapshot rides the existing ack (no extra round-trip) and is built by walking parent pointers back from the leaf — true **O(window)**, never a full-branch walk. Indices are window-relative.
+- `aborted` — present only on `abort`-level interrupt receipts: `true` iff the receiver actually invoked `ctx.abort()` (it was busy with a live session context); `false` means the abort was a **NO-OP** (peer idle, or mid-reload) and the peer's work was **not** stopped. Never assume an abort landed without checking this.
+
+**Dual-snapshot semantics.** A busy receiver acks `delivered` immediately (snapshot = the busy tail, `receiverBusy:true`) and `visible` later on flush (a fresh idle tail, `receiverBusy:false`). A sender that waits for `visible` therefore sees a *different* snapshot than one that waits for `delivered` — both are correct, they describe different moments.
+
+**Un-upgraded peers.** If a peer is on an older mesh build it returns a bare ack with none of the fields above; the sender's receipt then warns "UN-UPGRADED mesh — preempt level IGNORED" rather than showing an empty receipt, because a new sender's `abort`/`steer` is silently downgraded to a normal tell by an old receiver.
 
 ### Interrupts (preempt a busy peer)
 

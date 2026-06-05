@@ -14,7 +14,7 @@ import {
   setStableId,
 } from "@pi-extensions/shared/session-nickname";
 import { renderToolResult } from "@pi-extensions/shared/tool-ui-utils";
-import { Type } from "@sinclair/typebox";
+import { type TSchema, Type } from "@sinclair/typebox";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -1956,7 +1956,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
   // ── MCP Tools ─────────────────────────────────────────────────────────────
 
-  pi.registerTool({
+  // Discriminated tool-result details — one variant per outcome, so the agent
+  // (and any consumer) reads an unambiguous state instead of an optional bag of
+  // half-undefined fields. (ts-review: make wrong states impossible.)
+  type MeshTellDetails =
+    | { status: "error"; sessionId: string; resolvedSessionId?: string; error: string }
+    | { status: "sent"; sessionId: string; resolvedSessionId: string; deliveryId: string; waitFor: "none" }
+    | { status: "acked"; sessionId: string; resolvedSessionId: string; waitFor: string; ack: MeshTellAckEnvelope };
+  type MeshInterruptDetails =
+    | { status: "error"; sessionId: string; resolvedSessionId?: string; error: string }
+    | { status: "sent"; sessionId: string; resolvedSessionId: string; level: MeshTellPreemptLevel; ack: MeshTellAckEnvelope };
+  type MeshViewDetails =
+    | { status: "error"; sessionId: string; resolvedSessionId?: string; error: string }
+    | { status: "ok"; sessionId: string; resolvedSessionId: string; reply: Record<string, unknown> };
+
+  pi.registerTool<TSchema, MeshTellDetails>({
     name: "mesh_tell",
     label: "Mesh Tell",
     description:
@@ -1996,15 +2010,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            error: String(e) as string | undefined,
-            resolvedSessionId: undefined as string | undefined,
-            sent: undefined as boolean | undefined,
-            deliveryId: undefined as string | undefined,
-            waitFor: undefined as string | undefined,
-            ack: undefined as MeshTellAckEnvelope | undefined,
-          },
+          details: { status: "error", sessionId, error: String(e) } satisfies MeshTellDetails,
           isError: true,
         };
       }
@@ -2019,15 +2025,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         const { deliveryId } = mesh.tell(resolved, message);
         return {
           content: [{ type: "text", text: `${MI.tell} ${MI.sep} ${peerLabel}\n${rendered}` }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            sent: true,
-            deliveryId,
-            waitFor: "none",
-            error: undefined as string | undefined,
-            ack: undefined as MeshTellAckEnvelope | undefined,
-          },
+          details: { status: "sent", sessionId, resolvedSessionId: resolved, deliveryId, waitFor: "none" } satisfies MeshTellDetails,
         };
       }
 
@@ -2044,35 +2042,19 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           (receiptText ? `\n\n${receiptText}` : "");
         return {
           content: [{ type: "text", text }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            sent: true,
-            ack,
-            waitFor: receiptMode,
-            error: undefined as string | undefined,
-            deliveryId: undefined as string | undefined,
-          },
+          details: { status: "acked", sessionId, resolvedSessionId: resolved, waitFor: receiptMode, ack } satisfies MeshTellDetails,
         };
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            error: String(e) as string | undefined,
-            waitFor: receiptMode,
-            sent: undefined as boolean | undefined,
-            deliveryId: undefined as string | undefined,
-            ack: undefined as MeshTellAckEnvelope | undefined,
-          },
+          details: { status: "error", sessionId, resolvedSessionId: resolved, error: String(e) } satisfies MeshTellDetails,
           isError: true,
         };
       }
     },
   });
 
-  pi.registerTool({
+  pi.registerTool<TSchema, MeshInterruptDetails>({
     name: "mesh_interrupt",
     label: "Mesh Interrupt",
     description:
@@ -2115,14 +2097,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            error: String(e) as string | undefined,
-            resolvedSessionId: undefined as string | undefined,
-            sent: undefined as boolean | undefined,
-            level: undefined as string | undefined,
-            ack: undefined as MeshTellAckEnvelope | undefined,
-          },
+          details: { status: "error", sessionId, error: String(e) } satisfies MeshInterruptDetails,
           isError: true,
         };
       }
@@ -2148,33 +2123,19 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           (receiptText ? `\n\n${receiptText}` : "");
         return {
           content: [{ type: "text", text }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            sent: true,
-            level: preemptLevel,
-            ack,
-            error: undefined as string | undefined,
-          },
+          details: { status: "sent", sessionId, resolvedSessionId: resolved, level: preemptLevel, ack } satisfies MeshInterruptDetails,
         };
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            error: String(e) as string | undefined,
-            level: preemptLevel,
-            sent: undefined as boolean | undefined,
-            ack: undefined as MeshTellAckEnvelope | undefined,
-          },
+          details: { status: "error", sessionId, resolvedSessionId: resolved, error: String(e) } satisfies MeshInterruptDetails,
           isError: true,
         };
       }
     },
   });
 
-  pi.registerTool({
+  pi.registerTool<TSchema, MeshViewDetails>({
     name: "mesh_view",
     label: "Mesh View",
     description:
@@ -2205,12 +2166,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            error: String(e) as string | undefined,
-            resolvedSessionId: undefined as string | undefined,
-            reply: undefined as Record<string, unknown> | undefined,
-          },
+          details: { status: "error", sessionId, error: String(e) } satisfies MeshViewDetails,
           isError: true,
         };
       }
@@ -2226,22 +2182,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           typeof reply?.text === "string" ? reply.text : formatPayloadForDisplay(reply);
         return {
           content: [{ type: "text", text: replyText }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            reply,
-            error: undefined as string | undefined,
-          },
+          details: { status: "ok", sessionId, resolvedSessionId: resolved, reply } satisfies MeshViewDetails,
         };
       } catch (e) {
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
-          details: {
-            sessionId,
-            resolvedSessionId: resolved,
-            error: String(e) as string | undefined,
-            reply: undefined as Record<string, unknown> | undefined,
-          },
+          details: { status: "error", sessionId, resolvedSessionId: resolved, error: String(e) } satisfies MeshViewDetails,
           isError: true,
         };
       }
