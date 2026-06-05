@@ -1,0 +1,48 @@
+packages/code-mode/extensions/code-mode.ts
+  s_512fecfbbc3098::t_1ede055279f077 257-277
+  s_512fecfbbc3098::t_cde83200ce5b2e 722-723
+packages/code-mode/README.md
+  s_512fecfbbc3098::t_da14765c6e2cf6 462
+  s_512fecfbbc3098::t_11890832100a97 21
+  s_512fecfbbc3098::t_55c8362933728a 88
+packages/code-mode/src/session-factory.ts
+  s_512fecfbbc3098::t_05ffbaa2062127 1046-1057,1059-1063
+  s_512fecfbbc3098::t_615853bdc60971 1098-1099
+  s_512fecfbbc3098::t_3cec38cfdd5781 52-53
+  s_512fecfbbc3098::t_265d380dd0648e 96
+packages/code-mode/src/store-reload.test.ts
+  s_512fecfbbc3098::t_3f8b3ea2849059 1-20,29-32,41-58,60-61,63,65-69,71,78-80,82-83,86-89,91-92,94,96-100,102,104,109-112,114-115,120-121,123-126,128-129,131-134
+  s_512fecfbbc3098::t_59f1adc73719d3 21-28,33-40,59,62,64,70,72-77,81,84-85,90,93,95,101,103,105-108,113,116-119,122,127,130
+packages/code-mode/src/persistent-store.ts
+  s_512fecfbbc3098::t_36b2fac9411d0e 6,8-25,29,82-94,97-100,102,109,111-114,122-124,126-127,132-145,158,168,171-185,207-209,211,213,218-227,245,258-259,269-270,306-307,312-313,315,317,320-321,323-324,326-331,354-355
+  s_512fecfbbc3098::t_29596601984b8c 128
+  s_512fecfbbc3098::t_391f52fe8ad22e 148-153
+  s_512fecfbbc3098::t_020d12b8671886 70-81
+  s_512fecfbbc3098::t_9069a1279883a7 314
+  s_512fecfbbc3098::t_d48c92a545af61 383-389
+  s_512fecfbbc3098::t_4e642553c31975 325
+  s_512fecfbbc3098::t_0dbad1f66165cc 217
+  s_512fecfbbc3098::t_48757309f9026a 160-165
+  s_512fecfbbc3098::t_77116cdc67e825 374-382,390
+packages/code-mode/extensions/code-mode-declarations.md
+  s_512fecfbbc3098::t_2901e6fd1c7881 903-908
+packages/code-mode/extensions/code-mode-prompt.md
+  s_512fecfbbc3098::t_711095801c956e 201
+  s_512fecfbbc3098::t_28a4e2a604ed21 252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "7373ccedd2dcffb32e462afb6b075740569a049c",
+  "prompts": {},
+  "sessions": {
+    "s_512fecfbbc3098": {
+      "agent_id": {
+        "tool": "Volker Phobos Sasselov",
+        "id": "019e99aa-12c5-75bf-950f-5327a33aa834",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
