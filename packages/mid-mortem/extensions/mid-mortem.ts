@@ -62,7 +62,7 @@ The ticket should contain:
 - **Open threads** — anything left hanging, unresolved questions, next steps
 - **Gotchas & learnings** — bugs hit, surprising findings, things a future agent should know
 
-Run this command to create the record (mid-mortems are RECORDS — `mai artifact` is born closed, so it never clutters the work queue):
+Run this command to create the record (mid-mortems are RECORDS — \`mai artifact\` is born closed, so it never clutters the work queue):
 mai artifact "Mid-mortem: <brief topic>" -d "<one-line summary>" --tags mid-mortem,compaction -p 3
 
 Then write the full mid-mortem content to the ticket file using the write tool.
