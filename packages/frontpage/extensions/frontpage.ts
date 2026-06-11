@@ -1061,33 +1061,60 @@ export default function (pi: ExtensionAPI) {
           }
         } catch { /* no canvas image yet — non-fatal */ }
 
-        // Decision Points: surface any in-page answers the hooman submitted,
-        // mapping the stored choice key back to its human label via the spec.
+        // Decision Points: surface the hooman's answers two ways, because inside
+        // the tldraw embed the page is pointer-events:none unless they hit
+        // 'Interact'. (1) CLICKED answers, persisted server-side; (2) answers
+        // MARKED BY DRAWING on an option card (an annotation whose item is a
+        // fp-decision__option). Read both — a mark on an option IS the pick.
         let decisionsText = "";
         try {
-          const decResp = await fetch(`http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/decision`);
-          if (decResp.ok) {
-            const answered = (await decResp.json()) as Record<string, { chosenKey?: string; text?: string }>;
-            if (Object.keys(answered).length > 0) {
-              const meta = await readMeta(params.slug);
-              const decSecs = ((meta?.spec?.sections ?? []) as unknown as Array<Record<string, unknown>>).filter((s) => s.type === "decision");
-              const dl: string[] = [`Decision answers on '${params.slug}' (${Object.keys(answered).length} of ${decSecs.length} answered):`];
-              for (const sec of decSecs) {
-                const id = String(sec.id ?? "");
-                const ans = answered[id];
-                if (!ans) continue;
-                const opts = (sec.options as Array<{ key: string; label: string }> | undefined) ?? [];
-                const opt = opts.find((o) => o.key === ans.chosenKey);
-                const prompt = String(sec.prompt ?? "");
-                const promptShort = prompt.length > 80 ? prompt.slice(0, 79) + "\u2026" : prompt;
-                const choice = opt ? `chose "${opt.label}" (key=${ans.chosenKey})` : ans.chosenKey ? `chose key=${ans.chosenKey}` : "";
-                const wrote = ans.text ? `${choice ? " \u00b7 " : ""}wrote: "${ans.text}"` : "";
-                dl.push(`  \u2713 ${id} "${promptShort}": ${choice}${wrote}`);
-              }
-              const openSecs = decSecs.filter((s) => !answered[String(s.id ?? "")]);
-              if (openSecs.length > 0) dl.push(`  still open: ${openSecs.map((s) => String(s.id ?? "")).join(", ")}`);
-              decisionsText = dl.join("\n");
+          const meta = await readMeta(params.slug);
+          const decSecs = ((meta?.spec?.sections ?? []) as unknown as Array<Record<string, unknown>>).filter((s) => s.type === "decision");
+          if (decSecs.length > 0) {
+            let answered: Record<string, { chosenKey?: string; text?: string }> = {};
+            try {
+              const decResp = await fetch(`http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/decision`);
+              if (decResp.ok) answered = (await decResp.json()) as typeof answered;
+            } catch { /* server optional */ }
+            const promptOf = (sec: Record<string, unknown>) => {
+              const p = String(sec.prompt ?? "");
+              return p.length > 80 ? p.slice(0, 79) + "\u2026" : p;
+            };
+            // (1) clicked
+            const clicked: string[] = [];
+            for (const sec of decSecs) {
+              const id = String(sec.id ?? "");
+              const ans = answered[id];
+              if (!ans) continue;
+              const opts = (sec.options as Array<{ key: string; label: string }> | undefined) ?? [];
+              const opt = opts.find((o) => o.key === ans.chosenKey);
+              const choice = opt ? `chose "${opt.label}" (key=${ans.chosenKey})` : ans.chosenKey ? `chose key=${ans.chosenKey}` : "";
+              const wrote = ans.text ? `${choice ? " \u00b7 " : ""}wrote: "${ans.text}"` : "";
+              clicked.push(`  \u2713 ${id} "${promptOf(sec)}": ${choice}${wrote}`);
             }
+            // (2) marked by drawing on an option card
+            const marked: string[] = [];
+            const markedIds = new Set<string>();
+            const decById = new Map(decSecs.map((s) => [String(s.id ?? ""), s]));
+            for (const a of (state.annotations ?? []) as Array<{ refersToSection?: string; refersToItem?: { cls?: string; tag?: string; text?: string } | null }>) {
+              const secId = a.refersToSection;
+              const it = a.refersToItem;
+              if (!secId || !it || !decById.has(secId)) continue;
+              const cls = String(it.cls || it.tag || "");
+              if (!cls.includes("fp-decision__option")) continue;
+              const sec = decById.get(secId)!;
+              const optText = (it.text || "").replace(/Recommended/g, "").trim();
+              marked.push(`  \u270e ${secId} "${promptOf(sec)}": MARKED "${optText}"`);
+              markedIds.add(secId);
+            }
+            const parts: string[] = [];
+            if (clicked.length) parts.push(`Decision answers CLICKED on '${params.slug}':`, ...clicked);
+            if (marked.length) parts.push(`Decision choices MARKED BY DRAWING on '${params.slug}' (the embed isn't clickable in tldraw unless the hooman hits 'Interact' — treat a mark on an option AS the pick):`, ...marked);
+            const open = decSecs.filter((s) => !answered[String(s.id ?? "")] && !markedIds.has(String(s.id ?? "")));
+            if ((clicked.length || marked.length) && open.length) {
+              parts.push(`  still open: ${open.map((s) => String(s.id ?? "")).join(", ")}`);
+            }
+            decisionsText = parts.join("\n");
           }
         } catch { /* decisions optional */ }
 

@@ -76,6 +76,17 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 			? `/api/page/${encodeURIComponent(slug)}/embed-versioned?ts=${ts}`
 			: `/page/${encodeURIComponent(slug)}/embed`;
 		const frozen = ts > 0;
+		// Interact mode: by default the embed is pointer-events:none so the hooman
+		// can DRAW over it on the canvas. Toggling Interact flips the iframe to
+		// pointer-events:auto so clicks reach the page — decision buttons, choice
+		// cards, the floating chip and Submit all work live. Stored per-shape in
+		// meta so it survives re-renders. Frozen history embeds are never interactive.
+		const interactive = !frozen && (shape.meta as { interactive?: boolean }).interactive === true;
+		const editor = this.editor;
+		const toggleInteractive = (e: { stopPropagation: () => void }) => {
+			e.stopPropagation();
+			editor.updateShape({ id: shape.id, type: "frontpage-embed", meta: { ...shape.meta, interactive: !interactive } });
+		};
 		return (
 			<HTMLContainer
 				id={shape.id}
@@ -85,9 +96,9 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 					pointerEvents: "none",
 					overflow: "hidden",
 					background: "#fafaf7",
-					boxShadow: frozen ? "0 2px 12px rgba(0,0,0,0.06)" : "0 4px 24px rgba(0,0,0,0.10)",
+					boxShadow: frozen ? "0 2px 12px rgba(0,0,0,0.06)" : interactive ? "0 6px 28px rgba(255,56,92,0.22)" : "0 4px 24px rgba(0,0,0,0.10)",
 					borderRadius: 6,
-					border: frozen ? "1px solid #d8d8d8" : "2px solid #1f6feb",
+					border: frozen ? "1px solid #d8d8d8" : interactive ? "2px solid #FF385C" : "2px solid #1f6feb",
 					opacity: frozen ? 0.96 : 1,
 				}}
 			>
@@ -105,10 +116,26 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 						textTransform: "uppercase",
 					}}>{label}</div>
 				) : null}
+				{!frozen ? (
+					<button
+						onPointerDown={toggleInteractive}
+						title={interactive ? "Back to drawing on the canvas" : "Click to interact with the page — buttons & choices"}
+						style={{
+							position: "absolute", top: 7, right: 8, zIndex: 3,
+							pointerEvents: "auto", cursor: "pointer",
+							font: "600 11px -apple-system, BlinkMacSystemFont, sans-serif",
+							letterSpacing: "0.03em",
+							padding: "5px 11px", borderRadius: 20, border: "none",
+							background: interactive ? "#FF385C" : "rgba(255,255,255,0.94)",
+							color: interactive ? "#fff" : "#222",
+							boxShadow: "0 1px 6px rgba(0,0,0,0.2)",
+						}}
+					>{interactive ? "✏️ Done — draw" : "🖱 Interact"}</button>
+				) : null}
 				<iframe
 					src={url}
 					title={`${slug}${frozen ? "@" + ts : " (live)"}`}
-					style={{ width: "100%", height: "100%", border: 0, display: "block", background: "white", pointerEvents: "none", marginTop: label ? 24 : 0 }}
+					style={{ width: "100%", height: "100%", border: 0, display: "block", background: "white", pointerEvents: interactive ? "auto" : "none", marginTop: label ? 24 : 0 }}
 				/>
 			</HTMLContainer>
 		);
