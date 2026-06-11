@@ -1,0 +1,21 @@
+packages/shared/src/session-view.ts
+  s_5bc8f5dd982b26::t_c93d40de2c0fab 74-79
+packages/shared/src/session-view.test.ts
+  s_5bc8f5dd982b26::t_0fb2551d882a58 72-89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "92afd96bedb7e3b6dd27ceb8e9e0941a9ec09837",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
