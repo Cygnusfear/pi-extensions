@@ -1,0 +1,46 @@
+packages/frontpage/partials/css/base.css
+  s_512fecfbbc3098::t_6a30b885f7ca4c 449-508
+packages/frontpage/extensions/render.ts
+  s_512fecfbbc3098::t_ca9af34c44ea76 49
+  s_512fecfbbc3098::t_6b3bba1e4ee106 370,372-373
+  s_512fecfbbc3098::t_e53d945b9cc5cd 83-91
+  s_512fecfbbc3098::t_bc99054783de71 321-342
+  s_512fecfbbc3098::t_af5019de7fe6b8 179,182-184
+  s_512fecfbbc3098::t_267fb87a028a1e 426-449
+  s_512fecfbbc3098::t_2c5f0a76e8195f 470-471
+packages/frontpage/extensions/frontpage.ts
+  s_512fecfbbc3098::t_378d93a00aeb5d 314-325,330
+  s_512fecfbbc3098::t_833af728f36cec 1153-1157
+  s_512fecfbbc3098::t_85f346aba4c365 1064-1072,1074-1093
+  s_512fecfbbc3098::t_ba5d0de993c69b 1073
+  s_512fecfbbc3098::t_8f858449da64ec 1095,1098
+packages/frontpage/extensions/decision-render.test.ts
+  s_512fecfbbc3098::t_bbe21fdc1d9940 45-46
+  s_512fecfbbc3098::t_db90aff410dbee 1-44,47-55,57,62-70
+  s_512fecfbbc3098::t_f362c7875ddd45 56,58-61
+packages/frontpage/partials/shell.html
+  s_512fecfbbc3098::t_756b4f05262bae 21,27
+packages/frontpage/partials/sections/decision.html
+  s_512fecfbbc3098::t_b7d9f9183d9d86 1-22
+packages/frontpage/server-process/server.ts
+  s_512fecfbbc3098::t_9116441b60eaed 236-274
+  s_512fecfbbc3098::t_b18ccfea735d9c 314-316
+packages/frontpage/partials/js/decision.frag.js
+  s_512fecfbbc3098::t_b12b0dc1a4908d 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "196642943a77ba2a1843bb5a62283486ddf217ba",
+  "prompts": {},
+  "sessions": {
+    "s_512fecfbbc3098": {
+      "agent_id": {
+        "tool": "Volker Phobos Sasselov",
+        "id": "019e99aa-12c5-75bf-950f-5327a33aa834",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
