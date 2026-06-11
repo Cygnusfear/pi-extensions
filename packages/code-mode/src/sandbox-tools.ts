@@ -169,6 +169,8 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     rules: (opts?: { cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
     /** Retire a KNOWLEDGE rule (active → superseded). 'close' is rejected on rules. */
     supersede: (id: string, by?: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
+    /** Change a note's KIND, preserving its ID + history (repairs mis-filed notes). Aligns status to the new class (RECORD→closed, KNOWLEDGE→active, WORK→open). */
+    reclass: (id: string, kind: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
   };
 
   const mai: MaiNs = (async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string } = {}) => {
@@ -279,6 +281,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     const args = ["supersede", id];
     if (by) args.push("--by", by);
     const r = await maiRun(args, maiResolveDir(opts?.cwd));
+    return { ok: r.status === 0 };
+  };
+
+  mai.reclass = async (id, kind, opts) => {
+    const r = await maiRun(["reclass", id, "-k", kind], maiResolveDir(opts?.cwd));
     return { ok: r.status === 0 };
   };
 

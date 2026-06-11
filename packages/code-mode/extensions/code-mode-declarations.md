@@ -464,6 +464,9 @@ declare const mai: {
   /** Retire a KNOWLEDGE rule (active → superseded). mai.close() is rejected on rules. */
   supersede(id: string, by?: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
 
+  /** Change a note's KIND, preserving ID + history (repairs mis-filed notes). Aligns status to the new class (RECORD→closed, KNOWLEDGE→active, WORK→open). */
+  reclass(id: string, kind: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
+
   /** Create a short Maiboard ticket link. */
   ticketLink(input: string | { ticket: string }): Promise<{
     ticket: string;
