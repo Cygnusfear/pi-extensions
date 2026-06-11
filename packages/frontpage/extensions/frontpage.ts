@@ -68,6 +68,75 @@ function formatMermaidFindingsSection(
 
 // ---- storage paths ----
 const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
+/**
+ * Cap a PNG to Anthropic's image limits before it goes into a tool result.
+ *
+ * Extension tool-result images are NOT auto-resized by the harness (only the
+ * built-in read tool + CLI attachments are), so frontpage_read must guarantee
+ * the canvas PNG is within bounds itself — Anthropic rejects images over
+ * 8000px or ~5MB base64, which would break the turn.
+ *
+ * Targets <=1800px long edge and <=4.5MB base64. The client already exports a
+ * focused, ~1600px region, so this is normally a no-op pass-through; it only
+ * acts if the image is somehow oversized (old bundle, huge drawing spread).
+ * Uses macOS `sips` (no deps). NEVER upscales. Returns base64, or null if it
+ * cannot be brought under budget — the caller then skips the image rather than
+ * break the harness.
+ */
+async function capPngForApi(bytes: Buffer): Promise<string | null> {
+	const MAX_B64 = 4.5 * 1024 * 1024;
+	const MAX_DIM = 1800;
+	const b64Len = (rawBytes: number) => Math.ceil(rawBytes / 3) * 4;
+
+	const tmp = path.join(os.tmpdir(), `fp-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`);
+	const sipsResize = (file: string, dim: number) =>
+		new Promise<void>((res) => {
+			const p = spawn("sips", ["-Z", String(dim), file], { stdio: "ignore" });
+			p.on("close", () => res());
+			p.on("error", () => res());
+		});
+	const sipsDims = (file: string) =>
+		new Promise<{ w: number; h: number } | null>((res) => {
+			const p = spawn("sips", ["-g", "pixelWidth", "-g", "pixelHeight", file], { stdio: ["ignore", "pipe", "ignore"] });
+			let out = "";
+			p.stdout?.on("data", (d) => { out += d.toString(); });
+			p.on("close", () => {
+				const w = /pixelWidth:\s*(\d+)/.exec(out)?.[1];
+				const h = /pixelHeight:\s*(\d+)/.exec(out)?.[1];
+				res(w && h ? { w: Number(w), h: Number(h) } : null);
+			});
+			p.on("error", () => res(null));
+		});
+
+	try {
+		await fsp.writeFile(tmp, bytes);
+		const dims = await sipsDims(tmp);
+		const maxDim = dims ? Math.max(dims.w, dims.h) : 0;
+
+		// Already safe → pass through (no upscaling, no recompression).
+		if (maxDim > 0 && maxDim <= MAX_DIM && b64Len(bytes.length) <= MAX_B64) {
+			return bytes.toString("base64");
+		}
+
+		let dim = maxDim > 0 ? Math.min(MAX_DIM, maxDim) : MAX_DIM;
+		await sipsResize(tmp, dim);
+		let out = await fsp.readFile(tmp);
+		let guard = 0;
+		while (b64Len(out.length) > MAX_B64 && dim > 600 && guard++ < 6) {
+			dim = Math.floor(dim * 0.8);
+			await sipsResize(tmp, dim);
+			out = await fsp.readFile(tmp);
+		}
+		if (b64Len(out.length) > MAX_B64) return null;
+		return out.toString("base64");
+	} catch {
+		// sips unavailable/failed — return original only if already within budget.
+		return b64Len(bytes.length) <= MAX_B64 ? bytes.toString("base64") : null;
+	} finally {
+		fsp.unlink(tmp).catch(() => {});
+	}
+}
+
 function pagePath(slug: string): string { return path.join(STORE_DIR, `${slug}.html`); }
 function metaPath(slug: string): string { return path.join(STORE_DIR, `${slug}.meta.json`); }
 
@@ -914,12 +983,13 @@ export default function (pi: ExtensionAPI) {
     label: "Frontpage · read",
     description:
       "Read a frontpage's current annotation state — every sticky note / arrow / drawing the hooman has placed on the tldraw canvas, with each annotation mapped to the section AND specific item it overlaps. " +
-      "Always call this when the hooman says they 'added notes', 'annotated', or 'drew on' a page — it returns the spatial mapping (sticky → section + item) the agent needs to interpret what they're communicating.",
+      "Always call this when the hooman says they 'added notes', 'annotated', or 'drew on' a page — it returns the spatial mapping (sticky → section + item) AND a PNG IMAGE of the whole canvas so you can SEE freehand drawings, handwriting, and arrows the text mapping can't capture. Read the image, don't just the text.",
     promptSnippet: "Read sticky-note annotations on a frontpage with section + item attribution. Call any time the hooman annotates.",
     promptGuidelines: [
       "Call frontpage_read whenever the hooman annotates a frontpage. Don't guess what they meant — the tool returns the exact section + item each shape overlaps.",
       "Item attribution is the gold. When a sticky has '› item#N <tag> \"text\"', the hooman is targeting that specific card / kpi-item / paragraph. Don't generalise to the whole section.",
       "Arrows ARE the strongest signal: from-section/item → to-section/item is a literal 'these are linked' statement. Read both endpoints.",
+      "The result includes a PNG of the canvas when the hooman has drawn. READ IT — handwritten notes, freehand sketches, and what an arrow physically points at are only visible in the image, not the text mapping.",
       "After reading, act: patch the page via frontpage_update for substantive changes, or just acknowledge in chat for thumbs-up / agreement stickies.",
       "Do NOT delete the hooman's stickies as part of any patch — they clear them themselves.",
     ],
@@ -962,9 +1032,29 @@ export default function (pi: ExtensionAPI) {
           annotationCount: number;
         };
 
+        // Canvas vision: pull the PNG the browser exports on every draw, so the
+        // agent SEES handwriting/arrows/sketches the spatial text-mapping can't
+        // convey (the gap that forced the hooman to paste screenshots manually).
+        let imageBlock: { type: "image"; data: string; mimeType: string } | null = null;
+        try {
+          const imgResp = await fetch(`http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/canvas-image`);
+          if (imgResp.ok) {
+            const ab = await imgResp.arrayBuffer();
+            if (ab.byteLength > 0) {
+              // Hard-guarantee the image is within Anthropic's limits (extension
+              // tool images are NOT auto-resized by the harness).
+              const data = await capPngForApi(Buffer.from(ab));
+              if (data) imageBlock = { type: "image", data, mimeType: "image/png" };
+            }
+          }
+        } catch { /* no canvas image yet — non-fatal */ }
+
         if (state.annotationCount === 0) {
+          const noteText = imageBlock
+            ? `No section-mapped annotations on '${params.slug}', but the hooman HAS drawn on the canvas — read the image below (freehand notes/handwriting/arrows the text mapping can't capture).`
+            : `No annotations on '${params.slug}'. Either the hooman hasn't drawn anything yet, or the page hasn't been opened in the browser (which is when section bounds get measured).`;
           return {
-            content: [{ type: "text", text: `No annotations on '${params.slug}'. Either the hooman hasn't drawn anything yet, or the page hasn't been opened in the browser (which is when section bounds get measured).` }],
+            content: [{ type: "text", text: noteText }, ...(imageBlock ? [imageBlock] : [])],
             details: state,
           };
         }
@@ -1017,8 +1107,11 @@ export default function (pi: ExtensionAPI) {
             lines.push(`    • arrow${label}: ${fromS}${fromI}  →  ${toS}${toI}`);
           }
         }
+        const textOut = lines.join("\n") + (imageBlock
+          ? "\n\nThe canvas image below shows the hooman's drawings in full — READ IT to catch what the text mapping above can't convey: freehand handwriting, sketches, and exactly what each arrow points at."
+          : "");
         return {
-          content: [{ type: "text", text: lines.join("\n") }],
+          content: [{ type: "text", text: textOut }, ...(imageBlock ? [imageBlock] : [])],
           details: state,
         };
       } catch (err) {

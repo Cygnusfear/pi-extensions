@@ -15,6 +15,7 @@ import { createRoot } from "react-dom/client";
 import {
 	Tldraw,
 	BaseBoxShapeUtil,
+	Box,
 	HTMLContainer,
 	type TLBaseShape,
 	type RecordProps,
@@ -116,6 +117,27 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 	indicator(shape: FrontpageEmbedShape) {
 		return <rect width={shape.props.w} height={shape.props.h} rx={6} ry={6} />;
 	}
+
+	// Exported representation (editor.toImage). The live iframe can't be
+	// rasterized into the SVG export, so the embed renders as a LABELED FRAME —
+	// enough spatial reference for the agent to see where the hooman's drawings
+	// sit relative to each version. The drawings themselves export natively.
+	override toSvg(shape: FrontpageEmbedShape) {
+		const { w, h, slug, label, ts } = shape.props;
+		const frozen = ts > 0;
+		const accent = frozen ? "#9aa0a6" : "#1f6feb";
+		const barFill = frozen ? "#ededed" : "#1f6feb";
+		const barText = frozen ? "#666666" : "#ffffff";
+		return (
+			<g>
+				<rect x={0} y={0} width={w} height={h} rx={6} ry={6} fill="#fafaf7" stroke={accent} strokeWidth={frozen ? 1 : 2} />
+				<rect x={0} y={0} width={w} height={24} fill={barFill} />
+				<text x={10} y={16} fontFamily="-apple-system, sans-serif" fontSize={11} fontWeight={600} fill={barText}>{(label || slug).toUpperCase()}</text>
+				<text x={w / 2} y={h / 2} textAnchor="middle" fontFamily="-apple-system, sans-serif" fontSize={22} fill="#c2c2c2">{slug}</text>
+				<text x={w / 2} y={h / 2 + 28} textAnchor="middle" fontFamily="-apple-system, sans-serif" fontSize={13} fill="#d4d4d4">frontpage embed</text>
+			</g>
+		);
+	}
 }
 
 // ---- persistence helpers ----
@@ -135,6 +157,18 @@ async function loadServerSnapshot(slug: string): Promise<unknown | null> {
 		const body = (await r.json()) as { snapshot?: unknown | null };
 		return body.snapshot ?? null;
 	} catch { return null; }
+}
+
+async function postCanvasImage(slug: string, blob: Blob): Promise<void> {
+	try {
+		await fetch(`/api/page/${encodeURIComponent(slug)}/canvas-image`, {
+			method: "POST",
+			headers: { "content-type": "image/png" },
+			body: blob,
+		});
+	} catch (err) {
+		console.error("[frontpage] postCanvasImage failed:", err);
+	}
 }
 
 async function postSnapshot(slug: string, snapshot: unknown): Promise<boolean> {
@@ -300,7 +334,49 @@ function App({ slug }: { slug: string }) {
 				}
 			};
 			const saveSoon = debounce(doSave, 350);
-			const unlisten = ed.store.listen(() => { saveSoon(); });
+
+			// CANVAS VISION: export the whole canvas (frontpage frame + the
+			// hooman's drawings/handwriting/arrows) to a PNG whenever the canvas
+			// changes — change-driven + debounced, NO polling. Gated to when there
+			// is at least one drawing (a non-embed shape), so embed-only canvases
+			// don't burn exports. The agent reads this via frontpage_read to SEE
+			// handwriting/arrows the text mapping can't convey.
+			const exportCanvasImage = async () => {
+				if (!hydrated) return;
+				try {
+					const shapes = ed.getCurrentPageShapes();
+					const drawings = shapes.filter((s) => s.type !== "frontpage-embed");
+					if (drawings.length === 0) return;
+					// Export the REGION OF INTEREST (bounds of the hooman's drawings
+					// + padding), NOT the whole multi-version filmstrip — that can be
+					// 10000px+ tall and blow past Anthropic's image limits (8000px /
+					// 5MB). Focusing keeps the image small AND the handwriting legible.
+					let region: Box | null = null;
+					for (const s of drawings) {
+						const b = ed.getShapePageBounds(s);
+						if (!b) continue;
+						region = region ? region.union(b) : new Box(b.minX, b.minY, b.width, b.height);
+					}
+					if (!region) return;
+					region.expandBy(64);
+					// Cap the long edge ~1600px (Anthropic downscales >1568 anyway),
+					// allow up to 2x on small regions for crisp handwriting. The
+					// frontpage_read tool also hard-guarantees the final size.
+					const longEdge = Math.max(region.width, region.height);
+					const scale = Math.max(0.2, Math.min(2, 1600 / longEdge));
+					// Pass all shape ids + a bounds clip so the embed frame under the
+					// drawings renders too, clipped to the region.
+					const out = await ed.toImage(shapes.map((s) => s.id), {
+						format: "png", background: true, bounds: region, scale,
+					});
+					await postCanvasImage(slug, out.blob);
+				} catch (err) {
+					console.error("[frontpage] canvas image export failed:", err);
+				}
+			};
+			const exportImageSoon = debounce(() => { void exportCanvasImage(); }, 1200);
+
+			const unlisten = ed.store.listen(() => { saveSoon(); exportImageSoon(); });
 
 			// Apply default style + load saved snapshot (best-effort; cannot
 			// block persistence anymore since the listener is already live).
@@ -397,12 +473,23 @@ function App({ slug }: { slug: string }) {
 					const liveEmbeds = allEmbeds.filter((s) => ((s.props as { ts?: number }).ts ?? 0) === 0);
 					if (liveEmbeds.length === 0) return;
 
-					// Reference geometry = the RIGHTMOST embed (the filmstrip
-					// grows left→right; the newest CURRENT goes furthest right).
+					// Reference geometry = the RIGHTMOST embed (the filmstrip grows
+					// left→right; the newest CURRENT goes furthest right). Y stays
+					// aligned to the embed strip so versions line up for comparison.
 					const rightmost = allEmbeds.reduce((a, b) => ((a as { x: number }).x >= (b as { x: number }).x ? a : b));
 					const rp = rightmost.props as { w: number; h: number };
 					const rightX = (rightmost as { x: number }).x;
 					const rightY = (rightmost as { y: number }).y;
+
+					// X position = past the right edge of ALL page shapes, not just
+					// embeds — the hooman draws notes/arrows/handwriting to the side
+					// of the embed, and a new version must never land on top of
+					// them. getShapePageBounds covers draw/arrow/note/geo shapes.
+					let maxRight = rightX + rp.w;
+					for (const s of ed.getCurrentPageShapes()) {
+						const b = ed.getShapePageBounds(s);
+						if (b && b.maxX > maxRight) maxRight = b.maxX;
+					}
 
 					// 1. Freeze EVERY live embed at the prior version (there
 					//    should be exactly one, but guard against dupes so we
@@ -417,11 +504,12 @@ function App({ slug }: { slug: string }) {
 						}
 					}
 
-					// 2. Append ONE fresh live embed to the right of the rightmost.
-					const gap = 100;
+					// 2. Append ONE fresh live embed past the right edge of
+					//    EVERYTHING on the canvas (embeds + the hooman's drawings).
+					const gap = 120;
 					ed.createShape<FrontpageEmbedShape>({
 						type: "frontpage-embed",
-						x: rightX + rp.w + gap,
+						x: maxRight + gap,
 						y: rightY,
 						props: { w: 1200, h: 1500, slug, ts: 0, label: "CURRENT" },
 					});

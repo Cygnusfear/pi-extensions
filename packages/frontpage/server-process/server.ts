@@ -208,6 +208,31 @@ app.get("/page/:slug/embed", async (c) => {
 	}
 });
 
+// Canvas vision: the browser POSTs a PNG of the whole tldraw canvas (frontpage
+// frame + the hooman's drawings) on every change; frontpage_read returns it so
+// the agent can SEE handwriting/arrows the text mapping can't convey.
+app.post("/api/page/:slug/canvas-image", async (c) => {
+	const slug = c.req.param("slug");
+	try {
+		const buf = Buffer.from(await c.req.arrayBuffer());
+		if (buf.length === 0) return c.json({ ok: false, error: "empty body" }, 400);
+		await fsp.writeFile(canvasImagePath(slug), buf);
+		return c.json({ ok: true, bytes: buf.length });
+	} catch (e) {
+		return c.json({ ok: false, error: String(e) }, 500);
+	}
+});
+
+app.get("/api/page/:slug/canvas-image", async (c) => {
+	const slug = c.req.param("slug");
+	try {
+		const buf = await fsp.readFile(canvasImagePath(slug));
+		return c.body(buf, 200, { "content-type": "image/png" });
+	} catch {
+		return c.text("Not found", 404);
+	}
+});
+
 app.post("/api/page/:slug/dismiss-diff", async (c) => {
 	const slug = c.req.param("slug");
 	try { await fsp.unlink(diffPath(slug)); } catch { /* didn't exist; fine */ }
@@ -243,6 +268,9 @@ function layoutPath(slug: string): string {
 }
 function historyPath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.history.jsonl`);
+}
+function canvasImagePath(slug: string): string {
+	return path.join(STORE_DIR, `${slug}.canvas.png`);
 }
 function diffPath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.diff.json`);
