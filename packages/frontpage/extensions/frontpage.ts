@@ -311,11 +311,23 @@ const MarkdownTableSchema = Type.Object({ ...SectionCommon,
   notes: Type.Optional(Type.String()),
 });
 
+const DecisionSchema = Type.Object({ ...SectionCommon,
+  type: Type.Literal("decision"),
+  prompt: Type.String({ description: "The question for the hooman. Frame it as one clear ask." }),
+  options: Type.Optional(Type.Array(Type.Object({
+    key: Type.String({ description: "Short stable key, e.g. 'a' or 'navy' — what the answer reports back." }),
+    label: Type.String(),
+    detail: Type.Optional(Type.String({ description: "One line of context under the label." })),
+    recommended: Type.Optional(Type.Boolean({ description: "Marks your recommended pick." })),
+  }), { description: "Choice cards (radio). Omit for a free-text-only question." })),
+  allowText: Type.Optional(Type.Boolean({ description: "Show a free-text answer field (with or instead of options)." })),
+});
+
 const SectionSchema = Type.Union([
   LeadSchema, ProseSchema, PullQuoteSchema, CalloutSchema,
   KpiGridSchema, TableSchema, MarkdownTableSchema, TimelineSchema, CardGridSchema,
   MermaidSchema, D3Schema, ChartJsSchema, SvgSchema,
-  AnnotationChartSchema, RawHtmlSchema,
+  AnnotationChartSchema, RawHtmlSchema, DecisionSchema,
 ]);
 
 const SpecSchema = Type.Object({
@@ -1049,10 +1061,41 @@ export default function (pi: ExtensionAPI) {
           }
         } catch { /* no canvas image yet — non-fatal */ }
 
+        // Decision Points: surface any in-page answers the hooman submitted,
+        // mapping the stored choice key back to its human label via the spec.
+        let decisionsText = "";
+        try {
+          const decResp = await fetch(`http://${info.host}:${info.port}/api/page/${encodeURIComponent(params.slug)}/decision`);
+          if (decResp.ok) {
+            const answered = (await decResp.json()) as Record<string, { chosenKey?: string; text?: string }>;
+            if (Object.keys(answered).length > 0) {
+              const meta = await readMeta(params.slug);
+              const decSecs = ((meta?.spec?.sections ?? []) as unknown as Array<Record<string, unknown>>).filter((s) => s.type === "decision");
+              const dl: string[] = [`Decision answers on '${params.slug}' (${Object.keys(answered).length} of ${decSecs.length} answered):`];
+              for (const sec of decSecs) {
+                const id = String(sec.id ?? "");
+                const ans = answered[id];
+                if (!ans) continue;
+                const opts = (sec.options as Array<{ key: string; label: string }> | undefined) ?? [];
+                const opt = opts.find((o) => o.key === ans.chosenKey);
+                const prompt = String(sec.prompt ?? "");
+                const promptShort = prompt.length > 80 ? prompt.slice(0, 79) + "\u2026" : prompt;
+                const choice = opt ? `chose "${opt.label}" (key=${ans.chosenKey})` : ans.chosenKey ? `chose key=${ans.chosenKey}` : "";
+                const wrote = ans.text ? `${choice ? " \u00b7 " : ""}wrote: "${ans.text}"` : "";
+                dl.push(`  \u2713 ${id} "${promptShort}": ${choice}${wrote}`);
+              }
+              const openSecs = decSecs.filter((s) => !answered[String(s.id ?? "")]);
+              if (openSecs.length > 0) dl.push(`  still open: ${openSecs.map((s) => String(s.id ?? "")).join(", ")}`);
+              decisionsText = dl.join("\n");
+            }
+          }
+        } catch { /* decisions optional */ }
+
         if (state.annotationCount === 0) {
-          const noteText = imageBlock
+          const baseNote = imageBlock
             ? `No section-mapped annotations on '${params.slug}', but the hooman HAS drawn on the canvas — read the image below (freehand notes/handwriting/arrows the text mapping can't capture).`
             : `No annotations on '${params.slug}'. Either the hooman hasn't drawn anything yet, or the page hasn't been opened in the browser (which is when section bounds get measured).`;
+          const noteText = decisionsText ? `${decisionsText}\n\n${baseNote}` : baseNote;
           return {
             content: [{ type: "text", text: noteText }, ...(imageBlock ? [imageBlock] : [])],
             details: state,
@@ -1107,9 +1150,11 @@ export default function (pi: ExtensionAPI) {
             lines.push(`    • arrow${label}: ${fromS}${fromI}  →  ${toS}${toI}`);
           }
         }
-        const textOut = lines.join("\n") + (imageBlock
-          ? "\n\nThe canvas image below shows the hooman's drawings in full — READ IT to catch what the text mapping above can't convey: freehand handwriting, sketches, and exactly what each arrow points at."
-          : "");
+        const textOut = lines.join("\n")
+          + (decisionsText ? "\n\n" + decisionsText : "")
+          + (imageBlock
+            ? "\n\nThe canvas image below shows the hooman's drawings in full — READ IT to catch what the text mapping above can't convey: freehand handwriting, sketches, and exactly what each arrow points at."
+            : "");
         return {
           content: [{ type: "text", text: textOut }, ...(imageBlock ? [imageBlock] : [])],
           details: state,

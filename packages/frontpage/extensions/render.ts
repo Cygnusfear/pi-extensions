@@ -46,7 +46,7 @@ export type SectionSpec =
   | LeadSec | ProseSec | PullQuoteSec | CalloutSec
   | KpiGridSec | TableSec | MarkdownTableSec | TimelineSec | CardGridSec
   | MermaidSec | D3Sec | ChartJsSec | SvgSec
-  | AnnotationChartSec | RawHtmlSec;
+  | AnnotationChartSec | RawHtmlSec | DecisionSec;
 
 interface BaseSec { id?: string; label?: string; }
 
@@ -80,6 +80,15 @@ export interface AnnotationChartSec extends BaseSec {
   width?: number; height?: number;
 }
 export interface RawHtmlSec extends BaseSec { type: "raw_html"; html: string; }
+export interface DecisionSec extends BaseSec {
+  type: "decision";
+  /** The question posed to the hooman. */
+  prompt: string;
+  /** Optional choice cards. Omit for a free-text-only question. */
+  options?: { key: string; label: string; detail?: string; recommended?: boolean }[];
+  /** Show a free-text answer field (with or instead of options). */
+  allowText?: boolean;
+}
 
 // ---- Partial loader with dev-time cache ----
 
@@ -167,9 +176,12 @@ interface RenderCtx {
   // carries JS fragments we append into the single bottom <script type="module">
   scripts: string[];
   // which libs the page will need
-  needs: { mermaid: boolean; d3: boolean; chartjs: boolean; zoomPan: boolean; };
+  needs: { mermaid: boolean; d3: boolean; chartjs: boolean; zoomPan: boolean; decisions: boolean; };
   // section index counter for stagger animation
   i: number;
+  // decision-point bookkeeping: total (pre-scanned) + running index
+  decisionTotal: number;
+  decisionSeen: number;
 }
 
 function labelBlock(label?: string): string {
@@ -306,6 +318,28 @@ function renderSection(sec: SectionSpec, ctx: RenderCtx): string {
     }
     case "raw_html":
       return fill(read("sections/raw-html.html"), { id, i, html: sec.html });
+    case "decision": {
+      ctx.needs.decisions = true;
+      const index = ++ctx.decisionSeen;
+      const options = (sec.options ?? []).map(o => {
+        const recClass = o.recommended ? " fp-decision__option--recommended" : "";
+        const recBlock = o.recommended ? ` <span class="fp-decision__rec">Recommended</span>` : "";
+        const detail = o.detail ? `<span class="fp-decision__opt-detail">${escapeHtml(o.detail)}</span>` : "";
+        return `<button class="fp-decision__option${recClass}" type="button" data-fp-option="${escapeHtml(o.key)}">\n` +
+          `  <span class="fp-decision__radio" aria-hidden="true"></span>\n` +
+          `  <span class="fp-decision__opt-main"><span class="fp-decision__opt-label">${escapeHtml(o.label)}${recBlock}</span>${detail}</span>\n` +
+          `</button>`;
+      }).join("\n");
+      const textBlock = sec.allowText
+        ? `<textarea class="fp-decision__text" data-fp-text rows="2" placeholder="Type your answer\u2026"></textarea>`
+        : "";
+      return fill(read("sections/decision.html"), {
+        id, i, label_block: lbl,
+        prompt: escapeHtml(sec.prompt),
+        index, total: ctx.decisionTotal,
+        options, text_block: textBlock,
+      });
+    }
   }
 }
 
@@ -333,8 +367,10 @@ export function render(spec: FrontpageSpec): string {
     palette: spec.palette,
     register: spec.register,
     scripts: [],
-    needs: { mermaid: false, d3: false, chartjs: false, zoomPan: false },
+    needs: { mermaid: false, d3: false, chartjs: false, zoomPan: false, decisions: false },
     i: 1,
+    decisionTotal: spec.sections.filter(s => s.type === "decision").length,
+    decisionSeen: 0,
   };
 
   const sections = spec.sections.map(s => renderSection(s, ctx)).join("\n");
@@ -387,6 +423,30 @@ try {
     zoomPanInline = zp.replace(/^export\s+function\s+/m, "function ");
   }
 
+  if (ctx.needs.decisions) {
+    ctx.scripts.push(fill(read("js/decision.frag.js"), { slug: spec.slug }));
+  }
+
+  // Decision Points surfacing: a header count pill + a floating chip that
+  // follows the reader down a long page. Counts shown are TOTAL; the page
+  // script decrements them as the hooman answers (stored server-side).
+  let decisionsHeader = "";
+  let decisionsFloat = "";
+  if (ctx.decisionTotal > 0) {
+    const firstId = spec.sections.find(s => s.type === "decision")?.id ?? "";
+    const noun = ctx.decisionTotal === 1 ? "decision needs you" : "decisions need you";
+    decisionsHeader =
+      `<a class="fp-decisions-pill" href="#${escapeHtml(firstId)}" data-fp-decisions-pill>` +
+      `<span class="fp-decisions-pill__count" data-fp-pill-count>${ctx.decisionTotal}</span>` +
+      `<span class="fp-decisions-pill__label">${noun}</span>` +
+      `<span class="fp-decisions-pill__jump">Jump \u2193</span></a>`;
+    decisionsFloat =
+      `<button class="fp-decisions-chip" data-fp-decisions-chip type="button" hidden>` +
+      `<span class="fp-decisions-chip__count" data-fp-chip-count>0</span>` +
+      `<span class="fp-decisions-chip__label">unanswered</span>` +
+      `<span class="fp-decisions-chip__next">\u00b7 next \u2192</span></button>`;
+  }
+
   const scriptBody = [
     ...imports,
     zoomPanInline,
@@ -407,6 +467,8 @@ try {
     register_css: read(`css/registers/${spec.register}.css`),
     extra_head: spec.extra_head ?? "",
     byline_block: bylineBlock(spec),
+    decisions_header: decisionsHeader,
+    decisions_float: decisionsFloat,
     sections,
     scripts,
   });

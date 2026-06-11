@@ -1,0 +1,22 @@
+<section class="section fp-decision animate" id="{{id}}" data-id="{{id}}" data-fp-decision="{{id}}" style="--i:{{i}}">
+{{label_block}}  <div class="fp-decision__card">
+    <div class="fp-decision__head">
+      <span class="fp-decision__brand"><span class="fp-decision__dot" aria-hidden="true"></span>Decision<span class="fp-decision__sub">· needs your answer</span></span>
+      <span class="fp-decision__counter" data-fp-counter>#{{index}} of {{total}}</span>
+    </div>
+    <p class="fp-decision__prompt">{{prompt}}</p>
+    <div class="fp-decision__options">
+{{options}}
+    </div>
+    {{text_block}}
+    <div class="fp-decision__foot">
+      <button class="fp-decision__submit" type="button" data-fp-submit>Submit answer</button>
+      <span class="fp-decision__hint">or drop a sticky on a choice — the agent reads either</span>
+    </div>
+    <div class="fp-decision__answered" data-fp-answered hidden>
+      <span class="fp-decision__answered-check" aria-hidden="true">✓</span>
+      <span class="fp-decision__answered-text" data-fp-answered-text>Answered</span>
+      <button class="fp-decision__change" type="button" data-fp-change>Change</button>
+    </div>
+  </div>
+</section>

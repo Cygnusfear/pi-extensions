@@ -233,6 +233,45 @@ app.get("/api/page/:slug/canvas-image", async (c) => {
 	}
 });
 
+// Decision Points: the page POSTs the hooman's answer to a 'decision' block;
+// frontpage_read reads it back. Persisted as <slug>.decisions.json keyed by
+// section id -> { chosenKey?, text?, at }. Mirrors the canvas-image round-trip.
+type StoredDecision = { chosenKey?: string; text?: string; at: number };
+app.post("/api/page/:slug/decision", async (c) => {
+	const slug = c.req.param("slug");
+	try {
+		const body = (await c.req.json()) as { id?: unknown; chosenKey?: unknown; text?: unknown; clear?: unknown };
+		const id = typeof body.id === "string" ? body.id : "";
+		if (!id) return c.json({ ok: false, error: "missing id" }, 400);
+		let store: Record<string, StoredDecision> = {};
+		try { store = JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8")); } catch { /* none yet */ }
+		if (body.clear === true) {
+			delete store[id];
+		} else {
+			const entry: StoredDecision = { at: Date.now() };
+			if (typeof body.chosenKey === "string") entry.chosenKey = body.chosenKey;
+			if (typeof body.text === "string" && body.text.trim()) entry.text = body.text.trim();
+			if (entry.chosenKey === undefined && entry.text === undefined) {
+				return c.json({ ok: false, error: "empty answer" }, 400);
+			}
+			store[id] = entry;
+		}
+		await fsp.writeFile(decisionsPath(slug), JSON.stringify(store, null, 2), "utf8");
+		return c.json({ ok: true });
+	} catch (e) {
+		return c.json({ ok: false, error: String(e) }, 500);
+	}
+});
+
+app.get("/api/page/:slug/decision", async (c) => {
+	const slug = c.req.param("slug");
+	try {
+		return c.json(JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8")));
+	} catch {
+		return c.json({});
+	}
+});
+
 app.post("/api/page/:slug/dismiss-diff", async (c) => {
 	const slug = c.req.param("slug");
 	try { await fsp.unlink(diffPath(slug)); } catch { /* didn't exist; fine */ }
@@ -271,6 +310,9 @@ function historyPath(slug: string): string {
 }
 function canvasImagePath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.canvas.png`);
+}
+function decisionsPath(slug: string): string {
+	return path.join(STORE_DIR, `${slug}.decisions.json`);
 }
 function diffPath(slug: string): string {
 	return path.join(STORE_DIR, `${slug}.diff.json`);
