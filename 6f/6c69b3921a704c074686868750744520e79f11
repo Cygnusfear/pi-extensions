@@ -1,0 +1,20 @@
+packages/mid-mortem/extensions/mid-mortem.ts
+  s_580d05a9e2bede::t_99136d9a590d99 71
+  s_580d05a9e2bede::t_cd8bf05097295c 65-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "6f6c69b3921a704c074686868750744520e79f11",
+  "prompts": {},
+  "sessions": {
+    "s_580d05a9e2bede": {
+      "agent_id": {
+        "tool": "Pedro Io Thaler",
+        "id": "019e93b5-ea34-77ef-887b-d7b7f59c9c9a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
