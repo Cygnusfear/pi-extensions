@@ -560,7 +560,7 @@ RIGHT: Fix: investigate SpacetimeDB composite btree API
 ## Rules
 
 - When looking for `CLAUDE.md`, always check for the nearest existing `AGENTS.md` first. Locate it with `fd`/`Glob` or `Read({ path, optional: true })`; missing convention files are normal and must not abort the whole task. If a skill lookup returns a directory, read its `SKILL.md` file.
-- When entering a folder check and run `mai ls -k constraint; mai ls -k warning; mai ready` and `mai context <path>` per file. For more info `for k in constraint warning decision; do echo "── $k ──"; mai ls -k $k; done; echo "── ready ──"; mai ready; echo "──blocked ──"; mai blocked` and see the `mai-harness` skill.
+- When entering a folder, run the arrival ritual: `mai rules` (active constraints + warnings) and `mai context <path>` per file; `mai ls -k constraint` / `-k warning` give kind-filtered views. NOTE: `mai ls` is the WORK queue only — rules and records are excluded by kind. Notes carry an epistemic CLASS: file a rule with `mai constraint`/`mai warn` (KNOWLEDGE, retire via `mai supersede`), a delivered output with `mai artifact` (RECORD, born closed), work with `mai ticket` (WORK). Never file a rule or record as a ticket. See the `ticket-guide` skill.
 - Before editing, read the nearest existing `AGENTS.md` in the target code folder. Do not guess paths; if none exists, record that none exists and continue.
 - Before starting on a ticket, you always have a plan ticket in `mai`, either existing or make one.
 - Update or add `AGENTS.md` only after explicit `[OK]` from the hooman.

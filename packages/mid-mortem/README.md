@@ -1,6 +1,6 @@
 # @pi-extensions/mid-mortem
 
-Automatic session checkpointing before context compaction — decisions, progress, and gotchas are captured as mai tickets so nothing is lost.
+Automatic session checkpointing before context compaction — decisions, progress, and gotchas are captured as born-closed mai artifacts (RECORDs) so nothing is lost — and they never clutter the work queue.
 
 ## Why
 
@@ -9,14 +9,14 @@ Pi compacts long conversations to stay within context limits. When it does, old 
 ## Features
 
 - **Automatic triggering** — hooks into pi's `session_before_compact` event
-- **Ephemeral agent** — spawns a detached pi process that reads the transcript and writes a mai ticket
+- **Ephemeral agent** — spawns a detached pi process that reads the transcript and writes a mai artifact (a born-closed RECORD)
 - **Non-blocking** — the compaction continues immediately; the mid-mortem writes in the background
 - **Structured capture** — decisions, progress, open threads, and gotchas are all recorded
 - **Minimum threshold** — only fires when there are 4+ messages and 200+ characters of content
 
 ## What Gets Captured
 
-The mid-mortem ticket contains:
+The mid-mortem artifact contains:
 
 - **What was being worked on** — the goal and current task
 - **Decisions made** — architectural, design, or implementation choices with rationale
@@ -30,9 +30,8 @@ The mid-mortem ticket contains:
 2. The extension serializes the conversation to a temp file (user, assistant, and tool result messages)
 3. A detached `pi` process is spawned with a prompt instructing it to:
    - Read the transcript from the temp file
-   - Create a mai ticket tagged `mid-mortem,compaction`
-   - Write the full mid-mortem content to the ticket
-   - Close the ticket immediately
+   - Create a born-closed mai artifact tagged `mid-mortem,compaction` (`mai artifact` — a RECORD, not a work ticket)
+   - Write the full mid-mortem content to the record
 4. The temp file is written to `$TMPDIR/pi-mid-mortem/`
 5. The compaction proceeds without waiting for the mid-mortem to complete
 
@@ -50,4 +49,4 @@ The mid-mortem ticket contains:
 }
 ```
 
-Requires `mai` CLI to be available in `PATH` for ticket creation.
+Requires `mai` CLI to be available in `PATH` for artifact creation. Mid-mortems are RECORDs (`mai artifact`) — born closed, so they never appear in the `mai ls` work queue.

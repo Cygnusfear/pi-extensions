@@ -324,7 +324,8 @@ All of these are available inside `execute_code` as typed async functions:
 | `man(name)` | Get help for any sandbox function |
 | `readImage({ path })` | Read image files (png, jpg, gif, webp) |
 | `maiCall({ args? })` | Run mai CLI commands (raw passthrough) |
-| `mai.ticket/start/close/show/note/ls` | Structured mai operations |
+| `mai.ticket/start/close/show/note/ls` | Structured WORK operations (tickets, open→closed) |
+| `mai.constraint/artifact/rules/supersede` | KNOWLEDGE constraint (born active) · RECORD artifact (born closed) · rules query · retire rule |
 | `mai.ticketLink(ticketId)` | Create a short Maiboard ticket link |
 | `mai.reviewLink({ commits, ... })` | Create a short Maiboard review handoff link backed by `~/.maitake/review-handoffs/<token>.json` |
 | `maiTicket({...})` | Create tickets |

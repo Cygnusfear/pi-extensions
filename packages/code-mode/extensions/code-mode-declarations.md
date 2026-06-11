@@ -388,6 +388,13 @@ declare function maiCall(input?: { args?: string; cwd?: string }): Promise<{ std
  * mai — maitake CLI integration. Methods for common operations.
  * For raw CLI passthrough, use maiCall({ args: "ls" }).
  *
+ * Notes carry an epistemic CLASS. Pick the right creator:
+ *   WORK      mai.ticket()     open → closed   shows in mai.ls() (the work queue)
+ *   RECORD    mai.artifact()   born closed     a delivered output (ADR/research/post-mortem)
+ *   KNOWLEDGE mai.constraint() active → superseded   a durable rule, shows in mai.rules()
+ * Never file a rule or a record as a ticket — it makes mai.ls() lie. Question before
+ * every create: is this a rule, a delivered output, or work to do?
+ *
  * @example
  * // Raw passthrough
  * await maiCall({ args: "ls" });
@@ -442,8 +449,20 @@ declare const mai: {
   /** Add a note from a file. */
   noteFile(id: string, filePath: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
 
-  /** List tickets (mai ls). */
+  /** List the work queue (mai ls) — open WORK only; excludes rules + records. */
   ls(opts?: { cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+
+  /** Create a KNOWLEDGE constraint — a durable rule, born active, never in mai.ls(). Retire with mai.supersede(), not mai.close(). */
+  constraint(title: string, opts?: { body?: string; tags?: string; target?: string; cwd?: string }): Promise<{ id: string }>;
+
+  /** Create a RECORD artifact — a delivered output (ADR / research / post-mortem / review writeup), born closed, not work. */
+  artifact(title: string, opts?: { body?: string; tags?: string; cwd?: string }): Promise<{ id: string }>;
+
+  /** List the active KNOWLEDGE base (mai rules) — constraints + warnings. */
+  rules(opts?: { cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+
+  /** Retire a KNOWLEDGE rule (active → superseded). mai.close() is rejected on rules. */
+  supersede(id: string, by?: string, opts?: { cwd?: string }): Promise<{ ok: boolean }>;
 
   /** Create a short Maiboard ticket link. */
   ticketLink(input: string | { ticket: string }): Promise<{
