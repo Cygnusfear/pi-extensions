@@ -67,7 +67,7 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 	override canResize = () => true;
 	override hideResizeHandles = () => false;
 	override hideRotateHandle = () => true;
-	override canEdit = () => false;
+	override canEdit = () => true;
 	override canBind = () => true;
 
 	component(shape: FrontpageEmbedShape) {
@@ -76,24 +76,20 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 			? `/api/page/${encodeURIComponent(slug)}/embed-versioned?ts=${ts}`
 			: `/page/${encodeURIComponent(slug)}/embed`;
 		const frozen = ts > 0;
-		// Interact mode: by default the embed is pointer-events:none so the hooman
-		// can DRAW over it on the canvas. Toggling Interact flips the iframe to
-		// pointer-events:auto so clicks reach the page — decision buttons, choice
-		// cards, the floating chip and Submit all work live. Stored per-shape in
-		// meta so it survives re-renders. Frozen history embeds are never interactive.
-		const interactive = !frozen && (shape.meta as { interactive?: boolean }).interactive === true;
-		const editor = this.editor;
-		const toggleInteractive = (e: { stopPropagation: () => void }) => {
-			e.stopPropagation();
-			editor.updateShape({ id: shape.id, type: "frontpage-embed", meta: { ...shape.meta, interactive: !interactive } });
-		};
+		// Interactive ONLY when this embed is in tldraw's EDITING state — the one
+		// mechanism that suspends the active tool (pen/select) and routes native
+		// pointer events to the shape's DOM. A raw pointer-events flip is not
+		// enough: the draw tool captures pointers canvas-wide. Editing is toggled
+		// by the global "Interact / Draw" button (and double-click / Escape).
+		// getEditingShapeId() is reactive, so this re-renders when editing changes.
+		const interactive = !frozen && this.editor.getEditingShapeId() === shape.id;
 		return (
 			<HTMLContainer
 				id={shape.id}
 				style={{
 					width: shape.props.w,
 					height: shape.props.h,
-					pointerEvents: "none",
+					pointerEvents: interactive ? "all" : "none",
 					overflow: "hidden",
 					background: "#fafaf7",
 					boxShadow: frozen ? "0 2px 12px rgba(0,0,0,0.06)" : interactive ? "0 6px 28px rgba(255,56,92,0.22)" : "0 4px 24px rgba(0,0,0,0.10)",
@@ -115,22 +111,6 @@ class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
 						pointerEvents: "none",
 						textTransform: "uppercase",
 					}}>{label}</div>
-				) : null}
-				{!frozen ? (
-					<button
-						onPointerDown={toggleInteractive}
-						title={interactive ? "Back to drawing on the canvas" : "Click to interact with the page — buttons & choices"}
-						style={{
-							position: "absolute", top: 7, right: 8, zIndex: 3,
-							pointerEvents: "auto", cursor: "pointer",
-							font: "600 11px -apple-system, BlinkMacSystemFont, sans-serif",
-							letterSpacing: "0.03em",
-							padding: "5px 11px", borderRadius: 20, border: "none",
-							background: interactive ? "#FF385C" : "rgba(255,255,255,0.94)",
-							color: interactive ? "#fff" : "#222",
-							boxShadow: "0 1px 6px rgba(0,0,0,0.2)",
-						}}
-					>{interactive ? "✏️ Done — draw" : "🖱 Interact"}</button>
 				) : null}
 				<iframe
 					src={url}
@@ -337,6 +317,7 @@ function TimeMachineToolbarItem({ onClick }: { onClick: () => void }) {
 
 function App({ slug }: { slug: string }) {
 	const [editor, setEditor] = React.useState<Editor | null>(null);
+	const [interacting, setInteracting] = React.useState(false);
 	const [showTimeMachine, setShowTimeMachine] = React.useState(false);
 
 	const handleMount = React.useCallback(
@@ -344,6 +325,12 @@ function App({ slug }: { slug: string }) {
 			let cancelled = false;
 			let hydrated = false; // gate saves until initial load completes
 			setEditor(ed);
+
+			// Keep the global Interact toggle label in sync with tldraw's editing
+			// state (so Escape / double-click also flip it).
+			const syncInteracting = () => setInteracting(ed.getEditingShapeId() != null);
+			const offEditing = ed.store.listen(syncInteracting);
+			syncInteracting();
 
 			// --- PERSISTENCE: attach FIRST, synchronously, before any async
 			// load that could throw and block listener attachment. ---
@@ -550,6 +537,7 @@ function App({ slug }: { slug: string }) {
 			return () => {
 				cancelled = true;
 				window.removeEventListener("message", onMessage);
+				try { offEditing(); } catch {}
 				try { unlisten(); } catch {}
 				try { es?.close(); } catch {}
 				// Final flush on unmount so nothing is lost.
@@ -572,9 +560,38 @@ function App({ slug }: { slug: string }) {
 		[],
 	);
 
+	const toggleInteract = () => {
+		if (!editor) return;
+		if (editor.getEditingShapeId()) { editor.setEditingShape(null); return; }
+		const live = editor.getCurrentPageShapes().find(
+			(s) => s.type === "frontpage-embed" && (((s.props as { ts?: number }).ts ?? 0) === 0),
+		);
+		if (live) editor.setEditingShape(live.id);
+	};
+
 	return (
 		<>
 			<Tldraw shapeUtils={[FrontpageEmbedShapeUtil]} onMount={handleMount} components={components} />
+			{editor && (
+				<button
+					onClick={toggleInteract}
+					title={interacting ? "Exit interact mode — back to drawing" : "Interact with the page — click buttons & choices"}
+					style={{
+						position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
+						zIndex: 1000, cursor: "pointer",
+						font: "600 13px -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
+						letterSpacing: "0.02em",
+						padding: "9px 18px", borderRadius: 24, border: "none",
+						background: interacting ? "#FF385C" : "#ffffff",
+						color: interacting ? "#fff" : "#222222",
+						boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+						display: "flex", alignItems: "center", gap: 8,
+					}}
+				>
+					<span style={{ fontSize: 15 }}>{interacting ? "✏️" : "🖱"}</span>
+					{interacting ? "Done — back to drawing" : "Interact with the page"}
+				</button>
+			)}
 			{showTimeMachine && <TimeMachine slug={slug} onClose={() => setShowTimeMachine(false)} />}
 		</>
 	);
