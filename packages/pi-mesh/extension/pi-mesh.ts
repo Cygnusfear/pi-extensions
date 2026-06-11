@@ -24,6 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildSessionTailSnapshotFromLeaf,
+  capSessionViewEntries,
   formatSessionViewEntries,
   projectMeaningfulSessionEntries,
   sliceSessionViewEntries,
@@ -1869,10 +1870,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             return;
           }
           const entries = projectMeaningfulSessionEntries(currentCtx.sessionManager.getBranch());
-          const windowed = sliceSessionViewEntries(
-            entries,
-            req.payload.start ?? -20,
-            req.payload.end ?? 0,
+          // Cap the wire entries[] so a single fat entry can't flood the asker's
+          // context (per-entry bound; text is additionally total-capped by
+          // formatSessionViewEntries). See pe-zw1n8x78.
+          const windowed = capSessionViewEntries(
+            sliceSessionViewEntries(entries, req.payload.start ?? -20, req.payload.end ?? 0),
           );
           mesh.tell(req.from.id, {
             askId: req.askId,

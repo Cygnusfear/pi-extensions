@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { buildSessionTailSnapshotFromLeaf, projectMeaningfulSessionEntries } from "./session-view.ts";
+import {
+	buildSessionTailSnapshotFromLeaf,
+	capSessionViewEntries,
+	formatSessionViewEntries,
+	projectMeaningfulSessionEntries,
+	SESSION_VIEW_TOTAL_CHARS,
+	TELL_ACK_ENTRY_CHARS,
+	TELL_ACK_TOTAL_CHARS,
+} from "./session-view.ts";
 
 // A raw "message" entry the projector recognises.
 function msg(role: string, text: string, ts = "2026-06-05T10:00:00.000Z") {
@@ -85,5 +93,31 @@ describe("shouldIncludeCustomEntry — noise filtering (context-pollution)", () 
 	test("teams-worker-heartbeat stays filtered (regression)", () => {
 		const projected = projectMeaningfulSessionEntries([{ type: "custom", customType: "teams-worker-heartbeat", data: "tick" }]);
 		expect(projected.length).toBe(0);
+	});
+});
+
+describe("session-view caps — a single fat entry can never flood (context-pollution)", () => {
+	test("formatSessionViewEntries bounds per-entry AND total", () => {
+		const fat = [{ index: 0, label: "tool result", text: "x".repeat(50_000), type: "message" }];
+		const out = formatSessionViewEntries(fat);
+		expect(out.length).toBeLessThanOrEqual(SESSION_VIEW_TOTAL_CHARS + 120);
+		expect(out).toContain("chars truncated");
+	});
+	test("capSessionViewEntries bounds the WIRE entries[] text (not just rendered)", () => {
+		const fat = [{ index: 0, label: "x", text: "y".repeat(10_000), type: "message" }];
+		const capped = capSessionViewEntries(fat, 300);
+		expect(capped[0].text.length).toBeLessThan(400);
+		// identity-returns when nothing needs truncating
+		const small = [{ index: 0, label: "x", text: "ok", type: "message" }];
+		expect(capSessionViewEntries(small)).toBe(small);
+	});
+	test("tell-ack snapshot stays a tiny glance even with a fat leaf entry", () => {
+		const fatLeaf = {
+			id: "L", parentId: null, type: "message", timestamp: "2026-06-05T10:00:00.000Z",
+			message: { role: "assistant", content: "z".repeat(40_000) },
+		};
+		const snap = buildSessionTailSnapshotFromLeaf(() => fatLeaf, () => null);
+		expect(snap.text.length).toBeLessThanOrEqual(TELL_ACK_TOTAL_CHARS + 120);
+		expect(snap.entries[0].text.length).toBeLessThanOrEqual(TELL_ACK_ENTRY_CHARS + 80);
 	});
 });

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildBm25Index, searchBm25, tokenize, type Bm25Doc, type Bm25Index } from "./bm25.js";
-import { readMeaningfulSessionEntriesFromFile, sliceSessionViewEntries } from "./session-view.js";
+import { readMeaningfulSessionEntriesFromFile, sliceSessionViewEntries, truncateSessionText, SESSION_VIEW_TOTAL_CHARS } from "./session-view.js";
 
 export type SessionInfo = {
 	id: string;
@@ -214,7 +214,9 @@ function doView(args: { session?: string; start?: number; end?: number }, option
 	const footer = entries.length > sliced.length
 		? `\n--- ${entries.length - sliced.length} more entries. Use start/end to navigate.`
 		: "";
-	return header + body + footer;
+	// Total ceiling so a wide window of large entries can't flood context
+	// (per-entry already capped above). pe-zw1n8x78.
+	return header + truncateSessionText(body, SESSION_VIEW_TOTAL_CHARS) + footer;
 }
 
 function doGrep(
