@@ -71,6 +71,12 @@ function shouldIncludeCustomEntry(entry: SessionEntryLike): boolean {
 	const customType = typeof entry.customType === "string" ? entry.customType : "";
 	if (!customType) return true;
 	if (customType === "teams-worker-heartbeat") return false;
+	// teams-leader-state is internal leader bookkeeping (the full v2TeamRecord —
+	// measured at 104KB, embeds every worker's comment bodies). It is NOT meaningful
+	// activity; excluding it keeps it out of every session-view surface (mesh tell-ack
+	// view, mesh_view, ouija view, teams.view) AND out of ouija BM25 search (you don't
+	// want to match leader state-machine dumps). See ticket pe-zw1n8x78 / pe-o5jwnzcw.
+	if (customType === "teams-leader-state") return false;
 	if (customType.startsWith("ad:terminal-title")) return false;
 	if (customType.startsWith("ad:session-title")) return false;
 	return true;

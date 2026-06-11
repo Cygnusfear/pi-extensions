@@ -69,3 +69,21 @@ describe("buildSessionTailSnapshotFromLeaf — O(window) parentId walk", () => {
 		expect(snap.total).toBe(5);
 	});
 });
+
+describe("shouldIncludeCustomEntry — noise filtering (context-pollution)", () => {
+	test("teams-leader-state (the 104KB bookkeeping blob) is excluded from the projection", () => {
+		const entries = [
+			{ type: "custom", customType: "teams-leader-state", data: { v2TeamRecord: { workers: { w: "x".repeat(5000) } } } },
+			{ type: "custom", customType: "team-event", data: "worker completed: review done" },
+		];
+		const projected = projectMeaningfulSessionEntries(entries);
+		// leader-state is internal bookkeeping → filtered out of every session-view surface
+		expect(projected.find((e) => e.label === "teams-leader-state")).toBeUndefined();
+		// team-event is meaningful worker activity → kept
+		expect(projected.find((e) => e.label === "team-event")).toBeDefined();
+	});
+	test("teams-worker-heartbeat stays filtered (regression)", () => {
+		const projected = projectMeaningfulSessionEntries([{ type: "custom", customType: "teams-worker-heartbeat", data: "tick" }]);
+		expect(projected.length).toBe(0);
+	});
+});
