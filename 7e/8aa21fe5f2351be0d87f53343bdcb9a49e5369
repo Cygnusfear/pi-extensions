@@ -1,0 +1,35 @@
+packages/frontpage/extensions/frontpage.ts
+  s_4d4d102ca33017::t_73ec6ccb8f8384 1110-1112,1114
+  s_4d4d102ca33017::t_4bd169bb583070 986
+  s_4d4d102ca33017::t_b60455cbb3b51d 1044-1047
+  s_4d4d102ca33017::t_10ccf8c48dba62 71-139
+  s_4d4d102ca33017::t_ba07bf9995db7b 992
+  s_4d4d102ca33017::t_e05e3eb077b999 1035-1043,1048-1051,1053-1055,1057
+packages/frontpage/client/tldraw-shell.tsx
+  s_4d4d102ca33017::t_1ad3b02326a76a 18
+  s_4d4d102ca33017::t_ddddfc9a4c3cd4 120-140
+  s_4d4d102ca33017::t_571c2decb49094 507-509,512
+  s_4d4d102ca33017::t_da17627d7c6f63 348-371
+  s_4d4d102ca33017::t_bcee34c556c3bf 162-173
+  s_4d4d102ca33017::t_d9654245b1921e 337-347,372-379
+  s_4d4d102ca33017::t_e8364e1ce52732 476-478,484-492
+packages/frontpage/server-process/server.ts
+  s_4d4d102ca33017::t_b66b8cf4884dbf 211-235
+  s_4d4d102ca33017::t_1d7a6b530fecbd 272-274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "7e8aa21fe5f2351be0d87f53343bdcb9a49e5369",
+  "prompts": {},
+  "sessions": {
+    "s_4d4d102ca33017": {
+      "agent_id": {
+        "tool": "Néstor Zenith Narayan",
+        "id": "019e7b98-8c1e-7111-95fa-4954a355b3da",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
