@@ -1,0 +1,22 @@
+packages/code-mode/src/sandbox-tools.ts
+  s_580d05a9e2bede::t_890cff98a45d6c 172-173
+  s_580d05a9e2bede::t_dd229975f9609a 287-291
+packages/code-mode/extensions/code-mode-declarations.md
+  s_580d05a9e2bede::t_d52bc1df8d2c97 467-469
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "9b85712a155012a4a17126903bafe20102a54267",
+  "prompts": {},
+  "sessions": {
+    "s_580d05a9e2bede": {
+      "agent_id": {
+        "tool": "Pedro Io Thaler",
+        "id": "019e93b5-ea34-77ef-887b-d7b7f59c9c9a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
