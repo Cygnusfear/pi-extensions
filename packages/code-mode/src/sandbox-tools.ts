@@ -161,6 +161,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     ticketLink: (input: string | { ticket: string }) => Promise<TicketLinkResult>;
     /** Create a short Maiboard review handoff link backed by ~/.maitake/review-handoffs/<token>.json. */
     reviewLink: (input: ReviewHandoffInput) => Promise<ReviewHandoffResult>;
+    /** Create a KNOWLEDGE constraint — a durable rule, born active, never in mai.ls() (the work queue). Use for "never do X" / invariants. */
+    constraint: (title: string, opts?: { body?: string; tags?: string; target?: string; cwd?: string }) => Promise<{ id: string }>;
+    /** Create a RECORD artifact — a delivered output (ADR/research/post-mortem/review writeup), born closed, not work. */
+    artifact: (title: string, opts?: { body?: string; tags?: string; cwd?: string }) => Promise<{ id: string }>;
+    /** List the active KNOWLEDGE base (mai rules) — constraints + warnings. */
+    rules: (opts?: { cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+    /** Retire a KNOWLEDGE rule (active → superseded). 'close' is rejected on rules. */
+    supersede: (id: string, by?: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
   };
 
   const mai: MaiNs = (async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string } = {}) => {
@@ -237,6 +245,41 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   mai.noteFile = async (id, filePath, opts) => {
     const result = await maiRun(["add-note", id, "--file", filePath], maiResolveDir(opts?.cwd));
     return { ok: result.status === 0 };
+  };
+
+  // Class-aware creators: pick the right epistemic class so notes land in the
+  // right surface. constraint/warn = KNOWLEDGE (born active, mai.rules()),
+  // artifact = RECORD (born closed). Never file a rule or a record as a ticket.
+  mai.constraint = async (title, opts) => {
+    const args = ["constraint", title];
+    if (opts?.body) args.push("-d", opts.body);
+    if (opts?.tags) args.push("-l", opts.tags);
+    if (opts?.target) args.push("--target", opts.target);
+    const r = await maiRun(args, maiResolveDir(opts?.cwd));
+    if (r.status !== 0) throw new Error(`mai constraint failed: ${(r.stderr || r.stdout || "").trim()}`);
+    return { id: (r.stdout || "").trim().split(/\s+/)[0] };
+  };
+
+  mai.artifact = async (title, opts) => {
+    const args = ["artifact", title];
+    if (opts?.body) args.push("-d", opts.body);
+    if (opts?.tags) args.push("-l", opts.tags);
+    const r = await maiRun(args, maiResolveDir(opts?.cwd));
+    if (r.status !== 0) throw new Error(`mai artifact failed: ${(r.stderr || r.stdout || "").trim()}`);
+    return { id: (r.stdout || "").trim().split(/\s+/)[0] };
+  };
+
+  mai.rules = async (opts) => {
+    const r = await maiRun(["rules"], maiResolveDir(opts?.cwd));
+    const stdout = (r.stdout || "") + (r.stderr ? "\n" + r.stderr : "");
+    return { stdout: stdout.trim(), exitCode: r.status ?? 1 };
+  };
+
+  mai.supersede = async (id, by, opts) => {
+    const args = ["supersede", id];
+    if (by) args.push("--by", by);
+    const r = await maiRun(args, maiResolveDir(opts?.cwd));
+    return { ok: r.status === 0 };
   };
 
   mai.ls = async (opts) => {
