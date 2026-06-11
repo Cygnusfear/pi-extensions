@@ -1,0 +1,22 @@
+packages/frontpage/client/tldraw-shell.tsx
+  s_512fecfbbc3098::t_df460fcd24d0aa 119-134,138
+  s_512fecfbbc3098::t_404d15df650bcf 79-89,99,101
+packages/frontpage/extensions/frontpage.ts
+  s_512fecfbbc3098::t_1b5d8bac0a1004 1064-1068,1071-1093,1095-1117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "e8575ef8e67f477e976f243596a943e059c4dea6",
+  "prompts": {},
+  "sessions": {
+    "s_512fecfbbc3098": {
+      "agent_id": {
+        "tool": "Volker Phobos Sasselov",
+        "id": "019e99aa-12c5-75bf-950f-5327a33aa834",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
