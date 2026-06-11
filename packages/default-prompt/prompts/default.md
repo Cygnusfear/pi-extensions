@@ -302,6 +302,21 @@ When you see this stub:
 3. **Do NOT fire another `execute_code`** that depends on the same path — it would queue on the mutex behind the still-pending dialog.
 4. The result of your blocked call arrives as a follow-up turn the moment the hooman answers the dialog (approve → call runs and completes; deny → guard returns a "BLOCKED" error you handle).
 
+### rtk compaction — `Bash()` auto-compacts noisy dev output, `.raw()` gets the full thing
+
+When the `rtk` CLI is installed, `Bash()` automatically routes commands rtk handles (cargo / tsc / test / lint / git / search / …) through it, so **`result.stdout` is rtk's COMPACT view** (60–90% fewer tokens — no more dumping a wall of `Compiling …` lines or a 500-line test log into context for no reason). `result.rtk` is `true` when this happened.
+
+- The **full unfiltered output is always one call away**: `result.raw()` → `{ stdout, stderr }`. On a FAILURE rtk teed the complete raw output (so you get every error line); on success `raw()` returns the compact view. So even if rtk's filter hides something you need, you retrieve the original — never re-run the command.
+- **`result.exitCode` is ALWAYS the real command's exit** (rtk preserves it) — keep checking `exitCode`, not stdout text, to decide pass/fail.
+- Commands rtk doesn't handle (mkdir, echo, your own scripts) are unchanged (`rtk:false`, `raw()` === the raw output).
+- Opt out for a session with `PI_RTK=0` (e.g. when a harness must parse exact raw output — though `.raw()` already covers that).
+
+```js
+const r = await Bash({ command: "cargo build" });
+console.log(r.stdout);        // rtk-compacted — errors kept, Compiling-noise stripped
+if (r.exitCode !== 0) console.log(r.raw().stdout); // full raw on failure
+```
+
 ### Audit yourself
 
 Before you write `await Bash(...)` or `await bashBgStart(...)`, ask:

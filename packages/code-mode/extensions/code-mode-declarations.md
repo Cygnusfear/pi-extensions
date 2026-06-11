@@ -54,6 +54,14 @@ declare function ouija(input: {
  *
  * See "Shell commands — DON'T freeze the TUI" in the default prompt for
  * the full decision matrix.
+ *
+ * RTK COMPACTION (auto): when the rtk CLI is installed and handles this command
+ * (cargo / tsc / test / lint / git / search / ...), stdout is rtk's COMPACT view
+ * (60-90% fewer tokens) and result.rtk is true. The full UNFILTERED output is
+ * always reachable via result.raw() -> { stdout, stderr }: on a FAILURE rtk teed
+ * the complete raw output; on success raw() returns the compact view. exitCode is
+ * ALWAYS the real command's exit (rtk preserves it). Opt out globally with PI_RTK=0.
+ * Commands rtk does not handle are unchanged (rtk:false, raw() === the raw output).
  */
 declare function Bash(input: {
   /** Bash command to execute */
@@ -62,7 +70,16 @@ declare function Bash(input: {
   cwd?: string;
   /** Timeout in seconds (default: 30). Raising this past ~60s freezes the TUI for the full duration; prefer bashBgStart for long commands. */
   timeout?: number;
-}): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
+}): Promise<{
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut?: boolean;
+  /** True when rtk compacted this command's output (stdout = the compact view). */
+  rtk?: boolean;
+  /** Full UNFILTERED output. On failure rtk teed the complete raw; on success returns the compact view. exitCode is always the real exit. */
+  raw?: () => { stdout: string; stderr: string };
+}>;
 
 /**
  * Terminal status reported by handle.wait / handle.timeout / handle.stop.
