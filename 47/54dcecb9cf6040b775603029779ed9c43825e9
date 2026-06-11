@@ -1,0 +1,31 @@
+packages/shared/src/ouija-core.ts
+  s_5bc8f5dd982b26::t_80ced2c080d11e 5
+  s_5bc8f5dd982b26::t_52c768d2beec14 217-219
+packages/pi-mesh/extension/pi-mesh.ts
+  s_5bc8f5dd982b26::t_6125ea2fa0e3e0 1873-1877
+  s_5bc8f5dd982b26::t_e3c3d28259ccdc 27
+packages/shared/src/session-view.test.ts
+  s_5bc8f5dd982b26::t_f0d5f3b5603664 2-10
+  s_5bc8f5dd982b26::t_79596512a927b8 98-123
+packages/shared/src/session-view.ts
+  s_5bc8f5dd982b26::t_ff82dc554bd636 29
+  s_5bc8f5dd982b26::t_c7a7438b987578 240-243,245-247,251,254
+  s_5bc8f5dd982b26::t_3118298a66517c 14-28,30-47
+  s_5bc8f5dd982b26::t_bf233435e4ec78 188-192,195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "4754dcecb9cf6040b775603029779ed9c43825e9",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
