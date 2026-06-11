@@ -1,0 +1,30 @@
+packages/code-mode/README.md
+  s_580d05a9e2bede::t_9ffbc6afeb09d8 327-328
+packages/default-prompt/prompts/default.md
+  s_580d05a9e2bede::t_50dd398a19726d 563
+packages/code-mode/extensions/code-mode-declarations.md
+  s_580d05a9e2bede::t_7c0e3e62b65919 452,455-465
+  s_580d05a9e2bede::t_b5133b217d0ff0 391-397
+packages/mid-mortem/README.md
+  s_580d05a9e2bede::t_55fd492c390f52 12
+  s_580d05a9e2bede::t_3b593288d69e38 19
+  s_580d05a9e2bede::t_3e573eb4a6363d 33-34
+  s_580d05a9e2bede::t_5226ba851b0ef7 3
+  s_580d05a9e2bede::t_bf78d408de3993 52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.6",
+  "base_commit_sha": "417ad71044b046b2ecaad79ad607c6afb8dbaa4e",
+  "prompts": {},
+  "sessions": {
+    "s_580d05a9e2bede": {
+      "agent_id": {
+        "tool": "Pedro Io Thaler",
+        "id": "019e93b5-ea34-77ef-887b-d7b7f59c9c9a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
