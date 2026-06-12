@@ -46,6 +46,62 @@ import {
 import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
 
+// ─── rtk integration (Arch A: native rtk compaction, raw via failure-tee) ─────────
+// rtk (https://github.com/rtk-ai/rtk) is a CLI proxy that compacts noisy dev-command
+// output (cargo/tsc/test/lint/git…) by 60–90% before it reaches the agent's context.
+// We route code-mode Bash() through it: `rtk rewrite "<cmd>"` (rtk's single source of
+// truth for 70+ patterns) tells us the compacting form; we run that. rtk preserves
+// exit codes and tees the full raw output on FAILURES, referenced as
+// `[full output: <path>]` — which we read and expose via the result's raw() so the
+// agent can always retrieve the unfiltered output when rtk drops signal. Global
+// opt-out: PI_RTK=0. Graceful no-op when rtk is absent.
+let RTK_BIN: string | null | undefined = undefined; // undefined=unchecked · null=absent · string=path
+
+export async function rtkDetect(): Promise<string | null> {
+	if (RTK_BIN !== undefined) return RTK_BIN;
+	try {
+		const r = await spawnAsync({ cmd: "sh", args: ["-c", "command -v rtk"], timeout: 3000 });
+		RTK_BIN = r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
+	} catch {
+		RTK_BIN = null;
+	}
+	return RTK_BIN;
+}
+
+/** Ask rtk for the compacting rewrite of a command. Returns the rewrite, or null when
+ *  rtk doesn't handle it (run raw). Never reimplements rtk's registry. */
+export async function rtkRewrite(rtkBin: string, command: string, env: Record<string, string | undefined>): Promise<string | null> {
+	try {
+		const r = await spawnAsync({ cmd: rtkBin, args: ["rewrite", command], timeout: 5000, env });
+		// rtk rewrite signals via EXIT CODE (3 = rewrite on stdout, 1 = no rewrite ⇒
+		// empty stdout), NOT 0/nonzero success — so read stdout regardless of status.
+		const out = (r.stdout || "").trim();
+		if (!out || out === command) return null;
+		if (!/(^|\s)rtk\s/.test(out)) return null; // defensive: must contain an actual rtk invocation
+		return out;
+	} catch {
+		return null;
+	}
+}
+
+const RTK_TEE_RE = /\n?\[full output:\s*([^\]]+)\]\s*/;
+
+/** Split rtk's compacted output: pull the failure-tee raw (if any) and strip the
+ *  `[full output: <path>]` reference from the displayed view. raw is null when rtk
+ *  did not tee (e.g. on success) — callers fall back to the compacted text. */
+export function rtkSplitTee(compacted: string): { compacted: string; raw: string | null } {
+	const m = compacted.match(RTK_TEE_RE);
+	if (!m) return { compacted, raw: null };
+	let raw: string | null = null;
+	try {
+		raw = fs.readFileSync(m[1].trim().replace(/^~(?=\/)/, os.homedir()), "utf8");
+	} catch {
+		raw = null;
+	}
+	return { compacted: compacted.replace(RTK_TEE_RE, "\n").trim(), raw };
+}
+// ──────────────────────────────────────────────────────────────────────────────────
+
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
   const { cwd, images, signal, sessionManager } = ctx;
   const turndown = new TurndownService({
@@ -897,9 +953,26 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         if (ctx.agentGitIdentity.sessionName) gitEnv.PI_SESSION_NAME = ctx.agentGitIdentity.sessionName;
       }
 
+      // rtk compaction (Arch A): run the compacting rewrite when rtk handles this
+      // command; the unfiltered output stays reachable via raw(). The guards above
+      // already ran on the ORIGINAL command, and rtk only wraps it (same operation),
+      // so the safety decision holds. Global opt-out: PI_RTK=0.
+      let effectiveCommand = command;
+      let rtkApplied = false;
+      if (process.env.PI_RTK !== "0") {
+        const rtkBin = await rtkDetect();
+        if (rtkBin) {
+          const rewritten = await rtkRewrite(rtkBin, command, gitEnv);
+          if (rewritten) {
+            effectiveCommand = rewritten;
+            rtkApplied = true;
+          }
+        }
+      }
+
       const result = await spawnAsync({
         cmd: "sh",
-        args: ["-c", command],
+        args: ["-c", effectiveCommand],
         cwd: dir,
         timeout: timeoutMs,
         signal,
@@ -917,15 +990,31 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
               `[TIMEOUT] ${result.error.message}`,
             exitCode: -1,
             timedOut: true,
+            rtk: rtkApplied,
+            raw: () => ({ stdout: result.stdout || "", stderr: result.stderr || "" }),
           };
         }
         throw new Error(`Bash error: ${result.error.message}`);
       }
+      const rawStdout = result.stdout || "";
+      const rawStderr = result.stderr || "";
+      let displayStdout = rawStdout;
+      let teeRaw: string | null = null;
+      if (rtkApplied) {
+        const split = rtkSplitTee(rawStdout);
+        displayStdout = split.compacted;
+        teeRaw = split.raw;
+      }
+      // raw(): the full failure-tee when rtk teed it, else the (already complete)
+      // compacted view. exitCode is ALWAYS the real command's exit (rtk preserves it).
+      const rawView = { stdout: teeRaw ?? rawStdout, stderr: rawStderr };
       return {
-        stdout: result.stdout || "",
-        stderr: result.stderr || "",
+        stdout: displayStdout,
+        stderr: rawStderr,
         exitCode: result.status ?? 0,
         timedOut: false,
+        rtk: rtkApplied,
+        raw: () => rawView,
       };
     },
 

@@ -11,6 +11,40 @@ export type SessionViewEntry = {
 
 type SessionEntryLike = Record<string, unknown>;
 
+// Session-view previews are a PREVIEW format, not a transport. A single fat entry
+// (a big tool result, a long message) must never flood a consumer's context, so we
+// bound both per-entry text AND the total rendered snapshot, by construction. These
+// caps live at the DISPLAY/wire boundary only — the raw projection
+// (projectMeaningfulSessionEntries / readMeaningfulSessionEntriesFromFile) stays
+// FULL-TEXT so ouija BM25 search is unaffected. (Tickets pe-zw1n8x78 / pe-8auhostk.)
+/** Per-entry char cap for a rendered/wire preview entry. */
+export const SESSION_VIEW_ENTRY_CHARS = 600;
+/** Total char ceiling for a rendered snapshot (defense-in-depth over the per-entry cap). */
+export const SESSION_VIEW_TOTAL_CHARS = 4000;
+/** Tight caps for the UNSOLICITED mesh tell-ack "glance" — a sender who fired a tell
+ *  gets a small peek, never a session dump. */
+export const TELL_ACK_ENTRY_CHARS = 300;
+export const TELL_ACK_TOTAL_CHARS = 2000;
+
+export function truncateSessionText(text: string, max: number): string {
+	if (text.length <= max) return text;
+	return `${text.slice(0, max)}
+… [+${text.length - max} chars truncated — narrow the window or read the full session]`;
+}
+
+/** Return entries with each text field bounded to perEntryChars (for WIRE payloads
+ *  that carry the entries[] array, not just rendered text). Identity-returns when
+ *  nothing needed truncating, so callers pay nothing in the common case. */
+export function capSessionViewEntries(entries: SessionViewEntry[], perEntryChars = SESSION_VIEW_ENTRY_CHARS): SessionViewEntry[] {
+	let changed = false;
+	const out = entries.map((e) => {
+		if (e.text.length <= perEntryChars) return e;
+		changed = true;
+		return { ...e, text: truncateSessionText(e.text, perEntryChars) };
+	});
+	return changed ? out : entries;
+}
+
 function normalizeText(text: string): string {
 	return text.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -71,6 +105,12 @@ function shouldIncludeCustomEntry(entry: SessionEntryLike): boolean {
 	const customType = typeof entry.customType === "string" ? entry.customType : "";
 	if (!customType) return true;
 	if (customType === "teams-worker-heartbeat") return false;
+	// teams-leader-state is internal leader bookkeeping (the full v2TeamRecord —
+	// measured at 104KB, embeds every worker's comment bodies). It is NOT meaningful
+	// activity; excluding it keeps it out of every session-view surface (mesh tell-ack
+	// view, mesh_view, ouija view, teams.view) AND out of ouija BM25 search (you don't
+	// want to match leader state-machine dumps). See ticket pe-zw1n8x78 / pe-o5jwnzcw.
+	if (customType === "teams-leader-state") return false;
 	if (customType.startsWith("ad:terminal-title")) return false;
 	if (customType.startsWith("ad:session-title")) return false;
 	return true;
@@ -145,10 +185,14 @@ export function buildSessionTailSnapshotFromLeaf(
 	}
 	tail.reverse(); // oldest -> newest
 	const projected = projectMeaningfulSessionEntries(tail);
-	const entries = windowN > 0 ? projected.slice(-windowN) : projected;
+	const windowed = windowN > 0 ? projected.slice(-windowN) : projected;
+	// Tell-ack view is UNSOLICITED — keep it a tiny glance. Cap the wire entries[]
+	// (per-entry) so a single fat entry can't bloat the ack payload, and render the
+	// text with tight tell-ack caps.
+	const entries = capSessionViewEntries(windowed, TELL_ACK_ENTRY_CHARS);
 	return {
 		entries,
-		text: formatSessionViewEntries(entries),
+		text: formatSessionViewEntries(entries, { perEntryChars: TELL_ACK_ENTRY_CHARS, totalChars: TELL_ACK_TOTAL_CHARS }),
 		total: projected.length,
 	};
 }
@@ -193,13 +237,19 @@ export function sliceSessionViewEntries(entries: SessionViewEntry[], start = -20
 	return entries.slice(startIndex, endIndex + 1);
 }
 
-export function formatSessionViewEntries(entries: SessionViewEntry[]): string {
+export function formatSessionViewEntries(
+	entries: SessionViewEntry[],
+	opts?: { perEntryChars?: number; totalChars?: number },
+): string {
 	if (entries.length === 0) return "(no meaningful entries in that window)";
-	return entries
+	const perEntry = opts?.perEntryChars ?? SESSION_VIEW_ENTRY_CHARS;
+	const total = opts?.totalChars ?? SESSION_VIEW_TOTAL_CHARS;
+	const rendered = entries
 		.map((entry) => {
 			const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "";
 			const header = `[#${entry.index}]${ts ? ` ${ts}` : ""} ${entry.label}`;
-			return `${header}\n${entry.text}`;
+			return `${header}\n${truncateSessionText(entry.text, perEntry)}`;
 		})
 		.join("\n\n");
+	return truncateSessionText(rendered, total);
 }
