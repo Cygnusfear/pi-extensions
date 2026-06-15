@@ -286,7 +286,7 @@ Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specifi
 
 **Quick tools:** `contextTag({ name: "..." })` · `contextLog({ limit: 30 })` · `contextCheckout({ target, message })`
 
-**Thresholds:** 📊 ≥30% tag your position · 🙈 ≥40% write thick `$` vars · 🚨 ≥70% squash now · 💀 ≥90% squash immediately
+**Thresholds:** 📊 ≥50% tag your position · 🙈 ≥70% write thick `$` vars · 🚨 ≥80% squash now · 💀 ≥90% squash immediately
 
 ### Ouija — session history search 🔮
 

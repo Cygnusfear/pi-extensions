@@ -29,4 +29,24 @@ describe("context usage helpers", () => {
 
 		expect(footer).toBeNull();
 	});
+
+	test("new ladder: 60% gets a quiet info footer — NO distill/squash pressure (the opus-eager fix)", () => {
+		const at = (percent: number) =>
+			buildContextFooter({ getContextUsage: () => ({ tokens: percent * 2000, contextWindow: 200_000, percent }) });
+		// < 50 → no footer at all
+		expect(at(45)).toBeNull();
+		// 50–70 → info only, NO action words
+		const f60 = at(60);
+		expect(f60).toContain("60.0%");
+		expect(f60).toContain("📊");
+		expect(f60).not.toContain("idiot threshold");
+		expect(f60).not.toContain("squash");
+		// 70–80 → distill nudge (🙈)
+		expect(at(72)).toContain("idiot threshold");
+		// 80–90 → urgent squash (🚨)
+		expect(at(82)).toContain("URGENT");
+		expect(at(82)).toContain("session.squash()");
+		// ≥ 90 → maintenance (💀)
+		expect(at(91)).toContain("MAINTENANCE NOW");
+	});
 });

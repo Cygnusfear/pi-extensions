@@ -44,7 +44,7 @@ export function buildContextFooter(
 
 	const usage = readContextUsage(ctx.getContextUsage);
 	const percent = getKnownContextPercent(usage);
-	if (percent === undefined || percent < 30) return null;
+	if (percent === undefined || percent < 50) return null;
 
 	const pct = percent.toFixed(1);
 	const totalTokens = formatContextTokens(usage?.tokens ?? usage?.used);
@@ -59,10 +59,10 @@ export function buildContextFooter(
 			: "";
 		return `💀 ${pct}% (${context}) MAINTENANCE NOW — session.squash() or contextCheckout() to reclaim context${guard}`;
 	}
-	if (percent >= 70) {
+	if (percent >= 80) {
 		return `🚨 ${pct}% (${context}) URGENT — session.squash() to compact, or contextCheckout() to squash a segment`;
 	}
-	if (percent >= 40) {
+	if (percent >= 70) {
 		return `🙈 ${pct}% (${context}) idiot threshold — start distilling state into $ vars + session.save()`;
 	}
 	return `📊 ${pct}% (${context})`;
