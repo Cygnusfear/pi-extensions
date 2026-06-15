@@ -125,16 +125,22 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 				// After the last attempt, if we're still here the session is stuck.
 				if (i === CONTINUE_DELAYS_MS.length - 1) {
 					const t2 = setTimeout(() => {
-						if (active) {
+						if (!active) return;
+						// ctx is a long-lived module capture; if a reload/session
+						// replacement happened during this 2-min window it is STALE and
+						// ctx.ui.notify would throw the stale-ctx guard inside the timer.
+						// Guard it — fireNotification (desktop) is the real signal and
+						// doesn't touch ctx.
+						try {
 							ctx?.ui?.notify?.(
 								"🚓 Still rate-limited after 2 min of auto-retries — this session may be stuck.",
 								"warning",
 							);
-							fireNotification({
-								title: "🚓 Session may be dead",
-								body: "Still rate-limited after 2 min of auto-resumes. Needs attention.",
-							});
-						}
+						} catch { /* stale ctx after reload — non-fatal, desktop notify still fires */ }
+						fireNotification({
+							title: "🚓 Session may be dead",
+							body: "Still rate-limited after 2 min of auto-resumes. Needs attention.",
+						});
 					}, 5_000);
 					timers.push(t2);
 				}

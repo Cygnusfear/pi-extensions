@@ -171,10 +171,18 @@ export default function cwdExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-				const result = await ctx.switchSession(newSessionFile);
-				if (result.cancelled) return;
-				ctx.ui.notify(describeBase(target), "info");
+				// After switchSession the captured `ctx` is STALE — the session has
+				// been replaced. Post-switch work (the confirmation notify) MUST run
+				// on the fresh ctx handed to withSession, never the old one. On
+				// cancel, withSession isn't invoked, so we simply don't notify.
+				await ctx.switchSession(newSessionFile, {
+					withSession: async (freshCtx) => {
+						freshCtx.ui.notify(describeBase(target), "info");
+					},
+				});
 			} catch (err) {
+				// switchSession threw before replacing the session, so `ctx` is
+				// still valid here for the error notify.
 				ctx.ui.notify(`Failed to switch session: ${(err as Error).message}`, "error");
 			}
 		},
