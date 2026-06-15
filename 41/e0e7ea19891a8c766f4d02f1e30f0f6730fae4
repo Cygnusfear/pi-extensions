@@ -1,0 +1,26 @@
+packages/code-mode/extensions/code-mode-prompt.md
+  s_5bc8f5dd982b26::t_dcc763416b7903 289
+packages/code-mode/src/context-usage.test.ts
+  s_5bc8f5dd982b26::t_a79076adfa82ff 32-51
+packages/code-mode/README.md
+  s_5bc8f5dd982b26::t_fd28232af75293 441
+packages/code-mode/src/context-usage.ts
+  s_5bc8f5dd982b26::t_7c9ee9724ff9c2 47
+  s_5bc8f5dd982b26::t_fb587f4ed22c35 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "41e0e7ea19891a8c766f4d02f1e30f0f6730fae4",
+  "prompts": {},
+  "sessions": {
+    "s_5bc8f5dd982b26": {
+      "agent_id": {
+        "tool": "Jedidah Sagittarius Hammel",
+        "id": "019e9769-a1eb-7b63-a1f2-82cb0a2cc48a",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
