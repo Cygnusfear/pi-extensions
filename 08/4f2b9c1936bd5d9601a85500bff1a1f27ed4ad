@@ -1,0 +1,30 @@
+packages/teams/spawn-stress.test.ts
+  s_f7e5e1cc1b71a5::t_b525bd7e2a2f92 5-6
+packages/shared/README.md
+  s_b80b60cc68c1d4::t_e4334a5cfd1ccb 16-17
+  s_f7e5e1cc1b71a5::t_57dbcfb6fa9a84 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "084f2b9c1936bd5d9601a85500bff1a1f27ed4ad",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_f7e5e1cc1b71a5": {
+      "agent_id": {
+        "tool": "Alycia Cepheid Cameron",
+        "id": "019ed09e-f4dc-7876-aec8-ad81934265af",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
