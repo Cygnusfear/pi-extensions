@@ -184,19 +184,6 @@
         "@sinclair/typebox": "*",
       },
     },
-    "packages/foresight": {
-      "name": "@pi-extensions/foresight",
-      "version": "0.0.2",
-      "dependencies": {
-        "@earendil-works/pi-ai": "*",
-        "@pi-extensions/shared": "*",
-      },
-      "peerDependencies": {
-        "@earendil-works/pi-coding-agent": ">=0.74.0",
-        "@earendil-works/pi-tui": "*",
-        "@sinclair/typebox": "*",
-      },
-    },
     "packages/fork-fixes": {
       "name": "@pi-ext/fork-fixes",
       "version": "0.1.1",
@@ -722,8 +709,6 @@
     "@pi-extensions/fff": ["@pi-extensions/fff@workspace:packages/fff"],
 
     "@pi-extensions/file-tools": ["@pi-extensions/file-tools@workspace:packages/file-tools"],
-
-    "@pi-extensions/foresight": ["@pi-extensions/foresight@workspace:packages/foresight"],
 
     "@pi-extensions/frontpage": ["@pi-extensions/frontpage@workspace:packages/frontpage"],
 

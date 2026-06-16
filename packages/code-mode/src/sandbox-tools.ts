@@ -1,12 +1,6 @@
 import { fffFindAPI, fffGrepAPI, fffMultiGrepAPI } from "@pi-extensions/fff/api";
-import {
-  foresightContext,
-  foresightRecall,
-  foresightUnfold,
-} from "@pi-extensions/shared/foresight-read";
 import { runEditHooks } from "../../shared/src/edit-hooks";
 import { runGuardedConfirm } from "../../shared/src/guarded-confirm.ts";
-import { foresightRetain } from "@pi-extensions/shared/foresight-write";
 import {
   isGitPath,
   isGitUnsafeBash,
@@ -34,7 +28,6 @@ import type { HashlineEdit } from "./hashline";
 import { applyHashEdits, formatHashLines } from "./hashline";
 import { parsePatchText, patchDeriveNewContent } from "./patch-parser";
 import {
-  FORESIGHT_BANK,
   SUBPROCESS_TIMEOUT_MS,
   gitGuardError,
   isGitLockActive,
@@ -436,127 +429,6 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       payload,
     };
   };
-
-  // ==========================================================================
-  // memory namespace — callable (recall) + methods
-  //
-  // Built with Object.assign so the callable + methods are a single value with
-  // a proper function-with-methods type. Avoids `(memory as any).foo = ...`
-  // assignments that hide the methods from TS at lookup time.
-  // ==========================================================================
-
-  const memory = Object.assign(
-    async ({
-      query,
-      limit = 10,
-      factType,
-      minScore,
-      bank,
-    }: {
-      query: string;
-      limit?: number;
-      factType?: string;
-      minScore?: number;
-      bank?: string;
-    }) => {
-      const data = await foresightRecall(bank || FORESIGHT_BANK, query, limit, factType, minScore);
-      return JSON.stringify(data);
-    },
-    {
-      context: async ({
-        task,
-        maxNodes = 10,
-        bank,
-      }: {
-        task: string;
-        maxNodes?: number;
-        bank?: string;
-      }) => {
-        return foresightContext(bank || FORESIGHT_BANK, task, maxNodes);
-      },
-
-      create: async ({
-        factType,
-        oneLiner,
-        summary,
-        fullSynthesis,
-        entityName,
-        repo,
-        bank,
-      }: {
-        factType: string;
-        oneLiner: string;
-        summary: string;
-        fullSynthesis?: string;
-        entityName?: string;
-        repo?: string;
-        bank?: string;
-      }) => {
-        const result = await foresightRetain(bank || FORESIGHT_BANK, {
-          factType: factType as any,
-          oneLiner,
-          summary,
-          fullSynthesis,
-          entityName,
-          repo,
-        });
-        return JSON.stringify(result);
-      },
-
-      unfold: async ({
-        nodeId,
-        depth = "full",
-        bank,
-      }: {
-        nodeId: string;
-        depth?: string;
-        bank?: string;
-      }) => {
-        const data = await foresightUnfold(bank || FORESIGHT_BANK, nodeId, depth);
-        return JSON.stringify(data);
-      },
-
-      status: async () => {
-        return JSON.stringify({
-          backend: "foresight",
-          bank: FORESIGHT_BANK,
-          status: "ok",
-        });
-      },
-
-      subscribe: async ({
-        nodeId,
-        entity,
-        topic,
-        subscriber: _subscriber,
-      }: {
-        nodeId?: string;
-        entity?: string;
-        topic?: string;
-        subscriber?: string;
-      }) => {
-        const watching = nodeId
-          ? `node:${nodeId.slice(0, 8)}…`
-          : entity
-            ? `entity:${entity}`
-            : `topic:${topic}`;
-        return JSON.stringify({
-          status: "acknowledged",
-          subscriptionId: `stub-${Date.now()}`,
-          watching,
-          note: "Pub/sub not available with Foresight backend",
-        });
-      },
-
-      unsubscribe: async ({ subscriptionId }: { subscriptionId: string }) => {
-        return JSON.stringify({ status: "acknowledged", subscriptionId });
-      },
-
-      checkUpdates: async (_input?: { subscriber?: string }) => {
-        return JSON.stringify({ updates: [], note: "Pub/sub not available with Foresight backend" });
-      },
-    },
-  );
 
   // ==========================================================================
   // brave namespace — callable (search) + codeSearch method
@@ -1379,11 +1251,6 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     maiCall: mai,  // raw callable passthrough: maiCall({ args: "ls" })
     maiTicket: mai.ticket,  // backward compat
 
-    // memory — spread methods off the callable so this namespace can't drift
-    // (same reasoning as mai above). recall stays the raw callable.
-    memory: { ...memory },
-    recall: memory,  // callable: recall({ query })
-
     // brave — spread methods off the callable so this namespace can't drift.
     brave: { ...brave },
     braveSearch: brave,  // callable: braveSearch({ query })
@@ -1551,11 +1418,6 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     fffFind: fff,  // callable: fff({ query })
     fffGrep: (fff as any).grep,  // backward compat
     fffMultiGrep: (fff as any).multiGrep,  // backward compat
-
-    // memory.subscribe/unsubscribe/checkUpdates — from namespace below
-    memorySubscribe: memory.subscribe,  // backward compat
-    memoryUnsubscribe: memory.unsubscribe,  // backward compat
-    memoryCheckUpdates: memory.checkUpdates,  // backward compat
 
     // tldr — defined below as namespaced callable
     tldr: {

@@ -1,6 +1,6 @@
 # shared
 
-Shared utilities used by all pi-extensions packages — model resolution, JSON parsing, git guards, TUI rendering, session management, and Foresight memory integration.
+Shared utilities used by all pi-extensions packages — model resolution, JSON parsing, git guards, TUI rendering, and session management.
 
 ## Exports
 
@@ -13,7 +13,8 @@ Utilities for finding the latest model by provider and family.
 | `findLatest(models, provider, family)` | Find the single latest model matching provider + family regex |
 | `findLatestPerFamily(models)` | Get the latest model per family as a `Map<provider/family, LatestModel>` |
 | `getFamily(modelId)` | Get the family label for a model ID (`claude-opus-4-6` → `claude-opus`) |
-| `extractVersion(modelId)` | Extract a comparable version number, or `null` for pinned/non-versioned models |
+| `extractVersion(modelId)` | Extract a comparable version number, or `null` if none parseable |
+| `isExcludedFromLatest(modelId)` | True for dated pins, `-latest` aliases, and `-thinking` variants (should not be picked as "latest") |
 | `FAMILY_PATTERNS` | Regex-to-label map for all recognized model families |
 
 ### JSON Parsing — `safe-json.ts`
@@ -94,16 +95,3 @@ Shared rendering helpers for tool results and diffs.
 | `ensureHighlighter()` | Initialize the Shiki syntax highlighter |
 | `highlightCode(code, lang, theme)` | Highlight code with Shiki |
 | `renderBeautifulDiff(diff, options)` | Render a diff with syntax-colored +/− lines |
-
-### Foresight Memory — `foresight-env.ts`, `foresight-read.ts`, `foresight-write.ts`
-
-Shared Foresight CLI wrappers for semantic memory.
-
-| Export | Description |
-|--------|-------------|
-| `FS_ENV` / `FORESIGHT_BIN` | Foresight CLI configuration and binary path |
-| `foresightRecall(query, options)` | Search memory by semantic query |
-| `foresightUnfold(nodeId, options)` | Expand a memory node for detail |
-| `foresightContext(task, options)` | Get memories relevant to a task |
-| `foresightRetain(params)` | Create a new memory and return its UUID |
-| `foresightRetainFireAndForget(params)` | Create memory without waiting for UUID |

@@ -5,7 +5,6 @@
   "exports": {
     "./sandbox-registry": "./src/sandbox-registry.ts",
     "./edit-hooks": "./src/edit-hooks.ts",
-    "./foresight-env": "./src/foresight-env.ts",
     "./git-guards": "./src/git-guards.ts",
     "./process-guards": "./src/process-guards.ts",
     "./model-utils": "./src/model-utils.ts",
@@ -15,8 +14,6 @@
     "./session-view": "./src/session-view.ts",
     "./tool-ui-utils": "./src/tool-ui-utils.ts",
     "./tui-diff-renderer": "./src/tui-diff-renderer.ts",
-    "./foresight-read": "./src/foresight-read.ts",
-    "./foresight-write": "./src/foresight-write.ts",
     "./tool-availability": "./src/tool-availability.ts",
     "./mai-binary": "./src/mai-binary.ts",
     "./tui-safe": "./src/tui-safe.ts",

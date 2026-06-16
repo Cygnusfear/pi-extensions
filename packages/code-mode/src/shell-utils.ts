@@ -96,9 +96,6 @@ export function shellEsc(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-export const FORESIGHT_BANK =
-  process.env.FORESIGHT_BANK || process.env.HINDSIGHT_BANK || path.basename(process.cwd());
-
 // =============================================================================
 // Path utilities
 // =============================================================================

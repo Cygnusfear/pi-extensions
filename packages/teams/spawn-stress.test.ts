@@ -2,8 +2,8 @@
  * Stress test: spawn workers the exact same way teams does and verify
  * every single one creates a session file.
  *
- * This catches the real bug: extensions (like foresight) blocking
- * before_agent_start and preventing session file creation.
+ * This catches the real bug: a slow/blocking extension in before_agent_start
+ * preventing session file creation.
  *
  * We don't test full worker completion (that needs real mai tickets).
  * We test the critical path: spawn → extensions load → session created.
