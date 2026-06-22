@@ -35,14 +35,31 @@ export function truncateSessionText(text: string, max: number): string {
 /** Return entries with each text field bounded to perEntryChars (for WIRE payloads
  *  that carry the entries[] array, not just rendered text). Identity-returns when
  *  nothing needed truncating, so callers pay nothing in the common case. */
-export function capSessionViewEntries(entries: SessionViewEntry[], perEntryChars = SESSION_VIEW_ENTRY_CHARS): SessionViewEntry[] {
+export function capSessionViewEntries(
+	entries: SessionViewEntry[],
+	perEntryChars = SESSION_VIEW_ENTRY_CHARS,
+	maxTotalChars = SESSION_VIEW_TOTAL_CHARS,
+): SessionViewEntry[] {
+	// A preview is bounded per-entry AND in TOTAL, by construction. Cap each entry's
+	// text, then keep only the NEWEST entries that fit within maxTotalChars — so a
+	// wide window (or a flood of entries) can't return a large structured payload on
+	// the wire even though every entry's text is individually bounded. (pe-zw1n8x78;
+	// closes the "entries[] only per-entry capped" review finding.)
+	let total = 0;
 	let changed = false;
-	const out = entries.map((e) => {
-		if (e.text.length <= perEntryChars) return e;
-		changed = true;
-		return { ...e, text: truncateSessionText(e.text, perEntryChars) };
-	});
-	return changed ? out : entries;
+	const kept: SessionViewEntry[] = [];
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const e = entries[i];
+		const text = e.text.length <= perEntryChars ? e.text : truncateSessionText(e.text, perEntryChars);
+		total += text.length;
+		if (total > maxTotalChars && kept.length > 0) {
+			changed = true; // dropped older entries to honor the total budget
+			break;
+		}
+		if (text !== e.text) changed = true;
+		kept.unshift(text === e.text ? e : { ...e, text });
+	}
+	return changed ? kept : entries;
 }
 
 function normalizeText(text: string): string {
@@ -189,7 +206,7 @@ export function buildSessionTailSnapshotFromLeaf(
 	// Tell-ack view is UNSOLICITED — keep it a tiny glance. Cap the wire entries[]
 	// (per-entry) so a single fat entry can't bloat the ack payload, and render the
 	// text with tight tell-ack caps.
-	const entries = capSessionViewEntries(windowed, TELL_ACK_ENTRY_CHARS);
+	const entries = capSessionViewEntries(windowed, TELL_ACK_ENTRY_CHARS, TELL_ACK_TOTAL_CHARS);
 	return {
 		entries,
 		text: formatSessionViewEntries(entries, { perEntryChars: TELL_ACK_ENTRY_CHARS, totalChars: TELL_ACK_TOTAL_CHARS }),

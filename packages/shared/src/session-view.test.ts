@@ -121,3 +121,19 @@ describe("session-view caps — a single fat entry can never flood (context-poll
 		expect(snap.entries[0].text.length).toBeLessThanOrEqual(TELL_ACK_ENTRY_CHARS + 80);
 	});
 });
+
+describe("capSessionViewEntries — TOTAL array budget (closes the entries[] review finding)", () => {
+	test("a wide window of many entries returns a bounded array — newest within budget", () => {
+		// 200 entries x 100 chars = 20000 > 4000 budget → only the newest fit
+		const many = Array.from({ length: 200 }, (_, i) => ({ index: i, label: "m", text: "x".repeat(100), type: "message" }));
+		const capped = capSessionViewEntries(many);
+		const totalChars = capped.reduce((s, e) => s + e.text.length, 0);
+		expect(totalChars).toBeLessThanOrEqual(SESSION_VIEW_TOTAL_CHARS + 120);
+		expect(capped.length).toBeLessThan(many.length); // dropped older entries
+		expect(capped[capped.length - 1].index).toBe(199); // kept the NEWEST
+	});
+	test("small arrays under budget identity-return", () => {
+		const small = [{ index: 0, label: "x", text: "ok", type: "message" }];
+		expect(capSessionViewEntries(small)).toBe(small);
+	});
+});
