@@ -9,6 +9,7 @@
     "./process-guards": "./src/process-guards.ts",
     "./model-utils": "./src/model-utils.ts",
     "./safe-json": "./src/safe-json.ts",
+    "./team-templates": "./src/team-templates.ts",
     "./session-activity-summary": "./src/session-activity-summary.ts",
     "./session-nickname": "./src/session-nickname.ts",
     "./session-view": "./src/session-view.ts",

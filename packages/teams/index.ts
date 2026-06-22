@@ -4,6 +4,7 @@ import { buildPredicate, setTeamsNotifyFn, TeamsSubscription, type EventFilter, 
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
 import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
+import { ensureTeamTemplatesFile } from "@pi-extensions/shared/team-templates";
 
 function normalizeUiError(text: string): string {
 	return text.replace(/^Error:\s*/i, "");
@@ -216,6 +217,10 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		leader.setContext(ctx);
 		sessionCtx = ctx;
+		// Self-heal: seed ~/.pi/agent/team-templates.json if it is missing, so an
+		// accidental deletion recovers to a working, editable file instead of
+		// silently breaking every template delegation + the DEI roles block.
+		ensureTeamTemplatesFile();
 		// Route teams.on safety-net rejections to the TUI notification surface
 		// instead of letting them surface as raw host `unhandledRejection` output.
 		// See subscription.ts setTeamsNotifyFn for the contract.

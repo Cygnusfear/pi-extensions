@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { formatRuntimeSummary } from "./activity.js";
 import type { TeamLeader } from "./leader.js";
-import { resolveTemplate, listTemplates } from "./templates.js";
+import { resolveTemplate, listTemplates } from "@pi-extensions/shared/team-templates";
 import { resolve as resolveModelRole, type ResolverContext } from "../model-router/src/router.js";
 import { projectWidgetStatus } from "./widget.js";
 

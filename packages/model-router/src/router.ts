@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import type { AvailableModel, LivenessEntry, ResolveOptions, ResolveResult, ResolvedModel } from "./types.js";
+import { loadRoleModels } from "@pi-extensions/shared/team-templates";
 
 // ── Liveness store ──────────────────────────────────────────────────────────
 
@@ -55,43 +56,12 @@ function isUnhealthy(store: LivenessStore, fullId: string): boolean {
 }
 
 // ── Template loading ────────────────────────────────────────────────────────
+// The ordered role → model lists come from the single shared loader
+// (@pi-extensions/shared/team-templates), which owns the path, the default
+// set, seed-on-missing, and loud-on-corrupt handling. Re-exported here so the
+// model-router extension keeps a stable import surface.
 
-function getTemplatesPath() { return path.join(getHome(), ".pi", "agent", "team-templates.json"); }
-
-interface TemplateEntry {
-	model?: string | string[];
-	[key: string]: unknown;
-}
-
-function loadRoleModels(role: string): string[] | null {
-	try {
-		const raw = fs.readFileSync(getTemplatesPath(), "utf-8");
-		const templates: Record<string, TemplateEntry> = JSON.parse(raw);
-		const tmpl = templates[role];
-		if (!tmpl || !tmpl.model) return null;
-		if (Array.isArray(tmpl.model)) return tmpl.model;
-		return [tmpl.model];
-	} catch {
-		return null;
-	}
-}
-
-/** Get all defined roles and their model lists from team-templates.json. */
-export function loadAllRoles(): Record<string, string[]> {
-	try {
-		const raw = fs.readFileSync(getTemplatesPath(), "utf-8");
-		const templates: Record<string, TemplateEntry> = JSON.parse(raw);
-		const out: Record<string, string[]> = {};
-		for (const [name, tmpl] of Object.entries(templates)) {
-			if (tmpl.model) {
-				out[name] = Array.isArray(tmpl.model) ? tmpl.model : [tmpl.model];
-			}
-		}
-		return out;
-	} catch {
-		return {};
-	}
-}
+export { loadAllRoles } from "@pi-extensions/shared/team-templates";
 
 // ── Resolver ────────────────────────────────────────────────────────────────
 
