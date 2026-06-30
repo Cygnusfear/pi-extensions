@@ -61,7 +61,12 @@ describe("teams tool runtime action", () => {
 			pi,
 			leader,
 			{ action: 'delegate', tasks: [{ text: 'review x', assignee: 'rev', template: 'review' }], useWorktree: false },
-			{ cwd: '/tmp' } as any,
+			// template 'review' (a built-in DEFAULT_TEAM_TEMPLATES entry) has an array
+			// model, so the router calls ctx.modelRegistry.getAvailable() to pick a concrete
+			// one. Provide one of review's models as available so resolveModelRole resolves
+			// and delegation proceeds — this asserts the real behavior (mai ticket args),
+			// independent of the user's configured ~/.pi/agent/team-templates.json.
+			{ cwd: '/tmp', modelRegistry: { getAvailable: () => [{ provider: 'anthropic', id: 'claude-opus-4-8' }] } } as any,
 		);
 
 		const create = execCalls.find((c) => path.basename(c.cmd) === 'mai' && c.args[0] === 'ticket');

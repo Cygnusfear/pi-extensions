@@ -103,7 +103,13 @@ function buildExecuteCodeTool(params: {
 					return { content: [{ type: "text", text: stdout || "rlm.return called" }], details: { returned: true, stdout } };
 				}
 				const err = errorFromUnknown(e);
-				if (err.message === "rlm.return: value must be JSON-serializable") throw err;
+				if (err.message === "rlm.return: value must be JSON-serializable") {
+					// rlm.return misuse is fatal, not a retryable tool error. Carry it via state so
+					// the loop terminates — runAgentLoop swallows a thrown tool error into a retryable
+					// error-result, which would otherwise loop to maxIterations.
+					params.state.fatalError = err;
+					throw err;
+				}
 				throw new Error(formatExecutionError(err, stdout));
 			}
 			const stdout = params.subSession.drainLogs();
@@ -174,11 +180,6 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 			toolExecution: "sequential",
 			getSteeringMessages: async () => [],
 			getFollowUpMessages: async () => [],
-			afterToolCall: async (ctx: any) => {
-				const text = (ctx.result?.content ?? []).map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n");
-				if (ctx.isError && text.includes("rlm.return: value must be JSON-serializable")) throw new Error("rlm.return: value must be JSON-serializable");
-				return undefined;
-			},
 		} as any, async (event) => {
 			if (event.type === "message_end" && (event.message as any).role === "assistant") {
 				const assistant = event.message as AssistantMessage;
@@ -192,6 +193,7 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 			if (event.type === "turn_end") {
 				turns++;
 				monitor?.update({ iteration: turns, usage: { ...state.usage } }, "step");
+				if (state.fatalError) throw state.fatalError;
 				if (state.resolved) throw new RlmResolvedSignal();
 				if (turns >= maxIterations) throw new Error("rlm: maxIterations (" + maxIterations + ") reached without rlm.return");
 			}
@@ -209,6 +211,7 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 
 	if (combined.aborted && !state.resolved) throw abortError(combined);
 	if (!state.resolved) {
+		if (state.fatalError) throw state.fatalError;
 		if (terminalError) throw terminalError;
 		throw new Error("rlm: agent finished without rlm.return");
 	}
