@@ -1,0 +1,19 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  s_b80b60cc68c1d4::t_e962f48808f952 1169-1194
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "92bca7433d684636c8bab3cdaf50fb51ed426290",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
