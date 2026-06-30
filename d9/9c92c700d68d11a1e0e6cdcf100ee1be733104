@@ -1,0 +1,26 @@
+packages/model-shortcuts/README.md
+  s_b80b60cc68c1d4::t_d32e927d1c0838 21
+  s_b80b60cc68c1d4::t_de16ae16312de7 7
+packages/shared/src/model-utils.ts
+  s_b80b60cc68c1d4::t_a3ae7c2793d649 123-128,133,138,141-148,152
+  s_b80b60cc68c1d4::t_164cd92ef074ed 31
+  s_b80b60cc68c1d4::t_03c57f5081527d 72-86
+packages/model-shortcuts/extensions/model-shortcuts.ts
+  s_b80b60cc68c1d4::t_0d183f57a67e96 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "d99c92c700d68d11a1e0e6cdcf100ee1be733104",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
