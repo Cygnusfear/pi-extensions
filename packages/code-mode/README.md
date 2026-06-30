@@ -435,9 +435,9 @@ Code runs in a **persistent** Node.js `vm.Context` — the context object (inclu
 The execution flow has five layers:
 
 1. **AST-based auto-persist extraction** — the user's code is parsed with acorn. Top-level `const`/`let`/`var` and `function` declarations are collected (handles all destructuring patterns). A suffix is generated to copy each name to `$` after execution.
-2. **Syntax pre-validation** — the wrapped code (user code + auto-persist suffix) is validated with `vm.Script`. Syntax errors produce a clear message without affecting stored state.
+2. **Syntax pre-validation** — the wrapped code (user code + auto-persist suffix) is parsed with `acorn`. Genuine syntax errors are caught at this compile phase and produce a clear message without affecting stored state. (Note: Bun's `vm.Script` lazy-compiles and does **not** surface syntax errors at construction, so acorn — not `vm.Script` — is the actual validator.)
 3. **Hydration** — all variables in the `$` store are injected as bare context globals, so `const x = ...` from a previous call is available as bare `x` without the `$.` prefix. Tool bindings and builtins (`$`, `console`, `session`) are protected from shadowing.
-4. **Fault-tolerant execution** — code runs in a try/catch. Errors are caught, partial output is preserved, and a recovery hint tells the agent which `$` variables survived.
+4. **Fault-tolerant execution** — code runs in a try/catch. Runtime errors (including a runtime `SyntaxError` from `JSON.parse()`/`new RegExp()` on bad data — distinct from a code syntax error) are caught, partial output is preserved, the throwing line is located, and a recovery hint tells the agent which `$` variables survived.
 5. **Context management** — after execution, if context usage is ≥50%, a footer shows the percentage and cost. At ≥70%, it warns the agent to distill and trim; ≥80% urges a squash.
 
 ## Tool exclusivity

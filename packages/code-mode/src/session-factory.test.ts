@@ -169,6 +169,35 @@ describe("executeInSession — error modes", () => {
 		expect(result.output).not.toContain("$ store:");
 	});
 
+	test("runtime SyntaxError (JSON.parse) is a runtime error, not a code syntax error", async () => {
+		const sess = createCodeModeSession();
+		(sess.store.proxy as any).survivor = "keep-me";
+		const result = await executeInSession(
+			sess,
+			'JSON.parse("gso-gp7rp4vc plain text");',
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		// The real runtime error surfaces.
+		expect(result.error).toContain("JSON Parse error");
+		// It must be reported as a RUNTIME error (store survived), NOT mislabeled
+		// as a code syntax error — Layer 1 already validated syntax.
+		expect(result.output).toContain("Your $ store survived");
+		expect(result.output).not.toContain("Syntax error");
+		expect(result.output).not.toContain("Your $ store was NOT affected");
+		expect(result.output).not.toContain("Fix the syntax and retry");
+		// Located at the throwing line and tagged as a runtime SyntaxError.
+		expect(result.output).toContain("at your code line 1");
+		expect(result.output).toContain("thrown at runtime");
+	});
+
 	test("execution timeout aborts Bash and preserves partial subprocess output", async () => {
 		const sess = createCodeModeSession();
 		const result = await executeInSession(

@@ -922,6 +922,23 @@ function hydrateBareGlobals(session: CodeModeSession): void {
 // when ExecutionDeps.executionTimeoutMs is a positive finite number. Callers
 // (the execute_code tool) decide whether to opt into a deadline at all.
 
+/**
+ * Extract the user-code line number from a runtime error's stack.
+ *
+ * Execution frames reference the wrapped script as "code-mode.js:<line>:<col>".
+ * The wrapper (see executeInSession) prepends exactly one line, so the user line
+ * is the wrapped line minus 1. Returns null when no in-script frame is present
+ * (native throws with no stack, or errors from inside tool bindings).
+ */
+function extractUserCodeLine(err: unknown): number | null {
+	const stack = (err as { stack?: unknown })?.stack;
+	if (typeof stack !== "string") return null;
+	const m = stack.match(/code-mode\.js:(\d+):\d+/);
+	if (!m) return null;
+	const userLine = parseInt(m[1], 10) - 1;
+	return Number.isFinite(userLine) && userLine >= 1 ? userLine : null;
+}
+
 export async function executeInSession(
 	session: CodeModeSession,
 	code: string,
@@ -946,7 +963,7 @@ export async function executeInSession(
 	const wrapped = "(async () => {\n" + code + "\n" + autoPersistSuffix + "\n})()";
 
 	try {
-		new vm.Script(wrapped, { filename: "code-mode.js" });
+		acorn.parse(wrapped, { ecmaVersion: "latest" });
 	} catch (parseErr) {
 		const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
 		if (errorMode === "rethrow") throw parseErr instanceof Error ? parseErr : new Error(parseMsg);
@@ -1072,27 +1089,30 @@ export async function executeInSession(
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		const partialOutput = buildOutput(warnings, session.logs);
-		const errorName = (err as { name?: unknown })?.name;
-		const isSyntaxError = errorName === "SyntaxError" || error.startsWith("SyntaxError:");
-		if (isSyntaxError) {
-			const syntaxOutput = buildOutput(warnings, [
-				...(partialOutput ? [partialOutput, ""] : []),
-				"⚠️ Syntax error: " + error.replace(/^SyntaxError:\s*/, ""),
-				"",
-				"Your $ store was NOT affected. Fix the syntax and retry.",
-				"Run console.log($.__status()) only if you need store details.",
-			]);
-			return { output: syntaxOutput, error, duration: Date.now() - start };
-		}
+
+		// Locate the throwing line in the user's code. Execution frames reference
+		// the wrapped script as "code-mode.js:<line>"; the wrapper prepends exactly
+		// one line ("(async () => {"), so user line = wrapped line - 1.
+		const userLine = extractUserCodeLine(err);
+		const locator = userLine !== null ? " (at your code line " + userLine + ")" : "";
+
+		// A SyntaxError reaching this RUNTIME catch is never a syntax problem in the
+		// submitted code — Layer 1 (acorn) already validated that. It is a runtime
+		// throw from JSON.parse()/new RegExp()/eval()/etc. on bad input. Classify by
+		// PHASE (compile vs runtime), never by the error's constructor name.
+		const runtimeSyntaxNote =
+			(err as { name?: unknown })?.name === "SyntaxError"
+				? "\nThis SyntaxError was thrown at runtime (e.g. JSON.parse() or new RegExp() on invalid input) — your code's syntax is fine; check the data you passed in."
+				: "";
+
 		const storeInfo = session.store.getStatus();
 		const recoveryHint =
 			storeInfo !== "$ is empty"
 				? "Your $ store survived. Use $.<var> to continue from where you left off.\n" + storeInfo
 				: "$ store is empty — nothing to recover.";
 
-		const output = partialOutput
-			? partialOutput + "\n\n\u274c " + error + "\n\n" + recoveryHint
-			: "\u274c " + error + "\n\n" + recoveryHint;
+		const body = "❌ " + error + locator + runtimeSyntaxNote + "\n\n" + recoveryHint;
+		const output = partialOutput ? partialOutput + "\n\n" + body : body;
 
 		return { output, error, duration: Date.now() - start };
 	} finally {
