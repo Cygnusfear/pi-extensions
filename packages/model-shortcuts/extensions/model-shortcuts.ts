@@ -12,11 +12,10 @@ const SHORTCUTS = [
   { command: "haiku", provider: "anthropic", family: /^claude-haiku-/, label: "Haiku" },
   { command: "codex", provider: "openai-codex", family: /^gpt-.*-codex$/, label: "Codex" },
   { command: "gpt", provider: "openai-codex", family: /^gpt-5.*/, label: "GPT" },
-  { command: "zai", provider: "zai-coding", family: /^glm-5.1/, label: "GLM-5.1 Coding" },
+  { command: "zai", provider: "zai", family: /^glm-5(\.\d+)?$/, label: "GLM-5" },
   { command: "zturbo", provider: "zai", family: /^glm-5-turbo$/, label: "GLM-5-Turbo" },
   { command: "z5v", provider: "zai", family: /^glm-5v/, label: "GLM-5V-Turbo" },
   { command: "z47", provider: "zai", family: /^glm-4.7$/, label: "GLM-4.7" },
-  { command: "zflash", provider: "zai", family: /^glm-4.7-flash$/, label: "GLM-4.7-Flash" },
   { command: "kimi", provider: "kimi-coding", family: /^k\d+p/, label: "Kimi K" },
 ] as const;
 

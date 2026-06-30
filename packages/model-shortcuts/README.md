@@ -4,7 +4,7 @@ Instant model switching with slash commands. Zero maintenance — always resolve
 
 ## Features
 
-- **11 slash commands** for one-key model switching across Anthropic, OpenAI Codex, ZAI, and Kimi providers
+- **10 slash commands** for one-key model switching across Anthropic, OpenAI Codex, ZAI, and Kimi providers
 - **Dynamic resolution** — always picks the highest-versioned model from the registry (no stale IDs)
 - **Intelligent filtering** — skips pinned/dated models, aliases, and thinking variants when selecting "latest"
 - **Graceful fallbacks** — notifies if no matching model is found or if the API key is missing
@@ -18,11 +18,10 @@ Instant model switching with slash commands. Zero maintenance — always resolve
 | `/haiku`  | Anthropic    | Latest `claude-haiku-*`  | `claude-haiku-4-7`  |
 | `/codex`  | OpenAI Codex | Latest `gpt-*-codex`     | `gpt-5.5x`          |
 | `/gpt`    | OpenAI Codex | Latest `gpt-5.*`         | `gpt-5.5`           |
-| `/zai`    | ZAI Coding   | `glm-5.1*`               | `glm-5.1`           |
+| `/zai`    | ZAI          | latest `glm-5.x`         | `glm-5.2`           |
 | `/zturbo` | ZAI          | `glm-5-turbo`            | `glm-5-turbo`       |
 | `/z5v`    | ZAI          | `glm-5v*`                | `glm-5v-turbo`      |
 | `/z47`    | ZAI          | `glm-4.7`                | `glm-4.7`           |
-| `/zflash` | ZAI          | `glm-4.7-flash`          | `glm-4.7-flash`     |
 | `/kimi`   | Kimi Coding  | `k2p*`                   | `k2p6`              |
 
 ## How Dynamic Resolution Works

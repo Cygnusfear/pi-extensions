@@ -28,10 +28,9 @@ export const FAMILY_PATTERNS: [RegExp, string][] = [
 	[/^gemini-1/, "gemini-1"],
 	[/^glm-5v/, "glm-5v"],
 	[/^glm-5\.1/, "glm-5.1"],
+	[/^glm-5\.2/, "glm-5.2"],
 	[/^glm-5-turbo/, "glm-5-turbo"],
 	[/^glm-5$/, "glm-5"],
-	[/^glm-4.7-flashx/, "glm-4.7-flashx"],
-	[/^glm-4.7-flash/, "glm-4.7-flash"],
 	[/^glm-4.7$/, "glm-4.7"],
 	[/^k\d+p/, "kimi-k"],
 ];
@@ -70,6 +69,21 @@ export function extractVersion(modelId: string): number | null {
 	return null;
 }
 
+/**
+ * Should this model be excluded from "latest" selection?
+ *
+ * Separate from extractVersion: a model can have no parseable version
+ * (e.g. `glm-5v-turbo`, `glm-4.5-air`) yet still be the sole member of
+ * its family and therefore a valid "latest" pick. Only dated pins,
+ * `-latest` aliases, and `-thinking` variants are excluded outright.
+ */
+export function isExcludedFromLatest(modelId: string): boolean {
+	if (/\d{8}/.test(modelId)) return true;
+	if (modelId.endsWith("-latest")) return true;
+	if (modelId.endsWith("-thinking")) return true;
+	return false;
+}
+
 export interface LatestModel {
 	provider: string;
 	id: string;
@@ -106,21 +120,34 @@ export function findLatestPerFamily(models: ModelLike[]): Map<string, LatestMode
 
 /**
  * Find the single latest model matching a provider + family regex.
+ *
+ * A model is excluded from selection if it's a dated pin, a `-latest`
+ * alias, or a `-thinking` variant (see isExcludedFromLatest). Among the
+ * remaining matches, the highest version wins. If no match has a
+ * comparable version (variant families like `glm-5v-turbo`), the
+ * lexicographically-largest ID is returned as a deterministic fallback.
  */
 export function findLatest(models: ModelLike[], provider: string, family: RegExp): ModelLike | null {
 	let best: ModelLike | null = null;
 	let bestVersion = -1;
+	let fallback: ModelLike | null = null;
 
 	for (const m of models) {
 		if (m.provider !== provider) continue;
 		if (!family.test(m.id)) continue;
+		if (isExcludedFromLatest(m.id)) continue;
 
 		const v = extractVersion(m.id);
-		if (v !== null && v > bestVersion) {
-			bestVersion = v;
-			best = m;
+		if (v !== null) {
+			if (v > bestVersion) {
+				bestVersion = v;
+				best = m;
+			}
+		} else if (fallback === null || m.id > fallback.id) {
+			// Unversioned variant — deterministic fallback for singleton families.
+			fallback = m;
 		}
 	}
 
-	return best;
+	return best ?? fallback;
 }
