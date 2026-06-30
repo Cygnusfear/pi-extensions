@@ -1146,7 +1146,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     rg: async ({ args, cwd: explicitCwd, follow = true }: { args: string; cwd?: string; follow?: boolean }) => {
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const parsedArgs = splitShellArgs(args);
-      const effectiveArgs = follow && !parsedArgs.includes("--follow") && !parsedArgs.includes("-L") ? ["--follow", ...parsedArgs] : parsedArgs;
+      // --no-messages suppresses benign file-read errors (broken symlinks, permission
+      // denied) while KEEPING genuine regex/pattern errors on stderr. Without it, a
+      // traversal error on a no-match search gets returned as if it were a match.
+      const withQuiet = parsedArgs.includes("--no-messages") ? parsedArgs : ["--no-messages", ...parsedArgs];
+      const effectiveArgs = follow && !withQuiet.includes("--follow") && !withQuiet.includes("-L") ? ["--follow", ...withQuiet] : withQuiet;
       const result = await spawnAsync({
         cmd: "rg",
         args: effectiveArgs,
@@ -1156,8 +1160,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       if (result.error) {
         throw new Error(`rg error: ${result.error.message}`);
       }
-      // Return stdout, or stderr if stdout is empty (e.g., no matches produces exit 1)
-      return result.stdout || result.stderr || "";
+      // Never return stderr as content. With --no-messages, anything left on stderr is a
+      // genuine pattern/syntax error — surface it only when there is no match output.
+      const out = result.stdout || "";
+      const err = (result.stderr || "").trim();
+      if (!out && err) throw new Error(`rg error: ${err}`);
+      return out;
     },
 
     fd: async ({ args, cwd: explicitCwd, follow = true }: { args: string; cwd?: string; follow?: boolean }) => {
@@ -1173,7 +1181,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       if (result.error) {
         throw new Error(`fd error: ${result.error.message}`);
       }
-      return result.stdout || result.stderr || "";
+      // Never return stderr as content (fd is quiet on benign traversal — it does not
+      // error on broken symlinks). Surface a genuine error only when there is no output.
+      const out = result.stdout || "";
+      const err = (result.stderr || "").trim();
+      if (!out && err) throw new Error(`fd error: ${err}`);
+      return out;
     },
 
     WebFetch: async ({

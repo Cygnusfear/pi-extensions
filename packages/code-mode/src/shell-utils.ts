@@ -4,6 +4,7 @@ import {
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
 import { spawn } from "node:child_process";
+import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -161,6 +162,29 @@ export function spawnAsync({
     let stdoutLen = 0;
     let stderrLen = 0;
     let settled = false;
+
+    // cwd must be a directory. spawn() with a file cwd throws a cryptic ENOTDIR;
+    // surface an actionable message instead (a single file to search belongs in
+    // args, not cwd).
+    if (spawnCwd !== undefined) {
+      let cwdIsDir = false;
+      try {
+        cwdIsDir = fs.statSync(spawnCwd).isDirectory();
+      } catch {
+        cwdIsDir = false;
+      }
+      if (!cwdIsDir) {
+        resolve({
+          stdout: "",
+          stderr: "",
+          status: null,
+          error: new Error(
+            `cwd is not a directory: ${spawnCwd} — to run against a single file, pass it as an argument, not cwd`,
+          ),
+        });
+        return;
+      }
+    }
 
     const timeoutSignal = AbortSignal.timeout(timeout);
     const combinedSignal = externalSignal
