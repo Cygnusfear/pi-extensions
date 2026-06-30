@@ -12,6 +12,14 @@
  *
  * Everything else is camelCase (bashBgStart, braveSearch, hashRead, etc.)
  * or lowercase for single-word tools (rg, fd, sleep, mai, recall, ouija, teams).
+ *
+ * RETURN SHAPES — READ THIS. Bash() and Python() return an OBJECT
+ * { stdout, stderr, exitCode }. But rg(), fd(), fffFind/fffGrep/fffMultiGrep,
+ * ouija(), mesh.tell()/meshTell() and the teams.* helpers return a STRING
+ * (Glob returns string[]). On those, `result.stdout` is undefined — use the
+ * value directly (result.trim(), result.split, template literals). The silent
+ * trap is `(await rg(...)).stdout || "(none)"` → always "(none)". If you want
+ * Bash-style streams from a search, call Bash({ command: "rg ..." }) instead.
  */
 
 /**
@@ -359,7 +367,9 @@ declare function Glob(input: {
 
 /**
  * Run ripgrep search. Patterns are regex by default; use -F for literal.
- * Returns the raw rg output as a string.
+ * Returns the raw rg output as a STRING — NOT a { stdout, stderr, exitCode } object
+ * like Bash(). Use it directly (.trim()/.split()); .stdout is undefined. Empty
+ * string = no matches; a genuine pattern error (bad regex) throws.
  */
 declare function rg(input: {
   /** Arguments to pass to rg (e.g., '-n "pattern" src/') */
@@ -372,7 +382,8 @@ declare function rg(input: {
 
 /**
  * Find files with fd.
- * Returns the raw fd output as a string.
+ * Returns the raw fd output as a STRING — NOT a { stdout, ... } object like Bash().
+ * Use it directly; .stdout is undefined. Empty string = no matches.
  */
 declare function fd(input: {
   /** Arguments to pass to fd (e.g., '-e ts src/') */
