@@ -1,0 +1,33 @@
+packages/rlm/src/loop.ts
+  s_b80b60cc68c1d4::t_4f3469ca00104d 214
+  s_b80b60cc68c1d4::t_1cbcdcacd34e93 106-112
+  s_b80b60cc68c1d4::t_6e7ea61cad97f4 196
+packages/teams/tool.runtime.test.ts
+  s_f7e5e1cc1b71a5::t_888ee8c3270dd0 64-69
+packages/rlm/src/types.ts
+  s_b80b60cc68c1d4::t_2af498ce1f1a15 87-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "8dd7ade882b58dff79d95b2464026e89b5a64eac",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_f7e5e1cc1b71a5": {
+      "agent_id": {
+        "tool": "Alycia Cepheid Cameron",
+        "id": "019ed09e-f4dc-7876-aec8-ad81934265af",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
