@@ -1,0 +1,19 @@
+packages/rlm/test/rlm.contract.test.ts
+  s_b80b60cc68c1d4::t_d1a3932ae23f7f 134-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.4",
+  "base_commit_sha": "d9535499441ffba3c6c0e0092e00601766252132",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
