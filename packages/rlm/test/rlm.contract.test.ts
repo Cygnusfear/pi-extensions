@@ -131,10 +131,10 @@ describe("rlm contract", () => {
 		expect(String(result.stdout)).toContain("hi");
 	});
 	test("7c runbookRun is rejected because RLM disables runbook injection", async () => { await expectReject(runRlm(deps(), { task: "runbook", tools: ["runbookRun"] }, 0), "unknown tool 'runbookRun'"); });
-	test("8 whitelist namespace allows memory but rejects memory.context and rlm", async () => {
-		queue(js("rlm.return({kind: typeof memory.context});"));
-		await expect(runRlm(deps(), { task: "mem", tools: ["memory"] }, 0)).resolves.toMatchObject({ kind: "function" });
-		await expectReject(runRlm(deps(), { task: "bad", tools: ["memory.context"] }, 0), "unknown tool");
+	test("8 whitelist namespace allows mai + rlm but rejects the mai.ticket sub-method", async () => {
+		queue(js("rlm.return({kind: typeof mai.ticket});"));
+		await expect(runRlm(deps(), { task: "mai", tools: ["mai"] }, 0)).resolves.toMatchObject({ kind: "function" });
+		await expectReject(runRlm(deps(), { task: "bad", tools: ["mai.ticket"] }, 0), "unknown tool");
 		queue(js("rlm.return({kind: typeof rlm});"));
 		await expect(runRlm(deps(), { task: "rlm-listed", tools: ["rlm"] }, 0)).resolves.toMatchObject({ kind: "function" });
 	});
