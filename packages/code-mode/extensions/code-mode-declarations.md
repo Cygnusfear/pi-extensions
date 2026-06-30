@@ -1167,6 +1167,32 @@ declare const process: {
 declare function supervise(enabled: boolean): Promise<string>;
 
 /**
+ * Set your workspace stage icon — the cmux tab lifecycle indicator the hooman
+ * triages panes by. Call it the MOMENT your phase changes (first action of the
+ * new phase). Valid stages: planning, implementing, blocked, blocked-long,
+ * review, landing, bugfix, cleaning, coordinator, bhakti, smoketest, parked,
+ * attention. Accepts the stage string or { stage }.
+ */
+declare function status(stage: string): Promise<string>;
+
+/**
+ * Fire a desktop notification that pulls the hooman to THIS pane. Use whenever
+ * you need their eyes: a question, a blocking decision, or a done/blocked/
+ * smoke-test hand-back — they are almost certainly looking at another tab.
+ * Pass a string, or { title, subtitle, body } for full control.
+ */
+declare function notify(
+  message: string | { title?: string; subtitle?: string; body?: string },
+): Promise<string>;
+
+/**
+ * Set a short session codename (the ses-title slot, max 12 chars) so the pane is
+ * identifiable while planning, before the hooman /names it. The hooman's /name
+ * overrides it whenever set. Pass an empty string to clear.
+ */
+declare function sessionTitle(title: string): Promise<string>;
+
+/**
  * Coordinate a team of worker agents.
  *
  * @example
