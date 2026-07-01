@@ -6,6 +6,7 @@ describe("planInboundTell — inbound direct-tell routing", () => {
 		for (const preempt of [undefined, "steer", "abort"] as const) {
 			const plan = planInboundTell({ deafened: true, preempt, agentBusy: true, ackRequested: "delivered" });
 			expect(plan.action).toBe("drop-deafened");
+			expect(plan.ackPhase).toBe("refused");
 			expect(plan.ackDeafened).toBe(true);
 			expect(plan.abortFirst).toBe(false);
 			expect(plan.deliverAs).toBeUndefined();
@@ -65,16 +66,17 @@ describe("planInboundTell — inbound direct-tell routing", () => {
 		expect(plan.triggerTurn).toBe(true);
 	});
 
-	test("idle + normal tell ('visible' wait) surfaces via pi default (no forced turn) and acks 'visible'", () => {
+	test("idle + normal tell ('visible' alias wait) surfaces via pi default (no forced turn) and acks 'surfaced'", () => {
 		const plan = planInboundTell({ deafened: false, preempt: undefined, agentBusy: false, ackRequested: "visible" });
 		expect(plan.action).toBe("surface");
-		expect(plan.ackPhase).toBe("visible");
+		expect(plan.ackPhase).toBe("surfaced");
 		expect(plan.deliverAs).toBeUndefined();
 		expect(plan.triggerTurn).toBeUndefined();
 	});
 
-	test("preempt with 'visible' wait acks 'visible'; with default wait acks 'delivered'", () => {
-		expect(planInboundTell({ deafened: false, preempt: "steer", agentBusy: true, ackRequested: "visible" }).ackPhase).toBe("visible");
+	test("preempt with 'surfaced'/'visible' wait acks 'surfaced'; with default wait acks 'delivered'", () => {
+		expect(planInboundTell({ deafened: false, preempt: "steer", agentBusy: true, ackRequested: "visible" }).ackPhase).toBe("surfaced");
+		expect(planInboundTell({ deafened: false, preempt: "steer", agentBusy: true, ackRequested: "surfaced" }).ackPhase).toBe("surfaced");
 		expect(planInboundTell({ deafened: false, preempt: "steer", agentBusy: true, ackRequested: "delivered" }).ackPhase).toBe("delivered");
 	});
 });

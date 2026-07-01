@@ -93,6 +93,7 @@ export function createPersistentStore(opts?: {
   storePath?: string;
 }) {
   const store = new Map<string, StoreEntry>();
+  const virtuals = new Map<string, () => unknown>();
   let currentTurn = 0;
   // `diskPath` is mutable so the extension can late-bind a session-scoped path
   // once the per-call sessionManager is available (see bindPersistence).
@@ -243,6 +244,7 @@ export function createPersistentStore(opts?: {
     "__forget",
     "__persisted",
     "__bindPersistence",
+    "__defineVirtual",
   ]);
 
   const proxy = new Proxy({} as Record<string, unknown>, {
@@ -329,6 +331,12 @@ export function createPersistentStore(opts?: {
             bindPersistence(absPath);
             return "$ store bound to " + absPath;
           };
+        case "__defineVirtual":
+          return (name: string, getter: () => unknown) => {
+            if (!name || RESERVED.has(name)) return false;
+            virtuals.set(name, getter);
+            return true;
+          };
         case "__escaped":
           return store.get("__escaped")?.value ?? !!(opts?.getEscaped?.());
         case "toJSON":
@@ -338,6 +346,8 @@ export function createPersistentStore(opts?: {
             return obj;
           };
       }
+      const virtual = virtuals.get(prop);
+      if (virtual) return virtual();
       const entry = store.get(prop);
       if (entry) {
         entry.lastAccessTurn = currentTurn;
@@ -346,7 +356,7 @@ export function createPersistentStore(opts?: {
       return undefined;
     },
     has(_target, prop: string | symbol) {
-      return typeof prop === "string" && (store.has(prop) || RESERVED.has(prop));
+      return typeof prop === "string" && (store.has(prop) || virtuals.has(prop) || RESERVED.has(prop));
     },
     deleteProperty(_target, prop: string | symbol) {
       if (typeof prop !== "string") return false;
@@ -356,9 +366,17 @@ export function createPersistentStore(opts?: {
       return true;
     },
     ownKeys() {
-      return [...store.keys()];
+      return [...new Set([...store.keys(), ...virtuals.keys()])];
     },
     getOwnPropertyDescriptor(_target, prop: string | symbol) {
+      if (typeof prop === "string" && virtuals.has(prop)) {
+        return {
+          configurable: true,
+          enumerable: true,
+          writable: false,
+          value: virtuals.get(prop)!(),
+        };
+      }
       if (typeof prop === "string" && store.has(prop)) {
         return {
           configurable: true,

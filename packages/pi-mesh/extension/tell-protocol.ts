@@ -5,6 +5,7 @@ import type {
 	MeshTellEnvelope,
 	MeshTellPreemptLevel,
 	MeshTellReceiptPhase,
+	MeshTellReceiptWaitForPhase,
 } from "./types.ts";
 
 export function createDeliveryId(): string {
@@ -52,7 +53,7 @@ export function buildTellReceiptAck(
 export function unwrapInboundTell(msg: MeshMessage): {
 	message: MeshMessage;
 	deliveryId?: string;
-	ackRequested?: MeshTellReceiptPhase;
+	ackRequested?: MeshTellReceiptWaitForPhase;
 	preempt?: MeshTellPreemptLevel;
 	originalFrom?: string;
 } {

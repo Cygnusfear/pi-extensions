@@ -30,7 +30,9 @@ export interface MeshMessage {
 	timestamp: number;
 }
 
-export type MeshTellReceiptPhase = "delivered" | "visible";
+export type MeshTellReceiptPhase = "delivered" | "surfaced" | "refused" | "undeliverable" | "expired";
+/** Compatibility input: old callers may still request "visible"; it is normalized to "surfaced". */
+export type MeshTellReceiptWaitForPhase = MeshTellReceiptPhase | "visible";
 
 /**
  * Preempt level for a tell that should jump the receiver's queue.
@@ -62,7 +64,7 @@ export interface MeshTellEnvelope {
 	kind: "mesh:tell";
 	deliveryId: string;
 	from: string;
-	ackRequested?: MeshTellReceiptPhase;
+	ackRequested?: MeshTellReceiptWaitForPhase;
 	/** When set, this tell preempts the receiver's queue at the given level. */
 	preempt?: MeshTellPreemptLevel;
 	payload: unknown;

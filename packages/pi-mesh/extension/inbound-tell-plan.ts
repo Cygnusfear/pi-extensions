@@ -1,4 +1,5 @@
-import type { MeshTellPreemptLevel, MeshTellReceiptPhase } from "./types.ts";
+import { canonicalTellReceiptPhase, isSurfacedReceiptRequested } from "./active-inbound-mailbox.ts";
+import type { MeshTellPreemptLevel, MeshTellReceiptPhase, MeshTellReceiptWaitForPhase } from "./types.ts";
 
 /**
  * What the receiver does with an inbound direct tell, decided purely from
@@ -31,14 +32,17 @@ export function planInboundTell(input: {
 	deafened: boolean;
 	preempt?: MeshTellPreemptLevel;
 	agentBusy: boolean;
-	ackRequested?: MeshTellReceiptPhase;
+	ackRequested?: MeshTellReceiptWaitForPhase;
 }): InboundTellPlan {
-	const requestVisible = input.ackRequested === "visible";
-	const visiblePhase: MeshTellReceiptPhase = requestVisible ? "visible" : "delivered";
+	const requestSurfaced = isSurfacedReceiptRequested(input.ackRequested);
+	const requestedPhase: MeshTellReceiptPhase = input.ackRequested
+		? canonicalTellReceiptPhase(input.ackRequested)
+		: "delivered";
+	const surfacedPhase: MeshTellReceiptPhase = requestSurfaced ? requestedPhase : "delivered";
 
 	// (B) Respect /mesh deafen even for an interrupt — receiver sovereignty.
 	if (input.deafened) {
-		return { action: "drop-deafened", ackPhase: "delivered", ackDeafened: true, abortFirst: false };
+		return { action: "drop-deafened", ackPhase: "refused", ackDeafened: true, abortFirst: false };
 	}
 
 	if (input.preempt === "abort") {
@@ -48,7 +52,7 @@ export function planInboundTell(input: {
 		// still delivered + wakes a turn either way.
 		return {
 			action: "preempt-abort",
-			ackPhase: visiblePhase,
+			ackPhase: surfacedPhase,
 			ackDeafened: false,
 			abortFirst: input.agentBusy,
 			deliverAs: "followUp",
@@ -59,7 +63,7 @@ export function planInboundTell(input: {
 	if (input.preempt === "steer") {
 		return {
 			action: "preempt-steer",
-			ackPhase: visiblePhase,
+			ackPhase: surfacedPhase,
 			ackDeafened: false,
 			abortFirst: false,
 			deliverAs: "steer",
@@ -73,13 +77,13 @@ export function planInboundTell(input: {
 	}
 
 	// Idle + normal tell — surface now. Mirrors getInboundDeliveryOptions(false, …):
-	// a 'visible'-requesting sender gets pi's default surface (no forced turn);
+	// a 'surfaced'/'visible'-requesting sender gets pi's default surface (no forced turn);
 	// otherwise wake a turn so the message is actually read.
 	return {
 		action: "surface",
-		ackPhase: visiblePhase,
+		ackPhase: surfacedPhase,
 		ackDeafened: false,
 		abortFirst: false,
-		...(requestVisible ? {} : { deliverAs: "followUp", triggerTurn: true }),
+		...(requestSurfaced ? {} : { deliverAs: "followUp", triggerTurn: true }),
 	};
 }

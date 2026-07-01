@@ -891,6 +891,10 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 
 	Object.assign(session.context, merged);
 	if (deps.extraBindings) Object.assign(session.context, deps.extraBindings);
+	const mesh = (session.context as any).mesh;
+	if (mesh && typeof mesh.inbox === "function") {
+		(session.store.proxy as any).__defineVirtual?.("inbox", () => mesh.inbox());
+	}
 }
 
 function injectRunbookRunFn(session: CodeModeSession, deps: ExecutionDeps): void {

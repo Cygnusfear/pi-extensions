@@ -366,6 +366,27 @@ describe("executeInSession — contextual sandbox-fn delivery", () => {
 			unregisterSandboxFn("__pe_tk4s_v10_modelping");
 		}
 	});
+
+	test("mesh.inbox is mirrored onto $.inbox as a non-destructive peek", async () => {
+		const { registerSandboxFn, unregisterSandboxFn } = await import("../../shared/src/sandbox-registry");
+		const pending = [{ from: "peer-1", preview: "hello" }];
+		const meshFn = async () => "[]";
+		(meshFn as any).inbox = () => pending;
+		registerSandboxFn("mesh", meshFn);
+		try {
+			const sess = createCodeModeSession();
+			const deps = makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			});
+			const r = await executeInSession(sess, "console.log(JSON.stringify($.inbox)); console.log(JSON.stringify(await mesh.inbox()))", deps);
+			expect(r.output).toContain(JSON.stringify(pending));
+		} finally {
+			unregisterSandboxFn("mesh");
+		}
+	});
 });
 
 describe("executeInSession — session squash continuation hook", () => {

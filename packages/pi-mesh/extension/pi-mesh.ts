@@ -42,6 +42,13 @@ import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queu
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
 import { resolveDurableTarget } from "./route-resolve.ts";
 import {
+  ActiveInboundTellMailbox,
+  canonicalTellReceiptPhase,
+  isSurfacedReceiptRequested,
+  type ActiveInboundTellPeek,
+  type ActiveInboundTell,
+} from "./active-inbound-mailbox.ts";
+import {
   buildTellReceiptAck,
   createDeliveryId,
   isMeshTellAckEnvelope,
@@ -58,6 +65,7 @@ import type {
   MeshTellEnvelope,
   MeshTellPreemptLevel,
   MeshTellReceiptPhase,
+  MeshTellReceiptWaitForPhase,
   PeerInfo,
   RequestEvent,
 } from "./types.ts";
@@ -75,6 +83,18 @@ const AMBIENT_CHAT_BATCH_MS =
   Number.isFinite(ambientChatBatchMsRaw) && ambientChatBatchMsRaw >= 0
     ? Math.floor(ambientChatBatchMsRaw)
     : 750;
+
+const TERMINAL_TELL_RECEIPT_PHASES = new Set<MeshTellReceiptPhase>([
+  "refused",
+  "undeliverable",
+  "expired",
+]);
+
+function tellReceiptSatisfies(requested: MeshTellReceiptPhase, actual: MeshTellReceiptPhase): boolean {
+  if (actual === requested) return true;
+  if (TERMINAL_TELL_RECEIPT_PHASES.has(actual)) return true;
+  return requested === "delivered" && actual === "surfaced";
+}
 
 // ── Mesh icons ────────────────────────────────────────────────────────────────
 
@@ -298,19 +318,20 @@ export class PiMesh {
   tellAndWaitForReceipt(
     sessionId: string,
     message: unknown,
-    phase: MeshTellReceiptPhase,
+    phase: MeshTellReceiptWaitForPhase,
     timeoutMs = 10_000,
     opts?: { preempt?: MeshTellPreemptLevel },
   ): Promise<MeshTellAckEnvelope> {
     return new Promise((resolve, reject) => {
       const deliveryId = createDeliveryId();
+      const requestedPhase = canonicalTellReceiptPhase(phase);
       const timer = setTimeout(() => {
         this.pendingTellReceipts.delete(deliveryId);
-        reject(new Error(`mesh_tell: timeout waiting for ${phase} receipt after ${timeoutMs}ms`));
+        reject(new Error(`mesh_tell: timeout waiting for ${requestedPhase} receipt after ${timeoutMs}ms`));
       }, timeoutMs);
 
       this.pendingTellReceipts.set(deliveryId, {
-        phase,
+        phase: requestedPhase,
         resolve: (ack) => {
           clearTimeout(timer);
           resolve(ack);
@@ -325,7 +346,7 @@ export class PiMesh {
         kind: "mesh:tell",
         deliveryId,
         from: this.myClientId,
-        ackRequested: phase,
+        ackRequested: requestedPhase,
         ...(opts?.preempt ? { preempt: opts.preempt } : {}),
         payload: message,
         timestamp: Date.now(),
@@ -648,7 +669,7 @@ export class PiMesh {
         }
         if (isMeshTellAckEnvelope(msg.payload)) {
           const pending = this.pendingTellReceipts.get(msg.payload.deliveryId);
-          if (pending && pending.phase === msg.payload.phase) {
+          if (pending && tellReceiptSatisfies(pending.phase, msg.payload.phase)) {
             this.pendingTellReceipts.delete(msg.payload.deliveryId);
             pending.resolve(msg.payload);
           }
@@ -1289,15 +1310,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       persistChannels();
     }
   };
-  const pendingTells: Array<{
-    senderLabel: string;
-    fromId: string;
-    topic: string | undefined;
-    payloadText: string;
-    deliveryId: string | undefined;
-    originalFrom: string | undefined;
-    ackRequested: MeshTellReceiptPhase | undefined;
-  }> = [];
+  const activeTellMailbox = new ActiveInboundTellMailbox();
   const pendingAsks: Array<{
     requestId: number;
     senderLabel: string;
@@ -1307,6 +1320,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     askReceiptRequested: MeshAskReceiptWaitForPhase | undefined;
     expiresAt: number;
   }> = [];
+
+  const peekInbox = (): ActiveInboundTellPeek[] => activeTellMailbox.peek();
 
   // Expose mesh instance for other extensions (e.g. teams) — avoids duplicate connections
   (globalThis as any).__piMesh = mesh;
@@ -1387,8 +1402,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   };
 
   const flushPendingTells = () => {
-    if (agentBusy || pendingTells.length === 0) return;
-    const batch = pendingTells.splice(0, pendingTells.length);
+    if (agentBusy || activeTellMailbox.length === 0) return;
+    const batch = activeTellMailbox.drain();
     const blob = formatPendingTellsBatch(MI, batch);
     pi.sendMessage(
       {
@@ -1408,14 +1423,14 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       },
       { deliverAs: "followUp", triggerTurn: true },
     );
-    // Send 'visible' acks for queued tells that requested them — the agent is now seeing them.
+    // Send 'surfaced' acks for queued tells that requested them — the agent is now seeing them.
     // Enrich with a fresh snapshot (agent is idle at flush time, so receiverBusy: false).
     const flushView = buildReceiverSnapshot();
     for (const t of batch) {
-      if (t.deliveryId && t.originalFrom && t.ackRequested === "visible") {
+      if (t.deliveryId && t.originalFrom && isSurfacedReceiptRequested(t.ackRequested)) {
         mesh.sendTellReceipt(
           t.originalFrom,
-          buildTellReceiptAck(t.deliveryId, mesh.self().id, "visible", {
+          buildTellReceiptAck(t.deliveryId, mesh.self().id, "surfaced", {
             receiverBusy: false,
             view: flushView,
           }),
@@ -1484,22 +1499,32 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
       // mesh namespace — callable (peers) + tell/view/broadcast/chat/joinChannel/leaveChannel
       const meshPeers = async () => JSON.stringify(mesh.peers());
+      (meshPeers as any).inbox = () => peekInbox();
       (meshPeers as any).tell = async (params: {
         sessionId: string;
         message: unknown;
         waitFor?: string;
         timeoutMs?: number;
       }) => {
-        const resolved = resolveTargetSessionId(params.sessionId);
-        const mode = (params.waitFor ?? "delivered") as "none" | MeshTellReceiptPhase;
+        const mode = (params.waitFor ?? "delivered") as "none" | MeshTellReceiptWaitForPhase;
+        let resolved: string;
+        try {
+          resolved = resolveTargetSessionId(params.sessionId);
+        } catch (e) {
+          if (mode === "none") throw e;
+          const deliveryId = createDeliveryId();
+          const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+          return JSON.stringify({ sent: false, sessionId: params.sessionId, ack });
+        }
         if (mode === "none") {
           mesh.tell(resolved, params.message);
           return JSON.stringify({ sent: true, sessionId: resolved });
         }
+        const receiptMode = mode === "visible" ? "surfaced" : mode;
         const ack = await mesh.tellAndWaitForReceipt(
           resolved,
           params.message,
-          mode,
+          receiptMode,
           params.timeoutMs ?? 10_000,
         );
         return JSON.stringify({ sent: true, sessionId: resolved, ack });
@@ -1697,16 +1722,17 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         }
 
         if (plan.action === "queue") {
-          pendingTells.push({
+          activeTellMailbox.enqueue({
             senderLabel,
             fromId: msg.from ?? "unknown",
             topic: msg.topic,
+            payload: msg.payload,
             payloadText,
             deliveryId,
             originalFrom,
             ackRequested,
           });
-          // We have the message — ack 'delivered' now. 'visible' ack fires on flush.
+          // We have the message — ack 'delivered' now. 'surfaced' ack fires only on flush.
           sendAck();
           return;
         }
@@ -1864,7 +1890,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       ambientChatFlushTimer = null;
     }
     pendingAmbientChat.length = 0;
-    pendingTells.length = 0;
+    activeTellMailbox.clear();
     pendingAsks.length = 0;
     if (!started) return;
     try {
@@ -1887,6 +1913,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   type MeshViewDetails =
     | { status: "error"; sessionId: string; resolvedSessionId?: string; error: string }
     | { status: "ok"; sessionId: string; resolvedSessionId: string; reply: Record<string, unknown> };
+  type MeshInboxDetails = { status: "ok"; count: number; tells: ActiveInboundTellPeek[] };
 
   pi.registerTool<TSchema, MeshTellDetails>({
     name: "mesh_tell",
@@ -1905,7 +1932,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       waitFor: Type.Optional(
         Type.String({
           description:
-            "Receipt to wait for: 'none', 'delivered', or 'visible'. Default: 'delivered'",
+            "Receipt to wait for: 'none', 'delivered', 'surfaced' (or legacy alias 'visible'), 'refused', or 'undeliverable'. Default: 'delivered'",
         }),
       ),
       timeoutMs: Type.Optional(
@@ -1919,13 +1946,24 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       const { sessionId, message, waitFor, timeoutMs } = params as {
         sessionId: string;
         message: unknown;
-        waitFor?: "none" | MeshTellReceiptPhase;
+        waitFor?: "none" | MeshTellReceiptWaitForPhase;
         timeoutMs?: number;
       };
+      const receiptMode = waitFor === "visible" ? "surfaced" : (waitFor ?? "delivered");
+      const rendered = formatPayloadForDisplay(message);
       let resolved: string;
       try {
         resolved = resolveTargetSessionId(sessionId);
       } catch (e) {
+        if (receiptMode !== "none") {
+          const deliveryId = createDeliveryId();
+          const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+          const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' (pre-v1c has no durable mailbox).`;
+          return {
+            content: [{ type: "text", text }],
+            details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
+          };
+        }
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
           details: { status: "error", sessionId, error: String(e) } satisfies MeshTellDetails,
@@ -1933,8 +1971,6 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         };
       }
 
-      const receiptMode = waitFor ?? "delivered";
-      const rendered = formatPayloadForDisplay(message);
       const peerLabel = (() => {
         const peer = mesh.peers().find((p) => p.id === resolved || p.meshId === resolved);
         return peer ? getPeerLabel(peer) : resolved.slice(0, 8);
@@ -1969,6 +2005,24 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           isError: true,
         };
       }
+    },
+  });
+
+  pi.registerTool<TSchema, MeshInboxDetails>({
+    name: "mesh_inbox",
+    label: "Mesh Inbox",
+    description:
+      "Peek pending inbound direct mesh tells queued for this live session. Non-destructive: does not consume and never emits a surfaced receipt; queued tells still flush at agent_end.",
+    parameters: Type.Object({}),
+    async execute() {
+      const tells = peekInbox();
+      const text = tells.length === 0
+        ? "mesh inbox empty"
+        : tells.map((t, idx) => `${idx + 1}. ${t.senderLabel}: ${t.preview}`).join("\n");
+      return {
+        content: [{ type: "text", text }],
+        details: { status: "ok", count: tells.length, tells } satisfies MeshInboxDetails,
+      };
     },
   });
 
@@ -2369,7 +2423,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             ctx.ui.notify(`${MI.tell} ${MI.sep} ${tellLabel}\n${message}`, "info");
           } else {
             const phase: MeshTellReceiptPhase = tellFlags.has("--visible")
-              ? "visible"
+              ? "surfaced"
               : "delivered";
             await mesh.tellAndWaitForReceipt(resolved, message, phase, 10_000);
             ctx.ui.notify(`${MI.tell} ${MI.sep} ${tellLabel} (${phase})\n${message}`, "info");
