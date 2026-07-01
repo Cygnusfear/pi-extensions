@@ -242,21 +242,21 @@ describe("BYPASS 6 [MEDIUM]: git restore destructive forms not blocked", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// BYPASS 7: git worktree remove --force (MEDIUM)
+// git worktree remove --force — ALLOWED (hooman decision, recoverable-principle)
 //
-// "git worktree remove --force" forcibly removes a worktree
-// directory even if it has uncommitted changes, destroying that work.
-// Without --force, git refuses if there are untracked changes.
-// Currently treated as SAFE (same as "git worktree remove").
+// A worktree is a RECOVERABLE artifact: it rebuilds from its branch. Force-
+// removing one discards only that worktree's own uncommitted changes; the
+// branch/commits live in the main repo. The hooman ruled: ALLOW force-removal
+// of recoverable things. Guard returns null -> SAFE by design (not a bypass).
 // ═══════════════════════════════════════════════════════════════
 
-describe("BYPASS 7 [MEDIUM]: git worktree remove --force not blocked", () => {
-	test("(BYPASS) git worktree remove --force .worktrees/test", () =>
-		expectDestructive("git worktree remove --force .worktrees/test"));
-	test("(BYPASS) git worktree remove --force worktree-path", () =>
-		expectDestructive("git worktree remove --force worktree-path"));
-	test("(BYPASS) git worktree remove -f .worktrees/test", () =>
-		expectDestructive("git worktree remove -f .worktrees/test"));
+describe("ALLOWED: git worktree remove --force (recoverable — rebuilds from branch)", () => {
+	test("(ALLOWED — recoverable) git worktree remove --force .worktrees/test", () =>
+		expectSafe("git worktree remove --force .worktrees/test"));
+	test("(ALLOWED — recoverable) git worktree remove --force worktree-path", () =>
+		expectSafe("git worktree remove --force worktree-path"));
+	test("(ALLOWED — recoverable) git worktree remove -f .worktrees/test", () =>
+		expectSafe("git worktree remove -f .worktrees/test"));
 
 	// Safe: without --force it's a normal operation
 	test("(SAFE) git worktree remove .worktrees/test", () =>
@@ -268,23 +268,23 @@ describe("BYPASS 7 [MEDIUM]: git worktree remove --force not blocked", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// BYPASS 8: git submodule deinit --force (MEDIUM)
+// git submodule deinit --force — ALLOWED (hooman decision, recoverable-principle)
 //
-// "git submodule deinit --force" removes all submodule content
-// from the working tree (like rm -rf of the submodule directory).
-// Without --force it fails if there are local modifications.
-// Currently treated as SAFE.
+// Same recoverable-principle as worktree removal: a submodule's tree is
+// re-fetchable from its remote and re-checkout-able from the recorded commit
+// (git submodule update --init). Deinit --force discards only local uncommitted
+// submodule changes. ALLOW. Guard returns null -> SAFE by design.
 // ═══════════════════════════════════════════════════════════════
 
-describe("BYPASS 8 [MEDIUM]: git submodule deinit --force not blocked", () => {
-	test("(BYPASS) git submodule deinit --force .", () =>
-		expectDestructive("git submodule deinit --force ."));
-	test("(BYPASS) git submodule deinit --force lib/dep", () =>
-		expectDestructive("git submodule deinit --force lib/dep"));
-	test("(BYPASS) git submodule deinit -f lib/dep", () =>
-		expectDestructive("git submodule deinit -f lib/dep"));
-	test("(BYPASS) git submodule deinit --force --all", () =>
-		expectDestructive("git submodule deinit --force --all"));
+describe("ALLOWED: git submodule deinit --force (recoverable — re-fetchable from remote)", () => {
+	test("(ALLOWED — recoverable) git submodule deinit --force .", () =>
+		expectSafe("git submodule deinit --force ."));
+	test("(ALLOWED — recoverable) git submodule deinit --force lib/dep", () =>
+		expectSafe("git submodule deinit --force lib/dep"));
+	test("(ALLOWED — recoverable) git submodule deinit -f lib/dep", () =>
+		expectSafe("git submodule deinit -f lib/dep"));
+	test("(ALLOWED — recoverable) git submodule deinit --force --all", () =>
+		expectSafe("git submodule deinit --force --all"));
 
 	// Safe: without --force or just querying
 	test("(SAFE) git submodule status", () => expectSafe("git submodule status"));
