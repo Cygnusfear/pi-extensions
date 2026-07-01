@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	BackgroundBashManager,
+	isUsableChild,
 	wireLineStreams,
 	type BashBgResult,
 } from "./background-bash.ts";
@@ -416,27 +417,36 @@ describe("BashBgHandle — .each() chain composition", () => {
 });
 
 
-// Regression: under FD pressure, spawn(stdio:"pipe") can return a truthy stream
-// that lacks .on()/.resume() — wireLineStreams must SKIP it (warn + return),
-// never throw. Pre-fix this crashed the manager via readline.createInterface.
-describe("wireLineStreams degenerate-stream guard", () => {
-	it("does NOT throw on a resume-less stream (the FD-pressure case)", () => {
-		const listeners = new Set<[(line: string, stream: string) => void]>();
-		const logStream = { write: () => true } as any; // fake WriteStream
-		// stream has .on() but NO .resume() — exactly the degenerate shape Bun can return under load
-		const degenerate = { on: () => degenerate } as any;
-		expect(() => wireLineStreams(degenerate, "stdout", { jobId: "bg-test", logStream, listeners })).not.toThrow();
+// Regression: at the spawn boundary, bun's test runner (25+ files) can return an
+// INCOMPLETE ChildProcess — child missing .once, or a stream missing .resume.
+// isUsableChild validates once at the boundary so startSync fails the job cleanly
+// instead of crashing the manager on child.once/.on or readline. (Production spawn
+// verified healthy at 200 rapid spawns — this is robustness, not an FD-pressure fix.)
+describe("isUsableChild — spawn-boundary validation", () => {
+	it("false: child missing .once (the bun-runner degenerate case at child.once)", () => {
+		expect(isUsableChild({ on: () => {}, stdout: null, stderr: null } as any)).toBe(false);
 	});
-
-	it("does NOT throw on a stream missing .on() entirely", () => {
-		const listeners = new Set<[(line: string, stream: string) => void]>();
-		const logStream = { write: () => true } as any;
-		const stub = {} as any; // no .on(), no .resume()
-		expect(() => wireLineStreams(stub, "stderr", { jobId: "bg-test", logStream, listeners })).not.toThrow();
+	it("false: child missing .on", () => {
+		expect(isUsableChild({ once: () => {}, stdout: null, stderr: null } as any)).toBe(false);
 	});
+	it("false: stdout lacks .resume (the input.resume crash source)", () => {
+		expect(isUsableChild({ on: () => {}, once: () => {}, stdout: { on: () => {} }, stderr: null } as any)).toBe(false);
+	});
+	it("false: stderr lacks .resume", () => {
+		expect(isUsableChild({ on: () => {}, once: () => {}, stdout: null, stderr: { on: () => {} } } as any)).toBe(false);
+	});
+	it("true: complete child (on/once + resume-capable streams)", () => {
+		const s = { resume: () => {}, on: () => {} };
+		expect(isUsableChild({ on: () => {}, once: () => {}, stdout: s, stderr: s } as any)).toBe(true);
+	});
+	it("true: null streams are legitimate (non-pipe stdio config)", () => {
+		expect(isUsableChild({ on: () => {}, once: () => {}, stdout: null, stderr: null } as any)).toBe(true);
+	});
+});
 
-	it("null stream is a no-op (existing behavior preserved)", () => {
-		const listeners = new Set<[(line: string, stream: string) => void]>();
+describe("wireLineStreams", () => {
+	it("null stream is a no-op", () => {
+		const listeners = new Set<any>();
 		const logStream = { write: () => true } as any;
 		expect(() => wireLineStreams(null, "stdout", { jobId: "bg-test", logStream, listeners })).not.toThrow();
 	});

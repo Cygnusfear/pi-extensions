@@ -239,15 +239,27 @@ interface JobRuntime {
 }
 
 /**
- * Wire a child-process stdio stream into line capture + log tee.
- *
- * Extracted to module scope so the degenerate-stream path is unit-testable:
- * under extreme FD pressure, spawn(stdio:"pipe") can return a truthy stream
- * that lacks .resume()/.on() — readline.createInterface then throws
- * "input.resume is not a function" inside startSync. We guard instead of
- * crash: a stream missing .on() or .resume() is skipped (one diagnostic
- * warn, traceable in the wild). The job still RUNS — we just don't
- * line-capture its logs for that stream. Happy path is byte-identical.
+ * Validate that spawn() returned a fully-formed ChildProcess. A healthy spawn
+ * always yields an object with .on/.once and (for stdio:"pipe") Readable
+ * stdout/stderr supporting .resume(). Under bun's test runner at many-file scale
+ * the runtime can hand back an INCOMPLETE object (child missing .once, or a
+ * stream missing .resume) — validated ONCE here at the spawn boundary so the
+ * manager fails such a job cleanly instead of crashing on child.once/.on or
+ * readline.createInterface. Production spawn verified healthy at 200 rapid
+ * spawns; this is manager robustness, not an FD-pressure fix.
+ */
+export function isUsableChild(child: ChildProcess): boolean {
+	if (typeof (child as unknown as { on?: unknown }).on !== "function") return false;
+	if (typeof (child as unknown as { once?: unknown }).once !== "function") return false;
+	if (child.stdout != null && typeof (child.stdout as unknown as { resume?: unknown }).resume !== "function") return false;
+	if (child.stderr != null && typeof (child.stderr as unknown as { resume?: unknown }).resume !== "function") return false;
+	return true;
+}
+
+/**
+ * Wire a child-process stdio stream into line capture + log tee. Extracted for
+ * SRP + testability. Callers guarantee `stream` is null or a usable Readable
+ * (validated once at the spawn boundary by isUsableChild), so a null-guard suffices.
  */
 export function wireLineStreams(
 	stream: NodeJS.ReadableStream | null,
@@ -255,12 +267,6 @@ export function wireLineStreams(
 	deps: { jobId: string; logStream: WriteStream; listeners: Set<BashBgLineCallback> },
 ): void {
 	if (!stream) return;
-	// Guard: under FD saturation Bun can return an incomplete stream object
-	// (truthy but missing .on()/.resume()). readline would crash; skip instead.
-	if (typeof (stream as any).on !== "function" || typeof (stream as any).resume !== "function") {
-		console.warn(`[bashBg ${deps.jobId}] stdio stream incomplete under load, skipping ${label} line capture`);
-		return;
-	}
 	const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 	rl.on("line", (line: string) => {
 		try {
@@ -325,6 +331,34 @@ export class BackgroundBashManager {
 			stdio: ["ignore", "pipe", "pipe"],
 			env: process.env,
 		});
+
+		// Robustness boundary: a healthy spawn returns a fully-formed ChildProcess.
+		// If the runtime hands back an incomplete object (observed under bun's test
+		// runner at 25+ files; production spawn verified healthy at 200 rapid spawns),
+		// fail the job cleanly here instead of crashing the manager on child.on/.once
+		// or a readline stream missing .resume(). One diagnostic warn, no wiring.
+		if (!isUsableChild(child)) {
+			console.warn(`[bashBg ${id}] incomplete spawn result (malformed child/stdio) — failing job cleanly, no line capture`);
+			const failedAt = Date.now();
+			const job: BackgroundBashJob = {
+				id,
+				command,
+				cwd,
+				pid: 0,
+				logPath,
+				status: "exited",
+				exitCode: null,
+				startedAt: failedAt,
+				endedAt: failedAt,
+			};
+			const runtime: JobRuntime = { child, logStream, lineListeners: new Set(), exitWaiters: [] };
+			this.jobs.set(id, job);
+			this.runtimes.set(id, runtime);
+			try { logStream.end(); } catch { /* already closed */ }
+			const spawnPromise = Promise.reject(new Error(`background job ${id}: incomplete spawn result`));
+			spawnPromise.catch(() => {});
+			return { job, runtime, spawnPromise };
+		}
 
 		const now = Date.now();
 		const job: BackgroundBashJob = {
