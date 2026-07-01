@@ -1,0 +1,36 @@
+packages/teams/v2/mesh-adapter.ts
+  s_374f20587f28f1::t_dbdba46b6651e8 62
+  s_374f20587f28f1::t_fc3b27d0a380e1 79
+  s_374f20587f28f1::t_d793f0ca86c153 45
+  s_374f20587f28f1::t_d66adcf44487d6 17-18,34
+packages/teams/leader.ts
+  s_374f20587f28f1::t_5b5b7f8d6b7198 1333-1335
+  s_374f20587f28f1::t_e383ee9e966e8c 1607
+  s_374f20587f28f1::t_cd093cc269e8c7 1567-1569
+  s_374f20587f28f1::t_f1faa7eeac85d5 1587
+packages/teams/worker.ts
+  s_374f20587f28f1::t_7313de217105c4 165-169,182
+  s_374f20587f28f1::t_104c6af61f0075 5-6
+  s_374f20587f28f1::t_e1900a60c105af 143-145
+  s_374f20587f28f1::t_49899688164948 74-76
+  s_374f20587f28f1::t_ccea2d8430b464 326
+  s_374f20587f28f1::t_0dd9f987807575 106
+packages/teams/v2/protocol.ts
+  s_374f20587f28f1::t_df197ed863e646 49-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "18def804f57c4cfd5e2e0ddb04150f10a7377286",
+  "prompts": {},
+  "sessions": {
+    "s_374f20587f28f1": {
+      "agent_id": {
+        "tool": "Henrietta Apollo Perlmutter",
+        "id": "019f1b84-0b3b-7d0f-84b2-02daace32e31",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
