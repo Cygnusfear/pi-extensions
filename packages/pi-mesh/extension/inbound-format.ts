@@ -76,3 +76,27 @@ export function formatPendingTellsBatch(
 		),
 	].join("\n");
 }
+
+/**
+ * The hibernation-seam drain (ADD-2). Mail that arrived while this session was
+ * HIBERNATED, surfaced FIFO on revive BEFORE any live tell — so a message that
+ * sat in the durable mailbox is never jumped by one that arrives live post-revive.
+ */
+export function formatReviveDrainBatch(
+	icons: MeshIcons,
+	tells: PendingTell[],
+): string {
+	const header =
+		tells.length === 1
+			? "1 direct mesh-tell arrived while you were HIBERNATED and is delivered now (on revive)."
+			: `${tells.length} direct mesh-tells arrived while you were HIBERNATED and are delivered now (on revive), oldest first.`;
+	return [
+		header,
+		"These waited in your durable mailbox while you were offline — read them in order, they precede anything that arrived live after you woke.",
+		"",
+		...tells.map(
+			({ senderLabel, payloadText }, idx) =>
+				`${idx + 1}. ${icons.tell} ${icons.sep} ${senderLabel}:\n${payloadText}\n   — ${senderLabel} ${SIGNATURE_HINT}`,
+		),
+	].join("\n");
+}

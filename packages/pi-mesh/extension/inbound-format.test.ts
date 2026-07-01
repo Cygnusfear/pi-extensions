@@ -4,6 +4,7 @@ import {
   formatInboundChatContent,
   formatInboundAskContent,
   formatPendingTellsBatch,
+  formatReviveDrainBatch,
   type MeshIcons,
 } from "./inbound-format.ts";
 
@@ -98,5 +99,31 @@ describe("inbound-format — bottom-signature contract", () => {
       const out = formatInboundTellContent(ICONS, "Mercedes López-Morales", "test");
       expect(out).toContain("— Mercedes López-Morales (mesh sender, authoritative)");
     });
+  });
+});
+
+describe("formatReviveDrainBatch — hibernation-seam drain (ADD-2)", () => {
+  test("header says HIBERNATED + oldest-first, distinct from the busy-batch header", () => {
+    const out = formatReviveDrainBatch(ICONS, [
+      { senderLabel: "Alpha", payloadText: "first" },
+      { senderLabel: "Beta", payloadText: "second" },
+    ]);
+    expect(out).toContain("HIBERNATED");
+    expect(out).toContain("oldest first");
+    // FIFO: the first (older) hibernated tell is numbered before the second.
+    const firstIdx = out.indexOf("first");
+    const secondIdx = out.indexOf("second");
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(firstIdx);
+  });
+
+  test("singular header for one tell", () => {
+    const out = formatReviveDrainBatch(ICONS, [{ senderLabel: "Solo", payloadText: "only" }]);
+    expect(out).toContain("1 direct mesh-tell arrived while you were HIBERNATED");
+  });
+
+  test("each entry carries the authoritative bottom signature", () => {
+    const out = formatReviveDrainBatch(ICONS, [{ senderLabel: "Vera Rubin", payloadText: "hi" }]);
+    expect(out).toContain("— Vera Rubin (mesh sender, authoritative)");
   });
 });

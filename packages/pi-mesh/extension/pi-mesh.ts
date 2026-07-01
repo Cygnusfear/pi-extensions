@@ -74,6 +74,7 @@ import {
   formatInboundChatContent,
   formatInboundTellContent,
   formatPendingTellsBatch,
+  formatReviveDrainBatch,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
 import { DurableInboundMailbox } from "./durable-inbound-mailbox.ts";
@@ -1276,6 +1277,13 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     broadcastAllowed: boolean;
   } | null = null;
   let agentBusy = false;
+  // ── v1c revive-drain barrier (ADD-2, FIFO across the hibernation seam) ──────
+  // While a revive is draining the DURABLE mailbox, a live tell must NOT surface
+  // ahead of the hibernated mail. pendingReviveDrain holds live 'surface' tells in
+  // the active mailbox until the durable batch has been surfaced; reviveDrained is
+  // the one-shot guard so we drain exactly once per incarnation.
+  let pendingReviveDrain = true;
+  let reviveDrained = false;
   // Deafen silences incoming mesh messages (both direct tells and channel chat)
   // so the TUI stays quiet while you're focused. Toggled via /mesh deafen.
   // Mute blocks outbound mesh tell/chat/ask from your session so accidental
@@ -1532,6 +1540,78 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     }
   };
 
+  // ── v1c drain-before-live on revive (ADD-2) ────────────────────────────────
+  // On revive, DRAIN the durable mailbox into the turn context BEFORE any new
+  // live tell surfaces — hibernated mail is older, so it must lead (FIFO across
+  // the hibernation seam). One-shot per incarnation; a fresh session drains an
+  // empty mailbox (cheap no-op). Clears the revive-drain barrier and flushes any
+  // live tells that queued behind it, so the durable batch always lands first.
+  const drainDurableMailboxOnRevive = (): void => {
+    if (reviveDrained) return;
+    const durableId = mesh.getIdentity()?.id;
+    if (!durableId) return; // identity not resolved yet — a later call will drain
+    reviveDrained = true;
+    try {
+      const mailbox = DurableInboundMailbox.forDurableId(durableId);
+      const { drained, expired } = mailbox.drain();
+
+      // Late 'expired' acks so a sender never believes 'delivered' forever.
+      // ackRequested is a MeshTellReceiptWaitForPhase (never "none" — the mailbox
+      // is only written for receipt-requesting tells), so a truthy check suffices.
+      for (const e of expired) {
+        if (e.deliveryId && e.originalFrom && e.ackRequested) {
+          mesh.sendTellReceipt(
+            e.originalFrom,
+            buildTellReceiptAck(e.deliveryId, mesh.self().id, "expired"),
+          );
+        }
+      }
+
+      if (drained.length > 0) {
+        const blob = formatReviveDrainBatch(
+          MI,
+          drained.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText })),
+        );
+        pi.sendMessage(
+          {
+            customType: "mesh-revive-drain",
+            content: blob,
+            display: true,
+            details: {
+              count: drained.length,
+              tells: drained.map((d) => ({
+                from: d.fromId,
+                senderLabel: d.senderLabel,
+                topic: d.topic,
+                deliveryId: d.deliveryId,
+                ackRequested: d.ackRequested,
+              })),
+            },
+          },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+        // 'surfaced' acks — the hibernated mail has now entered the turn context.
+        const view = buildReceiverSnapshot();
+        for (const d of drained) {
+          if (d.deliveryId && d.originalFrom && isSurfacedReceiptRequested(d.ackRequested)) {
+            mesh.sendTellReceipt(
+              d.originalFrom,
+              buildTellReceiptAck(d.deliveryId, mesh.self().id, "surfaced", {
+                receiverBusy: false,
+                view,
+              }),
+            );
+          }
+        }
+      }
+    } finally {
+      // Lift the barrier and surface any live tells that queued during the drain —
+      // AFTER the durable batch, preserving FIFO across the seam.
+      pendingReviveDrain = false;
+      flushPendingTells();
+    }
+  };
+
   pi.on("agent_start", () => {
     agentBusy = true;
     if (ambientChatFlushTimer) {
@@ -1570,6 +1650,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // v1c: (re)materialise this session's canonical revive descriptor so a
       // hibernated peer stays reachable at its durable id after reload/resume.
       materialiseOwnDescriptor(ctx);
+      // v1c: drain any durable mail that arrived while hibernated BEFORE live
+      // tells surface (FIFO across the hibernation seam).
+      drainDurableMailboxOnRevive();
       return;
     }
     started = true;
@@ -1758,6 +1841,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         // v1c: materialise the canonical revive descriptor now the durable id is
         // known — the activator reads it to route revive-on-send by durable id.
         materialiseOwnDescriptor(ctx);
+        // v1c: durable id is known → drain hibernated mail before live tells.
+        drainDurableMailboxOnRevive();
       });
 
       // v1a identity-pin: resume/revive REUSE the durable session's mesh id, so a
@@ -1797,7 +1882,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         // recent activity back to the sender. O(window) via parentId walk.
         const snapshot = willAck && !deafened ? buildReceiverSnapshot() : undefined;
         const receiverBusy = agentBusy;
-        const plan = planInboundTell({ deafened, preempt, agentBusy, ackRequested });
+        const basePlan = planInboundTell({ deafened, preempt, agentBusy, ackRequested });
+        // v1c revive-drain barrier (ADD-2): while the durable mailbox is draining
+        // on revive, hold a live idle 'surface' tell in the active mailbox so the
+        // older hibernated mail leads. Deafen + preempt (steer/abort) still take
+        // effect — only a normal idle surface is deferred, then flushed right after
+        // the durable batch (see drainDurableMailboxOnRevive).
+        const plan =
+          pendingReviveDrain && basePlan.action === "surface"
+            ? { action: "queue" as const, ackPhase: "delivered" as const, ackDeafened: false, abortFirst: false }
+            : basePlan;
 
         // Enriched receipt — only sent when the sender requested one
         // (waitFor:'none' opted out, so there is no channel to enrich).
