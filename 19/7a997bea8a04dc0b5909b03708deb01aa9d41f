@@ -1,0 +1,42 @@
+packages/pi-mesh/extension/durable-session-store.ts
+  s_a55faf01f2a777::t_ecbf9724e3e7d9 6
+packages/teams/leader.ts
+  s_a55faf01f2a777::t_7eea3f6347b663 1830-1834
+  s_a55faf01f2a777::t_480b587cc99448 27
+  s_a55faf01f2a777::t_21c1832460a2cb 2363-2365
+packages/teams/types.ts
+  s_a55faf01f2a777::t_f9b1edae36ce41 51-55
+packages/shared/src/revive-descriptor.ts
+  s_a55faf01f2a777::t_46e3e8740ab356 4-8
+packages/teams/spawner.ts
+  s_a55faf01f2a777::t_11547cf1146f7d 309-314
+  s_a55faf01f2a777::t_0e34615b1a5d40 5-10
+  s_a55faf01f2a777::t_7ef20f2f848466 217-225
+  s_a55faf01f2a777::t_bc6c49b8cd3a2f 281-296
+  s_a55faf01f2a777::t_663051cee571e1 327-340
+  s_a55faf01f2a777::t_f1c66c219d7014 13-50
+  s_a55faf01f2a777::t_7b3941faf1939b 156-176
+  s_a55faf01f2a777::t_49214f409300c3 251-271
+packages/teams/spawner.activation.test.ts
+  s_a55faf01f2a777::t_a1418ce1212ba0 94-96
+  s_a55faf01f2a777::t_24414d0c59f3f4 112
+  s_a55faf01f2a777::t_806deda900aa6d 1-93,97-111,113-132
+packages/pi-mesh/extension/durable-session-store.test.ts
+  s_a55faf01f2a777::t_b42802f47c0e32 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "197a997bea8a04dc0b5909b03708deb01aa9d41f",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
