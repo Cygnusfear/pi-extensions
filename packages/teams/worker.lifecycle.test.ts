@@ -82,7 +82,7 @@ describe("teams worker lifecycle", () => {
 		setWorkerEnv();
 		const fake = makeFakePi();
 		const runWorker = await importRunWorker();
-		runWorker(fake.pi, { autoCloseOnAgentEnd: true, autoCloseOnSessionShutdown: true });
+		runWorker(fake.pi);
 
 		await fake.emit("session_shutdown", {}, { cwd: "/tmp/repo" });
 
@@ -92,39 +92,39 @@ describe("teams worker lifecycle", () => {
 		expect(close).toBeUndefined();
 	});
 
-	test("team_finish done writes DONE and closes ticket", async () => {
+	test("team_finish done writes DONE note and does NOT close the ticket (coordinator owns close — Cecilia fold)", async () => {
 		setWorkerEnv();
 		const fake = makeFakePi();
 		const runWorker = await importRunWorker();
-		runWorker(fake.pi, { autoCloseOnAgentEnd: true, autoCloseOnSessionShutdown: true });
+		runWorker(fake.pi);
 
 		await fake.tools.get("team_finish").execute("id", { status: "done", summary: "all good" }, null, null, { cwd: "/tmp/repo" });
 
 		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
 		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote?.args.at(-1)).toBe("DONE: all good");
-		expect(close?.args[1]).toBe("tk-1");
+		expect(close).toBeUndefined();
 	});
 
-	test("team_finish quit writes QUIT and closes ticket", async () => {
+	test("team_finish quit writes QUIT note and does NOT close the ticket (coordinator owns close — Cecilia fold)", async () => {
 		setWorkerEnv();
 		const fake = makeFakePi();
 		const runWorker = await importRunWorker();
-		runWorker(fake.pi, { autoCloseOnAgentEnd: true, autoCloseOnSessionShutdown: true });
+		runWorker(fake.pi);
 
 		await fake.tools.get("team_finish").execute("id", { status: "quit", summary: "blocked by missing data" }, null, null, { cwd: "/tmp/repo" });
 
 		const addNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
 		const close = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "close");
 		expect(addNote?.args.at(-1)).toBe("QUIT: blocked by missing data");
-		expect(close?.args[1]).toBe("tk-1");
+		expect(close).toBeUndefined();
 	});
 
 	test("team_comment can post a file-backed markdown note", async () => {
 		setWorkerEnv();
 		const fake = makeFakePi();
 		const runWorker = await importRunWorker();
-		runWorker(fake.pi, { autoCloseOnAgentEnd: true, autoCloseOnSessionShutdown: true });
+		runWorker(fake.pi);
 
 		const repoDir = fs.mkdtempSync(path.join(process.cwd(), "teams-worker-comment-"));
 		const notePath = path.join(repoDir, "review.md");

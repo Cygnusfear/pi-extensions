@@ -10,11 +10,6 @@ import type { WorkerSessionMode } from "./v2/protocol.ts";
 
 const HEARTBEAT_ENTRY_TYPE = "teams-worker-heartbeat";
 
-type WorkerOptions = {
-	autoCloseOnAgentEnd?: boolean;
-	autoCloseOnSessionShutdown?: boolean;
-};
-
 type TerminalStatus = "done" | "quit";
 
 function resolveHeartbeatIntervalMs(): number {
@@ -23,12 +18,10 @@ function resolveHeartbeatIntervalMs(): number {
 	return Math.floor(raw);
 }
 
-export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
+export function runWorker(pi: ExtensionAPI): void {
 	const ticketId = process.env.PI_TEAMS_TICKET_ID ?? "";
 	const workerName = process.env.PI_TEAMS_WORKER_NAME ?? "worker";
 	const workerInstanceId = process.env.PI_TEAMS_WORKER_INSTANCE_ID ?? "unknown-worker-instance";
-	const autoCloseOnAgentEnd = options.autoCloseOnAgentEnd !== false;
-	const autoCloseOnSessionShutdown = options.autoCloseOnSessionShutdown === true;
 
 	const channelId = process.env.PI_TEAMS_CHANNEL_ID;
 	const teamId = process.env.PI_TEAMS_TEAM_ID ?? ticketId;
@@ -75,18 +68,15 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	// envelope so the leader binds handle→durableId and routes over the durable topic.
 	const selfMeshId = (): string | undefined => mesh?.getIdentity()?.id ?? undefined;
 
-	let ticketClosed = false;
 	let lastStopReason: string | undefined;
 	let terminalStatus: TerminalStatus | null = null;
 
-	let agentEndFired = false;
 
 	const getTicketCwd = (cwd: string) => ticketCwd ?? cwd;
 
 	const finalizeTask = async (cwd: string, status: TerminalStatus, summary: string) => {
 		if (terminalStatus) return;
 		terminalStatus = status;
-		ticketClosed = true;
 
 		const normalizedSummary = summary.trim() || (status === "done" ? "Task completed." : "Worker quit.");
 		const note = status === "done"
@@ -106,10 +96,15 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				meshId: selfMeshId(),
 			}),
 		);
+		// Report status ONLY — the worker does NOT close its own ticket. A terminal
+		// signal is a STATUS REPORT (done/quit + summary via the note + the honest
+		// mesh finish tell above), not a lifecycle decision. Auto-closing a
+		// coordinator-owned (often shared-slice) ticket from the worker marks it
+		// "shipped" even at 9/10 before the gate passes (Cecilia symptom, same class
+		// as opaque-lifecycle #5). The coordinator/human owns ticket-close on a true pass.
 		try {
 			const effectiveCwd = getTicketCwd(cwd);
 			await pi.exec(getMaiBin(), ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
-			await pi.exec(getMaiBin(), ["close", ticketId], { cwd: effectiveCwd, timeout: 5000 });
 		} catch {
 			// best effort
 		}
@@ -215,7 +210,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 		if (leaseFile) {
 			leaseWatchdog = setInterval(() => {
-				if (ticketClosed || terminalStatus) return;
+				if (terminalStatus) return;
 				if (!isLeaderLeaseStale(leaseFile, Date.now(), LEASE_STALE_AFTER_MS)) return;
 				writeHeartbeat("leader_lease_expired", { leaseFile });
 				stopHeartbeat();
@@ -342,7 +337,6 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	});
 
 	pi.on("agent_end", async () => {
-		agentEndFired = true;
 		writeHeartbeat("agent_end", { terminalStatus });
 		// Workers must use team_finish to declare terminal success/quit.
 		// agent_end only says the turn ended; it is not success by itself.

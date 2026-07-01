@@ -16,13 +16,7 @@ const IS_FREEFORM = process.env.PI_TEAMS_FREEFORM === "1";
 
 export default function (pi: ExtensionAPI) {
 	if (IS_WORKER) {
-		const stayAlive = HAS_TOOLS || IS_FREEFORM;
-		runWorker(pi, {
-			// Freeform/hasTools workers never auto-close — coordinator controls lifecycle.
-			// Normal workers auto-close after grace period (GRACE_PERIOD_MS).
-			autoCloseOnAgentEnd: !stayAlive,
-			autoCloseOnSessionShutdown: true,
-		});
+		runWorker(pi);
 		if (!HAS_TOOLS) return;
 		// Worker with hasTools: also register as a leader so it can delegate sub-workers
 	}
