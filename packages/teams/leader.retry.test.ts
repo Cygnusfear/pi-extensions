@@ -91,14 +91,25 @@ function makeLeaderHarness(baseDir: string) {
 }
 
 async function waitForFile(pathname: string, timeoutMs = 5000): Promise<string> {
+	// Wait for STABLE NON-EMPTY content, not mere existence. The fake `pi` writes
+	// its args via a shell `>> log` redirect, which CREATES the file empty when the
+	// shell opens the fd — BEFORE `printf` fills it. Returning on existence alone
+	// races that window and reads "" (the pre-existing flake). Requiring the content
+	// to be non-empty AND unchanged across two consecutive polls makes it
+	// deterministic regardless of how the writer chunks its output.
 	const started = Date.now();
+	let previous: string | null = null;
 	while (Date.now() - started < timeoutMs) {
 		if (fs.existsSync(pathname)) {
-			return fs.readFileSync(pathname, "utf-8");
+			const content = fs.readFileSync(pathname, "utf-8");
+			if (content.length > 0) {
+				if (previous === content) return content; // stable → the writer is done
+				previous = content;
+			}
 		}
 		await Bun.sleep(25);
 	}
-	throw new Error(`Timed out waiting for ${pathname}`);
+	throw new Error(`Timed out waiting for non-empty ${pathname}`);
 }
 
 afterEach(() => {
