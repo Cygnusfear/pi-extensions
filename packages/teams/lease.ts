@@ -140,3 +140,212 @@ export function pruneStaleLeases(olderThanMs = LEASE_PRUNE_AFTER_MS, now = Date.
 	}
 	return removed;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACTIVATION LEASE (v1c) — single live incarnation per durable session
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The leader lease above is a dead-man's switch (workers self-terminate when
+// their coordinator dies). The ACTIVATION lease is a different authority: it
+// governs the ONE live incarnation of a durable SESSION and GATES revive
+// re-acquisition — a revive must acquire it before spawning `pi --session
+// <file>` (contract pe-jimphzxj, council amendment D + M3).
+//
+// Why it exists: two concurrent resumes of the SAME session file each spawn a
+// `pi --session <file>` process → concurrent appends corrupt one session.jsonl.
+// The activation lease makes the first resume win and the second refuse.
+//
+// Keyed by the session FILE (stable + known at both spawn and resume time). The
+// SINGLE SOURCE OF TRUTH for "is there a live incarnation" is holder-pid
+// liveness — no heartbeat is renewed:
+//   - a live worker pid   → the lease is held → a second resume refuses.
+//   - a dead worker pid    → the lease is stale → a standard revive re-acquires
+//                            (this IS the orphan = kill + standard-revive model:
+//                            a dead coordinator's worker is killed, its pid dies,
+//                            the session becomes revivable-by-anyone).
+// A pre-commit RESERVATION (worker pid not yet known) is gated by reserver-pid
+// liveness + a short staleness backstop, so a reserver that dies mid-spawn does
+// not strand the session.
+//
+// The `epoch` is the fencing token: commit and release verify it, so a stale
+// holder can never clobber the winner's committed lease.
+//
+// NOTE ON RACES: tryAcquire is SYNCHRONOUS (fs.openSync with the exclusive "wx"
+// flag). Two resumes in the SAME coordinator process therefore serialise on the
+// event loop — the first openSync completes before the second begins, so exactly
+// one wins with no split-brain. Cross-process contention is bounded by pid
+// liveness + the reservation TTL (a full distributed lock is v2).
+
+export const ACTIVATION_LEASE_STALE_AFTER_MS = 45_000;
+
+export interface ActivationLeaseRecord {
+	/** Fencing token — unique per acquisition. */
+	epoch: string;
+	/** Who reserved the lease (the coordinator / activator process). */
+	reserverPid: number;
+	/** The live incarnation's pid — set on commit, undefined while reserving. */
+	workerPid?: number;
+	/** The durable session file this lease governs. */
+	sessionFile: string;
+	acquiredAt: number;
+	committedAt?: number;
+}
+
+export interface ActivationLeaseOptions {
+	/** Liveness probe (injectable for tests). Default: process.kill(pid, 0). */
+	isAlive?: (pid: number) => boolean;
+	now?: number;
+	/** How long an un-committed reservation stays valid before it's stealable. */
+	staleAfterMs?: number;
+}
+
+export function activationLeaseRoot(): string {
+	return path.join(os.homedir(), ".pi", "teams", "activation");
+}
+
+/** Build the activation-lease path for a session file. Stable hash → same key
+ *  across resumes of the same session. */
+export function buildActivationLeasePath(sessionFile: string): string {
+	const key = crypto.createHash("sha1").update(sessionFile).digest("hex").slice(0, 16);
+	return path.join(activationLeaseRoot(), `${key}.lease`);
+}
+
+function defaultIsAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function newActivationEpoch(pid: number, now: number): string {
+	return `${pid}-${now}-${crypto.randomBytes(6).toString("hex")}`;
+}
+
+export function readActivationLease(sessionFile: string): ActivationLeaseRecord | null {
+	try {
+		const raw = fs.readFileSync(buildActivationLeasePath(sessionFile), "utf-8");
+		const parsed = JSON.parse(raw) as ActivationLeaseRecord;
+		if (parsed && typeof parsed.epoch === "string" && typeof parsed.reserverPid === "number") {
+			return parsed;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/** Is the lease held by a LIVE incarnation (committed → worker pid alive) or a
+ *  live+fresh reservation (uncommitted → reserver alive AND within the TTL)? */
+function isActivationRecordLive(
+	record: ActivationLeaseRecord,
+	isAlive: (pid: number) => boolean,
+	now: number,
+	staleAfterMs: number,
+): boolean {
+	if (record.workerPid !== undefined) return isAlive(record.workerPid);
+	return isAlive(record.reserverPid) && now - record.acquiredAt < staleAfterMs;
+}
+
+/** True iff a LIVE incarnation currently holds the activation lease. */
+export function isActivationLeaseHeldLive(
+	sessionFile: string,
+	opts: ActivationLeaseOptions = {},
+): boolean {
+	const record = readActivationLease(sessionFile);
+	if (!record) return false;
+	return isActivationRecordLive(
+		record,
+		opts.isAlive ?? defaultIsAlive,
+		opts.now ?? Date.now(),
+		opts.staleAfterMs ?? ACTIVATION_LEASE_STALE_AFTER_MS,
+	);
+}
+
+/**
+ * Try to acquire the activation lease for a session file BEFORE spawning a
+ * `pi --session <file>` incarnation. Returns { acquired, epoch } on success, or
+ * { acquired: false, heldBy } when a LIVE incarnation already holds it (the
+ * caller must NOT spawn — that would corrupt the shared session.jsonl).
+ *
+ * A dead/stale holder is stolen (its incarnation is gone), which is exactly how
+ * a standard revive re-acquires an orphaned session.
+ */
+export function tryAcquireActivationLease(
+	sessionFile: string,
+	reserverPid: number = process.pid,
+	opts: ActivationLeaseOptions = {},
+): { acquired: boolean; epoch?: string; heldBy?: ActivationLeaseRecord } {
+	const leasePath = buildActivationLeasePath(sessionFile);
+	const isAlive = opts.isAlive ?? defaultIsAlive;
+	const now = opts.now ?? Date.now();
+	const staleAfterMs = opts.staleAfterMs ?? ACTIVATION_LEASE_STALE_AFTER_MS;
+	fs.mkdirSync(path.dirname(leasePath), { recursive: true });
+
+	const epoch = newActivationEpoch(reserverPid, now);
+	const record: ActivationLeaseRecord = { epoch, reserverPid, sessionFile, acquiredAt: now };
+	const serialized = JSON.stringify(record);
+
+	// Up to 2 attempts: exclusive-create, or steal-a-dead-holder then create.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const fd = fs.openSync(leasePath, "wx"); // atomic exclusive create
+			try {
+				fs.writeSync(fd, serialized);
+			} finally {
+				fs.closeSync(fd);
+			}
+			return { acquired: true, epoch };
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+			const existing = readActivationLease(sessionFile);
+			if (!existing) continue; // vanished (race) — retry the create
+			if (isActivationRecordLive(existing, isAlive, now, staleAfterMs)) {
+				return { acquired: false, heldBy: existing }; // live incarnation → refuse
+			}
+			// Dead/stale holder → evict, then retry the exclusive create. The
+			// create is the sole winner-determiner, so a concurrent stealer that
+			// re-creates first will make our retry EEXIST → see a LIVE fresh
+			// reservation → refuse.
+			try {
+				fs.unlinkSync(leasePath);
+			} catch {
+				// already gone — fine
+			}
+		}
+	}
+	return { acquired: false, heldBy: readActivationLease(sessionFile) ?? undefined };
+}
+
+/**
+ * Commit a reservation to a live incarnation: record the worker pid so liveness
+ * tracking follows the actual `pi` process. Verifies the epoch so a stale holder
+ * cannot commit over the winner. Returns true on success.
+ */
+export function commitActivationLease(sessionFile: string, epoch: string, workerPid: number): boolean {
+	const existing = readActivationLease(sessionFile);
+	if (!existing || existing.epoch !== epoch) return false;
+	const updated: ActivationLeaseRecord = { ...existing, workerPid, committedAt: Date.now() };
+	const leasePath = buildActivationLeasePath(sessionFile);
+	const tmp = `${leasePath}.${process.pid}.${Date.now()}.tmp`;
+	fs.writeFileSync(tmp, JSON.stringify(updated), "utf-8");
+	fs.renameSync(tmp, leasePath);
+	return true;
+}
+
+/**
+ * Release the activation lease iff we still hold it (epoch matches). Called when
+ * the incarnation exits — a fast free so the next revive need not wait for the
+ * staleness backstop. Idempotent.
+ */
+export function releaseActivationLease(sessionFile: string, epoch: string): boolean {
+	const existing = readActivationLease(sessionFile);
+	if (!existing || existing.epoch !== epoch) return false;
+	try {
+		fs.unlinkSync(buildActivationLeasePath(sessionFile));
+	} catch {
+		// already gone — fine
+	}
+	return true;
+}
