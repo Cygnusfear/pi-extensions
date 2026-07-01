@@ -39,6 +39,8 @@ import {
   isMeshAskReceiptEnvelope,
 } from "./ask-protocol.ts";
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
+import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
+import { resolveDurableTarget } from "./route-resolve.ts";
 import {
   buildTellReceiptAck,
   createDeliveryId,
@@ -518,9 +520,28 @@ export class PiMesh {
     return false;
   }
 
-  /** Set the stable mesh identity (called by the identity resolution logic). */
+  /** Set the stable mesh identity (called by the identity resolution logic).
+   *
+   *  Durable-id routing: once the identity is known, become reachable at
+   *  `pi/mesh/session/${durableId}` so a tell addressed to the durable id lands
+   *  regardless of sidecar clientId churn — the clientId is a per-connection
+   *  transport detail; the durable mesh id is the address. Re-announce right away
+   *  so peers learn our meshId without waiting for the next heartbeat. */
   setIdentity(identity: MeshIdentity): void {
     this.myIdentity = identity;
+    if (this.isSocketReady && this.myClientId) {
+      this._subscribeToDurableTopic();
+      this._announce(this.myClientId, process.cwd());
+    }
+  }
+
+  /** Subscribe to this session's durable-identity topic so inbound tells routed
+   *  by durable id are delivered even after the sidecar clientId changes. Safe to
+   *  call repeatedly (the sidecar dedups) and before identity is known (no-op). */
+  private _subscribeToDurableTopic(): void {
+    const durableId = this.myIdentity?.id;
+    if (!durableId || durableId === this.myClientId) return;
+    this._send({ cmd: "subscribe", topic: `pi/mesh/session/${durableId}` });
   }
 
   /** Get the current stable mesh identity (if resolved). */
@@ -739,6 +760,11 @@ export class PiMesh {
 
   private _setupSubscriptions(clientId: string, _cwd: string): void {
     this._send({ cmd: "subscribe", topic: `pi/mesh/session/${clientId}` });
+    // Durable-id routing: also subscribe to our stable-identity topic when the
+    // identity is already resolved (e.g. reconnect after a reload). On a first
+    // connect the identity resolves slightly later, and setIdentity() adds this
+    // subscription then.
+    this._subscribeToDurableTopic();
     this._send({ cmd: "subscribe", topic: "pi/mesh/announce/**" });
     this._send({ cmd: "subscribe", topic: "pi/mesh/broadcast/**" });
   }
@@ -877,10 +903,14 @@ function resolveBroadcastAllowedFromSession(ctx: {
 
 /**
  * Resolve and set the mesh identity based on session_start reason.
- * - reload: reuse existing identity from session file
- * - resume: reuse if id not live on mesh; fork if id already live (double-resume)
- * - new/fork: generate fresh identity
- * - startup: delegates to resume/new based on whether mesh_identity entry exists
+ *
+ * v1a identity-pin: reload / resume / startup / rebirth REUSE the durable
+ * session's existing mesh id instead of re-minting it. Since the nickname is a
+ * deterministic function of the id, pinning the id keeps the name stable across
+ * resume/revive for free. Only `fork` and a genuinely new `/new` session mint a
+ * fresh id. A genuine concurrent duplicate is disambiguated by the DISPLAY-only
+ * nickname rename in _handleAnnounce (and, in v1c, the activation lease) — never
+ * by re-minting the id, which was the identity-churn bug (Simon→Robert Kirshner).
  */
 function resolveAndSetIdentity(
   reason: string,
@@ -895,61 +925,22 @@ function resolveAndSetIdentity(
 ): void {
   const existing = resolveIdentityFromSession(ctx);
 
-  // reload / resume / startup with existing identity → reuse (tentatively)
-  if ((reason === "reload" || reason === "resume" || reason === "startup") && existing) {
-    if (reason !== "reload") {
-      // For resume/startup: check if this id is already live on the mesh (double-resume detection)
-      const idAlreadyLive = mesh
-        .peers()
-        .some((p) => p.id === existing.id || p.meshId === existing.id);
-      if (idAlreadyLive) {
-        // DOUBLE-RESUME: session is already live in another pi process
-        pi.sendMessage({
-          customType: "mesh-identity-fork",
-          content:
-            "[pi-mesh] Session already open in another pi. Generating new identity for this instance.",
-          display: true,
-        });
-        // NOTE: ctx in session_start is ExtensionContext (read-only sessionManager),
-        // not ExtensionCommandContext. We cannot call ctx.newSession() here.
-        // Fall through to generate new identity below.
-      } else {
-        // Safe — reuse identity. Verify nickname against current peers.
-        mesh.setIdentity(existing);
-        setStableId(existing.id);
-        const liveNicknames = new Set(
-          mesh
-            .peers()
-            .map((p) => p.nickname)
-            .filter(Boolean) as string[],
-        );
-        if (liveNicknames.has(existing.nickname)) {
-          const newNickname = claimNickname(existing.id, liveNicknames);
-          const updated: MeshIdentity = { ...existing, nickname: newNickname };
-          mesh.setIdentity(updated);
-          pi.appendEntry(MESH_IDENTITY_TYPE, updated);
-        }
-        return;
-      }
-    } else {
-      // reload: always reuse identity from session file (no double-resume check needed)
-      mesh.setIdentity(existing);
-      setStableId(existing.id);
-      return;
+  // Reuse the pinned identity for every reason except fork / genuine-new.
+  if (existing && isIdentityReuseReason(reason, !!extractRebirthMarker(ctx))) {
+    mesh.setIdentity(existing);
+    setStableId(existing.id);
+    // Reclaim the DISPLAY nickname only if a DIFFERENT identity already holds it.
+    // A lingering same-id predecessor (dead incarnation still in the peer window)
+    // is our own id and must not rename us — that keeps /resume's name stable.
+    const { nickname, changed } = resolveReuseNickname(existing, mesh.peers());
+    if (changed) {
+      const updated: MeshIdentity = { ...existing, nickname };
+      mesh.setIdentity(updated);
+      pi.appendEntry(MESH_IDENTITY_TYPE, updated);
     }
-  } else if (reason === "new" && extractRebirthMarker(ctx) && existing) {
-    // REBIRTH: new session created by /rebirth — reuse old identity
-    // so peers on the mesh still recognise this agent.
-    mesh.setIdentity(existing);
-    setStableId(existing.id);
-    return;
-  } else if (reason !== "fork" && reason !== "new" && existing) {
-    // Unknown reason with existing identity — reuse
-    mesh.setIdentity(existing);
-    setStableId(existing.id);
     return;
   }
-  // fork, new (non-rebirth), missing identity, or double-resume → generate fresh identity below
+  // fork, new (non-rebirth), or missing identity → generate a fresh identity below.
 
   // Generate fresh identity
   const id = randomUUID();
@@ -1319,48 +1310,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
   // Expose mesh instance for other extensions (e.g. teams) — avoids duplicate connections
   (globalThis as any).__piMesh = mesh;
-  const resolveTargetSessionId = (rawSessionId: string): string => {
-    const needle = rawSessionId.trim();
-    const needleLower = needle.toLowerCase();
-    const peers = mesh.peers();
-
-    // 1. Exact ID / sessionId match
-    const byExactMatch = peers.find((peer) => peer.id === needle || peer.sessionId === needle);
-    if (byExactMatch) return byExactMatch.id;
-
-    // 2. Case-insensitive exact name/nickname match
-    const byExactLabel = peers.filter((peer) => {
-      const nickname = peer.nickname?.trim().toLowerCase();
-      const name = peer.name?.trim().toLowerCase();
-      return nickname === needleLower || name === needleLower;
-    });
-    if (byExactLabel.length === 1) return byExactLabel[0].id;
-    if (byExactLabel.length > 1) {
-      const matched = byExactLabel
-        .map((peer) => `${getPeerLabel(peer)} (${peer.id.slice(0, 8)})`)
-        .join(", ");
-      throw new Error(`Peer name '${needle}' is ambiguous: ${matched}`);
-    }
-
-    // 3. ID prefix match
-    if (needle.length >= 6) {
-      const byPrefix = peers.filter((peer) => {
-        const peerId = peer.id ?? "";
-        const peerSessionId = peer.sessionId ?? "";
-        return peerId.startsWith(needle) || peerSessionId.startsWith(needle);
-      });
-      if (byPrefix.length === 1) return byPrefix[0].id;
-      if (byPrefix.length > 1) {
-        const matched = byPrefix
-          .map((peer) => `${getPeerLabel(peer)} (${peer.id.slice(0, 8)})`)
-          .join(", ");
-        throw new Error(`Session id '${needle}' is ambiguous: ${matched}`);
-      }
-    }
-
-    const available = peers.map((p) => `${getPeerLabel(p)} (${p.id.slice(0, 8)})`).join(", ");
-    throw new Error(`No peer matching '${needle}'. Online: ${available || "none"}`);
-  };
+  // Resolve a raw target to a concrete ROUTE. Durable-id aware: matches on the
+  // stable meshId (not just the sidecar clientId) and returns the durable id as
+  // the route when the peer has one, so routing survives clientId churn. See
+  // route-resolve.ts for the pure, unit-tested resolution logic.
+  const resolveTargetSessionId = (rawSessionId: string): string =>
+    resolveDurableTarget(mesh.peers(), rawSessionId);
 
   const flushAmbientChat = () => {
     ambientChatFlushTimer = null;
@@ -1681,49 +1636,10 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         resolveAndSetIdentity(reason, ctx, mesh, pi);
       });
 
-      // Re-check on first peer-join: if the joining peer carries our mesh id,
-      // that means double-resume was missed at ready time (empty peer list).
-      let peerJoinReChecked = false;
-      mesh.on<PeerInfo>("peer-join", (joinedPeer) => {
-        if (peerJoinReChecked) return;
-        const identity = mesh.getIdentity();
-        if (!identity) return;
-        // Only re-check for resume/startup (reload never needs double-resume detection)
-        if (reason !== "resume" && reason !== "startup") return;
-        // Check if the joining peer has our mesh id → double-resume
-        if (joinedPeer.meshId === identity.id || joinedPeer.id === identity.id) {
-          peerJoinReChecked = true; // only trigger once
-          // DOUBLE-RESUME detected via peer-join: another pi has this session open
-          pi.sendMessage({
-            customType: "mesh-identity-fork",
-            content:
-              "[pi-mesh] Session already open in another pi (detected on peer join). Generating new identity.",
-            display: true,
-          });
-          // Generate fresh identity
-          const newId = randomUUID();
-          const liveNicknames = new Set(
-            mesh
-              .peers()
-              .map((p) => p.nickname)
-              .filter(Boolean) as string[],
-          );
-          const nickname = claimNickname(newId, liveNicknames);
-          const newIdentity: MeshIdentity = {
-            id: newId,
-            nickname,
-            claimedAt: Date.now(),
-            host: hostname(),
-          };
-          mesh.setIdentity(newIdentity);
-          setStableId(newIdentity.id);
-          try {
-            pi.appendEntry(MESH_IDENTITY_TYPE, newIdentity);
-          } catch (e) {
-            console.warn("[pi-mesh] Failed to persist identity after peer-join re-check:", e);
-          }
-        }
-      });
+      // v1a identity-pin: resume/revive REUSE the durable session's mesh id, so a
+      // lingering same-id predecessor is no longer treated as a fork — the old
+      // peer-join double-resume re-mint (identity churn) is removed. Genuine
+      // concurrent single-activation is the v1c activation-lease's responsibility.
 
       // Persist identity updates on nickname conflicts
       mesh.onNicknameConflict((updatedIdentity) => {
@@ -2020,7 +1936,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       const receiptMode = waitFor ?? "delivered";
       const rendered = formatPayloadForDisplay(message);
       const peerLabel = (() => {
-        const peer = mesh.peers().find((p) => p.id === resolved);
+        const peer = mesh.peers().find((p) => p.id === resolved || p.meshId === resolved);
         return peer ? getPeerLabel(peer) : resolved.slice(0, 8);
       })();
       if (receiptMode === "none") {

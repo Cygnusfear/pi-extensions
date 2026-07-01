@@ -89,36 +89,6 @@ describe("resolveIdentityFromSession", () => {
 	});
 });
 
-// ── Double-resume detection ──────────────────────────────────────────────────
-
-describe("double-resume detection", () => {
-	test("returns conflict when id found in peer list", () => {
-		const myId = "session-uuid-abc";
-		const peers: Array<{ id: string; meshId?: string }> = [
-			{ id: "client-1", meshId: "session-uuid-abc" }, // same identity live!
-			{ id: "client-2", meshId: "other-uuid" },
-		];
-
-		const idAlreadyLive = peers.some(
-			p => p.id === myId || p.meshId === myId,
-		);
-		expect(idAlreadyLive).toBe(true);
-	});
-
-	test("returns no conflict when id not in peer list", () => {
-		const myId = "session-uuid-abc";
-		const peers: Array<{ id: string; meshId?: string }> = [
-			{ id: "client-1", meshId: "other-uuid-1" },
-			{ id: "client-2", meshId: "other-uuid-2" },
-		];
-
-		const idAlreadyLive = peers.some(
-			p => p.id === myId || p.meshId === myId,
-		);
-		expect(idAlreadyLive).toBe(false);
-	});
-});
-
 // ── Conflict tie-break ───────────────────────────────────────────────────────
 
 describe("conflict tie-break", () => {
@@ -194,96 +164,6 @@ describe("conflict tie-break", () => {
 			1700000000000,
 		);
 		expect(iLose).toBe(false);
-	});
-});
-
-// ── Peer-join re-check (late double-resume detection) ────────────────────────
-
-describe("peer-join re-check for double-resume", () => {
-	test("detects double-resume when joining peer carries our mesh id", () => {
-		const myIdentity: MeshIdentity = {
-			id: "session-uuid-abc",
-			nickname: "Carl Ufo Hawkins",
-			claimedAt: 1700000000000,
-			host: "my-machine",
-		};
-
-		// Simulate: at ready time, peer list was empty (no conflict detected).
-		// Then a peer joins carrying our meshId → double-resume.
-		const joinedPeer: PeerInfo = {
-			id: "client-xyz",
-			lastSeen: Date.now(),
-			meshId: "session-uuid-abc", // same as our identity!
-			nickname: "Carl Ufo Hawkins",
-		};
-
-		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
-		expect(isDoubleResume).toBe(true);
-	});
-
-	test("no double-resume when joining peer has different mesh id", () => {
-		const myIdentity: MeshIdentity = {
-			id: "session-uuid-abc",
-			nickname: "Carl Ufo Hawkins",
-			claimedAt: 1700000000000,
-			host: "my-machine",
-		};
-
-		const joinedPeer: PeerInfo = {
-			id: "client-xyz",
-			lastSeen: Date.now(),
-			meshId: "different-uuid",
-			nickname: "Vera Supernova Sagan",
-		};
-
-		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
-		expect(isDoubleResume).toBe(false);
-	});
-
-	test("detects double-resume when peer id matches our identity id directly", () => {
-		const myIdentity: MeshIdentity = {
-			id: "session-uuid-abc",
-			nickname: "Carl Ufo Hawkins",
-			claimedAt: 1700000000000,
-			host: "my-machine",
-		};
-
-		// Edge case: peer.id matches our meshId (not via meshId field)
-		const joinedPeer: PeerInfo = {
-			id: "session-uuid-abc",
-			lastSeen: Date.now(),
-		};
-
-		const isDoubleResume = joinedPeer.meshId === myIdentity.id || joinedPeer.id === myIdentity.id;
-		expect(isDoubleResume).toBe(true);
-	});
-
-	test("re-check triggers fresh identity generation on double-resume", () => {
-		const myIdentity: MeshIdentity = {
-			id: "session-uuid-abc",
-			nickname: "Carl Ufo Hawkins",
-			claimedAt: 1700000000000,
-			host: "my-machine",
-		};
-
-		// Simulate the re-check finding double-resume → generate new identity
-		const joinedPeer: PeerInfo = {
-			id: "client-xyz",
-			lastSeen: Date.now(),
-			meshId: "session-uuid-abc",
-			nickname: "Carl Ufo Hawkins",
-		};
-
-		const isDoubleResume = joinedPeer.meshId === myIdentity.id;
-		expect(isDoubleResume).toBe(true);
-
-		// New identity would be generated
-		const newId = crypto.randomUUID();
-		expect(newId).not.toBe(myIdentity.id);
-		const liveNicknames = new Set([joinedPeer.nickname!]);
-		const newNickname = claimNickname(newId, liveNicknames);
-		// New nickname should avoid collision with the peer's name
-		expect(newNickname).not.toBe(myIdentity.nickname);
 	});
 });
 
