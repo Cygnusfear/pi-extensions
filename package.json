@@ -59,6 +59,7 @@
       "./packages/supervisor/src/index.ts",
       "./packages/runbooks/extensions/runbooks.ts",
       "./packages/reload/extensions/reload.ts",
+      "./packages/restart/extensions/restart.ts",
       "./packages/exit-command/extensions/exit-command.ts"
     ],
     "prompts": [
