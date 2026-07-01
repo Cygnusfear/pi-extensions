@@ -1,0 +1,21 @@
+packages/teams/orphan-revive.test.ts
+  s_a55faf01f2a777::t_07f5ee3e5f6c98 6,11
+  s_a55faf01f2a777::t_98e4650dc51011 1-5,7-10,12-69,73-109
+  s_a55faf01f2a777::t_9c2edacf412dd2 70-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "8e71e34185a204953cdd4c2dd1c31f1fc34c8e32",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
