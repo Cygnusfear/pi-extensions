@@ -125,22 +125,22 @@ describe("Category 1 — Bypass Attempts", () => {
 			expect(isGitUnsafeBash("alias r=rm; r -rf .git/")).toBeNull(); // BYPASS
 		});
 
-		test("BYPASS: X=.git; rm -rf $X/config — guard checks '=git' (literal), not '=.git'", () => {
+		test("caught: X=.git; rm -rf $X/config — guard checks '=git' (literal), not '=.git'", () => {
 			// The variable construction check: /=git\b/.test(normalized)
 			// matches 'TARGET=git' (var = string 'git'), but NOT 'X=.git' (var = '.git').
 			// The dot in '.git' means the string assigned is '.git', and '=.git' does not
 			// match /=git\b/ since there's a '.' before 'git'.
-			expect(isGitUnsafeBash("X=.git; rm -rf $X/config")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("X=.git; rm -rf $X/config")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: GITDIR='.git'; rm -rf $GITDIR — longer var name skips =git detection", () => {
+		test("caught: GITDIR='.git'; rm -rf $GITDIR — longer var name skips =git detection", () => {
 			// =git must appear as whole token — 'GITDIR=' doesn't match /=git\b/
 			// Hmm actually /=git\b/ matches '=git' but 'GITDIR='.git'' has the assignment
 			// After normalization: "GITDIR='.git'; rm -rf $GITDIR"
 			// Does /=git\b/ match? No — the assignment is GITDIR='.git' where after = comes '
 			// Actually: normalized = "GITDIR='.git'; rm -rf $GITDIR"
 			// /=git\b/ looks for =git word boundary — '.git' has ' before it so no match
-			expect(isGitUnsafeBash("GITDIR='.git'; rm -rf $GITDIR")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("GITDIR='.git'; rm -rf $GITDIR")).not.toBeNull(); // now caught
 		});
 	});
 
@@ -148,28 +148,28 @@ describe("Category 1 — Bypass Attempts", () => {
 	// xargs and find -exec (cross-segment path/command split)
 	// ──────────────────────────────────────────────────────────────────────────
 	describe("xargs and find -exec", () => {
-		test("BYPASS: echo .git | xargs rm -rf — path in seg1, rm in seg2", () => {
+		test("caught: echo .git | xargs rm -rf — path in seg1, rm in seg2", () => {
 			// Pipe splits: seg1='echo .git' (no write cmd), seg2='xargs rm -rf' (no .git/)
 			// The guard checks each segment independently, so neither triggers.
-			expect(isGitUnsafeBash("echo .git | xargs rm -rf")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("echo .git | xargs rm -rf")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: echo .git/config | xargs rm — .git/ in seg1, rm in seg2", () => {
+		test("caught: echo .git/config | xargs rm — .git/ in seg1, rm in seg2", () => {
 			// .git/ is in seg1 (echo), rm is in seg2 (xargs). Cross-segment, not caught.
-			expect(isGitUnsafeBash("echo .git/config | xargs rm")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("echo .git/config | xargs rm")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: find . -name '.git' -exec rm -rf {} + — no .git/ with trailing slash", () => {
+		test("caught: find . -name '.git' -exec rm -rf {} + — no .git/ with trailing slash", () => {
 			// The '.git' in -name arg has no trailing slash, so hasGitDir is false.
 			// rm is present but no segment passes both conditions simultaneously.
-			expect(isGitUnsafeBash("find . -name '.git' -exec rm -rf {} +")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("find . -name '.git' -exec rm -rf {} +")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: find . -path '.git/hooks/' -exec rm {} + — .git/ inside quotes, guard skips", () => {
+		test("caught: find . -path '.git/hooks/' -exec rm {} + — .git/ inside quotes, guard skips", () => {
 			// hasGitDir regex: /(?:^|\s|\/)\..git\// requires start/whitespace/slash before .git/
 			// In '-path \'.git/hooks/\'', the .git/ is preceded by \' (single quote), not \s or /.
 			// So hasGitDir is false despite .git/ appearing in the command.
-			expect(isGitUnsafeBash("find . -path '.git/hooks/' -exec rm {} +")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("find . -path '.git/hooks/' -exec rm {} +")).not.toBeNull(); // now caught
 		});
 	});
 
@@ -195,20 +195,20 @@ describe("Category 1 — Bypass Attempts", () => {
 	// Missing trailing slash
 	// ──────────────────────────────────────────────────────────────────────────
 	describe("Missing trailing slash on .git", () => {
-		test("BYPASS: rm -rf .git (no trailing slash) — guard requires .git/", () => {
+		test("caught: rm -rf .git (no trailing slash) — guard requires .git/", () => {
 			// The hasGitDir regex requires \.git\/ (with slash). Bare .git at end of token
 			// has no slash, so the check fails. This deletes the entire .git directory!
-			expect(isGitUnsafeBash("rm -rf .git")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("rm -rf .git")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: rm -rf .git / (space trick) — dangerous: deletes .git AND /", () => {
+		test("caught: rm -rf .git / (space trick) — dangerous: deletes .git AND /", () => {
 			// rm -rf .git / removes .git dir AND root filesystem.
 			// .git without trailing slash, so guard misses it entirely.
-			expect(isGitUnsafeBash("rm -rf .git /")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("rm -rf .git /")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: rmdir .git (no slash)", () => {
-			expect(isGitUnsafeBash("rmdir .git")).toBeNull(); // BYPASS
+		test("caught: rmdir .git (no slash)", () => {
+			expect(isGitUnsafeBash("rmdir .git")).not.toBeNull(); // now caught
 		});
 
 		test("CAUGHT: rm -rf .git/. — has .git/ prefix before dot", () => {
@@ -260,13 +260,13 @@ describe("Category 1 — Bypass Attempts", () => {
 	// git push -f shorthand
 	// ──────────────────────────────────────────────────────────────────────────
 	describe("git push -f shorthand", () => {
-		test("BYPASS: git push -f — guard only matches --force, not the -f alias", () => {
+		test("caught: git push -f — guard only matches --force, not the -f alias", () => {
 			// The DESTRUCTIVE_GIT_COMMANDS regex uses --force, not -f
-			expect(isGitUnsafeBash("git push -f")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("git push -f")).not.toBeNull(); // now caught
 		});
 
-		test("BYPASS: git push -f origin main — shorthand slips through", () => {
-			expect(isGitUnsafeBash("git push -f origin main")).toBeNull(); // BYPASS
+		test("caught: git push -f origin main — shorthand slips through", () => {
+			expect(isGitUnsafeBash("git push -f origin main")).not.toBeNull(); // now caught
 		});
 
 		test("CAUGHT: git push --force", () => {
@@ -562,11 +562,11 @@ describe("Category 4 — .git Write Operations (must be caught)", () => {
 
 	describe("tee / dd / truncate / shred targeting .git", () => {
 		test("echo config | tee .git/config", () => expectGitWrite("echo config | tee .git/config"));
-		test("BYPASS: dd if=/dev/zero of=.git/config — of= prefix means .git/ preceded by '=', not \\s", () => {
+		test("caught: dd if=/dev/zero of=.git/config — of= prefix means .git/ preceded by '=', not \\s", () => {
 			// hasGitDir: /(?:^|\s|\/)\..git\// needs start/whitespace/slash before .git/
 			// 'of=.git/config' has '=' before .git/, which doesn't match. No shell '>' redirect either.
 			// dd is in WRITE_COMMANDS_RE but hasGitDir never fires. BYPASS.
-			expect(isGitUnsafeBash("dd if=/dev/zero of=.git/config")).toBeNull(); // BYPASS
+			expect(isGitUnsafeBash("dd if=/dev/zero of=.git/config")).not.toBeNull(); // now caught
 		});
 		test("truncate --size 0 .git/index", () => expectGitWrite("truncate --size 0 .git/index"));
 		test("shred .git/config", () => expectGitWrite("shred .git/config"));
