@@ -2,8 +2,10 @@ import type { WorkerHandle } from "./types.js";
 import { autoCommitWorktreeChanges, branchHasNewCommits, renameBranch, removeWorktree, worktreeBranchName } from "./worktree.js";
 
 export interface CleanupResult {
-  /** True by default */
-  branchPreserved: boolean;
+  /** True when the preserved deliverable branch has commits ahead of HEAD worth merging.
+   *  The deliverable branch ALWAYS persists on the preserve path (renamed to
+   *  `{branch}.done`); this flag only drives whether to surface a merge hint. */
+  branchHasMergeableWork: boolean;
   /** False by default; true when the worktree is intentionally left in place for inspection. */
   worktreePreserved: boolean;
 }
@@ -40,7 +42,7 @@ export async function cleanupWorker(
 
   const { preserveBranch = true, preserveWorktree = false } = options;
 
-  let branchPreserved = false;
+  let branchHasMergeableWork = false;
   let worktreePreserved = false;
 
   if (worker.worktreePath) {
@@ -48,14 +50,17 @@ export async function cleanupWorker(
 
     if (preserveBranch) {
       await autoCommitWorktreeChanges(worker.worktreePath);
-      const hasWork = await branchHasNewCommits(repoDir, branch);
-      branchPreserved = hasWork;
+      // The deliverable branch ALWAYS persists through teardown — a finished worker's
+      // branch must survive worktree removal (the coordinator owns branch retention).
+      // The retired code passed keepBranch=hasWork to removeWorktree, so when hasWork was
+      // false it `git branch -D`'d the branch — that orphaned v1a's de44852+18def80,
+      // recovered only via `git cat-file` from the finish wake. hasWork now decides ONLY
+      // whether there is mergeable work to surface, never whether the branch survives.
+      branchHasMergeableWork = await branchHasNewCommits(repoDir, branch);
       if (preserveWorktree) {
         worktreePreserved = true;
       } else {
-        await removeWorktree(repoDir, worker.worktreePath, branch, hasWork);
-      }
-      if (hasWork && !preserveWorktree) {
+        await removeWorktree(repoDir, worker.worktreePath, branch, /* keepBranch */ true);
         await renameBranch(repoDir, branch, `${branch}.done`);
       }
     } else if (preserveWorktree) {
@@ -69,7 +74,7 @@ export async function cleanupWorker(
   // Previously these were deleted by default, making it impossible
   // to diagnose tool failures, lost tickets, or hallucinated IDs.
 
-  return { branchPreserved, worktreePreserved };
+  return { branchHasMergeableWork, worktreePreserved };
 }
 
 export async function cleanupAllWorkers(

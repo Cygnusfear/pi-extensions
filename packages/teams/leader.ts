@@ -2172,8 +2172,8 @@ export class TeamLeader {
     if (classification === "success") {
       const branch = `teams/${worker.name}/${worker.ticketId}`;
       const doneBranch = `${branch}.done`;
-      const hasBranch = cleanupResult?.branchPreserved;
-      const mergeHint = hasBranch
+      const hasMergeableWork = cleanupResult?.branchHasMergeableWork;
+      const mergeHint = hasMergeableWork
         ? `\n📌 Branch "${doneBranch}" preserved — merge when ready: git merge ${doneBranch}`
         : "";
       this.notifyLLM({
