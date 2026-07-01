@@ -1,0 +1,21 @@
+packages/teams/lease.ts
+  s_a55faf01f2a777::t_634ea08ed59ec1 143-351
+packages/teams/activation-lease.test.ts
+  s_a55faf01f2a777::t_e2a850c131045a 1-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "fb5da60fc3987992e40dc8680888bf373f746f92",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
