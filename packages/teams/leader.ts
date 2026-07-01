@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 import { isSessionPhaseEvent, type SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
+import type { MeshTellReceiptPhase } from "@pi-extensions/pi-mesh/types";
 import {
   formatSessionViewEntries,
   readMeaningfulSessionEntriesFromFile,
@@ -833,6 +834,7 @@ export class TeamLeader {
   // expects without forcing teams to import pi-mesh's internal types.
   private mesh: {
     tell: (id: string, msg: unknown) => void;
+    tellAndWaitForReceipt: (id: string, msg: unknown, phase: MeshTellReceiptPhase, timeoutMs?: number) => Promise<{ phase: MeshTellReceiptPhase }>;
     ask: (id: string, msg: unknown, timeout?: number) => Promise<unknown>;
     chat: (ch: string, msg: unknown) => void;
     joinChannel: (ch: string) => void;
@@ -1387,7 +1389,7 @@ export class TeamLeader {
 
   /** Send a turn-triggering message to a specific worker by name.
    *  If the worker is in done/grace (persistent, between turns), resumes it via session continuation. */
-  tellWorker(name: string, message: unknown): boolean {
+  async tellWorker(name: string, message: unknown): Promise<boolean> {
     const worker = this.workers.get(name);
     if (!worker) return false;
 
@@ -1428,17 +1430,28 @@ export class TeamLeader {
       return true;
     }
 
-    // Running worker — send via mesh
+    // Running worker — send via mesh with an HONEST delivery receipt (v1d).
+    // The retired fire-and-forget path (`mesh.tell(); return true`) returned true
+    // UNCONDITIONALLY even when the durable id had no live/revivable peer — that is
+    // Cecilia bug 1 (false-positive receipt). Route over the stable durableMeshId
+    // (v1a, never a stale clientId) and await the honest v1b ack:
+    //   delivered / surfaced   → reached the peer's durable mailbox / turn context → true
+    //   refused / undeliverable / expired / timeout → NOT delivered → false
     if (worker.routeState !== "linked" || !worker.durableMeshId || !this.mesh) return false;
-    this.mesh.tell(worker.durableMeshId, message);
-    return true;
+    try {
+      const ack = await this.mesh.tellAndWaitForReceipt(worker.durableMeshId, message, "delivered", 5000);
+      return ack.phase === "delivered" || ack.phase === "surfaced";
+    } catch {
+      // No receipt within the window = honest not-delivered.
+      return false;
+    }
   }
 
   /** Send a turn-triggering message to all running workers. */
-  tellAllWorkers(message: unknown): number {
+  async tellAllWorkers(message: unknown): Promise<number> {
     let count = 0;
     for (const [name] of this.workers) {
-      if (this.tellWorker(name, message)) count++;
+      if (await this.tellWorker(name, message)) count++;
     }
     return count;
   }

@@ -180,7 +180,7 @@ async function runTeamsAction(
     if (!params.name || !params.message) {
       return err("Provide name and message.");
     }
-    const sent = leader.tellWorker(params.name, params.message);
+    const sent = await leader.tellWorker(params.name, params.message);
     const worker = leader.getWorker(params.name);
     const why = worker ? ` (route ${worker.routeState})` : "";
     return ok(sent ? `Told "${params.name}"` : `Worker "${params.name}" not reachable${why}`);
@@ -190,7 +190,7 @@ async function runTeamsAction(
     if (!params.message) {
       return err("Provide message.");
     }
-    const count = leader.tellAllWorkers(params.message);
+    const count = await leader.tellAllWorkers(params.message);
     return ok(`Told ${count} worker(s)`);
   }
 

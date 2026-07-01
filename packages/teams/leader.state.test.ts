@@ -365,3 +365,88 @@ describe("TeamLeader state persistence", () => {
 		expect(workers[0]?.routeState).toBe("dead");
 	});
 });
+
+describe("tellWorker honest delivery receipt (v1d — Cecilia bug 1)", () => {
+	function meshWithReceipt(receipt: { phase: string } | Error, spy: { calls: number }) {
+		return {
+			on: () => {},
+			off: () => {},
+			stop: () => {},
+			joinChannel: () => {},
+			peers: () => [],
+			self: () => ({ id: "mesh-self" }),
+			tell: () => {
+				throw new Error("tellWorker must NOT use fire-and-forget mesh.tell for a running worker");
+			},
+			tellAndWaitForReceipt: async (_id: string, _msg: unknown, _phase: string, _to?: number) => {
+				spy.calls += 1;
+				if (receipt instanceof Error) throw receipt;
+				return receipt;
+			},
+			ask: async () => ({}),
+			chat: () => {},
+		};
+	}
+
+	test("a 'delivered' receipt returns true", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt({ phase: "delivered" }, spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "linked", durableMeshId: "durable-1" }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(true);
+		expect(spy.calls).toBe(1);
+	});
+
+	test("a 'surfaced' receipt returns true", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt({ phase: "surfaced" }, spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "linked", durableMeshId: "durable-1" }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(true);
+	});
+
+	test("an 'undeliverable' receipt returns FALSE (no false-positive — Cecilia bug 1 root)", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt({ phase: "undeliverable" }, spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "linked", durableMeshId: "durable-1" }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(false);
+		expect(spy.calls).toBe(1);
+	});
+
+	test("a 'refused' (deafened) receipt returns false", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt({ phase: "refused" }, spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "linked", durableMeshId: "durable-1" }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(false);
+	});
+
+	test("a receipt timeout/rejection returns false (honest not-delivered)", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt(new Error("mesh_tell: timeout waiting for delivered receipt after 5000ms"), spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "linked", durableMeshId: "durable-1" }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(false);
+	});
+
+	test("a worker with no durable route returns false WITHOUT calling the mesh", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		leader.setMesh(meshWithReceipt({ phase: "delivered" }, spy) as any);
+		leader.workers.set("worker-1", makeWorker({ routeState: "pending", durableMeshId: undefined }));
+		expect(await leader.tellWorker("worker-1", "go")).toBe(false);
+		expect(spy.calls).toBe(0);
+	});
+
+	test("tellAllWorkers counts only the workers whose tell was honestly delivered", async () => {
+		const { leader } = makeHarness();
+		const spy = { calls: 0 };
+		// alive → delivered=true ; ghost → no route → false (mesh not called for it)
+		leader.setMesh(meshWithReceipt({ phase: "delivered" }, spy) as any);
+		leader.workers.set("alive", makeWorker({ name: "alive", routeState: "linked", durableMeshId: "durable-alive" }));
+		leader.workers.set("ghost", makeWorker({ name: "ghost", routeState: "pending", durableMeshId: undefined }));
+		expect(await leader.tellAllWorkers("go")).toBe(1);
+	});
+});
+
