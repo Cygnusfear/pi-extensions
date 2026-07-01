@@ -55,6 +55,7 @@ import { safeAction } from "@pi-extensions/shared/tool-availability";
 import { getStableNickname, onStableIdChange } from "@pi-extensions/shared/session-nickname";
 import { registerSandboxFn } from "../../shared/src/sandbox-registry.ts";
 import { registerStageController } from "../../shared/src/stage-control.ts";
+import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION, type SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
 
 // ── Stage table ───────────────────────────────────────────────────────────
 
@@ -66,6 +67,11 @@ export interface StageDef {
 	 *  single source of truth for whatever consumes the mapping. */
 	color: string;
 }
+
+type PhaseEventMesh = {
+	chat: (channelId: string, payload: unknown) => void;
+	getIdentity?: () => { id?: string } | null;
+};
 
 export const STAGES: Record<string, StageDef> = {
 	planning: { icon: "🧶", label: "planning (default)", color: "none" },
@@ -268,6 +274,41 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	// True once we've subscribed to mesh stable-id changes (subscribe once even
 	// across reloads — the listener re-renders against the live currentCtx).
 	let stableIdSubscribed = false;
+	let phaseSeq = 0;
+
+	const emitPhaseEvent = (stageKey: string, def: StageDef) => {
+		const channelId = process.env.PI_TEAMS_CHANNEL_ID;
+		const teamId = process.env.PI_TEAMS_TEAM_ID;
+		const leaderEpoch = process.env.PI_TEAMS_LEADER_EPOCH;
+		const workerId = process.env.PI_TEAMS_WORKER_NAME;
+		const attemptId = process.env.PI_TEAMS_WORKER_INSTANCE_ID;
+		if (!channelId || !teamId || !leaderEpoch || !workerId || !attemptId) return;
+		const mesh = (globalThis as { __piMesh?: PhaseEventMesh }).__piMesh;
+		if (!mesh) return;
+		const meshId = mesh.getIdentity?.()?.id;
+		const sessionId = currentCtx?.sessionManager?.getSessionId?.();
+		const event: SessionPhaseEvent = {
+			kind: SESSION_PHASE_EVENT_KIND,
+			version: SESSION_PHASE_EVENT_VERSION,
+			from: "worker",
+			to: "leader",
+			teamId,
+			leaderEpoch,
+			workerId,
+			attemptId,
+			seq: ++phaseSeq,
+			sentAt: Date.now(),
+			...(meshId ? { meshId } : {}),
+			payload: {
+				stage: stageKey,
+				label: def.label,
+				icon: def.icon,
+				color: def.color,
+				...(sessionId ? { sessionId } : {}),
+			},
+		};
+		safeAction(() => mesh.chat(channelId, event));
+	};
 
 	// Register a formatter so pi core owns the timing of title refreshes but we
 	// own the format. Core passes the live session name + cwd basename; we add
@@ -314,6 +355,8 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 		safeAction(() => currentCtx?.sessionManager?.appendCustomEntry?.(STAGE_ENTRY_TYPE, { stage: key }));
 		render();
 		const def = STAGES[key];
+		safeAction(() => currentCtx?.sessionManager?.appendCustomEntry?.("session-phase-event", { stage: key, label: def.label, icon: def.icon, color: def.color, at: Date.now() }));
+		emitPhaseEvent(key, def);
 		return `${def.icon} ${key} — ${def.label}`;
 	};
 

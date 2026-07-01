@@ -19,6 +19,7 @@ export type WorkerFact =
 	| { type: "spawn_started"; at: number; pid?: number }
 	| { type: "session_detected"; at: number; sessionFile: string }
 	| { type: "worker_hello"; at: number }
+	| { type: "phase_event"; at: number; stage: string }
 	| { type: "comment_posted"; at: number; text: string }
 	| { type: "finish_done"; at: number; summary: string }
 	| { type: "finish_quit"; at: number; summary: string }

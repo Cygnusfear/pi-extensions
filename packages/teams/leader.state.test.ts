@@ -4,6 +4,7 @@ import path from "node:path";
 import { TeamLeader } from "./leader.ts";
 import type { WorkerHandle } from "./types.js";
 import { createWorkerCommentEnvelope } from "./v2/mesh-adapter.ts";
+import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION } from "@pi-extensions/shared/session-phase-event";
 
 function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 	const now = Date.now();
@@ -219,6 +220,52 @@ describe("TeamLeader state persistence", () => {
 
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toMatchObject({ type: "comment", comment: "hello from v2" });
+	});
+
+	test("mesh channel handler turns status() phase events into teams.on PollEvents", () => {
+		const { leader } = makeHarness();
+		const observed: any[] = [];
+		leader.notifyLLM = (event: any) => observed.push(event);
+		leader.renderWidget = () => {};
+		leader.v2TeamId = "team-1";
+		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
+		const mesh = {
+			on: () => {},
+			off: () => {},
+			stop: () => {},
+			joinChannel: () => {},
+			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
+			self: () => ({ id: "mesh-self" }),
+			tell: () => {},
+			ask: async () => ({}),
+			chat: () => {},
+		};
+		leader.setMesh(mesh as any);
+		leader._wireMeshChannelEvents();
+
+		leader.meshChannelHandler({
+			from: "route-1",
+			channel: "teams-v2-team-1",
+			payload: {
+				kind: SESSION_PHASE_EVENT_KIND,
+				version: SESSION_PHASE_EVENT_VERSION,
+				from: "worker",
+				to: "leader",
+				teamId: "team-1",
+				leaderEpoch: leader.leaderEpoch,
+				workerId: "worker-1",
+				attemptId: "attempt-1",
+				seq: 1,
+				sentAt: Date.now(),
+				meshId: "durable-1",
+				payload: { stage: "implementing", label: "implementing", icon: "🏭", color: "amber", sessionId: "sess-1" },
+			},
+			timestamp: Date.now(),
+		});
+
+		expect(observed).toHaveLength(1);
+		expect(observed[0]).toMatchObject({ type: "phase", phase: { payload: { stage: "implementing" } } });
+		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
 	});
 
 	test("buildSpawnSessionMode defaults to fresh even when branching is available", () => {

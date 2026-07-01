@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
+import { isSessionPhaseEvent, type SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
 import {
   formatSessionViewEntries,
   readMeaningfulSessionEntriesFromFile,
@@ -840,7 +841,7 @@ export class TeamLeader {
       & ((event: "message", cb: MessageHandler) => void);
     off: ((event: "channel", cb: ChannelHandler) => void)
       & ((event: "message", cb: MessageHandler) => void);
-    peers: () => Array<{ id: string; sessionId?: string; nickname?: string; name?: string }>;
+    peers: () => Array<{ id: string; sessionId?: string; nickname?: string; name?: string; meshId?: string }>;
     self: () => { id: string };
   } | null = null;
   private meshChannelId: string | null = null;
@@ -1537,11 +1538,38 @@ export class TeamLeader {
     if (changed) this.persistStateIfHydrated();
   }
 
+  private handleSessionPhaseEvent(event: SessionPhaseEvent, transportFrom: string): void {
+    const workerName = event.workerId;
+    const worker = this.workers.get(workerName);
+    if (!worker) return;
+    if (event.attemptId && event.attemptId !== worker.workerInstanceId) return;
+    if (this.v2TeamId && event.teamId !== this.v2TeamId) return;
+    if (event.leaderEpoch && event.leaderEpoch !== this.leaderEpoch) return;
+
+    let peerNickname: string | undefined;
+    const routeId = event.meshId ?? transportFrom;
+    if (!worker.nickname && this.mesh) {
+      const peer = this.mesh.peers().find((pr) => pr.id === transportFrom || pr.meshId === routeId || pr.sessionId === transportFrom);
+      if (peer?.nickname) peerNickname = peer.nickname;
+    }
+    this.bindWorkerRoute(worker, routeId, peerNickname);
+    worker.lastActivityAt = Date.now();
+    worker.lastOutputAt = Date.now();
+    worker.lastOutputLabel = `phase:${event.payload.stage}`;
+    this.appendV2Fact(workerName, { type: "phase_event", at: Date.now(), stage: event.payload.stage });
+    this.notifyLLM({ type: "phase", worker: { ...worker }, phase: event });
+    this.renderWidget();
+  }
+
   /** Wire mesh channel events into the existing notification pipeline. */
 	private _wireMeshChannelEvents() {
 		if (!this.mesh) return;
 		if (this.meshChannelHandler || this.meshMessageHandler) return;
 		this.meshChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
+			if (isSessionPhaseEvent(msg.payload)) {
+				this.handleSessionPhaseEvent(msg.payload, msg.from);
+				return;
+			}
 			if (!isWorkerToLeaderEnvelope(msg.payload)) return;
 			const envelope = msg.payload;
 			const p = envelope.payload as Record<string, unknown> | undefined;
@@ -2728,6 +2756,8 @@ function formatPollEvent(event: PollEvent): string {
     }
     case "comment":
       return `${ICONS.comment} ${tag}:\n${event.comment}`;
+    case "phase":
+      return `${ICONS.alive} ${tag}:\nphase → ${event.phase.payload.icon} ${event.phase.payload.stage}`;
     case "alive":
       return `${ICONS.alive} ${tag}:\nalive`;
   }

@@ -1,4 +1,5 @@
 
+import type { SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
 import type { WorkerSessionMode } from "./v2/protocol.ts";
 
 export interface WorkerAttempt {
@@ -95,6 +96,7 @@ export type PollEvent =
 	| { type: "failed"; worker: WorkerHandle; reason: string }
 	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number }
 	| { type: "comment"; worker: WorkerHandle; comment: string }
+	| { type: "phase"; worker: WorkerHandle; phase: SessionPhaseEvent }
 	| { type: "alive"; worker: WorkerHandle };
 
 const pollMs = Number(process.env.PI_TEAMS_POLL_INTERVAL_MS ?? "1000");
