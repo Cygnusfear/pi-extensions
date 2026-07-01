@@ -104,6 +104,8 @@ interface PersistedWorkerState {
   nickname?: string;
   durableMeshId?: string;
   routeState?: WorkerHandle["routeState"];
+  terminalStatus?: "done" | "quit";
+  terminalSummary?: string;
   lastActivityAt?: number;
   lastOutputAt?: number;
   lastSeenCommentCount?: number;
@@ -928,6 +930,8 @@ export class TeamLeader {
         nickname: w.nickname,
         durableMeshId: w.durableMeshId,
         routeState: w.routeState,
+        terminalStatus: w.terminalStatus,
+        terminalSummary: w.terminalSummary,
         doneAt: w.doneAt,
         graceAt: w.graceAt,
         resumableUntilAt: w.resumableUntilAt,
@@ -1141,6 +1145,8 @@ export class TeamLeader {
           nickname: saved.nickname,
           durableMeshId: saved.durableMeshId,
           routeState,
+          terminalStatus: saved.terminalStatus,
+          terminalSummary: saved.terminalSummary,
           lastActivityAt: saved.lastActivityAt ?? now,
           lastProcessActivityAt: now,
           lastOutputAt: saved.lastOutputAt,
@@ -1650,6 +1656,13 @@ export class TeamLeader {
 			const finishSummary = typeof p.summary === "string" ? p.summary : "";
 			if (envelope.type === "worker.finish" && finishStatus === "done") {
         this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: finishSummary });
+        // Capture the EXPLICIT terminal status from the durable finish tell — the
+        // authoritative terminal source assessWorkerExit reads on process exit (replaces
+        // the heartbeat worker_terminal entry). The SAME leader instance that receives
+        // this tell runs handleWorkerExit, so the handle is populated before assessment.
+        worker.terminalStatus = "done";
+        worker.terminalSummary = finishSummary;
+        this.persistStateIfHydrated();
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh done";
         // Don't emit completion here — process exit handler is authoritative.
@@ -1657,6 +1670,9 @@ export class TeamLeader {
         this.renderWidget();
       } else if (envelope.type === "worker.finish" && finishStatus === "quit") {
         this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
+        worker.terminalStatus = "quit";
+        worker.terminalSummary = finishSummary;
+        this.persistStateIfHydrated();
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh quit";
         this.renderWidget();

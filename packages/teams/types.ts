@@ -44,6 +44,12 @@ export interface WorkerHandle {
 	nickname?: string;
 	durableMeshId?: string;
 	routeState: WorkerRouteState;
+	/** Explicit terminal status DECLARED by the worker via team_finish, captured from the
+	 *  durable mesh worker.finish tell on receipt. This is the authoritative terminal source
+	 *  read by assessWorkerExit — it replaces the retired heartbeat `worker_terminal` entry
+	 *  (explicit-over-inference, per the ADR). */
+	terminalStatus?: "done" | "quit";
+	terminalSummary?: string;
 	freeform?: boolean;
 	recoveryAttempts?: number;
 	/** Original spawn config — retained so startup-death can respawn from scratch. */
