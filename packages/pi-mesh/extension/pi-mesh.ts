@@ -1691,6 +1691,26 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           resolved = resolveTargetSessionId(params.sessionId);
         } catch (e) {
           if (mode === "none") throw e;
+          // v1c revive-on-send: no LIVE peer, but if the target is a REVIVABLE
+          // durable session the code-mode tell lands in its durable mailbox +
+          // notifies supervisors — same honest 'delivered' as the mesh_tell tool.
+          const receiptMode = mode === "visible" ? "surfaced" : mode;
+          const delivered = deliverToDurableMailbox(
+            params.sessionId,
+            params.message,
+            formatPayloadForDisplay(params.message),
+            receiptMode,
+          );
+          if (delivered) {
+            const ack = buildTellReceiptAck(delivered.deliveryId, mesh.self().id, "delivered");
+            return JSON.stringify({
+              sent: true,
+              sessionId: params.sessionId,
+              durableMailbox: true,
+              supervisorsNotified: delivered.notified,
+              ack,
+            });
+          }
           const deliveryId = createDeliveryId();
           const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
           return JSON.stringify({ sent: false, sessionId: params.sessionId, ack });
