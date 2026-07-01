@@ -163,23 +163,36 @@ describe("assessWorkerExit", () => {
 		expect(result.forcedExit).toBe(false);
 	});
 
-	test("older forced shutdown does not poison later clean agent_end", () => {
-		const baseDir = makeTempDir("teams-assess-ordered-");
+	test("explicit terminalStatus 'done' (from the durable finish tell) → success", () => {
+		const baseDir = makeTempDir("teams-assess-done-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
 		fs.writeFileSync(
 			path.join(sessionDir, "worker.jsonl"),
 			[
 				JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
-				JSON.stringify({ type: "custom", customType: "teams-worker-heartbeat", id: "hb-1", parentId: null, timestamp: new Date().toISOString(), data: { event: "session_shutdown_close", isForced: true } }),
-				JSON.stringify({ type: "custom", customType: "teams-worker-heartbeat", id: "hb-2", parentId: null, timestamp: new Date().toISOString(), data: { event: "agent_end" } }),
-				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "useful output" }, { type: "toolCall", id: "1", name: "bash", arguments: { command: "echo ok" } }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "useful output that counts as substantive" }, { type: "toolCall", id: "1", name: "bash", arguments: { command: "echo ok" } }] } }),
 			].join("\n") + "\n",
 		);
-		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "DONE: summary");
+		// Ticket NOT closed, no DONE note — success comes purely from the explicit terminal on the handle.
+		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir, terminalStatus: "done", terminalSummary: "all shipped" } as any, 0, false, "progress note");
+		expect(result.explicitTerminal).toBe("done");
 		expect(result.forcedExit).toBe(false);
-		expect(result.cleanAgentEnd).toBe(true);
+		expect(result.cleanExit).toBe(true);
 		expect(result.classification).toBe("success");
+	});
+
+	test("explicit terminalStatus 'quit' → warning, reason is the finish summary", () => {
+		const baseDir = makeTempDir("teams-assess-quit-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(sessionDir, "worker.jsonl"),
+			[JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() })].join("\n") + "\n",
+		);
+		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir, terminalStatus: "quit", terminalSummary: "blocked on missing data" } as any, 0, false, "note");
+		expect(result.classification).toBe("warning");
+		expect(result.reason).toBe("blocked on missing data");
 	});
 
 	test("late assistant error does not erase meaningful prior work", () => {
@@ -205,7 +218,7 @@ describe("assessWorkerExit", () => {
 		expect(result.classification).toBe("success");
 	});
 
-	test("forced shutdown heartbeat forces failure", () => {
+	test("an EXITED:/FAILED: note forces failure (defensive net, no heartbeat)", () => {
 		const baseDir = makeTempDir("teams-assess-forced-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -213,13 +226,59 @@ describe("assessWorkerExit", () => {
 			path.join(sessionDir, "worker.jsonl"),
 			[
 				JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
-				JSON.stringify({ type: "custom", customType: "teams-worker-heartbeat", id: "hb-1", parentId: null, timestamp: new Date().toISOString(), data: { event: "session_shutdown_close", isForced: true } }),
 				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "some output" }, { type: "toolCall", id: "1", name: "bash", arguments: { command: "echo ok" } }] } }),
 			].join("\n") + "\n",
 		);
-		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "DONE: summary");
-		expect(result.classification).toBe("failure");
+		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "EXITED: process ended before completing");
 		expect(result.forcedExit).toBe(true);
+		expect(result.classification).toBe("failure");
+	});
+
+	test("freeform worker clean exit (0) without team_finish → turn_finished (resumable)", () => {
+		const baseDir = makeTempDir("teams-assess-turn-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(sessionDir, "worker.jsonl"),
+			[
+				JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "did a turn of useful work worth resuming later" }] } }),
+			].join("\n") + "\n",
+		);
+		const result = assessWorkerExit({ freeform: true, hasTools: true, sessionDir } as any, 0, false, "note");
+		expect(result.cleanExit).toBe(true);
+		expect(result.classification).toBe("turn_finished");
+	});
+
+	test("non-zero exit + no meaningful output → failure", () => {
+		const baseDir = makeTempDir("teams-assess-crash-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(sessionDir, "worker.jsonl"),
+			[
+				JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "error", content: [{ type: "text", text: "x" }] } }),
+			].join("\n") + "\n",
+		);
+		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 1, false, "note");
+		expect(result.classification).toBe("failure");
+	});
+
+	test("meaningful output but no team_finish and no close → warning (not silently success)", () => {
+		const baseDir = makeTempDir("teams-assess-warn-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(sessionDir, "worker.jsonl"),
+			[
+				JSON.stringify({ type: "session", version: 3, id: "test-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "did substantial work but never called team_finish anywhere here" }, { type: "toolCall", id: "1", name: "bash", arguments: { command: "echo ok" } }] } }),
+			].join("\n") + "\n",
+		);
+		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 1, false, "note");
+		expect(result.classification).toBe("warning");
+		expect(result.reason).toContain("without explicit team_finish");
 	});
 });
 

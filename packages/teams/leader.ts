@@ -62,22 +62,14 @@ interface RealActivity {
   label: string;
 }
 
-interface WorkerLifecycleFacts {
-  sawAgentEnd: boolean;
-  sawForcedSessionShutdown: boolean;
-  sawSessionShutdownClose: boolean;
-  lastHeartbeatEvent?: string;
-  lastAgentEndSeq?: number;
-  lastForcedShutdownSeq?: number;
-  lastTerminalSeq?: number;
-  lastTerminalStatus?: "done" | "quit";
-  lastTerminalSummary?: string;
-}
-
 interface WorkerExitAssessment {
-  lifecycle: WorkerLifecycleFacts;
+  /** The worker's DECLARED terminal status (team_finish → durable mesh finish → handle). */
+  explicitTerminal?: "done" | "quit";
+  /** A ticket note explicitly signalling an abnormal exit (EXITED:/FAILED:) forces failure —
+   *  a defensive net; the retired heartbeat-based forced-shutdown input is gone. */
   forcedExit: boolean;
-  cleanAgentEnd: boolean;
+  /** Process exited 0 — `pi -p` prints a clean turn end as exit 0, error/abort as non-zero. */
+  cleanExit: boolean;
   ticketClosed: boolean;
   outputMeaningful: boolean;
   classification: "success" | "warning" | "failure" | "turn_finished";
@@ -205,112 +197,29 @@ function readDiagnosticLog(sessionDir: string, fileName: string, label: string):
   }
 }
 
-function readWorkerLifecycleFacts(sessionDir: string): WorkerLifecycleFacts {
-  let sessionFile: string | undefined;
-  try {
-    const files = fs.readdirSync(sessionDir)
-      .filter(f => f.endsWith(".jsonl"))
-      .map(f => path.join(sessionDir, f));
-    if (files.length === 0) return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
-    sessionFile = files.length === 1
-      ? files[0]
-      : files.map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime)[0].f;
-  } catch {
-    return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
-  }
-
-  const TAIL_BYTES = 65536;
-  let tail = "";
-  try {
-    const stat = fs.statSync(sessionFile);
-    const size = stat.size;
-    if (size === 0) return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
-    const fd = fs.openSync(sessionFile, "r");
-    try {
-      fs.readSync(fd, buf, 0, buf.length, start);
-    } finally {
-      fs.closeSync(fd);
-    }
-    tail = buf.toString("utf8");
-  } catch {
-    return { sawAgentEnd: false, sawForcedSessionShutdown: false, sawSessionShutdownClose: false };
-  }
-
-  let sawAgentEnd = false;
-  let sawSessionShutdownClose = false;
-  let lastHeartbeatEvent: string | undefined;
-  let lastAgentEndSeq: number | undefined;
-  let lastForcedShutdownSeq: number | undefined;
-  let lastTerminalSeq: number | undefined;
-  let lastTerminalStatus: "done" | "quit" | undefined;
-  let lastTerminalSummary: string | undefined;
-  let seq = 0;
-
-  for (const line of tail.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const entry = safeJsonParse<Record<string, any>>(trimmed);
-      if (entry.type !== "custom" || entry.customType !== "teams-worker-heartbeat") continue;
-      const data = entry.data;
-      if (!data || typeof data !== "object") continue;
-      const event = typeof data.event === "string" ? data.event : undefined;
-      if (!event) continue;
-      seq += 1;
-      lastHeartbeatEvent = event;
-      if (event === "agent_end") {
-        sawAgentEnd = true;
-        lastAgentEndSeq = seq;
-      }
-      if (event === "session_shutdown_close") {
-        sawSessionShutdownClose = true;
-        if (data.isForced === true) lastForcedShutdownSeq = seq;      }
-      if (event === "worker_terminal") {
-        const status = data.status === "done" || data.status === "quit" ? data.status : undefined;
-        if (status) {
-          lastTerminalSeq = seq;
-          lastTerminalStatus = status;
-          if (typeof data.summary === "string") lastTerminalSummary = data.summary;
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  const sawForcedSessionShutdown =
-    lastForcedShutdownSeq !== undefined &&
-    (lastAgentEndSeq === undefined || lastForcedShutdownSeq > lastAgentEndSeq);
-
-  return {
-    sawAgentEnd,
-    sawForcedSessionShutdown,
-    sawSessionShutdownClose,
-    lastHeartbeatEvent,
-    lastAgentEndSeq,
-    lastForcedShutdownSeq,
-    lastTerminalSeq,
-    lastTerminalStatus,
-    lastTerminalSummary,
-  };
-}
 
 export function assessWorkerExit(
-  worker: Pick<WorkerHandle, "freeform" | "hasTools" | "sessionDir">,
+  worker: Pick<WorkerHandle, "freeform" | "hasTools" | "sessionDir" | "terminalStatus" | "terminalSummary">,
   exitCode: number | null,
   ticketClosed: boolean,
   lastNote: string,
 ): WorkerExitAssessment {
-  const lifecycle = readWorkerLifecycleFacts(worker.sessionDir);
   const outputCheck = workerProducedMeaningfulOutput(worker.sessionDir);
   const outputMeaningful = outputCheck.meaningful;
-  const explicitTerminal = lifecycle.lastTerminalStatus;
 
-  const forcedExit = !explicitTerminal && (lifecycle.sawForcedSessionShutdown || lastNote.startsWith("EXITED:") || lastNote.startsWith("FAILED:"));
-  const cleanAgentEnd = lifecycle.sawAgentEnd && exitCode === 0 && !forcedExit;
+  // Explicit terminal source: the worker's team_finish, captured on the handle from the
+  // durable mesh worker.finish tell (v1d — replaces the retired heartbeat `worker_terminal`
+  // entry; explicit-over-inference per the ADR).
+  const explicitTerminal = worker.terminalStatus;
+
+  // A ticket note explicitly signalling an abnormal exit forces failure — a defensive net.
+  // (The retired heartbeat-based forced-shutdown input — a session_shutdown_close entry the
+  // worker never actually wrote — is gone; only the note-prefix check remains.)
+  const forcedExit = !explicitTerminal && (lastNote.startsWith("EXITED:") || lastNote.startsWith("FAILED:"));
+
+  // Clean-vs-crash is the process exit code: `pi -p` (print mode) exits 0 on a clean turn
+  // end and non-zero on error/abort — no heartbeat needed.
+  const cleanExit = exitCode === 0 && !forcedExit;
 
   let classification: WorkerExitAssessment["classification"];
   let reason: string | undefined;
@@ -319,10 +228,10 @@ export function assessWorkerExit(
     classification = "success";
   } else if (explicitTerminal === "quit") {
     classification = "warning";
-    reason = lifecycle.lastTerminalSummary || lastNote || "worker quit";
-  } else if (worker.freeform && cleanAgentEnd) {
+    reason = worker.terminalSummary || lastNote || "worker quit";
+  } else if (worker.freeform && cleanExit) {
     classification = "turn_finished";
-  } else if (!forcedExit && ticketClosed && (lastNote.startsWith("DONE:") || cleanAgentEnd)) {
+  } else if (!forcedExit && ticketClosed && (lastNote.startsWith("DONE:") || cleanExit)) {
     // Legacy compatibility for workers that still closed the ticket directly.
     classification = "success";
   } else if (forcedExit) {
@@ -337,9 +246,9 @@ export function assessWorkerExit(
   }
 
   return {
-    lifecycle,
+    explicitTerminal,
     forcedExit,
-    cleanAgentEnd,
+    cleanExit,
     ticketClosed,
     outputMeaningful,
     classification,
@@ -634,10 +543,6 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   lines.push(`model: ${worker.model ?? "default"} | exit code: ${(attempt.exitCode ?? exitCode) ?? "null (spawn error)"}`);
   lines.push(`runtime: ${runtimeSec}s | status: ${worker.status}`);
   if ((worker.attempts?.length ?? 0) > 1) lines.push(`attempts: ${worker.attempts?.length}`);
-  const lifecycle = readWorkerLifecycleFacts(attempt.sessionDir);
-  if (lifecycle.lastHeartbeatEvent) {
-    lines.push(`worker lifecycle: last=${lifecycle.lastHeartbeatEvent} | agent_end=${lifecycle.sawAgentEnd} | forced_shutdown=${lifecycle.sawForcedSessionShutdown}`);
-  }
   if (attempt.spawnError || worker.spawnError) lines.push(`spawn error: ${attempt.spawnError ?? worker.spawnError}`);
 
   // Session file check
@@ -994,23 +899,22 @@ export class TeamLeader {
   private deriveRestoredStatus(saved: PersistedWorkerState, now: number): WorkerHandle["status"] | null {
     if (saved.killedAt) return null;
 
-    const lifecycle = readWorkerLifecycleFacts(saved.sessionDir);
-
     // Prune terminal workers (done/warning/failed) older than TTL — they're stale
     // and will never be interacted with again. Prevents accumulation across reloads.
     const terminalCutoff = now - TeamLeader.TERMINAL_RESTORE_TTL_MS;
-    if (lifecycle.lastTerminalStatus || saved.status === "done" || saved.status === "warning" || saved.status === "failed") {
+    if (saved.terminalStatus || saved.status === "done" || saved.status === "warning" || saved.status === "failed") {
       const terminalAt = saved.doneAt ?? saved.lastActivityAt ?? saved.spawnedAt;
       if (terminalAt && terminalAt < terminalCutoff) return null;
     }
 
-    if (lifecycle.lastTerminalStatus === "done") {
+    // Explicit terminal, persisted from the worker's team_finish (v1d — replaces the retired
+    // heartbeat read from the worker's session file on restore).
+    if (saved.terminalStatus === "done") {
       return saved.freeform
         ? (saved.graceAt && now >= saved.graceAt ? "grace" : "done")
         : "done";
     }
-    if (lifecycle.lastTerminalStatus === "quit") return "warning";
-    if (lifecycle.sawForcedSessionShutdown) return "failed";
+    if (saved.terminalStatus === "quit") return "warning";
 
     const legacyStatus = saved.status === "idle" ? "grace" : saved.status;
 
@@ -1898,7 +1802,7 @@ export class TeamLeader {
     // failing tool so the coordinator does not have to guess (e.g. "context cap" inferences
     // that are not actually what the leader observed). Done / quit (explicit) need nothing
     // because the worker chose its own summary via team_finish.
-    const isAmbiguousWarning = classification === "warning" && !assessment.lifecycle.lastTerminalStatus;
+    const isAmbiguousWarning = classification === "warning" && !assessment.explicitTerminal;
     const diagnostics = classification === "failure" || isAmbiguousWarning
       ? readSessionDiagnostics(worker.sessionDir)
       : "";
@@ -2180,7 +2084,7 @@ export class TeamLeader {
     // Cleanup: auto-commit dirty files, preserve success/warning branches, and
     // keep ambiguous warning worktrees on disk so failed terminal signaling does
     // not destroy post-mortem evidence.
-    const explicitTerminal = assessment.lifecycle.lastTerminalStatus;
+    const explicitTerminal = assessment.explicitTerminal;
     const preserveBranch = (classification === "success" || classification === "warning") && worker.worktreePath !== null;
     const preserveWorktree = classification === "warning" && !explicitTerminal && worker.worktreePath !== null;
     const cleanupResult = await cleanupWorker(this.ctx.cwd, worker, { preserveBranch, preserveWorktree }).catch(() => undefined);
