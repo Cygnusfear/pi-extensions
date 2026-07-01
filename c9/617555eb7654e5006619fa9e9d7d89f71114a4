@@ -1,0 +1,33 @@
+packages/teams/worker.ts
+  s_730b3b5447f2bb::t_0306f1ce63fb73 57-62,168,178,323
+packages/teams/leader.ts
+  s_730b3b5447f2bb::t_dde1cc2d831fc1 759-762,1457-1483,1497-1517,1519-1571,1580-1581,1584-1585,1587-1592,1594
+packages/session-tab-title/extensions/session-tab-title.test.ts
+  s_730b3b5447f2bb::t_c95638a753bcde 2-3,183-214
+  s_730b3b5447f2bb::t_e2c914e35b77d3 215-216
+packages/session-tab-title/extensions/session-tab-title.ts
+  s_730b3b5447f2bb::t_777ca14b6e9808 73,77-88,294,299,324
+packages/teams/leader.state.test.ts
+  s_730b3b5447f2bb::t_902632902527dc 6,225-344,391-428,432-433
+  s_730b3b5447f2bb::t_35a483790f24ed 429-431
+  s_730b3b5447f2bb::t_ceff4a2dc392c0 434
+packages/teams/worker.lifecycle.test.ts
+  s_730b3b5447f2bb::t_e73214b8ebb80a 56,79-80,160-195
+  s_730b3b5447f2bb::t_7493c4b6636e8b 196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "c9617555eb7654e5006619fa9e9d7d89f71114a4",
+  "prompts": {},
+  "sessions": {
+    "s_730b3b5447f2bb": {
+      "agent_id": {
+        "tool": "Simon Nebula Minniti",
+        "id": "019f1d9b-3982-7b32-9590-2a8ddfff3bb0",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
