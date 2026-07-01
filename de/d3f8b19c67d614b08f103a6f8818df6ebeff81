@@ -1,0 +1,19 @@
+packages/shared/src/git-guards-redteam-r2-sonnet.test.ts
+  s_b80b60cc68c1d4::t_1bc3ec5c9df5f0 344-349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "ded3f8b19c67d614b08f103a6f8818df6ebeff81",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
