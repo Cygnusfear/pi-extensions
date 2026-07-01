@@ -76,6 +76,13 @@ import {
   formatPendingTellsBatch,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
+import { DurableInboundMailbox } from "./durable-inbound-mailbox.ts";
+import {
+  buildReviveNotify,
+  materialiseDurableDescriptor,
+  readDurableDescriptor,
+} from "./durable-session-store.ts";
+import type { ReviveDescriptor } from "@pi-extensions/shared/revive-descriptor";
 
 
 const ambientChatBatchMsRaw = Number(process.env.PI_MESH_AMBIENT_CHAT_BATCH_MS ?? "750");
@@ -1332,6 +1339,92 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const resolveTargetSessionId = (rawSessionId: string): string =>
     resolveDurableTarget(mesh.peers(), rawSessionId);
 
+  // ── v1c revive-on-send (activator: supervisor-NOTIFIED, v1 = notify) ────────
+  const selfLabel = (): string => getPeerLabel(mesh.self());
+
+  // Best-effort nudge to a hibernated session's supervisors that it has pending
+  // mail. v1 = NOTIFY ONLY — the supervisor (or a human) revives via the STANDARD
+  // path; the durable mailbox is the reliable channel, this is the wake nudge.
+  const notifyReviveSupervisors = (
+    descriptor: ReviveDescriptor,
+    durableId: string,
+    deliveryId: string,
+    mailboxCount: number,
+  ): number => {
+    let notified = 0;
+    for (const supervisor of descriptor.supervisors ?? []) {
+      try {
+        const route = resolveTargetSessionId(supervisor); // throws when offline
+        mesh.tell(
+          route,
+          buildReviveNotify({
+            durableId,
+            nickname: descriptor.nickname,
+            deliveryId,
+            from: mesh.self().id,
+            senderLabel: selfLabel(),
+            mailboxCount,
+          }),
+        );
+        notified++;
+      } catch {
+        // supervisor offline — skip the nudge; the mail persists durably.
+      }
+    }
+    return notified;
+  };
+
+  // Deliver a tell to a HIBERNATED durable session's persisted mailbox. Returns
+  // null when the target has no revive descriptor (→ dead → 'undeliverable').
+  const deliverToDurableMailbox = (
+    durableId: string,
+    message: unknown,
+    payloadText: string,
+    receiptMode: MeshTellReceiptWaitForPhase,
+  ): { descriptor: ReviveDescriptor; deliveryId: string; mailboxCount: number; notified: number } | null => {
+    const descriptor = readDurableDescriptor(durableId);
+    if (!descriptor) return null;
+    const now = Date.now();
+    const deliveryId = createDeliveryId();
+    const mailbox = DurableInboundMailbox.forDurableId(durableId);
+    const { entry } = mailbox.append(
+      {
+        deliveryId,
+        fromId: mesh.self().id,
+        senderLabel: selfLabel(),
+        payload: message,
+        payloadText,
+        ackRequested: receiptMode,
+        originalFrom: mesh.self().id,
+        sentAt: now,
+      },
+      now,
+    );
+    const mailboxCount = mailbox.length;
+    const notified = notifyReviveSupervisors(descriptor, durableId, entry.deliveryId, mailboxCount);
+    return { descriptor, deliveryId: entry.deliveryId, mailboxCount, notified };
+  };
+
+  // Materialise THIS session's canonical revive descriptor (keyed by durable id)
+  // from the spawner's partial one. No-op for a session with no partial (a plain
+  // human session stays out of the registry → honest 'undeliverable' offline).
+  const materialiseOwnDescriptor = (ctx: {
+    sessionManager: { getSessionFile?: () => string | undefined; getSessionId?: () => string };
+  }): void => {
+    const identity = mesh.getIdentity();
+    if (!identity) return;
+    try {
+      materialiseDurableDescriptor({
+        durableId: identity.id,
+        sessionId: ctx.sessionManager.getSessionId?.(),
+        nickname: identity.nickname,
+        sessionFile: ctx.sessionManager.getSessionFile?.(),
+      });
+    } catch {
+      // registry write is best-effort — never block a turn on it.
+    }
+  };
+
   const flushAmbientChat = () => {
     ambientChatFlushTimer = null;
     if (agentBusy || pendingAmbientChat.length === 0) return;
@@ -1474,6 +1567,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Already running — handle identity for reload/resume/fork/new transitions
       mesh.updateSessionId(sessionId);
       resolveAndSetIdentity(reason, ctx, mesh, pi);
+      // v1c: (re)materialise this session's canonical revive descriptor so a
+      // hibernated peer stays reachable at its durable id after reload/resume.
+      materialiseOwnDescriptor(ctx);
       return;
     }
     started = true;
@@ -1659,6 +1755,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Resolve identity once sidecar is ready (tentatively — peer list may be empty)
       mesh.on("ready", () => {
         resolveAndSetIdentity(reason, ctx, mesh, pi);
+        // v1c: materialise the canonical revive descriptor now the durable id is
+        // known — the activator reads it to route revive-on-send by durable id.
+        materialiseOwnDescriptor(ctx);
       });
 
       // v1a identity-pin: resume/revive REUSE the durable session's mesh id, so a
@@ -1956,9 +2055,28 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         resolved = resolveTargetSessionId(sessionId);
       } catch (e) {
         if (receiptMode !== "none") {
+          // v1c revive-on-send: no LIVE peer, but if the target is a REVIVABLE
+          // durable session (a persisted descriptor exists) the tell lands in its
+          // durable mailbox + notifies its supervisors — an HONEST 'delivered'
+          // (it reached the durable mailbox), never a false-negative drop.
+          const delivered = deliverToDurableMailbox(sessionId, message, rendered, receiptMode);
+          if (delivered) {
+            const ack = buildTellReceiptAck(delivered.deliveryId, mesh.self().id, "delivered");
+            const label = delivered.descriptor.nickname ?? sessionId.slice(0, 8);
+            const supervisorNote =
+              delivered.notified > 0
+                ? `${delivered.notified} supervisor${delivered.notified === 1 ? "" : "s"} notified to revive`
+                : "no live supervisor to notify — mail waits for the next revive";
+            const text = `${MI.tell} ${MI.sep} ${label} (delivered → durable mailbox; peer hibernated, ${supervisorNote})\n${rendered}`;
+            return {
+              content: [{ type: "text", text }],
+              details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
+            };
+          }
+          // No live peer AND no revive descriptor → genuinely dead.
           const deliveryId = createDeliveryId();
           const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
-          const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' (pre-v1c has no durable mailbox).`;
+          const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and no revivable durable session is registered for it.`;
           return {
             content: [{ type: "text", text }],
             details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
