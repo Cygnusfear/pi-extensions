@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { rtkDetect, rtkRewrite, rtkSplitTee } from "./sandbox-tools.ts";
+import { rtkRewrite, rtkSplitTee } from "./sandbox-tools.ts";
+import { rtkDep } from "./rtk-dep.ts";
 
 describe("rtkSplitTee — failure-tee raw extraction + reference stripping", () => {
 	test("reads the tee file and strips the [full output: ...] reference from the view", () => {
@@ -33,9 +34,9 @@ describe("rtkSplitTee — failure-tee raw extraction + reference stripping", () 
 	});
 });
 
-describe("rtkDetect + rtkRewrite — real rtk binary (skips when rtk is absent)", () => {
+describe("rtkDep + rtkRewrite — real rtk binary (skips when rtk is absent)", () => {
 	test("rewrites a handled command, passes through a non-handled one, handles compound", async () => {
-		const bin = await rtkDetect();
+		const bin = rtkDep.resolved;
 		if (!bin) return; // rtk not installed in this environment — skip
 		expect(await rtkRewrite(bin, "cargo build", process.env)).toBe("rtk cargo build");
 		expect(await rtkRewrite(bin, "mkdir foo_rtk_test", process.env)).toBeNull();

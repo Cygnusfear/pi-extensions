@@ -38,6 +38,7 @@ import {
 } from "./shell-utils";
 import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
+import { rtkDep } from "./rtk-dep";
 
 // ─── rtk integration (Arch A: native rtk compaction, raw via failure-tee) ─────────
 // rtk (https://github.com/rtk-ai/rtk) is a CLI proxy that compacts noisy dev-command
@@ -48,19 +49,6 @@ import type { SandboxContext } from "./types";
 // `[full output: <path>]` — which we read and expose via the result's raw() so the
 // agent can always retrieve the unfiltered output when rtk drops signal. Global
 // opt-out: PI_RTK=0. Graceful no-op when rtk is absent.
-let RTK_BIN: string | null | undefined = undefined; // undefined=unchecked · null=absent · string=path
-
-export async function rtkDetect(): Promise<string | null> {
-	if (RTK_BIN !== undefined) return RTK_BIN;
-	try {
-		const r = await spawnAsync({ cmd: "sh", args: ["-c", "command -v rtk"], timeout: 3000 });
-		RTK_BIN = r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
-	} catch {
-		RTK_BIN = null;
-	}
-	return RTK_BIN;
-}
-
 /** Ask rtk for the compacting rewrite of a command. Returns the rewrite, or null when
  *  rtk doesn't handle it (run raw). Never reimplements rtk's registry. */
 export async function rtkRewrite(rtkBin: string, command: string, env: Record<string, string | undefined>): Promise<string | null> {
@@ -831,14 +819,15 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       // so the safety decision holds. Global opt-out: PI_RTK=0.
       let effectiveCommand = command;
       let rtkApplied = false;
-      if (process.env.PI_RTK !== "0") {
-        const rtkBin = await rtkDetect();
-        if (rtkBin) {
-          const rewritten = await rtkRewrite(rtkBin, command, gitEnv);
-          if (rewritten) {
-            effectiveCommand = rewritten;
-            rtkApplied = true;
-          }
+      // rtk resolves via the shared dep registry (PI_RTK_BIN → PATH → absolute
+      // fallbacks); spawning the ABSOLUTE path avoids PATH-stripping. Absent → skip
+      // (commands run raw, rtk:false). Disable entirely with PI_RTK=0.
+      const rtkBin = process.env.PI_RTK === "0" ? null : rtkDep.resolved;
+      if (rtkBin) {
+        const rewritten = await rtkRewrite(rtkBin, command, gitEnv);
+        if (rewritten) {
+          effectiveCommand = rewritten;
+          rtkApplied = true;
         }
       }
 

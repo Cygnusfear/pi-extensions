@@ -17,6 +17,10 @@ import { keyHint } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
+// Register rtk as an optional dependency at startup (side-effect import) so a fresh
+// machine gets the "install rtk" hint via /deps + showMissingDeps. sandbox-tools
+// (lazy-loaded) uses the same rtkDep.resolved for Bash() compaction.
+import "../src/rtk-dep";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
