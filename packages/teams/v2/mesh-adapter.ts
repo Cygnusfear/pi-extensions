@@ -1,9 +1,5 @@
 import type { TeamEnvelope, TeamEnvelopeType, WorkerCommentPayload, WorkerFinishPayload, WorkerHelloPayload, WorkerRuntimeEnvelope } from "./protocol.ts";
 
-export function buildTeamChannelId(teamId: string): string {
-	return `teams-v2-${teamId}`;
-}
-
 export function createWorkerEnvelope<TPayload>(input: {
 	teamId: string;
 	leaderEpoch: string;

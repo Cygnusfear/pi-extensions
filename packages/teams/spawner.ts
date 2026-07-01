@@ -58,8 +58,8 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 		lines.push(
 			`Your coordinator's mesh ID is "${coordinatorMeshId}" — FYI only.`,
 			`To talk to the coordinator, use \`team_comment\` (progress, questions, acknowledgements, blockers) and \`team_finish\` (terminal status).`,
-			`\`team_comment\` writes to the ticket AND broadcasts on the team's mesh channel — the coordinator sees it immediately, plus a durable note is kept.`,
-			`Do NOT use raw \`mesh_tell\` to the coordinator id — direct point-to-point has a peer-discovery race at spawn time and will fail for the first few seconds of worker life. \`team_comment\` uses the team channel, which bypasses that race entirely.`,
+			`\`team_comment\` writes to the ticket AND sends an ordinary durable mesh tell to the coordinator, plus a durable note is kept.`,
+			`Do NOT use raw \`mesh_tell\` to the coordinator id — ad hoc point-to-point messages can race peer discovery at spawn time. \`team_comment\` uses the teams envelope over the coordinator durable id.`,
 			"",
 		);
 	}
@@ -117,8 +117,6 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		PI_TEAMS_LEASE_FILE: leaseFile,
 	};
 
-	// Mesh channel for instant worker→coordinator communication
-	if (config.channelId) env.PI_TEAMS_CHANNEL_ID = config.channelId;
 	if (config.teamId) env.PI_TEAMS_TEAM_ID = config.teamId;
 	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
 	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;

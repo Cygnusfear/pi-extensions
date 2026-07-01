@@ -23,7 +23,6 @@ export function runWorker(pi: ExtensionAPI): void {
 	const workerName = process.env.PI_TEAMS_WORKER_NAME ?? "worker";
 	const workerInstanceId = process.env.PI_TEAMS_WORKER_INSTANCE_ID ?? "unknown-worker-instance";
 
-	const channelId = process.env.PI_TEAMS_CHANNEL_ID;
 	const teamId = process.env.PI_TEAMS_TEAM_ID ?? ticketId;
 	const leaderEpoch = process.env.PI_TEAMS_LEADER_EPOCH ?? "legacy";
 	const sessionMode = (() => {
@@ -44,21 +43,10 @@ export function runWorker(pi: ExtensionAPI): void {
 
 	// Connect to mesh for instant progress delivery (if available)
 	let mesh: PiMesh | null = null;
-	const meshChat = (payload: unknown) => {
-		if (mesh && channelId) {
-			try { mesh.chat(channelId, payload); } catch {}
-		}
-	};
 	const meshTell = (payload: unknown) => {
 		if (mesh && coordinatorId) {
 			try { mesh.tell(coordinatorId, payload); } catch {}
 		}
-	};
-	const meshTellAndChat = (payload: unknown) => {
-		// Replacement-first cutover: send the new durable direct tell while the old
-		// channel remains live until the gate proves no dark window.
-		meshTell(payload);
-		meshChat(payload);
 	};
 	const meshTellCritical = async (payload: unknown) => {
 		if (!mesh || !coordinatorId) return;
@@ -165,7 +153,7 @@ export function runWorker(pi: ExtensionAPI): void {
 	};
 
 	const announceInitWhenReady = (attempt = 0) => {
-		if (!mesh || (!coordinatorId && !channelId)) return;
+		if (!mesh || !coordinatorId) return;
 		// Wait for the DURABLE identity (not just any clientId) so the hello declares
 		// the stable mesh id the leader binds the route to. mesh.self().id would
 		// return the clientId before the identity resolves — too early to route by.
@@ -175,7 +163,7 @@ export function runWorker(pi: ExtensionAPI): void {
 			setTimeout(() => announceInitWhenReady(attempt + 1), 100);
 			return;
 		}
-		meshTellAndChat(
+		meshTell(
 			createWorkerHelloEnvelope({
 				teamId,
 				leaderEpoch,
@@ -190,7 +178,6 @@ export function runWorker(pi: ExtensionAPI): void {
 					workerId: workerName,
 					attemptId: workerInstanceId,
 					coordinatorSessionId: coordinatorId ?? "",
-					channelId,
 					leasePath: leaseFile ?? "",
 					sessionMode,
 				},
@@ -208,7 +195,6 @@ export function runWorker(pi: ExtensionAPI): void {
 			mesh = (globalThis as { __piMesh?: PiMesh }).__piMesh ?? null;
 			if (!mesh) { console.warn("[teams-worker] shared mesh instance not available"); }
 			else {
-				if (channelId) mesh.joinChannel(channelId);
 				announceInitWhenReady();
 			}
 		} catch (e) {
@@ -320,7 +306,7 @@ export function runWorker(pi: ExtensionAPI): void {
 					details: undefined,
 				};
 			}
-			meshTellAndChat(
+			meshTell(
 				createWorkerCommentEnvelope({
 					teamId,
 					leaderEpoch,

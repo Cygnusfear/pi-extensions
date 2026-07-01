@@ -90,7 +90,6 @@ export interface SpawnConfig {
 	model?: string;
 	hasTools?: boolean;
 	additionalPrompt?: string;
-	channelId?: string;
 	teamId?: string;
 	leaderEpoch?: string;
 	coordinatorMeshId?: string;

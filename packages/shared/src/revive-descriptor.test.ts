@@ -73,7 +73,7 @@ describe("revive descriptor — shared schema", () => {
 	});
 
 	test("allowlist contains the teams coordination vars a revive needs", () => {
-		for (const key of ["PI_TEAMS_TICKET_ID", "PI_TEAMS_COORDINATOR_ID", "PI_TEAMS_WORKER_NAME", "PI_TEAMS_CHANNEL_ID"]) {
+		for (const key of ["PI_TEAMS_TICKET_ID", "PI_TEAMS_COORDINATOR_ID", "PI_TEAMS_WORKER_NAME"]) {
 			expect(REVIVE_DESCRIPTOR_ENV_ALLOWLIST).toContain(key);
 		}
 	});

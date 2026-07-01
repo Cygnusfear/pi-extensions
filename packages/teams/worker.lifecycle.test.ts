@@ -41,8 +41,6 @@ async function importRunWorker() {
 	mock.module("@pi-extensions/pi-mesh/extension/pi-mesh.js", () => ({
 		PiMesh: class {
 			start() {}
-			joinChannel() {}
-			chat() {}
 			tell() {}
 			stop() {}
 			self() { return { id: "mesh-self" }; }
@@ -60,7 +58,6 @@ function setWorkerEnv(extra: Record<string, string | undefined> = {}) {
 	process.env.PI_TEAMS_WORKER_NAME = "worker-1";
 	process.env.PI_TEAMS_WORKER_INSTANCE_ID = "inst-1";
 	process.env.PI_TEAMS_GRACE_PERIOD_MS = "0";
-	delete process.env.PI_TEAMS_CHANNEL_ID;
 	delete process.env.PI_TEAMS_COORDINATOR_ID;
 	for (const [k, v] of Object.entries(extra)) {
 		if (v === undefined) delete process.env[k];
@@ -158,21 +155,16 @@ describe("teams worker lifecycle", () => {
 		fs.rmSync(repoDir, { recursive: true, force: true });
 	});
 
-	test("team_comment sends direct durable tell alongside the cutover channel", async () => {
+	test("team_comment sends only ordinary durable mesh tells", async () => {
 		setWorkerEnv({
 			PI_TEAMS_COORDINATOR_ID: "coord-durable-1",
-			PI_TEAMS_CHANNEL_ID: "teams-v2-team-1",
 			PI_TEAMS_TEAM_ID: "team-1",
 			PI_TEAMS_LEADER_EPOCH: "epoch-1",
 		});
 		const tells: Array<{ id: string; payload: any }> = [];
-		const chats: Array<{ channel: string; payload: any }> = [];
-		const joined: string[] = [];
 		(globalThis as any).__piMesh = {
 			getIdentity: () => ({ id: "worker-durable-1" }),
-			joinChannel: (channel: string) => joined.push(channel),
 			tell: (id: string, payload: any) => tells.push({ id, payload }),
-			chat: (channel: string, payload: any) => chats.push({ channel, payload }),
 			tellAndWaitForReceipt: async () => ({ phase: "delivered" }),
 		};
 		const fake = makeFakePi();
@@ -182,14 +174,9 @@ describe("teams worker lifecycle", () => {
 		await fake.emit("session_start", {}, { cwd: "/worker/own/repo" });
 		await fake.tools.get("team_comment").execute("id", { message: "progress over ordinary mesh" }, null, null, { cwd: "/worker/own/repo" });
 
-		expect(joined).toEqual(["teams-v2-team-1"]);
 		expect(tells.map((m) => [m.id, m.payload.type])).toEqual([
 			["coord-durable-1", "worker.hello"],
 			["coord-durable-1", "worker.comment"],
-		]);
-		expect(chats.map((m) => [m.channel, m.payload.type])).toEqual([
-			["teams-v2-team-1", "worker.hello"],
-			["teams-v2-team-1", "worker.comment"],
 		]);
 		expect(tells[0]?.payload.meshId).toBe("worker-durable-1");
 		expect(tells[1]?.payload.meshId).toBe("worker-durable-1");

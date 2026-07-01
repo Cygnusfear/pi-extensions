@@ -182,9 +182,8 @@ describe("buildTitle", () => {
 });
 
 describe("session phase event transport", () => {
-  test("publishes a direct coordinator tell alongside the cutover channel", () => {
+  test("publishes a direct coordinator tell", () => {
     const tells: Array<{ id: string; payload: unknown }> = [];
-    const chats: Array<{ channel: string; payload: unknown }> = [];
     const event = {
       kind: SESSION_PHASE_EVENT_KIND,
       version: SESSION_PHASE_EVENT_VERSION,
@@ -203,14 +202,11 @@ describe("session phase event transport", () => {
     publishSessionPhaseEvent({
       mesh: {
         tell: (id, payload) => tells.push({ id, payload }),
-        chat: (channel, payload) => chats.push({ channel, payload }),
       },
       event,
       coordinatorId: "coord-durable-1",
-      channelId: "teams-v2-team-1",
     });
 
     expect(tells).toEqual([{ id: "coord-durable-1", payload: event }]);
-    expect(chats).toEqual([{ channel: "teams-v2-team-1", payload: event }]);
   });
 });

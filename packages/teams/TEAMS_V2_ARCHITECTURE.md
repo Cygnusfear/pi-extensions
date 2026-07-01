@@ -114,7 +114,6 @@ type WorkerRuntimeEnvelope = {
     kind: 'direct-session'
     sessionId: string
   }
-  channelId?: string
   leasePath: string
   sessionMode:
     | { kind: 'fresh' }

@@ -550,7 +550,6 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				model: "openai-codex/gpt-5.4",
 				hasTools: false,
 				additionalPrompt: "do stuff",
-				channelId: undefined,
 				coordinatorMeshId: undefined,
 				freeform: false,
 			};

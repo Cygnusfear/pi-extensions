@@ -18,7 +18,6 @@ export interface WorkerRuntimeEnvelope {
 	workerId: WorkerId;
 	attemptId: AttemptId;
 	coordinatorSessionId: string;
-	channelId?: string;
 	leasePath: string;
 	sessionMode: WorkerSessionMode;
 }

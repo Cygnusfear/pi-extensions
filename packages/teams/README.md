@@ -2,7 +2,7 @@
 
 Multi-agent orchestration for pi — spawn worker agents, delegate tasks, and coordinate complex work across parallel sessions.
 
-The coordinator (your main pi session) creates tickets, spawns workers as separate pi processes, and manages their lifecycle end-to-end. Workers report back via mesh channels and ticket comments.
+The coordinator (your main pi session) creates tickets, spawns workers as separate pi processes, and manages their lifecycle end-to-end. Workers report back via ordinary durable mesh tells and ticket comments.
 
 ## Features
 
@@ -13,7 +13,7 @@ The coordinator (your main pi session) creates tickets, spawns workers as separa
 - **Persistent workers** — keep workers alive for interactive sessions, tag-teaming, and monitoring
 - **Sub-delegation** — workers can spawn their own sub-workers when given `hasTools: true`
 - **Lifecycle management** — explicit terminal states via `team_finish` (done/quit)
-- **Mesh-based communication** — workers coordinate with the leader via dedicated channels
+- **Mesh-based communication** — workers coordinate with the leader through ordinary durable mesh tells
 - **Lease-based liveness** — coordinator health is tracked; workers detect stale leaders
 - **Ticket integration** — automatic ticket creation with task descriptions, progress tracking via `team_comment`
 - **Session strategy** — fork (default), fresh, or resume modes for worker sessions
@@ -51,7 +51,7 @@ Each task creates:
 1. A **mai instruction ticket** with the task description, tagged `team,agent-instruction`
 2. A **pi session** running as a separate process
 3. A **git worktree** (when `useWorktree: true`) branched from `baseRef`
-4. A **mesh channel** for leader↔worker communication
+4. A **durable mesh route** for leader↔worker communication
 
 Teams-created tickets are worker assignment records, not result artifacts. A review worker's assignment ticket is tagged `agent-instruction`; the review worker creates a separate `mai review` ticket tagged `review` for the actual review output. The same separation applies to oracle, research, and audit workers: the instruction ticket follows Teams lifecycle, while the produced artifact stays available for downstream use.
 
@@ -342,7 +342,7 @@ console.log("Workers spawned, subscriptions armed. Going idle.");
 
 ## Mesh Routing
 
-Workers communicate with the coordinator via a dedicated mesh channel (not raw peer discovery). The coordinator's mesh ID is injected at spawn time, and workers use `team_comment` / `team_finish` tools — they never touch raw `mesh_tell` or `mesh_ask` directly.
+Workers communicate with the coordinator via ordinary durable mesh tells. The coordinator's mesh ID is injected at spawn time, and workers use `team_comment` / `team_finish` tools — they never touch raw `mesh_tell` or `mesh_ask` directly.
 
 The V2 protocol adds typed envelopes with `teamId`, `leaderEpoch`, and `workerId` for reliable, diagnosable coordination.
 

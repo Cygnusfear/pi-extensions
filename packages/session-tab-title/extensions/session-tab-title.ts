@@ -69,7 +69,6 @@ export interface StageDef {
 }
 
 type PhaseEventMesh = {
-	chat: (channelId: string, payload: unknown) => void;
 	tell: (peerId: string, payload: unknown) => void;
 	getIdentity?: () => { id?: string } | null;
 };
@@ -78,12 +77,8 @@ export function publishSessionPhaseEvent(input: {
 	mesh: PhaseEventMesh;
 	event: SessionPhaseEvent;
 	coordinatorId?: string;
-	channelId?: string;
 }): void {
-	// Replacement-first cutover: publish the durable direct tell while the old
-	// channel stays live until the teams gate proves no dark window.
 	if (input.coordinatorId) safeAction(() => input.mesh.tell(input.coordinatorId!, input.event));
-	if (input.channelId) safeAction(() => input.mesh.chat(input.channelId!, input.event));
 }
 
 export const STAGES: Record<string, StageDef> = {
@@ -290,13 +285,12 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 	let phaseSeq = 0;
 
 	const emitPhaseEvent = (stageKey: string, def: StageDef) => {
-		const channelId = process.env.PI_TEAMS_CHANNEL_ID;
 		const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
 		const teamId = process.env.PI_TEAMS_TEAM_ID;
 		const leaderEpoch = process.env.PI_TEAMS_LEADER_EPOCH;
 		const workerId = process.env.PI_TEAMS_WORKER_NAME;
 		const attemptId = process.env.PI_TEAMS_WORKER_INSTANCE_ID;
-		if ((!channelId && !coordinatorId) || !teamId || !leaderEpoch || !workerId || !attemptId) return;
+		if (!coordinatorId || !teamId || !leaderEpoch || !workerId || !attemptId) return;
 		const mesh = (globalThis as { __piMesh?: PhaseEventMesh }).__piMesh;
 		if (!mesh) return;
 		const meshId = mesh.getIdentity?.()?.id;
@@ -321,7 +315,7 @@ export default function sessionTabTitle(pi: ExtensionAPI) {
 				...(sessionId ? { sessionId } : {}),
 			},
 		};
-		publishSessionPhaseEvent({ mesh, event, coordinatorId, channelId });
+		publishSessionPhaseEvent({ mesh, event, coordinatorId });
 	};
 
 	// Register a formatter so pi core owns the timing of title refreshes but we

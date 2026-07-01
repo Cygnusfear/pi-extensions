@@ -38,7 +38,6 @@ import {
   STUCK_WARNING_COOLDOWN_MS,
 } from "./types.js";
 import { createTeamsWidget } from "./widget.js";
-import { buildTeamChannelId } from "./v2/mesh-adapter.ts";
 import type { TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload } from "./v2/protocol.ts";
 import type { TeamRecord } from "./v2/state.ts";
 import { appendFact as applyV2Fact, createTeamRecord, upsertWorker as upsertV2Worker } from "./v2/runtime-store.ts";
@@ -52,8 +51,6 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
   ? Math.floor(ambientChatBatchMsRaw)
   : 750;
 
-/** Mesh "channel" event payload — broadcasts on subscribed channels. */
-type ChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => void;
 /** Mesh "message" event payload — direct tells. */
 type MessageHandler = (msg: { from: string; payload: unknown }) => void;
 
@@ -109,7 +106,6 @@ interface PersistedWorkerState {
 
 interface LeaderStateSnapshot {
   version: number;
-  meshChannelId: string | null;
   v2TeamId?: string | null;
   v2TeamRecord?: TeamRecord | null;
   workers: Record<string, PersistedWorkerState>;
@@ -734,26 +730,18 @@ export class TeamLeader {
   private lastSavedStateSignature: string | null = null;
   showComments = true;
 
-  // Mesh — shared instance from pi-mesh extension, set via setMesh()
-  // The on/off callback shape varies by event channel: "channel" emits
-  // ChannelMessage, "message" emits MeshMessage. Use overloaded function
-  // signatures so each handler can declare the precise per-event payload it
-  // expects without forcing teams to import pi-mesh's internal types.
+  // Mesh — shared instance from pi-mesh extension, set via setMesh().
+  // Teams listens only for direct durable mesh tells from workers.
   private mesh: {
     tell: (id: string, msg: unknown) => void;
     tellAndWaitForReceipt: (id: string, msg: unknown, phase: MeshTellReceiptPhase, timeoutMs?: number) => Promise<{ phase: MeshTellReceiptPhase }>;
     ask: (id: string, msg: unknown, timeout?: number) => Promise<unknown>;
-    chat: (ch: string, msg: unknown) => void;
-    joinChannel: (ch: string) => void;
     stop: () => void;
-    on: ((event: "channel", cb: ChannelHandler) => void)
-      & ((event: "message", cb: MessageHandler) => void);
-    off: ((event: "channel", cb: ChannelHandler) => void)
-      & ((event: "message", cb: MessageHandler) => void);
+    on: (event: "message", cb: MessageHandler) => void;
+    off: (event: "message", cb: MessageHandler) => void;
     peers: () => Array<{ id: string; sessionId?: string; nickname?: string; name?: string; meshId?: string }>;
     self: () => { id: string };
   } | null = null;
-  private meshChannelId: string | null = null;
   private v2TeamId: string | null = null;
   private v2TeamRecord: TeamRecord | null = null;
 	private readonly leaderEpoch = crypto.randomUUID();
@@ -763,7 +751,6 @@ export class TeamLeader {
   private pendingAmbientTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private leaseFilePath: string | null = null;
   private leaseTimer: ReturnType<typeof setInterval> | null = null;
-  private meshChannelHandler?: ChannelHandler;
   private meshMessageHandler?: MessageHandler;
 
   private static readonly STATE_ENTRY_TYPE = "teams-leader-state";
@@ -850,7 +837,6 @@ export class TeamLeader {
   private buildStateSignature(workers: Record<string, PersistedWorkerState>, cleared = false): string {
     return JSON.stringify({
       version: 3,
-      meshChannelId: this.meshChannelId,
       v2TeamId: this.v2TeamId,
       v2TeamRecord: this.v2TeamRecord,
       cleared,
@@ -882,8 +868,7 @@ export class TeamLeader {
 
       const snapshot: LeaderStateSnapshot = {
         version: 3,
-        meshChannelId: this.meshChannelId,
-        v2TeamId: this.v2TeamId,
+          v2TeamId: this.v2TeamId,
         v2TeamRecord: this.v2TeamRecord,
         workers,
         savedAt: Date.now(),
@@ -1005,11 +990,6 @@ export class TeamLeader {
 		this.meshDelivered.clear();
 		this.v2TeamId = lastState.v2TeamId ?? this.v2TeamId;
 
-		if (lastState.meshChannelId && this.mesh) {
-			this.meshChannelId = lastState.meshChannelId;
-			this.mesh.joinChannel(this.meshChannelId);
-			this._wireMeshChannelEvents();
-		}
 		if (lastState.v2TeamRecord?.teamId === this.v2TeamId) {
 			this.v2TeamRecord = structuredClone(lastState.v2TeamRecord);
 		} else if (this.v2TeamId) {
@@ -1085,18 +1065,17 @@ export class TeamLeader {
     }
   }
 
-  private unwireMeshChannelEvents() {
+  private unwireMeshMessageEvents() {
     if (!this.mesh) return;
-    if (this.meshChannelHandler) this.mesh.off("channel", this.meshChannelHandler);
     if (this.meshMessageHandler) this.mesh.off("message", this.meshMessageHandler);
-    this.meshChannelHandler = undefined;
     this.meshMessageHandler = undefined;
   }
 
   /** Set the shared mesh instance from the pi-mesh extension. */
   setMesh(mesh: typeof this.mesh): void {
-    if (this.mesh && this.mesh !== mesh) this.unwireMeshChannelEvents();
+    if (this.mesh && this.mesh !== mesh) this.unwireMeshMessageEvents();
     this.mesh = mesh;
+    this.wireMeshMessageEvents();
   }
 
   private ensureV2Team(): TeamRecord {
@@ -1388,7 +1367,6 @@ export class TeamLeader {
 
     if (worker.hasTools) env.PI_TEAMS_HAS_TOOLS = "1";
     else delete env.PI_TEAMS_HAS_TOOLS;
-    if (this.meshChannelId) env.PI_TEAMS_CHANNEL_ID = this.meshChannelId;
     if (this.leaseFilePath) env.PI_TEAMS_LEASE_FILE = this.leaseFilePath;
 
     const meshId = this.getDurableMeshId();
@@ -1446,7 +1424,7 @@ export class TeamLeader {
     if (this.batchTimer) { clearInterval(this.batchTimer); this.batchTimer = null; }
     this.monitoredWorkers.clear();
     this.stopLeaseHeartbeat();
-    this.unwireMeshChannelEvents();
+    this.unwireMeshMessageEvents();
   }
 
   /** Bind a worker handle to its DURABLE mesh id (v1a). The id is DECLARED by the
@@ -1568,28 +1546,16 @@ export class TeamLeader {
 		}
 	}
 
-	/** Wire mesh channel events into the existing notification pipeline. */
-	private _wireMeshChannelEvents() {
-		if (!this.mesh) return;
-		if (this.meshChannelHandler || this.meshMessageHandler) return;
-		this.meshChannelHandler = (msg: { from: string; channel: string; payload: unknown; timestamp: number }) => {
-			if (isSessionPhaseEvent(msg.payload)) {
-				this.handleSessionPhaseEvent(msg.payload, msg.from);
-				return;
-			}
-			if (isWorkerToLeaderEnvelope(msg.payload)) this.handleWorkerToLeaderEnvelope(msg.payload, msg.from);
-		};
-		this.mesh.on("channel", this.meshChannelHandler);
-
-	    // Direct tells from workers — durable mesh delivery, with the channel path still
-	    // accepted during the replacement-first cutover.
+	/** Wire direct mesh tells into the existing notification pipeline. */
+	private wireMeshMessageEvents() {
+		if (!this.mesh || this.meshMessageHandler) return;
 		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
 			if (isSessionPhaseEvent(msg.payload)) {
 				this.handleSessionPhaseEvent(msg.payload, msg.from);
 				return;
 			}
 			if (isWorkerToLeaderEnvelope(msg.payload)) this.handleWorkerToLeaderEnvelope(msg.payload, msg.from);
-	    };
+		};
 		this.mesh.on("message", this.meshMessageHandler);
 	}
 
@@ -1644,13 +1610,8 @@ export class TeamLeader {
 
     const sessionFile = this.ctx.sessionManager.getSessionFile() ?? "";
 
-    // Ensure a mesh channel exists for this delegation batch
-    if (!this.meshChannelId && this.mesh) {
-      if (!this.v2TeamId) this.v2TeamId = `team-${crypto.randomUUID().slice(0, 8)}`;
-      this.meshChannelId = buildTeamChannelId(this.v2TeamId);
-      this.mesh.joinChannel(this.meshChannelId);
-      this._wireMeshChannelEvents();
-    }
+    this.ensureV2Team();
+    this.wireMeshMessageEvents();
 
     const config: SpawnConfig = {
       workerInstanceId,
@@ -1663,7 +1624,6 @@ export class TeamLeader {
       model: effectiveModel,
       hasTools,
       additionalPrompt,
-      channelId: this.meshChannelId ?? undefined,
       teamId: this.v2TeamId ?? ticketId,
       leaderEpoch: this.leaderEpoch,
       coordinatorMeshId: this.getDurableMeshId() || undefined,
@@ -2616,8 +2576,8 @@ export class TeamLeader {
       return;
     }
 
-    // Comments are delivered instantly via mesh-chat channel — skip the delayed
-    // team-event duplicate. Lifecycle events (completed/failed/stuck) still go through.
+    // Comments are delivered instantly via the teams direct mesh envelope — skip the
+    // delayed team-event duplicate. Lifecycle events (completed/failed/stuck) still go through.
     if (event.type === "comment") {
       return;
     }

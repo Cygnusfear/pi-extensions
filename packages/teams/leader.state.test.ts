@@ -83,7 +83,6 @@ describe("TeamLeader state persistence", () => {
 		const now = Date.now();
 		const snapshot = {
 			version: 3,
-			meshChannelId: null,
 			v2TeamId: "team-1",
 			v2TeamRecord: {
 				teamId: "team-1",
@@ -156,70 +155,26 @@ describe("TeamLeader state persistence", () => {
 		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
 	});
 
-	test("mesh handlers wire once and are removed on stopPolling", () => {
+	test("mesh message handler wires once and is removed on stopPolling", () => {
 		const { leader } = makeHarness();
 		const listeners = {
-			channel: new Set<Function>(),
 			message: new Set<Function>(),
 		};
 		const mesh = {
-			on: (event: "channel" | "message", cb: Function) => listeners[event].add(cb),
-			off: (event: "channel" | "message", cb: Function) => listeners[event].delete(cb),
+			on: (event: "message", cb: Function) => listeners[event].add(cb),
+			off: (event: "message", cb: Function) => listeners[event].delete(cb),
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {},
+			tellAndWaitForReceipt: async () => ({ phase: "delivered" }),
 			ask: async () => ({}),
-			chat: () => {},
 		};
 		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
-		leader._wireMeshChannelEvents();
-		expect(listeners.channel.size).toBe(1);
+		leader.wireMeshMessageEvents();
 		expect(listeners.message.size).toBe(1);
 		leader.stopPolling();
-		expect(listeners.channel.size).toBe(0);
 		expect(listeners.message.size).toBe(0);
-	});
-
-	test("mesh channel handler accepts v2 worker comment envelopes", () => {
-		const { leader } = makeHarness();
-		const notified: Array<{ type: string; comment?: string }> = [];
-		leader.notifyLLM = (event: { type: string; comment?: string }) => notified.push(event);
-		leader.queueAmbientChatForResumableWorkers = () => {};
-		leader.renderWidget = () => {};
-		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
-		const mesh = {
-			on: () => {},
-			off: () => {},
-			stop: () => {},
-			joinChannel: () => {},
-			peers: () => [],
-			self: () => ({ id: "mesh-self" }),
-			tell: () => {},
-			ask: async () => ({}),
-			chat: () => {},
-		};
-		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
-
-		leader.meshChannelHandler({
-			from: "mesh-worker-1",
-			channel: "teams-v2-team-1",
-			payload: createWorkerCommentEnvelope({
-				teamId: "team-1",
-				leaderEpoch: "epoch-1",
-				workerId: "worker-1",
-				attemptId: "attempt-1",
-				seq: 1,
-				text: "hello from v2",
-			}),
-			timestamp: Date.now(),
-		});
-
-		expect(notified).toHaveLength(1);
-		expect(notified[0]).toMatchObject({ type: "comment", comment: "hello from v2" });
 	});
 
 	test("mesh direct message handler accepts v2 worker comment envelopes", () => {
@@ -233,15 +188,12 @@ describe("TeamLeader state persistence", () => {
 			on: () => {},
 			off: () => {},
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {},
 			ask: async () => ({}),
-			chat: () => {},
 		};
 		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
 
 		leader.meshMessageHandler({
 			from: "route-1",
@@ -269,15 +221,12 @@ describe("TeamLeader state persistence", () => {
 			on: () => {},
 			off: () => {},
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {},
 			ask: async () => ({}),
-			chat: () => {},
 		};
 		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
 
 		leader.meshMessageHandler({
 			from: "route-1",
@@ -305,7 +254,7 @@ describe("TeamLeader state persistence", () => {
 		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
 	});
 
-	test("direct and channel duplicates are processed once during replacement-first cutover", () => {
+	test("duplicate direct payloads are processed once", () => {
 		const { leader } = makeHarness();
 		const notified: Array<{ type: string; comment?: string }> = [];
 		leader.notifyLLM = (event: { type: string; comment?: string }) => notified.push(event);
@@ -316,15 +265,12 @@ describe("TeamLeader state persistence", () => {
 			on: () => {},
 			off: () => {},
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {},
 			ask: async () => ({}),
-			chat: () => {},
 		};
 		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
 		const envelope = createWorkerCommentEnvelope({
 			teamId: "team-1",
 			leaderEpoch: "epoch-1",
@@ -335,58 +281,13 @@ describe("TeamLeader state persistence", () => {
 			meshId: "durable-1",
 		});
 
-		leader.meshChannelHandler({ from: "route-1", channel: "teams-v2-team-1", payload: envelope, timestamp: Date.now() });
+		leader.meshMessageHandler({ from: "route-1", payload: envelope });
 		leader.meshMessageHandler({ from: "route-1", payload: envelope });
 
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toMatchObject({ type: "comment", comment: "same payload" });
 	});
 
-	test("mesh channel handler turns status() phase events into teams.on PollEvents", () => {
-		const { leader } = makeHarness();
-		const observed: any[] = [];
-		leader.notifyLLM = (event: any) => observed.push(event);
-		leader.renderWidget = () => {};
-		leader.v2TeamId = "team-1";
-		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
-		const mesh = {
-			on: () => {},
-			off: () => {},
-			stop: () => {},
-			joinChannel: () => {},
-			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
-			self: () => ({ id: "mesh-self" }),
-			tell: () => {},
-			ask: async () => ({}),
-			chat: () => {},
-		};
-		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
-
-		leader.meshChannelHandler({
-			from: "route-1",
-			channel: "teams-v2-team-1",
-			payload: {
-				kind: SESSION_PHASE_EVENT_KIND,
-				version: SESSION_PHASE_EVENT_VERSION,
-				from: "worker",
-				to: "leader",
-				teamId: "team-1",
-				leaderEpoch: leader.leaderEpoch,
-				workerId: "worker-1",
-				attemptId: "attempt-1",
-				seq: 1,
-				sentAt: Date.now(),
-				meshId: "durable-1",
-				payload: { stage: "implementing", label: "implementing", icon: "🏭", color: "amber", sessionId: "sess-1" },
-			},
-			timestamp: Date.now(),
-		});
-
-		expect(observed).toHaveLength(1);
-		expect(observed[0]).toMatchObject({ type: "phase", phase: { payload: { stage: "implementing" } } });
-		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
-	});
 
 	test("mesh direct message handler turns status() phase events into teams.on PollEvents", () => {
 		const { leader } = makeHarness();
@@ -399,15 +300,12 @@ describe("TeamLeader state persistence", () => {
 			on: () => {},
 			off: () => {},
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {},
 			ask: async () => ({}),
-			chat: () => {},
 		};
 		leader.setMesh(mesh as any);
-		leader._wireMeshChannelEvents();
 
 		leader.meshMessageHandler({
 			from: "route-1",
@@ -536,7 +434,6 @@ describe("tellWorker honest delivery receipt (v1d — Cecilia bug 1)", () => {
 			on: () => {},
 			off: () => {},
 			stop: () => {},
-			joinChannel: () => {},
 			peers: () => [],
 			self: () => ({ id: "mesh-self" }),
 			tell: () => {
@@ -548,7 +445,6 @@ describe("tellWorker honest delivery receipt (v1d — Cecilia bug 1)", () => {
 				return receipt;
 			},
 			ask: async () => ({}),
-			chat: () => {},
 		};
 	}
 

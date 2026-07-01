@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { buildTeamChannelId, createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./mesh-adapter.ts";
+import { createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./mesh-adapter.ts";
 
 describe("teams v2 mesh adapter", () => {
-	test("buildTeamChannelId namespaces team traffic", () => {
-		expect(buildTeamChannelId("team-123")).toBe("teams-v2-team-123");
-	});
-
 	test("worker hello envelope is acked and addressed to leader", () => {
 		const envelope = createWorkerHelloEnvelope({
 			teamId: "team-1",
