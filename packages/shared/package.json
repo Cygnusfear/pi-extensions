@@ -23,7 +23,8 @@
     "./pending-interactions": "./src/pending-interactions.ts",
     "./guarded-confirm": "./src/guarded-confirm.ts",
     "./stage-control": "./src/stage-control.ts",
-    "./session-phase-event": "./src/session-phase-event.ts"
+    "./session-phase-event": "./src/session-phase-event.ts",
+    "./revive-descriptor": "./src/revive-descriptor.ts"
   },
   "dependencies": {
     "diff": "^8.0.4",
