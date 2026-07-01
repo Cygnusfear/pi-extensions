@@ -120,6 +120,24 @@ describe("teams worker lifecycle", () => {
 		expect(close).toBeUndefined();
 	});
 
+	test("mai note runs in the worker's OWN cwd, not the leader ticketCwd (Cecilia bug 4)", async () => {
+		// Leader launched from a NON-repo dir → PI_TEAMS_TICKET_CWD is not a git repo.
+		setWorkerEnv({ PI_TEAMS_TICKET_CWD: "/leader/not-a-git-repo" });
+		const fake = makeFakePi();
+		const runWorker = await importRunWorker();
+		runWorker(fake.pi);
+
+		// team_finish note
+		await fake.tools.get("team_finish").execute("id", { status: "done", summary: "ok" }, null, null, { cwd: "/worker/own/repo" });
+		const finishNote = fake.execCalls.find((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note");
+		expect((finishNote?.opts as { cwd?: string })?.cwd).toBe("/worker/own/repo");
+
+		// team_comment note (inline)
+		await fake.tools.get("team_comment").execute("id", { message: "progress" }, null, null, { cwd: "/worker/own/repo" });
+		const commentNote = fake.execCalls.filter((c) => path.basename(c.cmd) === "mai" && c.args[0] === "add-note").at(-1);
+		expect((commentNote?.opts as { cwd?: string })?.cwd).toBe("/worker/own/repo");
+	});
+
 	test("team_comment can post a file-backed markdown note", async () => {
 		setWorkerEnv();
 		const fake = makeFakePi();

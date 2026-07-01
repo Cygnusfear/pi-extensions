@@ -34,7 +34,6 @@ export function runWorker(pi: ExtensionAPI): void {
 		}
 	})();
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
-	const ticketCwd = process.env.PI_TEAMS_TICKET_CWD;
 	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
 	let meshSeq = 0;
 
@@ -72,7 +71,6 @@ export function runWorker(pi: ExtensionAPI): void {
 	let terminalStatus: TerminalStatus | null = null;
 
 
-	const getTicketCwd = (cwd: string) => ticketCwd ?? cwd;
 
 	const finalizeTask = async (cwd: string, status: TerminalStatus, summary: string) => {
 		if (terminalStatus) return;
@@ -103,7 +101,12 @@ export function runWorker(pi: ExtensionAPI): void {
 		// "shipped" even at 9/10 before the gate passes (Cecilia symptom, same class
 		// as opaque-lifecycle #5). The coordinator/human owns ticket-close on a true pass.
 		try {
-			const effectiveCwd = getTicketCwd(cwd);
+			// Run mai in the worker's OWN cwd (its worktree / target repoRoot), which is
+			// always a valid git repo. The retired `ticketCwd ?? cwd` preferred the
+			// LEADER's cwd, which can be a non-repo (Cecilia bug 4: leader launched from
+			// /Users/alexander/Projects → "not a git repository" → silent note loss).
+			// maitake is global + ticket-id-keyed, so the note attaches by id from any repo.
+			const effectiveCwd = cwd;
 			await pi.exec(getMaiBin(), ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
 		} catch {
 			// best effort
@@ -278,7 +281,9 @@ export function runWorker(pi: ExtensionAPI): void {
 				};
 			}
 
-			const effectiveCwd = getTicketCwd(ctx.cwd);
+			// Worker's OWN cwd (its worktree / target repoRoot) — always a valid git repo.
+			// See finalizeTask for why the leader's ticketCwd is not used (Cecilia bug 4).
+			const effectiveCwd = ctx.cwd;
 			let result;
 			let commentText: string;
 			if (hasFilePath) {
