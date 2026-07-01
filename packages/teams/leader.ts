@@ -100,7 +100,7 @@ interface PersistedWorkerState {
   sessionMode?: import("./v2/protocol.ts").WorkerSessionMode;
   freeform?: boolean;
   nickname?: string;
-  meshClientId?: string;
+  durableMeshId?: string;
   routeState?: WorkerHandle["routeState"];
   lastActivityAt?: number;
   lastOutputAt?: number;
@@ -923,7 +923,7 @@ export class TeamLeader {
         sessionMode: w.attempts?.at(-1)?.sessionMode,
         freeform: w.freeform,
         nickname: w.nickname,
-        meshClientId: w.meshClientId,
+        durableMeshId: w.durableMeshId,
         routeState: w.routeState,
         doneAt: w.doneAt,
         graceAt: w.graceAt,
@@ -1029,7 +1029,7 @@ export class TeamLeader {
   ): WorkerHandle["routeState"] {
     if (status === "warning" || status === "failed" || status === "killed") return "dead";
     if (saved.freeform && (status === "done" || status === "grace")) return "resumable";
-    if ((status === "running" || status === "spawning") && saved.meshClientId) return "linked";
+    if ((status === "running" || status === "spawning") && saved.durableMeshId) return "linked";
     if (status === "running" || status === "spawning") return "pending";
     return "dead";
   }
@@ -1136,7 +1136,7 @@ export class TeamLeader {
           spawnedAt: saved.spawnedAt,
           freeform: saved.freeform,
           nickname: saved.nickname,
-          meshClientId: saved.meshClientId,
+          durableMeshId: saved.durableMeshId,
           routeState,
           lastActivityAt: saved.lastActivityAt ?? now,
           lastProcessActivityAt: now,
@@ -1304,7 +1304,7 @@ export class TeamLeader {
         break;
       case "running":
         worker.status = "running";
-        if (worker.routeState === "dead") worker.routeState = worker.meshClientId ? "linked" : "pending";
+        if (worker.routeState === "dead") worker.routeState = worker.durableMeshId ? "linked" : "pending";
         break;
       case "done":
         worker.status = "done";
@@ -1330,8 +1330,9 @@ export class TeamLeader {
     }
   }
 
-  /** Get the mesh client ID (for passing to workers as coordinator ID). */
-  getMeshClientId(): string {
+  /** Get this coordinator's DURABLE mesh id (self().id) — passed to workers as the
+   *  coordinator route so worker→coordinator tells land on pi/mesh/session/<durableId>. */
+  getDurableMeshId(): string {
     return this.mesh?.self()?.id ?? "";
   }
 
@@ -1358,9 +1359,9 @@ export class TeamLeader {
     const worker = this.workers.get(name);
     if (!worker) throw new Error(`Unknown worker \"${name}\"`);
 
-    if (worker.routeState === "linked" && worker.meshClientId && this.mesh) {
+    if (worker.routeState === "linked" && worker.durableMeshId && this.mesh) {
       try {
-        const reply = await this.mesh.ask(worker.meshClientId, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
+        const reply = await this.mesh.ask(worker.durableMeshId, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
         if (reply?.error) throw new Error(String(reply.error));
         return {
           text: typeof reply?.text === "string" ? reply.text : JSON.stringify(reply),
@@ -1399,7 +1400,7 @@ export class TeamLeader {
 
       this.clearPendingAmbientChat(name);
       worker.routeState = "pending";
-      worker.meshClientId = undefined;
+      worker.durableMeshId = undefined;
       worker.doneAt = undefined;
       worker.graceAt = undefined;
       worker.resumableUntilAt = undefined;
@@ -1427,8 +1428,8 @@ export class TeamLeader {
     }
 
     // Running worker — send via mesh
-    if (worker.routeState !== "linked" || !worker.meshClientId || !this.mesh) return false;
-    this.mesh.tell(worker.meshClientId, message);
+    if (worker.routeState !== "linked" || !worker.durableMeshId || !this.mesh) return false;
+    this.mesh.tell(worker.durableMeshId, message);
     return true;
   }
 
@@ -1465,7 +1466,7 @@ export class TeamLeader {
     if (this.meshChannelId) env.PI_TEAMS_CHANNEL_ID = this.meshChannelId;
     if (this.leaseFilePath) env.PI_TEAMS_LEASE_FILE = this.leaseFilePath;
 
-    const meshId = this.getMeshClientId();
+    const meshId = this.getDurableMeshId();
     if (meshId) env.PI_TEAMS_COORDINATOR_ID = meshId;
     if (this.ctx) env.PI_TEAMS_LEADER_SESSION = this.ctx.sessionManager.getSessionFile() ?? "";
 
@@ -1523,9 +1524,14 @@ export class TeamLeader {
     this.unwireMeshChannelEvents();
   }
 
-  private linkWorkerRoute(worker: WorkerHandle, meshClientId: string, nickname?: string) {
-    const changed = worker.meshClientId !== meshClientId || worker.routeState !== "linked" || (nickname !== undefined && worker.nickname !== nickname);
-    worker.meshClientId = meshClientId;
+  /** Bind a worker handle to its DURABLE mesh id (v1a). The id is DECLARED by the
+   *  worker in its envelope (envelope.meshId) and is stable across resume/reconnect,
+   *  so unlike the retired clientId-route cache it never goes stale. Coordinator→worker
+   *  tells then route over pi/mesh/session/<durableId>, which the worker subscribes to
+   *  on identity resolution. */
+  private bindWorkerRoute(worker: WorkerHandle, durableMeshId: string, nickname?: string) {
+    const changed = worker.durableMeshId !== durableMeshId || worker.routeState !== "linked" || (nickname !== undefined && worker.nickname !== nickname);
+    worker.durableMeshId = durableMeshId;
     worker.routeState = "linked";
     if (nickname) worker.nickname = nickname;
     if (changed) this.persistStateIfHydrated();
@@ -1558,8 +1564,9 @@ export class TeamLeader {
 			const commentText = typeof p.text === "string" ? p.text : null;
 			if (envelope.type === "worker.comment" && commentText !== null) {
         this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
-        // Any worker channel activity tells us its current direct mesh route.
-        this.linkWorkerRoute(worker, msg.from, peerNickname);
+        // Bind to the worker's DECLARED durable mesh id (stable route); fall back to
+        // the transport clientId only for a legacy worker that omits envelope.meshId.
+        this.bindWorkerRoute(worker, envelope.meshId ?? msg.from, peerNickname);
         // Instant progress — feed into existing notification pipeline
         worker.lastOutputAt = Date.now();
         worker.lastOutputLabel = "mesh comment";
@@ -1577,7 +1584,7 @@ export class TeamLeader {
 	      } else if (envelope.type === "worker.hello") {
         this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
         worker.lastActivityAt = Date.now();
-        this.linkWorkerRoute(worker, msg.from, peerNickname);
+        this.bindWorkerRoute(worker, envelope.meshId ?? msg.from, peerNickname);
         this.renderWidget();
       }
     };
@@ -1597,7 +1604,7 @@ export class TeamLeader {
 			if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
 			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
 
-			this.linkWorkerRoute(worker, msg.from);
+			this.bindWorkerRoute(worker, envelope.meshId ?? msg.from);
 			const finishStatus = p.status;
 			const finishSummary = typeof p.summary === "string" ? p.summary : "";
 			if (envelope.type === "worker.finish" && finishStatus === "done") {
@@ -1690,7 +1697,7 @@ export class TeamLeader {
       channelId: this.meshChannelId ?? undefined,
       teamId: this.v2TeamId ?? ticketId,
       leaderEpoch: this.leaderEpoch,
-      coordinatorMeshId: this.getMeshClientId() || undefined,
+      coordinatorMeshId: this.getDurableMeshId() || undefined,
       ticketCwd: this.ctx.cwd,
       ticketText,
       freeform,
@@ -1853,7 +1860,7 @@ export class TeamLeader {
         if (child) {
           worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
           worker.routeState = "pending";
-          worker.meshClientId = undefined;
+          worker.durableMeshId = undefined;
           worker.lastActivityAt = Date.now();
           worker.lastProcessActivityAt = Date.now();
           worker.lastNote = `AUTO-RETRY: ${recovery.error.slice(0, 120)}`;
@@ -1937,7 +1944,7 @@ export class TeamLeader {
       if (child) {
         worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
         worker.routeState = "pending";
-        worker.meshClientId = undefined;
+        worker.durableMeshId = undefined;
         worker.lastActivityAt = Date.now();
         worker.lastProcessActivityAt = Date.now();
         worker.lastNote = "AUTO-RESUME: continuing after mid-turn auto-compaction";
@@ -2034,7 +2041,7 @@ export class TeamLeader {
         if (newHandle.attempts?.[0]) worker.attempts.push(newHandle.attempts[0]);
         worker.status = "spawning";
         worker.routeState = "pending";
-        worker.meshClientId = undefined;
+        worker.durableMeshId = undefined;
         worker.spawnedAt = Date.now();
         worker.lastActivityAt = Date.now();
         worker.lastProcessActivityAt = Date.now();
@@ -2106,7 +2113,7 @@ export class TeamLeader {
     const crashReport = classification === "failure" ? buildWorkerCrashReport(worker, exitCode) : "";
     this.projectV2WorkerRuntime(name);
     worker.routeState = "dead";
-    worker.meshClientId = undefined;
+    worker.durableMeshId = undefined;
 
     // Cleanup: auto-commit dirty files, preserve success/warning branches, and
     // keep ambiguous warning worktrees on disk so failed terminal signaling does
@@ -2318,7 +2325,7 @@ export class TeamLeader {
     this.appendV2Fact(workerName, { type: "worker_killed", at: Date.now() });
     worker.status = "killed";
     worker.routeState = "dead";
-    worker.meshClientId = undefined;
+    worker.durableMeshId = undefined;
     worker.killedAt = Date.now();
 
     // Remove from map FIRST — prevents handleWorkerExit zombie re-add (RC-A4)
@@ -2447,7 +2454,7 @@ export class TeamLeader {
 
       worker.status = "failed";
       worker.routeState = "dead";
-      worker.meshClientId = undefined;
+      worker.durableMeshId = undefined;
       worker.lastNote = worker.lastNote ?? "stale recovered worker pruned after reload";
       pruned = true;
     }

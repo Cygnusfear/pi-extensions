@@ -1,24 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMaiBin } from "../shared/src/mai-binary.js";
 import { Type } from "@sinclair/typebox";
-import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve, join } from "node:path";
-import { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
+import { resolve } from "node:path";
+import type { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
 import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
 import { createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
 import type { WorkerSessionMode } from "./v2/protocol.ts";
-
-function resolveWorkerMeshBinPath(): string | null {
-	const binName = process.platform === "win32" ? "pi-mesh.exe" : "pi-mesh";
-	const workerDir = dirname(new URL(import.meta.url).pathname);
-	const meshNative = resolve(workerDir, "..", "pi-mesh", "native");
-	const primary = join(meshNative, binName);
-	const fallback = join(meshNative, "target", "release", binName);
-	if (existsSync(primary)) return primary;
-	if (existsSync(fallback)) return fallback;
-	return null;
-}
 
 const HEARTBEAT_ENTRY_TYPE = "teams-worker-heartbeat";
 
@@ -83,6 +71,9 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		}
 	};
 	const nextSeq = () => ++meshSeq;
+	// Our durable mesh identity (shared instance). Declared on every worker→leader
+	// envelope so the leader binds handle→durableId and routes over the durable topic.
+	const selfMeshId = (): string | undefined => mesh?.getIdentity()?.id ?? undefined;
 
 	let ticketClosed = false;
 	let lastStopReason: string | undefined;
@@ -112,6 +103,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				seq: nextSeq(),
 				status,
 				summary: normalizedSummary,
+				meshId: selfMeshId(),
 			}),
 		);
 		try {
@@ -148,7 +140,9 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 	const stopHeartbeat = () => {
 		clearInterval(heartbeatTimer);
 		if (leaseWatchdog) { clearInterval(leaseWatchdog); leaseWatchdog = null; }
-		if (mesh) { try { mesh.stop(); } catch {} mesh = null; }
+		// The mesh instance is SHARED (owned by the pi-mesh extension) — drop our
+		// reference but never stop it, or we'd kill the process's only mesh.
+		mesh = null;
 	};
 
 	const killOwnProcessGroup = () => {
@@ -168,8 +162,11 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 
 	const announceInitWhenReady = (attempt = 0) => {
 		if (!mesh || !channelId) return;
-		const selfId = mesh.self().id;
-		if (!selfId) {
+		// Wait for the DURABLE identity (not just any clientId) so the hello declares
+		// the stable mesh id the leader binds the route to. mesh.self().id would
+		// return the clientId before the identity resolves — too early to route by.
+		const durableId = mesh.getIdentity()?.id;
+		if (!durableId) {
 			if (attempt >= 50) return;
 			setTimeout(() => announceInitWhenReady(attempt + 1), 100);
 			return;
@@ -182,6 +179,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 				workerId: workerName,
 				attemptId: workerInstanceId,
 				seq: nextSeq(),
+				meshId: durableId,
 				runtime: {
 					protocolVersion: 1,
 					teamId,
@@ -197,14 +195,16 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 		);
 	};
 
-	// Start mesh connection (non-blocking — if sidecar isn't available, mesh stays null)
-	pi.on("session_start", (_event, ctx) => {
+	// Consume the SHARED pi-mesh instance (v1a M1). The pi-mesh extension runs in
+	// this same worker process and owns the mesh lifecycle + the pinned durable
+	// identity. Minting a second PiMesh here (the old behaviour) created a second
+	// sidecar clientId that defeated the pinned id and forced the stale-route +
+	// identity-churn bugs. Exactly one PiMesh per worker.
+	pi.on("session_start", (_event, _ctx) => {
 		try {
-			const binPath = resolveWorkerMeshBinPath();
-			if (!binPath) { console.warn("[teams-worker] mesh binary not found"); }
+			mesh = (globalThis as { __piMesh?: PiMesh }).__piMesh ?? null;
+			if (!mesh) { console.warn("[teams-worker] shared mesh instance not available"); }
 			else {
-				mesh = new PiMesh();
-				mesh.start(binPath, ctx.sessionManager.getSessionId(), ctx.cwd, { mode: "peer", scouting: true });
 				if (channelId) mesh.joinChannel(channelId);
 				announceInitWhenReady();
 			}
@@ -323,6 +323,7 @@ export function runWorker(pi: ExtensionAPI, options: WorkerOptions = {}): void {
 					attemptId: workerInstanceId,
 					seq: nextSeq(),
 					text: commentText,
+					meshId: selfMeshId(),
 				}),
 			);
 			return { content: [{ type: "text" as const, text: `Commented on ticket #${ticketId}` }], details: undefined };

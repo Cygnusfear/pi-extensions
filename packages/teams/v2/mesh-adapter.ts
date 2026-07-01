@@ -14,6 +14,8 @@ export function createWorkerEnvelope<TPayload>(input: {
 	payload: TPayload;
 	correlationId?: string;
 	requiresAck?: boolean;
+	/** Sender's durable mesh id — lets the leader bind handle->durableId. */
+	meshId?: string;
 }): TeamEnvelope<TPayload> {
 	return {
 		version: 1,
@@ -29,6 +31,7 @@ export function createWorkerEnvelope<TPayload>(input: {
 		payload: input.payload,
 		...(input.correlationId ? { correlationId: input.correlationId } : {}),
 		...(input.requiresAck !== undefined ? { requiresAck: input.requiresAck } : {}),
+		...(input.meshId ? { meshId: input.meshId } : {}),
 	};
 }
 
@@ -39,6 +42,7 @@ export function createWorkerHelloEnvelope(input: {
 	attemptId: string;
 	seq: number;
 	runtime: WorkerRuntimeEnvelope;
+	meshId?: string;
 }): TeamEnvelope<WorkerHelloPayload> {
 	return createWorkerEnvelope({
 		...input,
@@ -55,6 +59,7 @@ export function createWorkerCommentEnvelope(input: {
 	attemptId: string;
 	seq: number;
 	text: string;
+	meshId?: string;
 }): TeamEnvelope<WorkerCommentPayload> {
 	return createWorkerEnvelope({
 		...input,
@@ -71,6 +76,7 @@ export function createWorkerFinishEnvelope(input: {
 	seq: number;
 	status: "done" | "quit";
 	summary: string;
+	meshId?: string;
 }): TeamEnvelope<WorkerFinishPayload> {
 	return createWorkerEnvelope({
 		...input,

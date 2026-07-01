@@ -41,7 +41,7 @@ export interface WorkerHandle {
 	spawnError?: string;
 	attempts?: WorkerAttempt[];
 	nickname?: string;
-	meshClientId?: string;
+	durableMeshId?: string;
 	routeState: WorkerRouteState;
 	freeform?: boolean;
 	recoveryAttempts?: number;

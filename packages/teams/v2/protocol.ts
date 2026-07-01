@@ -46,6 +46,11 @@ export interface TeamEnvelope<TPayload = unknown> {
 	sentAt: number;
 	correlationId?: string;
 	requiresAck?: boolean;
+	/** The sender's DURABLE mesh identity (mesh.self().id) — the stable routing
+	 *  address, decoupled from the sidecar clientId. A worker declares this so the
+	 *  leader binds handle->durableId and routes replies over the durable session
+	 *  topic (survives clientId churn). Optional for back-compat with pre-v1a envelopes. */
+	meshId?: string;
 	payload: TPayload;
 }
 
