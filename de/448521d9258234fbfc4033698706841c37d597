@@ -1,0 +1,35 @@
+packages/pi-mesh/extension/route-resolve.test.ts
+  s_374f20587f28f1::t_76b251b9762f32 1-36,43-68
+  s_374f20587f28f1::t_ac86060d8c8e98 37-42
+packages/pi-mesh/extension/pi-mesh.ts
+  s_374f20587f28f1::t_8e57aeff087ca8 42
+  s_374f20587f28f1::t_0b7e8563f6d8f5 1639-1642
+  s_374f20587f28f1::t_48c5f34561a048 763-767
+  s_374f20587f28f1::t_d1952c96ca79e4 1313-1318
+  s_374f20587f28f1::t_4ffe619c555cef 43
+  s_374f20587f28f1::t_6c4a55107c0290 906-913,928-929,932-940,943
+  s_374f20587f28f1::t_d9f94127ba3474 523-529,532-544
+  s_374f20587f28f1::t_dcbecdbe151ce5 1939
+packages/pi-mesh/extension/identity-pin.ts
+  s_374f20587f28f1::t_1cd6cbd0e8ba46 1-48
+packages/pi-mesh/extension/identity-pin.test.ts
+  s_374f20587f28f1::t_286fb39bc1794b 1-71
+packages/pi-mesh/extension/route-resolve.ts
+  s_374f20587f28f1::t_c872f13b2067b5 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "de448521d9258234fbfc4033698706841c37d597",
+  "prompts": {},
+  "sessions": {
+    "s_374f20587f28f1": {
+      "agent_id": {
+        "tool": "Henrietta Apollo Perlmutter",
+        "id": "019f1b84-0b3b-7d0f-84b2-02daace32e31",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
