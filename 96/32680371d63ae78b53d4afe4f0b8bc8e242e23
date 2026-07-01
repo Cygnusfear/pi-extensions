@@ -1,0 +1,26 @@
+packages/pi-mesh/extension/pi-mesh.ts
+  s_a55faf01f2a777::t_808ce421dab412 1570-1572
+  s_a55faf01f2a777::t_96a07fb51cfd8c 2058-2076,2079
+  s_a55faf01f2a777::t_aa6d2c684ef424 1758-1760
+  s_a55faf01f2a777::t_c8329dad0576d2 1342-1427
+packages/pi-mesh/extension/durable-session-store.test.ts
+  s_a55faf01f2a777::t_a746527a1650fe 1-160
+packages/pi-mesh/extension/durable-session-store.ts
+  s_a55faf01f2a777::t_2969ecdb5d53f1 1-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "9632680371d63ae78b53d4afe4f0b8bc8e242e23",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
