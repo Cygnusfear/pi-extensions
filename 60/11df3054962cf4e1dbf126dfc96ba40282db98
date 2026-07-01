@@ -1,0 +1,29 @@
+packages/pi-mesh/extension/inbound-format.test.ts
+  s_a55faf01f2a777::t_8d4527cc335db6 104-129
+packages/pi-mesh/extension/pi-mesh.ts
+  s_a55faf01f2a777::t_f168f5e0306873 1559-1560,1562
+  s_a55faf01f2a777::t_74177b090415ba 1653-1655
+  s_a55faf01f2a777::t_d502127a084969 1885-1894
+  s_a55faf01f2a777::t_c7002ccbfa3e9b 1280-1286
+  s_a55faf01f2a777::t_9dde7f12f0b699 77
+  s_a55faf01f2a777::t_c202b6c2f9e1a3 1844-1845
+  s_a55faf01f2a777::t_afd659b280a83e 1543-1558,1561,1563-1614
+packages/pi-mesh/extension/inbound-format.ts
+  s_a55faf01f2a777::t_c1e8c0b6b155d3 79-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "6011df3054962cf4e1dbf126dfc96ba40282db98",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
