@@ -54,6 +54,12 @@ export function runWorker(pi: ExtensionAPI): void {
 			try { mesh.tell(coordinatorId, payload); } catch {}
 		}
 	};
+	const meshTellAndChat = (payload: unknown) => {
+		// Replacement-first cutover: send the new durable direct tell while the old
+		// channel remains live until the gate proves no dark window.
+		meshTell(payload);
+		meshChat(payload);
+	};
 	const meshTellCritical = async (payload: unknown) => {
 		if (!mesh || !coordinatorId) return;
 		try {
@@ -159,7 +165,7 @@ export function runWorker(pi: ExtensionAPI): void {
 	};
 
 	const announceInitWhenReady = (attempt = 0) => {
-		if (!mesh || !channelId) return;
+		if (!mesh || (!coordinatorId && !channelId)) return;
 		// Wait for the DURABLE identity (not just any clientId) so the hello declares
 		// the stable mesh id the leader binds the route to. mesh.self().id would
 		// return the clientId before the identity resolves — too early to route by.
@@ -169,8 +175,7 @@ export function runWorker(pi: ExtensionAPI): void {
 			setTimeout(() => announceInitWhenReady(attempt + 1), 100);
 			return;
 		}
-		mesh.chat(
-			channelId,
+		meshTellAndChat(
 			createWorkerHelloEnvelope({
 				teamId,
 				leaderEpoch,
@@ -315,7 +320,7 @@ export function runWorker(pi: ExtensionAPI): void {
 					details: undefined,
 				};
 			}
-			meshChat(
+			meshTellAndChat(
 				createWorkerCommentEnvelope({
 					teamId,
 					leaderEpoch,

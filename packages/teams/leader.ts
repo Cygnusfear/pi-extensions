@@ -756,9 +756,10 @@ export class TeamLeader {
   private meshChannelId: string | null = null;
   private v2TeamId: string | null = null;
   private v2TeamRecord: TeamRecord | null = null;
-  private readonly leaderEpoch = crypto.randomUUID();
-  private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
-  private pendingAmbientChat = new Map<string, string[]>();
+	private readonly leaderEpoch = crypto.randomUUID();
+	private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
+	private meshEventDedup = new Map<string, number>(); // transport event key → first-seen timestamp
+	private pendingAmbientChat = new Map<string, string[]>();
   private pendingAmbientTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private leaseFilePath: string | null = null;
   private leaseTimer: ReturnType<typeof setInterval> | null = null;
@@ -1453,21 +1454,33 @@ export class TeamLeader {
    *  so unlike the retired clientId-route cache it never goes stale. Coordinator→worker
    *  tells then route over pi/mesh/session/<durableId>, which the worker subscribes to
    *  on identity resolution. */
-  private bindWorkerRoute(worker: WorkerHandle, durableMeshId: string, nickname?: string) {
-    const changed = worker.durableMeshId !== durableMeshId || worker.routeState !== "linked" || (nickname !== undefined && worker.nickname !== nickname);
-    worker.durableMeshId = durableMeshId;
-    worker.routeState = "linked";
-    if (nickname) worker.nickname = nickname;
-    if (changed) this.persistStateIfHydrated();
-  }
+	private bindWorkerRoute(worker: WorkerHandle, durableMeshId: string, nickname?: string) {
+	  const changed = worker.durableMeshId !== durableMeshId || worker.routeState !== "linked" || (nickname !== undefined && worker.nickname !== nickname);
+	  worker.durableMeshId = durableMeshId;
+	  worker.routeState = "linked";
+	  if (nickname) worker.nickname = nickname;
+	  if (changed) this.persistStateIfHydrated();
+	}
 
-  private handleSessionPhaseEvent(event: SessionPhaseEvent, transportFrom: string): void {
-    const workerName = event.workerId;
-    const worker = this.workers.get(workerName);
-    if (!worker) return;
-    if (event.attemptId && event.attemptId !== worker.workerInstanceId) return;
-    if (this.v2TeamId && event.teamId !== this.v2TeamId) return;
-    if (event.leaderEpoch && event.leaderEpoch !== this.leaderEpoch) return;
+	private claimMeshEvent(key: string): boolean {
+		if (this.meshEventDedup.has(key)) return false;
+		this.meshEventDedup.set(key, Date.now());
+		while (this.meshEventDedup.size > 800) {
+			const oldest = this.meshEventDedup.keys().next().value;
+			if (oldest === undefined) break;
+			this.meshEventDedup.delete(oldest);
+		}
+		return true;
+	}
+
+	private handleSessionPhaseEvent(event: SessionPhaseEvent, transportFrom: string): void {
+	  const workerName = event.workerId;
+	  const worker = this.workers.get(workerName);
+	  if (!worker) return;
+	  if (event.attemptId && event.attemptId !== worker.workerInstanceId) return;
+	  if (this.v2TeamId && event.teamId !== this.v2TeamId) return;
+	  if (event.leaderEpoch && event.leaderEpoch !== this.leaderEpoch) return;
+	  if (!this.claimMeshEvent(`phase:${event.teamId}:${event.leaderEpoch}:${event.workerId}:${event.attemptId}:${event.seq}`)) return;
 
     let peerNickname: string | undefined;
     const routeId = event.meshId ?? transportFrom;
@@ -1481,10 +1494,81 @@ export class TeamLeader {
     worker.lastOutputLabel = `phase:${event.payload.stage}`;
     this.appendV2Fact(workerName, { type: "phase_event", at: Date.now(), stage: event.payload.stage });
     this.notifyLLM({ type: "phase", worker: { ...worker }, phase: event });
-    this.renderWidget();
-  }
+	  this.renderWidget();
+	}
 
-  /** Wire mesh channel events into the existing notification pipeline. */
+	private handleWorkerToLeaderEnvelope(envelope: TeamEnvelope<unknown>, transportFrom: string): void {
+		const p = envelope.payload as Record<string, unknown> | undefined;
+		if (!p || typeof p !== "object") return;
+		const workerName = envelope.workerId ?? "unknown";
+		const workerInstanceId = envelope.attemptId ?? "";
+		const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
+		const worker = this.workers.get(workerName);
+		if (!worker) return;
+		if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
+		if (ticketId && ticketId !== worker.ticketId) return;
+		if (!this.claimMeshEvent(`worker:${envelope.teamId}:${envelope.leaderEpoch}:${workerName}:${workerInstanceId}:${envelope.type}:${envelope.seq}`)) return;
+
+		const routeId = envelope.meshId ?? transportFrom;
+		let peerNickname: string | undefined;
+		if (!worker.nickname && this.mesh) {
+			const peer = this.mesh.peers().find((pr) => pr.id === transportFrom || pr.meshId === routeId || pr.sessionId === transportFrom);
+			if (peer?.nickname) peerNickname = peer.nickname;
+		}
+
+		const commentText = typeof p.text === "string" ? p.text : null;
+		if (envelope.type === "worker.comment" && commentText !== null) {
+			this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
+			this.bindWorkerRoute(worker, routeId, peerNickname);
+			worker.lastOutputAt = Date.now();
+			worker.lastOutputLabel = "mesh comment";
+			if (!this.meshDelivered.has(workerName)) this.meshDelivered.set(workerName, new Set());
+			const seen = this.meshDelivered.get(workerName)!;
+			seen.add(commentText);
+			if (seen.size > 50) {
+				const first = seen.values().next().value;
+				if (first !== undefined) seen.delete(first);
+			}
+			this.notifyLLM({ type: "comment", worker: { ...worker }, comment: commentText });
+			this.queueAmbientChatForResumableWorkers(workerName, commentText);
+			this.renderWidget();
+		} else if (envelope.type === "worker.hello") {
+			this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
+			worker.lastActivityAt = Date.now();
+			this.bindWorkerRoute(worker, routeId, peerNickname);
+			this.renderWidget();
+		} else {
+			const finishStatus = p.status;
+			const finishSummary = typeof p.summary === "string" ? p.summary : "";
+			if (envelope.type === "worker.finish" && finishStatus === "done") {
+				this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: finishSummary });
+				// Capture the EXPLICIT terminal status from the durable finish tell — the
+				// authoritative terminal source assessWorkerExit reads on process exit (replaces
+				// the heartbeat worker_terminal entry). The SAME leader instance that receives
+				// this tell runs handleWorkerExit, so the handle is populated before assessment.
+				this.bindWorkerRoute(worker, routeId, peerNickname);
+				worker.terminalStatus = "done";
+				worker.terminalSummary = finishSummary;
+				this.persistStateIfHydrated();
+				worker.lastOutputAt = Date.now();
+				worker.lastOutputLabel = "mesh done";
+				// Don't emit completion here — process exit handler is authoritative.
+				// But update the widget immediately.
+				this.renderWidget();
+			} else if (envelope.type === "worker.finish" && finishStatus === "quit") {
+				this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
+				this.bindWorkerRoute(worker, routeId, peerNickname);
+				worker.terminalStatus = "quit";
+				worker.terminalSummary = finishSummary;
+				this.persistStateIfHydrated();
+				worker.lastOutputAt = Date.now();
+				worker.lastOutputLabel = "mesh quit";
+				this.renderWidget();
+			}
+		}
+	}
+
+	/** Wire mesh channel events into the existing notification pipeline. */
 	private _wireMeshChannelEvents() {
 		if (!this.mesh) return;
 		if (this.meshChannelHandler || this.meshMessageHandler) return;
@@ -1493,97 +1577,21 @@ export class TeamLeader {
 				this.handleSessionPhaseEvent(msg.payload, msg.from);
 				return;
 			}
-			if (!isWorkerToLeaderEnvelope(msg.payload)) return;
-			const envelope = msg.payload;
-			const p = envelope.payload as Record<string, unknown> | undefined;
-			if (!p || typeof p !== "object") return;
-			const workerName = envelope.workerId ?? "unknown";
-			const workerInstanceId = envelope.attemptId ?? "";
-			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
-			const worker = this.workers.get(workerName);
-			if (!worker) return;
-			if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
-			if (ticketId && ticketId !== worker.ticketId) return; // ignore late events from an older batch reusing the same worker name
-
-			// Resolve sender nickname from mesh peer list
-			let peerNickname: string | undefined;
-			if (!worker.nickname && this.mesh) {
-				const peer = this.mesh.peers().find((pr) => pr.id === msg.from || pr.sessionId === msg.from);
-				if (peer?.nickname) peerNickname = peer.nickname;
-      }
-
-			const commentText = typeof p.text === "string" ? p.text : null;
-			if (envelope.type === "worker.comment" && commentText !== null) {
-        this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
-        // Bind to the worker's DECLARED durable mesh id (stable route); fall back to
-        // the transport clientId only for a legacy worker that omits envelope.meshId.
-        this.bindWorkerRoute(worker, envelope.meshId ?? msg.from, peerNickname);
-        // Instant progress — feed into existing notification pipeline
-        worker.lastOutputAt = Date.now();
-        worker.lastOutputLabel = "mesh comment";
-        // Track for dedup against polling (capped to last 50 per worker)
-        if (!this.meshDelivered.has(workerName)) this.meshDelivered.set(workerName, new Set());
-        const seen = this.meshDelivered.get(workerName)!;
-        seen.add(commentText);
-        if (seen.size > 50) {
-          const first = seen.values().next().value;
-          if (first !== undefined) seen.delete(first);
-        }
-        this.notifyLLM({ type: "comment", worker: { ...worker }, comment: commentText });
-        this.queueAmbientChatForResumableWorkers(workerName, commentText);
-				this.renderWidget();
-	      } else if (envelope.type === "worker.hello") {
-        this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
-        worker.lastActivityAt = Date.now();
-        this.bindWorkerRoute(worker, envelope.meshId ?? msg.from, peerNickname);
-        this.renderWidget();
-      }
-    };
+			if (isWorkerToLeaderEnvelope(msg.payload)) this.handleWorkerToLeaderEnvelope(msg.payload, msg.from);
+		};
 		this.mesh.on("channel", this.meshChannelHandler);
 
-    // Direct tells from workers (completion/failure) — these trigger a turn
+	    // Direct tells from workers — durable mesh delivery, with the channel path still
+	    // accepted during the replacement-first cutover.
 		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
-			if (!isWorkerToLeaderEnvelope(msg.payload)) return;
-			const envelope = msg.payload;
-			const p = envelope.payload as Record<string, unknown> | undefined;
-			if (!p || typeof p !== "object") return;
-			const workerName = envelope.workerId ?? "unknown";
-			const workerInstanceId = envelope.attemptId ?? "";
-			const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
-			const worker = this.workers.get(workerName);
-			if (!worker) return;
-			if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
-			if (ticketId && ticketId !== worker.ticketId) return; // ignore stale direct messages from an older batch
-
-			this.bindWorkerRoute(worker, envelope.meshId ?? msg.from);
-			const finishStatus = p.status;
-			const finishSummary = typeof p.summary === "string" ? p.summary : "";
-			if (envelope.type === "worker.finish" && finishStatus === "done") {
-        this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: finishSummary });
-        // Capture the EXPLICIT terminal status from the durable finish tell — the
-        // authoritative terminal source assessWorkerExit reads on process exit (replaces
-        // the heartbeat worker_terminal entry). The SAME leader instance that receives
-        // this tell runs handleWorkerExit, so the handle is populated before assessment.
-        worker.terminalStatus = "done";
-        worker.terminalSummary = finishSummary;
-        this.persistStateIfHydrated();
-        worker.lastOutputAt = Date.now();
-        worker.lastOutputLabel = "mesh done";
-        // Don't emit completion here — process exit handler is authoritative.
-        // But update the widget immediately.
-        this.renderWidget();
-      } else if (envelope.type === "worker.finish" && finishStatus === "quit") {
-        this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
-        worker.terminalStatus = "quit";
-        worker.terminalSummary = finishSummary;
-        this.persistStateIfHydrated();
-        worker.lastOutputAt = Date.now();
-        worker.lastOutputLabel = "mesh quit";
-        this.renderWidget();
-      }
-    };
+			if (isSessionPhaseEvent(msg.payload)) {
+				this.handleSessionPhaseEvent(msg.payload, msg.from);
+				return;
+			}
+			if (isWorkerToLeaderEnvelope(msg.payload)) this.handleWorkerToLeaderEnvelope(msg.payload, msg.from);
+	    };
 		this.mesh.on("message", this.meshMessageHandler);
-  }
+	}
 
   async delegate(
     ticketId: string,

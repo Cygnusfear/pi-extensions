@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { buildTitle, shortStableName, normalizeSessionTitle, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
+import { buildTitle, shortStableName, normalizeSessionTitle, publishSessionPhaseEvent, resolveStageKey, listStageKeys, STAGES } from "../extensions/session-tab-title.ts";
+import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION } from "@pi-extensions/shared/session-phase-event";
 
 describe("STAGES table", () => {
   test("has all 14 hooman-specified stages", () => {
@@ -177,5 +178,39 @@ describe("buildTitle", () => {
     // 👩‍🚀 contains a space-free ZWJ sequence; split(" ")[0] still isolates it
     const unique = new Set(icons);
     expect(unique.size).toBe(icons.length);
+  });
+});
+
+describe("session phase event transport", () => {
+  test("publishes a direct coordinator tell alongside the cutover channel", () => {
+    const tells: Array<{ id: string; payload: unknown }> = [];
+    const chats: Array<{ channel: string; payload: unknown }> = [];
+    const event = {
+      kind: SESSION_PHASE_EVENT_KIND,
+      version: SESSION_PHASE_EVENT_VERSION,
+      from: "worker" as const,
+      to: "leader" as const,
+      teamId: "team-1",
+      leaderEpoch: "epoch-1",
+      workerId: "worker-1",
+      attemptId: "attempt-1",
+      seq: 1,
+      sentAt: Date.now(),
+      meshId: "worker-durable-1",
+      payload: { stage: "implementing", label: "implementing", icon: "🏭", color: "amber", sessionId: "sess-1" },
+    };
+
+    publishSessionPhaseEvent({
+      mesh: {
+        tell: (id, payload) => tells.push({ id, payload }),
+        chat: (channel, payload) => chats.push({ channel, payload }),
+      },
+      event,
+      coordinatorId: "coord-durable-1",
+      channelId: "teams-v2-team-1",
+    });
+
+    expect(tells).toEqual([{ id: "coord-durable-1", payload: event }]);
+    expect(chats).toEqual([{ channel: "teams-v2-team-1", payload: event }]);
   });
 });
