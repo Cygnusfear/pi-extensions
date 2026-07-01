@@ -1,0 +1,37 @@
+packages/teams/types.ts
+  s_154c1e7edc0124::t_0c9a5e6b167a4b 2,99
+packages/teams/leader.ts
+  s_154c1e7edc0124::t_cb3a929af97a06 844
+  s_154c1e7edc0124::t_8e2f4ba91036b4 1541-1558,1560-1563,1569-1572
+  s_154c1e7edc0124::t_89ef7e34aef80a 1559
+  s_154c1e7edc0124::t_41df0c781386bb 8
+packages/shared/src/session-phase-event.ts
+  s_154c1e7edc0124::t_efa44bcc1b2176 1-50
+packages/teams/leader.state.test.ts
+  s_154c1e7edc0124::t_c3742b2d13e6ce 7,225-268
+  s_154c1e7edc0124::t_d012fcd22df801 269-270
+packages/session-tab-title/extensions/session-tab-title.ts
+  s_154c1e7edc0124::t_b9231ba109cc2d 75
+  s_154c1e7edc0124::t_93ed530f871066 58,71-74
+  s_154c1e7edc0124::t_393d3c84d158f3 277-311,358-359
+packages/teams/v2/state.ts
+  s_154c1e7edc0124::t_e4226fd7880dd2 22
+packages/shared/package.json
+  s_154c1e7edc0124::t_80314c2f97f748 25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "5156f37f7b1e9f4e551ad1637351344ef20d7149",
+  "prompts": {},
+  "sessions": {
+    "s_154c1e7edc0124": {
+      "agent_id": {
+        "tool": "Harlow Nova Bahcall",
+        "id": "019f1bbf-b1ae-75ff-a53b-4894414ba33d",
+        "model": "openai-codex/gpt-5.5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
