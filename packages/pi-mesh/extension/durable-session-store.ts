@@ -3,6 +3,7 @@ import path from "node:path";
 import {
 	buildReviveDescriptor,
 	isReviveDescriptor,
+	SPAWNER_PARTIAL_DESCRIPTOR_FILE,
 	type ReviveDescriptor,
 } from "@pi-extensions/shared/revive-descriptor";
 import { durableDescriptorPath, durableSessionDir } from "./durable-inbound-mailbox.ts";
@@ -71,10 +72,6 @@ export function removeDurableDescriptor(durableId: string, root?: string): void 
 }
 
 // ── The spawner's PARTIAL descriptor (written next to the session file) ───────
-
-/** Filename the spawner writes its PARTIAL descriptor under, in the session dir.
- *  pi-mesh reads it on identity resolution to materialise the canonical one. */
-export const SPAWNER_PARTIAL_DESCRIPTOR_FILE = "revive-descriptor.json";
 
 /** Env var pointing at the spawner's partial descriptor (set at spawn). Falls
  *  back to `<dirname(sessionFile)>/revive-descriptor.json` when unset. */

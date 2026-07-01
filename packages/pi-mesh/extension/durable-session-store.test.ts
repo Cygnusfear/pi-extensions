@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildReviveDescriptor } from "@pi-extensions/shared/revive-descriptor";
+import { buildReviveDescriptor, SPAWNER_PARTIAL_DESCRIPTOR_FILE } from "@pi-extensions/shared/revive-descriptor";
 import { durableDescriptorPath } from "./durable-inbound-mailbox.ts";
 import {
 	buildReviveNotify,
@@ -13,7 +13,6 @@ import {
 	readSpawnerPartialDescriptor,
 	removeDurableDescriptor,
 	REVIVE_DESCRIPTOR_ENV,
-	SPAWNER_PARTIAL_DESCRIPTOR_FILE,
 	spawnerPartialDescriptorPath,
 	writeDurableDescriptor,
 } from "./durable-session-store.ts";

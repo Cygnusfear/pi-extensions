@@ -24,7 +24,7 @@ import {
   writeLeaderLease,
 } from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
-import { isProcessAlive, killWorker, resumeWorker, spawnWorker } from "./spawner.js";
+import { isProcessAlive, killWorker, releaseWorkerActivation, resumeWorker, spawnWorker } from "./spawner.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
 import { wrapPollEvent, type TeamsEvent } from "./subscription.js";
 import type { PollEvent, SpawnConfig, WorkerAttempt, WorkerHandle } from "./types.js";
@@ -1827,6 +1827,11 @@ export class TeamLeader {
       return;
     }
 
+    // v1c: the incarnation is confirmed dead — free its activation lease so a
+    // resume/revive of this session can re-acquire (recovery below re-acquires a
+    // fresh lease; a terminal worker leaves no leftover).
+    releaseWorkerActivation(worker);
+
     if (!this.v2TeamRecord?.workers[name]) {
       this.upsertV2WorkerFromHandle(worker);
     }
@@ -2355,6 +2360,9 @@ export class TeamLeader {
     worker.routeState = "dead";
     worker.durableMeshId = undefined;
     worker.killedAt = Date.now();
+    // v1c: free the activation lease so a standard revive of this durable session
+    // can re-acquire immediately (orphan = kill + standard-revive).
+    releaseWorkerActivation(worker);
 
     // Remove from map FIRST — prevents handleWorkerExit zombie re-add (RC-A4)
     // and ensures widget/polling no longer see this worker.

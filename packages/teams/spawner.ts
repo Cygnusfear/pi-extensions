@@ -2,8 +2,51 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { buildLeaderLeasePath } from "./lease.js";
+import { buildLeaderLeasePath, commitActivationLease, releaseActivationLease, tryAcquireActivationLease } from "./lease.js";
+import {
+	buildReviveDescriptor,
+	pickReviveDescriptorEnv,
+	SPAWNER_PARTIAL_DESCRIPTOR_FILE,
+} from "@pi-extensions/shared/revive-descriptor";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
+
+/**
+ * Write the SPAWNER's PARTIAL revive descriptor next to the worker's session
+ * file (ADD-1, contract pe-jimphzxj). The activator (pi-mesh) reads it on
+ * identity resolution and materialises the canonical descriptor keyed by the
+ * durable id. Only the spawner knows the semantic params (model, ticket,
+ * worktree, PI_TEAMS_* env) that pi-mesh's process-view cannot see.
+ */
+function writeWorkerReviveDescriptor(input: {
+	sessionFile: string;
+	cwd: string;
+	model?: string;
+	ticketId?: string;
+	worktreePath?: string | null;
+	env: Record<string, string | undefined>;
+	supervisors?: string[];
+}): string {
+	const args = ["--session", input.sessionFile];
+	if (input.model) args.push("--model", input.model);
+	const descriptor = buildReviveDescriptor({
+		sessionFile: input.sessionFile,
+		cwd: input.cwd,
+		command: "pi",
+		args,
+		model: input.model,
+		ticketId: input.ticketId,
+		worktreePath: input.worktreePath ?? undefined,
+		env: pickReviveDescriptorEnv(input.env),
+		supervisors: input.supervisors && input.supervisors.length > 0 ? input.supervisors : undefined,
+	});
+	const descriptorPath = path.join(path.dirname(input.sessionFile), SPAWNER_PARTIAL_DESCRIPTOR_FILE);
+	fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
+	const tmp = `${descriptorPath}.${process.pid}.${Date.now()}.tmp`;
+	fs.writeFileSync(tmp, JSON.stringify(descriptor, null, 2), "utf-8");
+	fs.renameSync(tmp, descriptorPath);
+	return descriptorPath;
+}
+
 
 export function buildWorkerPrompt(ticketId: string, workerName: string, ticketText?: string, additionalPrompt?: string, freeform?: boolean, coordinatorMeshId?: string, ticketCwd?: string): string {
 	const lines = [
@@ -110,13 +153,27 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	const sessionFile = path.join(sessionDir, "session.jsonl");
 	if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "", "utf-8");
 
-	const args: string[] = [];
-	if (config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume") {
-		const sessionFileArg = config.sessionMode.sessionFile;
-		args.push("--session", sessionFileArg);
-	} else {
-		args.push("--session", sessionFile);
-	}
+	const activeSessionFile =
+		config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
+			? config.sessionMode.sessionFile
+			: sessionFile;
+
+	// v1c ADD-1: write the spawner's PARTIAL revive descriptor next to the session
+	// file so the activator (pi-mesh) materialises the canonical one keyed by the
+	// durable id. Point the worker at it explicitly (pi-mesh also has a session-dir
+	// fallback).
+	const descriptorPath = writeWorkerReviveDescriptor({
+		sessionFile: activeSessionFile,
+		cwd: config.cwd,
+		model: config.model,
+		ticketId: config.ticketId,
+		worktreePath: config.useWorktree ? config.cwd : null,
+		env,
+		supervisors: config.coordinatorMeshId ? [config.coordinatorMeshId] : undefined,
+	});
+	env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
+
+	const args: string[] = ["--session", activeSessionFile];
 	if (config.model) args.push("--model", config.model);
 	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.ticketText, config.additionalPrompt, config.freeform, config.coordinatorMeshId, config.ticketCwd));
 
@@ -157,6 +214,15 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		attempts: [{ workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
 	};
 
+	// v1c: this fresh incarnation holds the activation lease so a concurrent resume
+	// of the same session is refused while it is live (single-activation authority).
+	const activation = tryAcquireActivationLease(activeSessionFile);
+	if (activation.acquired && activation.epoch) {
+		commitActivationLease(activeSessionFile, activation.epoch, child.pid!);
+		handle.activationEpoch = activation.epoch;
+		handle.activationSessionFile = activeSessionFile;
+	}
+
 	return { process: child, handle };
 }
 
@@ -182,6 +248,27 @@ export function resumeWorker(
 	const sessionFile = findSessionFile(handle.sessionDir);
 	if (!sessionFile) return null;
 
+	// v1c per-worker activation LOCK (part C): refuse a concurrent resume of the
+	// SAME session — two `pi --session <file>` would corrupt one session.jsonl.
+	// tryAcquire is atomic (openSync "wx"), so two racing resumes → exactly one
+	// wins; the loser gets null and the caller skips it. A dead prior incarnation's
+	// stale lease is stolen (that IS the orphan = kill + standard-revive path).
+	const activation = tryAcquireActivationLease(sessionFile);
+	if (!activation.acquired || !activation.epoch) return null;
+
+	// Refresh the revive descriptor with the CURRENT resume env so a future revive
+	// is reconstructable from the latest incarnation's params.
+	const descriptorPath = writeWorkerReviveDescriptor({
+		sessionFile,
+		cwd: handle.worktreePath ?? process.cwd(),
+		model: handle.model,
+		ticketId: handle.ticketId,
+		worktreePath: handle.worktreePath,
+		env,
+		supervisors: env.PI_TEAMS_COORDINATOR_ID ? [env.PI_TEAMS_COORDINATOR_ID] : undefined,
+	});
+	env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
+
 	const stdoutLog = path.join(handle.sessionDir, "stdout.log");
 	const stderrLog = path.join(handle.sessionDir, "stderr.log");
 	const stdoutFd = fs.openSync(stdoutLog, "a"); // append
@@ -191,12 +278,22 @@ export function resumeWorker(
 	if (handle.model) args.push("--model", handle.model);
 	args.push("-p", message);
 
-	const child = spawn("pi", args, {
-		cwd: handle.worktreePath ?? process.cwd(),
-		env,
-		stdio: ["ignore", stdoutFd, stderrFd],
-		detached: true,
-	});
+	let child: ChildProcess;
+	try {
+		child = spawn("pi", args, {
+			cwd: handle.worktreePath ?? process.cwd(),
+			env,
+			stdio: ["ignore", stdoutFd, stderrFd],
+			detached: true,
+		});
+	} catch (err) {
+		// Spawn failed (e.g. pi not found) — do NOT strand the activation lease.
+		// Release the reservation so a later revive can re-acquire immediately.
+		try { fs.closeSync(stdoutFd); } catch {}
+		try { fs.closeSync(stderrFd); } catch {}
+		releaseActivationLease(sessionFile, activation.epoch);
+		throw err;
+	}
 
 	fs.closeSync(stdoutFd);
 	fs.closeSync(stderrFd);
@@ -209,6 +306,12 @@ export function resumeWorker(
 	handle.attempts = handle.attempts ?? [];
 	handle.attempts.push({ workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now, sessionMode: { kind: "resume", sessionFile } });
 
+	// Commit the reservation to the new incarnation's pid so single-activation
+	// liveness tracks the actual `pi` process; store the epoch for release on exit.
+	commitActivationLease(sessionFile, activation.epoch, child.pid!);
+	handle.activationEpoch = activation.epoch;
+	handle.activationSessionFile = sessionFile;
+
 	return child;
 }
 
@@ -218,6 +321,20 @@ export function isProcessAlive(pid: number): boolean {
 		return true;
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Release this worker's activation lease when its incarnation exits or is killed.
+ * Idempotent + best-effort: a dead worker pid already makes the lease stealable,
+ * so this is immediacy + hygiene (no leftover lease file). No-op if the worker
+ * never held a lease.
+ */
+export function releaseWorkerActivation(handle: WorkerHandle): void {
+	if (handle.activationSessionFile && handle.activationEpoch) {
+		releaseActivationLease(handle.activationSessionFile, handle.activationEpoch);
+		handle.activationEpoch = undefined;
+		handle.activationSessionFile = undefined;
 	}
 }
 

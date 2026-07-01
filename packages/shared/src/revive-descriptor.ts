@@ -1,6 +1,11 @@
 export const REVIVE_DESCRIPTOR_KIND = "mesh:revive-descriptor" as const;
 export const REVIVE_DESCRIPTOR_VERSION = 1 as const;
 
+/** Filename the SPAWNER writes its PARTIAL descriptor under, next to the session
+ *  file. The ACTIVATOR (pi-mesh) reads it there on identity resolution. This is
+ *  the cross-lane file contract — both lanes must agree on the name. */
+export const SPAWNER_PARTIAL_DESCRIPTOR_FILE = "revive-descriptor.json";
+
 /**
  * The persisted revive descriptor — the shared cross-lane data contract that
  * makes a hibernated durable session REVIVABLE.

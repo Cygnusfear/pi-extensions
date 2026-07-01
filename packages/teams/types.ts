@@ -48,6 +48,11 @@ export interface WorkerHandle {
 	recoveryAttempts?: number;
 	/** Original spawn config — retained so startup-death can respawn from scratch. */
 	spawnConfig?: SpawnConfig;
+	/** v1c activation lease: the epoch of the CURRENT live incarnation's lease
+	 *  (single-activation authority) + the session file it is keyed by. Set on
+	 *  spawn/resume, released on exit. */
+	activationEpoch?: string;
+	activationSessionFile?: string;
 	doneAt?: number;
 	graceAt?: number;
 	resumableUntilAt?: number;
