@@ -1,0 +1,39 @@
+packages/background-bash/extensions/background-bash.test.ts
+  s_f7e5e1cc1b71a5::t_d53749687de305 417-442
+  s_f7e5e1cc1b71a5::t_0730bb04649e6a 24
+  s_f7e5e1cc1b71a5::t_a8df2f733f9397 443
+packages/shared/src/git-guards-redteam-r2-haiku.test.ts
+  s_b80b60cc68c1d4::t_1e738b24919858 9-10
+  s_b80b60cc68c1d4::t_f8d5516b24280d 19,21-22,25-26
+  s_b80b60cc68c1d4::t_c915fe3b797f04 93-94
+  s_b80b60cc68c1d4::t_eafeed04281f81 119,121-122
+  s_b80b60cc68c1d4::t_e92441238201ed 31,33-34,37-38
+packages/background-bash/extensions/background-bash.ts
+  s_f7e5e1cc1b71a5::t_95158ce614c563 252
+  s_f7e5e1cc1b71a5::t_b92d9e0dd5211e 350-354
+  s_f7e5e1cc1b71a5::t_0b53a31f15eac8 241-251,253-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "556fe19ae00a89f4e7ac31895ddd1925b832acf5",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_f7e5e1cc1b71a5": {
+      "agent_id": {
+        "tool": "Alycia Cepheid Cameron",
+        "id": "019ed09e-f4dc-7876-aec8-ad81934265af",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
