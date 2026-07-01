@@ -1,0 +1,19 @@
+packages/teams/leader.retry.test.ts
+  s_a55faf01f2a777::t_7d9f88982a77a7 94-99,101,104-108,112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "1062cd5b58b1c935236eecc6ac75d8edafe5cef4",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
