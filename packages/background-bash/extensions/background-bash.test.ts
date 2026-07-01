@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import {
 	BackgroundBashManager,
+	wireLineStreams,
 	type BashBgResult,
 } from "./background-bash.ts";
 
@@ -411,5 +412,32 @@ describe("BashBgHandle — .each() chain composition", () => {
 		expect(r.status).toBe("exited");
 		expect(received).toContain("first");
 		expect(received).not.toContain("second");
+	});
+});
+
+
+// Regression: under FD pressure, spawn(stdio:"pipe") can return a truthy stream
+// that lacks .on()/.resume() — wireLineStreams must SKIP it (warn + return),
+// never throw. Pre-fix this crashed the manager via readline.createInterface.
+describe("wireLineStreams degenerate-stream guard", () => {
+	it("does NOT throw on a resume-less stream (the FD-pressure case)", () => {
+		const listeners = new Set<[(line: string, stream: string) => void]>();
+		const logStream = { write: () => true } as any; // fake WriteStream
+		// stream has .on() but NO .resume() — exactly the degenerate shape Bun can return under load
+		const degenerate = { on: () => degenerate } as any;
+		expect(() => wireLineStreams(degenerate, "stdout", { jobId: "bg-test", logStream, listeners })).not.toThrow();
+	});
+
+	it("does NOT throw on a stream missing .on() entirely", () => {
+		const listeners = new Set<[(line: string, stream: string) => void]>();
+		const logStream = { write: () => true } as any;
+		const stub = {} as any; // no .on(), no .resume()
+		expect(() => wireLineStreams(stub, "stderr", { jobId: "bg-test", logStream, listeners })).not.toThrow();
+	});
+
+	it("null stream is a no-op (existing behavior preserved)", () => {
+		const listeners = new Set<[(line: string, stream: string) => void]>();
+		const logStream = { write: () => true } as any;
+		expect(() => wireLineStreams(null, "stdout", { jobId: "bg-test", logStream, listeners })).not.toThrow();
 	});
 });

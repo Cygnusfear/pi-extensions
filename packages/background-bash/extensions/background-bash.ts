@@ -238,6 +238,46 @@ interface JobRuntime {
 	exitWaiters: Array<(result: BashBgResult) => void>;
 }
 
+/**
+ * Wire a child-process stdio stream into line capture + log tee.
+ *
+ * Extracted to module scope so the degenerate-stream path is unit-testable:
+ * under extreme FD pressure, spawn(stdio:"pipe") can return a truthy stream
+ * that lacks .resume()/.on() — readline.createInterface then throws
+ * "input.resume is not a function" inside startSync. We guard instead of
+ * crash: a stream missing .on() or .resume() is skipped (one diagnostic
+ * warn, traceable in the wild). The job still RUNS — we just don't
+ * line-capture its logs for that stream. Happy path is byte-identical.
+ */
+export function wireLineStreams(
+	stream: NodeJS.ReadableStream | null,
+	label: BashBgStream,
+	deps: { jobId: string; logStream: WriteStream; listeners: Set<BashBgLineCallback> },
+): void {
+	if (!stream) return;
+	// Guard: under FD saturation Bun can return an incomplete stream object
+	// (truthy but missing .on()/.resume()). readline would crash; skip instead.
+	if (typeof (stream as any).on !== "function" || typeof (stream as any).resume !== "function") {
+		console.warn(`[bashBg ${deps.jobId}] stdio stream incomplete under load, skipping ${label} line capture`);
+		return;
+	}
+	const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+	rl.on("line", (line: string) => {
+		try {
+			deps.logStream.write(line);
+			deps.logStream.write("\n");
+		} catch { /* file fd already closed */ }
+		for (const cb of deps.listeners) {
+			try {
+				cb(line, label);
+			} catch (err) {
+				console.warn(`[bashBg ${deps.jobId}] .each callback threw: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		}
+	});
+}
+
+
 export class BackgroundBashManager {
 	private readonly jobs = new Map<string, BackgroundBashJob>();
 	private readonly runtimes = new Map<string, JobRuntime>();
@@ -307,23 +347,12 @@ export class BackgroundBashManager {
 		this.jobs.set(id, job);
 		this.runtimes.set(id, runtime);
 
-		const wireLineStream = (stream: NodeJS.ReadableStream | null, label: BashBgStream): void => {
-			if (!stream) return;
-			const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-			rl.on("line", (line: string) => {
-				try {
-					logStream.write(line);
-					logStream.write("\n");
-				} catch { /* file fd already closed */ }
-				for (const cb of runtime.lineListeners) {
-					try {
-						cb(line, label);
-					} catch (err) {
-						console.warn(`[bashBg ${id}] .each callback threw: ${err instanceof Error ? err.message : String(err)}`);
-					}
-				}
+		const wireLineStream = (stream: NodeJS.ReadableStream | null, label: BashBgStream): void =>
+			wireLineStreams(stream, label, {
+				jobId: id,
+				logStream,
+				listeners: runtime.lineListeners,
 			});
-		};
 
 		wireLineStream(child.stdout, "stdout");
 		wireLineStream(child.stderr, "stderr");

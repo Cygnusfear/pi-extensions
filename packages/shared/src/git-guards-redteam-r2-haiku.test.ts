@@ -6,8 +6,8 @@ describe("Red Team Round 2: Git Safety Guards", () => {
 	// ATTACK VECTOR 1: git -C /path reset --hard
 	// Does the -C flag bypass detection?
 	// ─────────────────────────────────────────────────────────────
-	test("BYPASS: git -C /path reset --hard (flag ordering)", () => {
-		expect(isGitUnsafeBash("git -C /path reset --hard")).toBeNull();
+	test("caught: git -C /path reset --hard (flag ordering — stripGitGlobalFlags)", () => {
+		expect(isGitUnsafeBash("git -C /path reset --hard")).not.toBeNull();
 	});
 
 	test("catches: git reset --hard (standard form)", () => {
@@ -16,26 +16,26 @@ describe("Red Team Round 2: Git Safety Guards", () => {
 
 	// ─────────────────────────────────────────────────────────────
 	// ATTACK VECTOR 2: git filter-branch --force -- --all
-	// Not in DESTRUCTIVE_GIT_COMMANDS list
+	// Now caught — filter-branch is in DESTRUCTIVE_GIT_COMMANDS
 	// ─────────────────────────────────────────────────────────────
-	test("BYPASS: git filter-branch --force -- --all (history rewrite)", () => {
-		expect(isGitUnsafeBash("git filter-branch --force -- --all")).toBeNull();
+	test("caught: git filter-branch --force -- --all (history rewrite)", () => {
+		expect(isGitUnsafeBash("git filter-branch --force -- --all")).not.toBeNull();
 	});
 
-	test("BYPASS: git filter-branch (without args)", () => {
-		expect(isGitUnsafeBash("git filter-branch")).toBeNull();
+	test("caught: git filter-branch (without args)", () => {
+		expect(isGitUnsafeBash("git filter-branch")).not.toBeNull();
 	});
 
 	// ─────────────────────────────────────────────────────────────
 	// ATTACK VECTOR 3: git reflog expire --expire=now --all
-	// Not in DESTRUCTIVE_GIT_COMMANDS list
+	// Now caught — reflog expire is in DESTRUCTIVE_GIT_COMMANDS
 	// ─────────────────────────────────────────────────────────────
-	test("BYPASS: git reflog expire --expire=now --all (destroys history)", () => {
-		expect(isGitUnsafeBash("git reflog expire --expire=now --all")).toBeNull();
+	test("caught: git reflog expire --expire=now --all (destroys history)", () => {
+		expect(isGitUnsafeBash("git reflog expire --expire=now --all")).not.toBeNull();
 	});
 
-	test("BYPASS: git reflog expire", () => {
-		expect(isGitUnsafeBash("git reflog expire")).toBeNull();
+	test("caught: git reflog expire", () => {
+		expect(isGitUnsafeBash("git reflog expire")).not.toBeNull();
 	});
 
 	// ─────────────────────────────────────────────────────────────
@@ -90,8 +90,8 @@ describe("Red Team Round 2: Git Safety Guards", () => {
 	// ATTACK VECTOR 9: >| .git/config (force clobber)
 	// BYPASS: Bare redirect without a command prefix is not caught
 	// ─────────────────────────────────────────────────────────────
-	test("BYPASS: >| .git/config (clobber redirect without command)", () => {
-		expect(isGitUnsafeBash(">| .git/config")).toBeNull();
+	test("caught: >| .git/config (clobber redirect — all redirect operators matched)", () => {
+		expect(isGitUnsafeBash(">| .git/config")).not.toBeNull();
 	});
 
 	// ─────────────────────────────────────────────────────────────
@@ -116,10 +116,10 @@ describe("Red Team Round 2: Git Safety Guards", () => {
 
 	// ─────────────────────────────────────────────────────────────
 	// ATTACK VECTOR 12: grm -rf .git/ (GNU rm on macOS)
-	// BYPASS: "grm" is not "rm" — WRITE_COMMANDS_RE won't match
+	// Now caught — grm is in WRITE_COMMANDS_RE
 	// ─────────────────────────────────────────────────────────────
-	test("BYPASS: grm -rf .git/ (GNU rm alias not detected)", () => {
-		expect(isGitUnsafeBash("grm -rf .git/")).toBeNull();
+	test("caught: grm -rf .git/ (GNU rm alias)", () => {
+		expect(isGitUnsafeBash("grm -rf .git/")).not.toBeNull();
 	});
 
 	// ─────────────────────────────────────────────────────────────
