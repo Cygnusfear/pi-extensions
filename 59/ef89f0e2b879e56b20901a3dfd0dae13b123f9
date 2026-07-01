@@ -1,0 +1,19 @@
+packages/shared/src/git-guards-redteam.test.ts
+  s_b80b60cc68c1d4::t_e45318bd3de62a 128,133,136,143,151,154,157,159,162,165,168,172,198,201,204,207,210-211,263,265,268-269,565,569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "59ef89f0e2b879e56b20901a3dfd0dae13b123f9",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
