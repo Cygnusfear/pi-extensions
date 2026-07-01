@@ -1,0 +1,23 @@
+packages/background-bash/extensions/background-bash.ts
+  s_f7e5e1cc1b71a5::t_f847303394edca 335-362
+  s_f7e5e1cc1b71a5::t_97b7cff0b886c6 242-262
+packages/background-bash/extensions/background-bash.test.ts
+  s_f7e5e1cc1b71a5::t_c8b08323a59a2b 24
+  s_f7e5e1cc1b71a5::t_8f1feb140129b3 420-427,429-436,438-445,447-449
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "c71378076aa889d2563696dc7190b838eca2ff1b",
+  "prompts": {},
+  "sessions": {
+    "s_f7e5e1cc1b71a5": {
+      "agent_id": {
+        "tool": "Alycia Cepheid Cameron",
+        "id": "019ed09e-f4dc-7876-aec8-ad81934265af",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
