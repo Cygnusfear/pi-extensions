@@ -1,0 +1,19 @@
+packages/shared/src/git-guards-redteam-opus.test.ts
+  s_b80b60cc68c1d4::t_aad3dc4d977d9f 43-44,48-49,58-59,62-63,67-68,72-73,77-78,82-83,87-88,98-99,103,106-107,115-116,119-120,148-150,153-154,292,295,325,327,336-337,340-341,344-345,348-349,352-353,358,360,363-364,367-368,371,373,376,378,409-410,413-414,421-422,425,427,430-431,434-435,438-439,442-443,460-461,464-465,501-502,505-506,509-510,513-514,517-518,527-528,531-532,535-536,847-848,855,857
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "f03367309ec285dbb21b785e13f1607da691a31b",
+  "prompts": {},
+  "sessions": {
+    "s_b80b60cc68c1d4": {
+      "agent_id": {
+        "tool": "Harlow Cepheid Frebel",
+        "id": "019ecd81-6748-7204-8bf5-35796a2e8126",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
