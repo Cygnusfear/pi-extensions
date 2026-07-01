@@ -1,0 +1,30 @@
+packages/pi-mesh/extension/durable-inbound-mailbox.ts
+  s_a55faf01f2a777::t_cac0cbf1351bd2 1-121,125,128-231
+  s_a55faf01f2a777::t_e8f92672e9bf15 122-124,126-127
+packages/pi-mesh/extension/durable-inbound-mailbox.test.ts
+  s_a55faf01f2a777::t_5cf963750b631f 148-151
+  s_a55faf01f2a777::t_c42b67a1d9286e 1-10,12-147,152-154
+  s_a55faf01f2a777::t_9c8679d2dcaf40 11
+packages/shared/package.json
+  s_a55faf01f2a777::t_d56f54d11c5e3c 26-27
+packages/shared/src/revive-descriptor.test.ts
+  s_a55faf01f2a777::t_c1018fc75c6085 1-80
+packages/shared/src/revive-descriptor.ts
+  s_a55faf01f2a777::t_63b2cb146a6faf 1-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "b5ccf3fdd89a691b3053a81a86b5c10a7aaed303",
+  "prompts": {},
+  "sessions": {
+    "s_a55faf01f2a777": {
+      "agent_id": {
+        "tool": "Fred Saturn Hawking",
+        "id": "019f1d01-9874-75d2-b456-573a5ff6eb82",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
