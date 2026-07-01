@@ -1,0 +1,25 @@
+packages/teams/worker.ts
+  s_107fe759197d0d::t_6ec6ec70f6517f 99-104
+  s_107fe759197d0d::t_079507ed61b86a 21
+  s_107fe759197d0d::t_b95b1506e7b630 213
+packages/teams/index.ts
+  s_107fe759197d0d::t_7dc179593a594f 19
+packages/teams/worker.lifecycle.test.ts
+  s_107fe759197d0d::t_15099637c24040 85,95,99,106,109,113,120,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.5",
+  "base_commit_sha": "1e095eea828cb83cdcaa430fef851141b5078e0d",
+  "prompts": {},
+  "sessions": {
+    "s_107fe759197d0d": {
+      "agent_id": {
+        "tool": "Uroš Probe Parker",
+        "id": "019f1d58-2026-7511-958e-1011fb16b7df",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
