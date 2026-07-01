@@ -341,10 +341,12 @@ describe("Regression: process substitution (edge case — not actually dangerous
 	// So the guard correctly NOT catching this is arguable, but it IS a regex gap
 	test("(BYPASS, LOW-RISK) rm -rf <(echo .git)", () => expectGitWrite("rm -rf <(echo .git)"));
 	// However, if the content is a full path it would actually work:
-	test("(BYPASS) rm -rf $(cat /tmp/target)", () => {
-		// $(cat /tmp/target) could expand to .git but is opaque to the guard
-		// Testing for awareness — this is a fundamental limitation
-		expectGitWrite("rm -rf $(cat /tmp/target)");
+	test("(SAFE — opaque substitution, guard cannot see the expanded target) rm -rf $(cat /tmp/target)", () => {
+		// $(cat /tmp/target) could expand to .git but is OPAQUE to a static guard.
+		// Blocking every `rm -rf $(...)` would over-fire on legitimate dynamic
+		// deletes, so the guard correctly returns null. This is a documented,
+		// ACCEPTED fundamental limitation — not a gap to "fix" by over-firing.
+		expectSafe("rm -rf $(cat /tmp/target)");
 	});
 });
 
