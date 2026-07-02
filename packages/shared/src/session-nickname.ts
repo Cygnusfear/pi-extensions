@@ -612,6 +612,45 @@ export type MeshIdentity = {
 	host: string;
 };
 
+// ── Display color ────────────────────────────────────────────────────────────
+
+/**
+ * The color used to render a nickname WHEREVER it appears in the UI — the
+ * powerline status footer, the teams widget, or anywhere else a durable mesh
+ * identity is surfaced. Shared source of truth so the hooman's eye reads the
+ * same amber for the same face across every surface — pinned identity, pinned
+ * color.
+ *
+ * The pi Theme semantic API (`ThemeColor` in @earendil-works/pi-coding-agent)
+ * exposes a fixed enum of tokens (`accent`/`warning`/…), none of which map to
+ * this hue; and adding a new semantic token there would leak a display concern
+ * into the core theme. So the color lives here in the nickname module — the
+ * module that already owns "what nicknames ARE" — and renderers wrap the
+ * nickname in a truecolor ANSI escape via `colorizeNickname` below.
+ */
+export const NICKNAME_DISPLAY_COLOR = "#ff9d00";
+
+// Truecolor ANSI foreground escape, computed once from NICKNAME_DISPLAY_COLOR so
+// a hex change stays a single-source edit.
+const NICKNAME_ANSI_FG = ((): string => {
+	const hex = NICKNAME_DISPLAY_COLOR.slice(1);
+	const r = parseInt(hex.slice(0, 2), 16);
+	const g = parseInt(hex.slice(2, 4), 16);
+	const b = parseInt(hex.slice(4, 6), 16);
+	return `\x1b[38;2;${r};${g};${b}m`;
+})();
+const ANSI_RESET = "\x1b[0m";
+
+/**
+ * Wrap `text` in the shared nickname color as a truecolor ANSI escape.
+ * Renderers that surface a durable-peer nickname (teams widget, etc.) call
+ * this instead of a semantic theme token, so every surface renders identity
+ * in the same amber the powerline footer does.
+ */
+export function colorizeNickname(text: string): string {
+	return `${NICKNAME_ANSI_FG}${text}${ANSI_RESET}`;
+}
+
 // ── Hash function ────────────────────────────────────────────────────────────
 
 function fnv1a32(input: string): number {

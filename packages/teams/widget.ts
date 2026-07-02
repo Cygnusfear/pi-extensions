@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { colorizeNickname } from "@pi-extensions/shared/session-nickname";
 import { formatRuntimeSummary } from "./activity.js";
 import type { WorkerHandle, WorkerStatus } from "./types.js";
 import type { WorkerLifecycleState } from "./v2/state.ts";
@@ -68,7 +69,6 @@ export function createTeamsWidget(
       const lines: string[] = [];
       lines.push(truncateToWidth(" " + theme.bold(theme.fg("accent", "Teams")), width));
 
-      const nameW = Math.max(...workers.map((w) => visibleWidth(w.name)));
       const ticketW = Math.max(...workers.map((w) => visibleWidth(w.ticketId)));
       for (const w of workers) {
         const v2Lifecycle = getV2Lifecycle?.(w.name) ?? null;
@@ -76,12 +76,25 @@ export function createTeamsWidget(
         const { status } = projectWidgetStatus(w, v2Lifecycle);
         const statusKey = (status in STATUS_COLOR ? status : "failed") as WorkerStatus;
         const icon = theme.fg(STATUS_COLOR[statusKey], STATUS_ICON[statusKey]);
-        const nick = w.nickname ? theme.fg("warning", w.nickname) + " · " : "";
-        const name = theme.bold(padRight(w.name, nameW));
+        // Line 1 — DURABLE IDENTITY first (the pinned nickname from v1a: e.g. "Roger
+        // Geodesic Maudin"), then role, then status. The worker IS its durable mesh
+        // peer; `w.name` is a mutable role-alias, not the identity. Before the
+        // worker's hello envelope arrives we don't know the face yet — show "…" so
+        // the row reads "peer exists, identity resolving" rather than hiding the
+        // identity slot entirely.
+        const identityLabel = w.nickname
+          ? colorizeNickname(w.nickname) // shared color — same amber the powerline footer uses
+          : theme.fg("dim", "…");
+        const roleLabel = theme.bold(w.name);
         const statusLabel = theme.fg(STATUS_COLOR[statusKey], String(status ?? "unknown"));
+        const identityRow = ` ${icon} ${identityLabel} · ${roleLabel} · ${statusLabel}`;
+        lines.push(truncateToWidth(identityRow, width));
+
+        // Line 2 — metadata badges (model · session-mode · ticket + ticket-status),
+        // indented to align with the ↳ activity/note rows below. This separation
+        // stops the identity from being buried behind the metadata pileup.
         const ticketStatus = w.ticketStatus ?? "unknown";
-        const modelTag = w.model ? ` · ${theme.fg("accent", w.model)}` : "";
-        const sessionIcon = sessionModeLabel?.startsWith("fork") ? "" : "󰆈";
+        const sessionIcon = sessionModeLabel?.startsWith("fork") ? "" : "󰆈";
         const sessionText = sessionModeLabel?.startsWith("fork")
           ? "fork"
           : (sessionModeLabel ?? "new");
@@ -89,8 +102,13 @@ export function createTeamsWidget(
           ticketStatus === "closed"
             ? theme.fg("muted", ticketStatus)
             : theme.fg("accent", ticketStatus);
-        const row = ` ${icon} ${nick}${name} ${statusLabel} · ${theme.fg("muted", sessionIcon)} ${theme.fg("muted", sessionText)} · ${theme.fg("muted", "󰤓")} ${padRight(w.ticketId, ticketW)} ${ticketStatusLabel}${modelTag}`;
-        lines.push(truncateToWidth(row, width));
+        const modelBadge = w.model
+          ? `${theme.fg("muted", "󰁨")} ${theme.fg("accent", w.model)}`
+          : "";
+        const sessionBadge = `${theme.fg("muted", sessionIcon)} ${theme.fg("muted", sessionText)}`;
+        const ticketBadge = `${theme.fg("muted", "󰤓")} ${padRight(w.ticketId, ticketW)} ${ticketStatusLabel}`;
+        const badges = [modelBadge, sessionBadge, ticketBadge].filter((s) => s.length > 0).join(" · ");
+        lines.push(truncateToWidth(`   ${badges}`, width));
         const activity = formatRuntimeSummary({
           hasActiveChildProcess: w.hasActiveChildProcess,
           activeChildProcessCount: w.activeChildProcessCount,
