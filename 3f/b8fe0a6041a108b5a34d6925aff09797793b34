@@ -1,0 +1,26 @@
+packages/teams/leader.ts
+  s_c80280c75e1308::t_f2b4c22d15f7bd 56
+  s_c80280c75e1308::t_e0533bf12019e2 1553-1558,1560-1561,1564
+  s_c80280c75e1308::t_d636ef96902839 9-10
+  s_c80280c75e1308::t_62dd8a31aaf507 1559
+packages/teams/leader.state.test.ts
+  s_c80280c75e1308::t_9348f6f67a2fed 333-405
+packages/pi-mesh/package.json
+  s_c80280c75e1308::t_b8b25a849e3202 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.8",
+  "base_commit_sha": "3fb8fe0a6041a108b5a34d6925aff09797793b34",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
