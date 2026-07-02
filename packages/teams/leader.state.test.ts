@@ -330,6 +330,79 @@ describe("TeamLeader state persistence", () => {
 		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
 	});
 
+	// ── Regression: LIVE worker→leader tells arrive WRAPPED in a mesh:tell envelope ──
+	// (PiMesh.tell / publishSessionPhaseEvent publish via mesh.tell), NOT as the bare
+	// envelope the tests above feed. Pre-fix, meshMessageHandler classified the mesh:tell
+	// WRAPPER and dropped the inner envelope → route never bound (identity "…", status
+	// stuck "spawning"). These feed the wrapped LIVE shape: they FAIL on pre-fix code
+	// (drop) and PASS on the unwrap fix — closing the mock-shape blind spot that hid this
+	// for the whole v1d cycle. Bare-envelope tests above pass either way (idempotent unwrap).
+	test("mesh handler unwraps a mesh:tell-WRAPPED worker hello (live shape) and binds the route", () => {
+		const { leader } = makeHarness();
+		leader.renderWidget = () => {};
+		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
+		const mesh = {
+			on: () => {}, off: () => {}, stop: () => {},
+			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
+			self: () => ({ id: "mesh-self" }), tell: () => {}, ask: async () => ({}),
+		};
+		leader.setMesh(mesh as any);
+
+		const hello = createWorkerHelloEnvelope({
+			teamId: "team-1", leaderEpoch: "epoch-1", workerId: "worker-1", attemptId: "attempt-1",
+			seq: 1, meshId: "durable-1",
+			runtime: {
+				protocolVersion: 1, teamId: "team-1", leaderEpoch: "epoch-1", workerId: "worker-1",
+				attemptId: "attempt-1", coordinatorSessionId: "coord-1", leasePath: "/tmp/lease.json",
+				sessionMode: { kind: "fresh" },
+			},
+		});
+
+		// LIVE shape: payload IS the mesh:tell envelope whose inner payload is the hello.
+		leader.meshMessageHandler({
+			from: "route-1",
+			topic: "session/mesh-self",
+			timestamp: Date.now(),
+			payload: { kind: "mesh:tell", deliveryId: "d-hello-1", from: "durable-1", payload: hello, timestamp: Date.now() },
+		});
+
+		expect(leader.getWorker("worker-1")?.routeState).toBe("linked");
+		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
+	});
+
+	test("mesh handler unwraps a mesh:tell-WRAPPED status() phase event (live shape)", () => {
+		const { leader } = makeHarness();
+		const observed: any[] = [];
+		leader.notifyLLM = (event: any) => observed.push(event);
+		leader.renderWidget = () => {};
+		leader.v2TeamId = "team-1";
+		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
+		const mesh = {
+			on: () => {}, off: () => {}, stop: () => {},
+			peers: () => [{ id: "route-1", meshId: "durable-1", nickname: "Worker Nova" }],
+			self: () => ({ id: "mesh-self" }), tell: () => {}, ask: async () => ({}),
+		};
+		leader.setMesh(mesh as any);
+
+		const phase = {
+			kind: SESSION_PHASE_EVENT_KIND, version: SESSION_PHASE_EVENT_VERSION, from: "worker", to: "leader",
+			teamId: "team-1", leaderEpoch: leader.leaderEpoch, workerId: "worker-1", attemptId: "attempt-1",
+			seq: 1, sentAt: Date.now(), meshId: "durable-1",
+			payload: { stage: "implementing", label: "implementing", icon: "🏭", color: "amber", sessionId: "sess-1" },
+		};
+
+		leader.meshMessageHandler({
+			from: "route-1",
+			topic: "session/mesh-self",
+			timestamp: Date.now(),
+			payload: { kind: "mesh:tell", deliveryId: "d-phase-1", from: "durable-1", payload: phase, timestamp: Date.now() },
+		});
+
+		expect(observed).toHaveLength(1);
+		expect(observed[0]).toMatchObject({ type: "phase", phase: { payload: { stage: "implementing" } } });
+		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
+	});
+
 	test("buildSpawnSessionMode defaults to fresh even when branching is available", () => {
 		const { leader } = makeHarness();
 		const forked = path.join(process.cwd(), `.tmp-fork-${Date.now()}.jsonl`);

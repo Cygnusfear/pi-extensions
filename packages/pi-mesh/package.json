@@ -5,6 +5,7 @@
   "exports": {
     ".": "./extension/pi-mesh.ts",
     "./extension/pi-mesh.js": "./extension/pi-mesh.ts",
+    "./extension/tell-protocol.js": "./extension/tell-protocol.ts",
     "./types": "./extension/types.ts"
   },
   "pi": {

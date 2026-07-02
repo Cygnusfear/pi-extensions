@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 import { isSessionPhaseEvent, type SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
-import type { MeshTellReceiptPhase } from "@pi-extensions/pi-mesh/types";
+import type { MeshTellReceiptPhase, MeshMessage } from "@pi-extensions/pi-mesh/types";
+import { unwrapInboundTell } from "@pi-extensions/pi-mesh/extension/tell-protocol.js";
 import {
   formatSessionViewEntries,
   readMeaningfulSessionEntriesFromFile,
@@ -52,7 +53,7 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
   : 750;
 
 /** Mesh "message" event payload — direct tells. */
-type MessageHandler = (msg: { from: string; payload: unknown }) => void;
+type MessageHandler = (msg: MeshMessage) => void;
 
 interface RealActivity {
   timestampMs: number;
@@ -1549,12 +1550,18 @@ export class TeamLeader {
 	/** Wire direct mesh tells into the existing notification pipeline. */
 	private wireMeshMessageEvents() {
 		if (!this.mesh || this.meshMessageHandler) return;
-		this.meshMessageHandler = (msg: { from: string; payload: unknown }) => {
-			if (isSessionPhaseEvent(msg.payload)) {
-				this.handleSessionPhaseEvent(msg.payload, msg.from);
+		this.meshMessageHandler = (rawMsg) => {
+			// Inbound mesh tells arrive wrapped in a mesh:tell envelope; unwrap to the
+			// inner payload before classifying — mirrors the code-mode inbound consumer
+			// (pi-mesh.ts). Without this, worker→leader envelopes (hello/comment/finish)
+			// and phase events are matched against the wrapper and silently dropped, so
+			// the worker's route never binds (identity stays "…", status stuck "spawning").
+			const { message } = unwrapInboundTell(rawMsg);
+			if (isSessionPhaseEvent(message.payload)) {
+				this.handleSessionPhaseEvent(message.payload, message.from);
 				return;
 			}
-			if (isWorkerToLeaderEnvelope(msg.payload)) this.handleWorkerToLeaderEnvelope(msg.payload, msg.from);
+			if (isWorkerToLeaderEnvelope(message.payload)) this.handleWorkerToLeaderEnvelope(message.payload, message.from);
 		};
 		this.mesh.on("message", this.meshMessageHandler);
 	}
