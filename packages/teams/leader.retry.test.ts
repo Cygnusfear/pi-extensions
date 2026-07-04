@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableToolRetry } from "./leader.ts";
+import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableStreamAbort, getRecoverableToolRetry } from "./leader.ts";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
 const cleanupDirs: string[] = [];
@@ -1285,5 +1285,276 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(worker.status).toBe("failed");
 		expect(events).toHaveLength(1);
 		expect(events[0].type).toBe("failed");
+	});
+});
+
+
+
+describe("getRecoverableStreamAbort", () => {
+	test("matches the empty-abort flake from a realistic diagnostics string (with errorMessage)", () => {
+		// Shape readSessionDiagnostics emits for: content:[], stopReason aborted, errorMessage set.
+		const diagnostics = "\n  error: Request was aborted\n  last assistant: stopReason: aborted | error: Request was aborted";
+		const recovery = getRecoverableStreamAbort(diagnostics);
+		expect(recovery).not.toBeNull();
+		expect(recovery?.error).toContain("empty aborted");
+		expect(recovery?.error).toContain("Request was aborted");
+		expect(recovery?.prompt).toContain("produced no output");
+		expect(recovery?.prompt).toContain("team_finish");
+	});
+
+	test("matches the stopReason: error variant (no errorMessage)", () => {
+		expect(getRecoverableStreamAbort("\n  last assistant: stopReason: error")).not.toBeNull();
+	});
+
+	test("matches the stopReason: aborted variant (no errorMessage)", () => {
+		expect(getRecoverableStreamAbort("\n  last assistant: stopReason: aborted")).not.toBeNull();
+	});
+
+	test("returns null when the aborted turn produced text (not the empty flake)", () => {
+		const diagnostics = "\n  last assistant: stopReason: aborted | text: I will start by reading the files";
+		expect(getRecoverableStreamAbort(diagnostics)).toBeNull();
+	});
+
+	test("returns null when a tool ran (last failing tool present)", () => {
+		const diagnostics = "\n  last assistant: stopReason: error\n  last failing tool: bash: command failed";
+		expect(getRecoverableStreamAbort(diagnostics)).toBeNull();
+	});
+
+	test("returns null for a normal end_turn / no assistant / unrelated stopReason", () => {
+		expect(getRecoverableStreamAbort("\n  last assistant: stopReason: stop | text: done")).toBeNull();
+		expect(getRecoverableStreamAbort("\n  last assistant: stopReason: length")).toBeNull();
+		expect(getRecoverableStreamAbort("")).toBeNull();
+	});
+});
+
+describe("TeamLeader empty-abort first-turn recovery", () => {
+	test("retries exactly ONCE after an empty/aborted first turn, then gives up on the second death", async () => {
+		const baseDir = makeTempDir("teams-empty-abort-retry-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		// Pure empty-abort first turn: content:[], stopReason aborted, no tool calls,
+		// no substantive text, no CompactionEntry (so it is NOT the compaction shape).
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "empty-abort", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "Request was aborted\n", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const invocationLog = path.join(baseDir, "pi-invocation.log");
+		const binDir = path.join(baseDir, "bin");
+		makeFakePiBinary(binDir, invocationLog);
+
+		const originalPath = process.env.PATH ?? "";
+		process.env.PATH = `${binDir}:${originalPath}`;
+
+		try {
+			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
+			const worker: WorkerHandle = {
+				workerInstanceId: "ea-1",
+				name: "empty-abort-worker",
+				pid: 999980,
+				ticketId: "tk-ea",
+				ticketStatus: "open",
+				lastNote: undefined,
+				sessionDir,
+				sessionFile,
+				worktreePath: null,
+				model: "zai-coding/glm-5.2",
+				hasTools: false,
+				status: "running",
+				spawnedAt: Date.now() - 1000,
+				lastActivityAt: Date.now() - 1000,
+				lastProcessActivityAt: Date.now() - 1000,
+				hasActiveChildProcess: false,
+				activeChildProcessCount: 0,
+				lastSeenCommentCount: 0,
+				routeState: "linked",
+			};
+
+			// First death → bounded recovery fires exactly once.
+			await leader.handleWorkerExit("empty-abort-worker", worker, 1);
+			expect(worker.recoveryAttempts).toBe(1);
+			expect(worker.status).toBe("spawning");
+			expect(worker.lastNote).toContain("AUTO-RETRY");
+
+			const firstInvocation = await waitForFile(invocationLog);
+			expect(firstInvocation).toContain("--session");
+			expect(firstInvocation).toContain(sessionFile);
+			// Continuation prompt (NOT the malformed-JSON escape guidance).
+			expect(firstInvocation).toContain("produced no output");
+			expect(firstInvocation).toContain("team_finish");
+
+			// Tear down the first fake child without firing its exit handler, then
+			// simulate the retried worker dying again.
+			const child = leader.childProcesses.get("empty-abort-worker");
+			expect(child).toBeDefined();
+			if (child) {
+				child.removeAllListeners();
+				if (child.pid) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
+				cleanupPids.push(child.pid);
+			}
+			await Bun.sleep(60); // let the killed pid settle so isProcessAlive() sees it dead
+
+			// Second death → recoveryAttempts is already 1, so the bounded block
+			// (recoveryAttempts < 1 IS the cascade guard) must NOT fire again.
+			await leader.handleWorkerExit("empty-abort-worker", worker, 1);
+			expect(worker.recoveryAttempts).toBe(1); // unchanged — no second retry
+			expect(worker.status).toBe("failed");
+
+			// fake pi invoked exactly once total (count --session occurrences — the
+			// prompt contains newlines, so raw line count is unreliable).
+			const logText = fs.readFileSync(invocationLog, "utf-8");
+			const sessionInvocations = (logText.match(/--session/g) || []).length;
+			expect(sessionInvocations).toBe(1);
+
+			const noteLog = fs.readFileSync(maiNoteLog, "utf-8");
+			expect(noteLog).toContain("AUTO-RETRY");
+			expect(noteLog).toContain("aborted/errored before any content");
+
+			const sent = fs.readFileSync(sendMessageLog, "utf-8");
+			expect(sent).toContain("empty/aborted first-turn stream response");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	test("a DIRECTED abort (leader kill) does NOT retry even with an empty-abort session", async () => {
+		const baseDir = makeTempDir("teams-directed-abort-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		// Same empty-abort signature as the flake — the distinction is that the
+		// LEADER killed this worker (status=killed, killedAt set), which is the
+		// primary directed-stop mechanism. The killed guard at the top of
+		// handleWorkerExit filters it before any recovery logic runs.
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "directed-abort", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "Request was aborted\n", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const invocationLog = path.join(baseDir, "pi-invocation.log");
+		const binDir = path.join(baseDir, "bin");
+		makeFakePiBinary(binDir, invocationLog);
+
+		const originalPath = process.env.PATH ?? "";
+		process.env.PATH = `${binDir}:${originalPath}`;
+
+		try {
+			const { leader } = makeLeaderHarness(baseDir);
+			const worker: WorkerHandle = {
+				workerInstanceId: "dir-1",
+				name: "directed-abort-worker",
+				pid: 999979,
+				ticketId: "tk-dir",
+				ticketStatus: "open",
+				lastNote: undefined,
+				sessionDir,
+				sessionFile,
+				worktreePath: null,
+				model: "zai-coding/glm-5.2",
+				hasTools: false,
+				status: "killed",
+				killedAt: Date.now(),
+				spawnedAt: Date.now() - 1000,
+				lastActivityAt: Date.now() - 1000,
+				lastProcessActivityAt: Date.now() - 1000,
+				hasActiveChildProcess: false,
+				activeChildProcessCount: 0,
+				lastSeenCommentCount: 0,
+				routeState: "dead",
+			};
+
+			await leader.handleWorkerExit("directed-abort-worker", worker, 1);
+
+			// The killed guard early-returns: no retry, no respawn, no pi invocation.
+			expect(worker.recoveryAttempts ?? 0).toBe(0);
+			expect(worker.status).toBe("killed");
+			expect(fs.existsSync(invocationLog)).toBe(false);
+			expect(leader.childProcesses.has("directed-abort-worker")).toBe(false);
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	});
+
+	test("does NOT treat a mid-turn compaction abort as the stream flake (separate resume path)", async () => {
+		// The stream-abort classifier is guarded by !endedWithUnresolvedCompaction,
+		// so a compaction abort (CompactionEntry after the aborted message) is left
+		// to the compaction-resume block on the warning path, not retried here.
+		const baseDir = makeTempDir("teams-empty-abort-vs-compaction-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(
+			sessionFile,
+			[
+				JSON.stringify({ type: "session", version: 3, id: "ea-vs-comp", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "working through the task now" }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "toolResult", content: [{ type: "text", text: "ok" }] } }),
+				JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "aborted", errorMessage: "Request was aborted", content: [] } }),
+				JSON.stringify({ type: "compaction", tokensBefore: 203040, fromHook: false, firstKeptEntryId: "abc", summary: "## Goal\nresume me" }),
+			].join("\n") + "\n",
+		);
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "Request was aborted\n", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const invocationLog = path.join(baseDir, "pi-invocation.log");
+		const binDir = path.join(baseDir, "bin");
+		makeFakePiBinary(binDir, invocationLog);
+
+		const originalPath = process.env.PATH ?? "";
+		process.env.PATH = `${binDir}:${originalPath}`;
+
+		try {
+			const { leader, sendMessageLog } = makeLeaderHarness(baseDir);
+			const worker: WorkerHandle = {
+				workerInstanceId: "comp-1",
+				name: "comp-action-worker",
+				pid: 999978,
+				ticketId: "tk-comp2",
+				ticketStatus: "open",
+				lastNote: undefined,
+				sessionDir,
+				sessionFile,
+				worktreePath: null,
+				model: "zai-coding/glm-5.2",
+				hasTools: false,
+				status: "running",
+				spawnedAt: Date.now() - 1000,
+				lastActivityAt: Date.now() - 1000,
+				lastProcessActivityAt: Date.now() - 1000,
+				hasActiveChildProcess: false,
+				activeChildProcessCount: 0,
+				lastSeenCommentCount: 0,
+				routeState: "linked",
+			};
+
+			await leader.handleWorkerExit("comp-action-worker", worker, 1);
+
+			// Compaction resume (warning path) fires — NOT the stream-abort retry.
+			expect(worker.recoveryAttempts).toBe(1);
+			expect(worker.lastNote).toContain("AUTO-RESUME");
+			const child = leader.childProcesses.get("comp-action-worker");
+			if (child) {
+				child.removeAllListeners();
+				if (child.pid) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
+				cleanupPids.push(child.pid);
+			}
+			const sent = fs.readFileSync(sendMessageLog, "utf-8");
+			expect(sent).toContain("auto-resuming once after mid-turn compaction");
+			// And critically: NOT the stream-abort message.
+			expect(sent).not.toContain("empty/aborted first-turn stream response");
+		} finally {
+			process.env.PATH = originalPath;
+		}
 	});
 });
