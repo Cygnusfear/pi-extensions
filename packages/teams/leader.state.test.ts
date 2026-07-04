@@ -5,6 +5,15 @@ import { TeamLeader } from "./leader.ts";
 import type { WorkerHandle } from "./types.js";
 import { createWorkerCommentEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
 import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION } from "@pi-extensions/shared/session-phase-event";
+import { unwrapInboundTell } from "@pi-extensions/pi-mesh/extension/tell-protocol.js";
+
+// The mesh "message" event now delivers an already-unwrapped InboundMeshMessage
+// (unwrap happens at the mesh source). Feed the leader handler what the mesh
+// delivers: unwrapInboundTell(raw). This also exercises the full delivery path
+// (wrapped mesh:tell -> mesh-unwrap -> handler binds) for the regression tests.
+function deliver(leader: TeamLeader, raw: Parameters<typeof unwrapInboundTell>[0]) {
+	return leader.meshMessageHandler(unwrapInboundTell(raw));
+}
 
 function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 	const now = Date.now();
@@ -195,7 +204,7 @@ describe("TeamLeader state persistence", () => {
 		};
 		leader.setMesh(mesh as any);
 
-		leader.meshMessageHandler({
+		deliver(leader, {
 			from: "route-1",
 			payload: createWorkerCommentEnvelope({
 				teamId: "team-1",
@@ -228,7 +237,7 @@ describe("TeamLeader state persistence", () => {
 		};
 		leader.setMesh(mesh as any);
 
-		leader.meshMessageHandler({
+		deliver(leader, {
 			from: "route-1",
 			payload: createWorkerHelloEnvelope({
 				teamId: "team-1",
@@ -281,8 +290,8 @@ describe("TeamLeader state persistence", () => {
 			meshId: "durable-1",
 		});
 
-		leader.meshMessageHandler({ from: "route-1", payload: envelope });
-		leader.meshMessageHandler({ from: "route-1", payload: envelope });
+		deliver(leader, { from: "route-1", payload: envelope });
+		deliver(leader, { from: "route-1", payload: envelope });
 
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toMatchObject({ type: "comment", comment: "same payload" });
@@ -307,7 +316,7 @@ describe("TeamLeader state persistence", () => {
 		};
 		leader.setMesh(mesh as any);
 
-		leader.meshMessageHandler({
+		deliver(leader, {
 			from: "route-1",
 			payload: {
 				kind: SESSION_PHASE_EVENT_KIND,
@@ -359,7 +368,7 @@ describe("TeamLeader state persistence", () => {
 		});
 
 		// LIVE shape: payload IS the mesh:tell envelope whose inner payload is the hello.
-		leader.meshMessageHandler({
+		deliver(leader, {
 			from: "route-1",
 			topic: "session/mesh-self",
 			timestamp: Date.now(),
@@ -391,7 +400,7 @@ describe("TeamLeader state persistence", () => {
 			payload: { stage: "implementing", label: "implementing", icon: "🏭", color: "amber", sessionId: "sess-1" },
 		};
 
-		leader.meshMessageHandler({
+		deliver(leader, {
 			from: "route-1",
 			topic: "session/mesh-self",
 			timestamp: Date.now(),

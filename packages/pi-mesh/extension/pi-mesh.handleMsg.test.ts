@@ -52,7 +52,7 @@ describe("_handleMsg TDZ regression", () => {
 			if (isMeshAskEnvelope(innerPayload)) {
 				return { emitted: { event: "request", data: innerPayload } };
 			}
-			return { emitted: { event: "message", data: msg } };
+			return { emitted: { event: "message", data: unwrapped } };
 		} catch (e) {
 			return { error: e as Error };
 		}
@@ -76,6 +76,17 @@ describe("_handleMsg TDZ regression", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.emitted).toBeDefined();
 		expect(result.emitted!.event).toBe("message");
+	});
+
+	test("footgun closed: the message event delivers an already-unwrapped InboundMeshMessage so a consumer that never calls unwrapInboundTell still reads the inner payload", () => {
+		const envelope = JSON.stringify({ from: "route-id", topic: "session/r", payload: { kind: "mesh:tell", deliveryId: "d-fg", from: "durable-sender", payload: { kind: "worker.hello" }, timestamp: 1 }, timestamp: 1 });
+		const inbound = simulateHandleMsg(envelope).emitted!.data as { message: { payload: unknown; from: string }; deliveryId?: string; originalFrom?: string };
+		// Inner payload, unwrapped by the mesh source. NO unwrapInboundTell call here.
+		expect(inbound.message.payload).toEqual({ kind: "worker.hello" });
+		expect(inbound.message.from).toBe("durable-sender");
+		// Receipt-aware consumers still get the wrapper metadata off the same object.
+		expect(inbound.deliveryId).toBe("d-fg");
+		expect(inbound.originalFrom).toBe("durable-sender");
 	});
 
 	test("tell ack is parsed and matched (not swallowed by TDZ)", () => {

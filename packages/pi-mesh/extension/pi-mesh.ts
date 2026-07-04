@@ -52,6 +52,7 @@ import {
   buildTellReceiptAck,
   createDeliveryId,
   isMeshTellAckEnvelope,
+  type InboundMeshMessage,
   unwrapInboundTell,
 } from "./tell-protocol.ts";
 import type {
@@ -582,7 +583,13 @@ export class PiMesh {
     return Array.from(this.peerMap.values());
   }
 
-  on<T = unknown>(event: MeshEventType, cb: MeshEventCallback<T>): void {
+  // The "message" event delivers an already-unwrapped InboundMeshMessage: the
+  // inner payload is at .message.payload, so a consumer cannot forget to unwrap
+  // and silently drop a wrapped tell (see the emit site in _handleMsg).
+  on(event: "message", cb: MeshEventCallback<InboundMeshMessage>): void;
+  on<T = unknown>(event: MeshEventType, cb: MeshEventCallback<T>): void;
+  // biome-ignore lint/suspicious/noExplicitAny: implementation signature must accept every overload's callback variance
+  on(event: MeshEventType, cb: MeshEventCallback<any>): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(cb as MeshEventCallback);
   }
@@ -726,7 +733,7 @@ export class PiMesh {
           this._emit("request", event);
           return;
         }
-        this._emit("message", msg);
+        this._emit("message", unwrapped);
       } catch {}
     }
   }
@@ -1882,9 +1889,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Wire inbound tells into the conversation.
       // Busy → queue and flush on agent_end so the agent actually wakes up to see it.
       // Idle → deliver immediately.
-      mesh.on<MeshMessage>("message", (rawMsg) => {
-        const { message: msg, deliveryId, ackRequested, preempt, originalFrom } =
-          unwrapInboundTell(rawMsg);
+      mesh.on("message", (inbound) => {
+        const { message: msg, deliveryId, ackRequested, preempt, originalFrom } = inbound;
         if (isTeamsLifecyclePayload(msg.payload)) return;
         const senderPeer = mesh.peers().find((p) => p.id === msg.from);
         const senderLabel = senderPeer

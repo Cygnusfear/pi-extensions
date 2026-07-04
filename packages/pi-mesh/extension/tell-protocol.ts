@@ -50,6 +50,14 @@ export function buildTellReceiptAck(
 	};
 }
 
+export interface InboundMeshMessage {
+	message: MeshMessage;
+	deliveryId?: string;
+	ackRequested?: MeshTellReceiptWaitForPhase;
+	preempt?: MeshTellPreemptLevel;
+	originalFrom?: string;
+}
+
 export function unwrapInboundTell(msg: MeshMessage): {
 	message: MeshMessage;
 	deliveryId?: string;
@@ -66,3 +74,4 @@ export function unwrapInboundTell(msg: MeshMessage): {
 		originalFrom: msg.payload.from,
 	};
 }
+
