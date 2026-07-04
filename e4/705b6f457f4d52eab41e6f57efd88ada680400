@@ -1,0 +1,19 @@
+packages/teams/leader.retry.test.ts
+  s_b6e4cc025e1178::t_78eb38955110a9 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e4705b6f457f4d52eab41e6f57efd88ada680400",
+  "prompts": {},
+  "sessions": {
+    "s_b6e4cc025e1178": {
+      "agent_id": {
+        "tool": "Shri Andromeda Drake",
+        "id": "019f2bdc-09ea-7a33-8135-71cfebd1f3c2",
+        "model": "zai-coding/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
