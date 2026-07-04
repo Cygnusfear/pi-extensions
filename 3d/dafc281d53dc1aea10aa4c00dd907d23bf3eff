@@ -1,0 +1,24 @@
+packages/teams/leader.ts
+  s_b6e4cc025e1178::t_c6536a489430a9 1936-1938,1942
+  s_b6e4cc025e1178::t_4001289a0f3c28 485-562
+  s_b6e4cc025e1178::t_4439a8ff2525e6 229-234
+  s_b6e4cc025e1178::t_a305f174f00876 1876-1887
+  s_b6e4cc025e1178::t_dfda25baa59cb3 1906-1908,1914
+  s_b6e4cc025e1178::t_8e4f9ff6854692 484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3ddafc281d53dc1aea10aa4c00dd907d23bf3eff",
+  "prompts": {},
+  "sessions": {
+    "s_b6e4cc025e1178": {
+      "agent_id": {
+        "tool": "Shri Andromeda Drake",
+        "id": "019f2bdc-09ea-7a33-8135-71cfebd1f3c2",
+        "model": "zai-coding/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
