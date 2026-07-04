@@ -226,7 +226,12 @@ export function assessWorkerExit(
   } else if (explicitTerminal === "quit") {
     classification = "warning";
     reason = worker.terminalSummary || lastNote || "worker quit";
-  } else if (worker.freeform && cleanExit) {
+  } else if (worker.freeform && cleanExit && outputMeaningful) {
+    // A freeform worker that ended a turn cleanly AND produced meaningful output is
+    // resumable idle. Requiring outputMeaningful keeps an empty/aborted FIRST turn
+    // (no content, no tool calls — a stream flake) from being misclassified as a
+    // useful turn; it must fall through to the !outputMeaningful → failure branch so
+    // the bounded recovery block can retry it.
     classification = "turn_finished";
   } else if (!forcedExit && ticketClosed && (lastNote.startsWith("DONE:") || cleanExit)) {
     // Legacy compatibility for workers that still closed the ticket directly.
@@ -472,6 +477,85 @@ export function getRecoverableToolRetry(diagnostics: string): { error: string; p
       "This usually happens with hash_edit, apply_patch, regexes, ANSI escapes, or Windows paths.",
       "If the edit text has lots of backslashes, use execute_code and write the file from JavaScript instead of a raw JSON tool call.",
       "Do the same work again now and do not stop after this reminder.",
+    ].join("\n"),
+  };
+}
+
+/**
+ * Detect the empty-aborted-first-turn stream flake and produce a continuation
+ * prompt so the bounded recovery block (handleWorkerExit) can retry the worker
+ * once.
+ *
+ * THE FLAKE: a worker's FIRST model turn yields an empty/aborted response —
+ * the provider stream failed or aborted before emitting any content or tool
+ * calls. The session's last assistant message has `stopReason` "aborted" or
+ * "error" with empty content (no text, no toolCall blocks). Nothing real was
+ * produced, so the worker dies having done nothing. This is a transient
+ * provider/stream hiccup (observed on zai-coding/glm-5.2), not a real failure.
+ *
+ * MATCHES (non-null) only when readSessionDiagnostics() shows:
+ *   - last assistant: stopReason: aborted | error
+ *   - NO "text:" segment on that line (empty content)
+ *   - NO "last failing tool:" (no tool calls ran)
+ * The "no tool calls" guarantee is provided by the caller: this classifier is
+ * only reached on the failure-classified path, where workerProducedMeaningfulOutput
+ * has already confirmed there were no tool calls and no substantive text.
+ *
+ * DIRECTED-ABORT SAFETY — never retry a directed stop. A directed abort (leader
+ * kill, mesh interrupt, session shutdown, mid-turn auto-compaction) sets the
+ * agent abort signal, which the provider surfaces as stopReason "aborted". Those
+ * cases are filtered BEFORE this classifier runs:
+ *   - Leader kill        → worker.status="killed" / worker.killedAt guard at the
+ *                          top of handleWorkerExit (early return; never reaches
+ *                          the recovery block).
+ *   - Explicit team_finish → classification success/warning (the recovery block
+ *                          is failure-gated, so it never fires).
+ *   - Mid-turn compaction → has its own resume path (endedWithUnresolvedCompaction)
+ *                          and is excluded here by the caller's guard.
+ * This classifier therefore matches the empty abort/error signature; the upstream
+ * filters guarantee a leader-directed stop never reaches it. (An external
+ * mesh.interrupt aimed at a first-turn worker is indistinguishable from the flake
+ * in the session and is not a normal teams workflow — the leader stops workers
+ * via kill(), never mesh.interrupt — so the residual risk is one bounded retry.)
+ *
+ * NOTE on stopReason: per the provider stream (openai-completions.ts /
+ * anthropic-messages.ts), stopReason "aborted" means signal.aborted was true at
+ * catch time, "error" means it was not. The flake can surface as EITHER depending
+ * on whether the stream-failure cleanup races ahead of the catch, so we accept
+ * both. "error" is unambiguously a genuine non-directed failure; "aborted" is
+ * accepted here because every leader-directed "aborted" is filtered upstream.
+ */
+export function getRecoverableStreamAbort(diagnostics: string): { error: string; prompt: string } | null {
+  // readSessionDiagnostics emits the last assistant message as a single segment:
+  //   "\n  last assistant: stopReason: <reason> | error: <msg> | text: <text>"
+  // For the empty flake there is no text and no failing tool.
+  const assistantMatch = diagnostics.match(/last assistant: ([^\n]+)/);
+  if (!assistantMatch) return null;
+  const lastAssistant = assistantMatch[1];
+
+  const stopMatch = lastAssistant.match(/stopReason: (aborted|error)/);
+  if (!stopMatch) return null;
+
+  // Empty content is the flake signature — a turn that emitted text (even partial)
+  // did real work and is not the empty-first-turn flake.
+  if (/\btext:/.test(lastAssistant)) return null;
+  // A turn that ran tools is not the empty flake.
+  if (/last failing tool:/.test(diagnostics)) return null;
+
+  const stopReason = stopMatch[1];
+  const errorDetailMatch = lastAssistant.match(/\| error: ([^|]+)/);
+  const errorDetail = errorDetailMatch ? errorDetailMatch[1].trim() : undefined;
+  const error = errorDetail
+    ? `empty ${stopReason} first-turn stream response: ${errorDetail}`
+    : `empty ${stopReason} first-turn stream response (no content, no tool calls)`;
+
+  return {
+    error,
+    prompt: [
+      "Your previous turn produced no output — the model stream aborted or errored before any content or tool calls. This was a transient provider/stream flake, not a real failure.",
+      "Start the task fresh now and complete it exactly as originally instructed.",
+      "Use team_comment to report progress as needed.",
+      'When you are done, call team_finish(status="done", summary=...). If you cannot continue, call team_finish(status="quit", summary=...). team_finish is the authoritative terminal signal — do not exit silently.',
     ].join("\n"),
   };
 }
@@ -1789,7 +1873,18 @@ export class TeamLeader {
     }
 
     if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
-      const recovery = getRecoverableToolRetry(diagnostics);
+      // Try the malformed-tool-JSON classifier first; if it doesn't match, try the
+      // empty-aborted-first-turn stream flake. Both reuse the SAME bounded path
+      // (recoveryAttempts < 1 IS the cascade guard — at most one auto-retry per
+      // worker, then it gives up). The stream-abort classifier is skipped when the
+      // session ended with an unresolved compaction (that has its own resume block
+      // below) so the two recovery paths never overlap.
+      const toolRetry = getRecoverableToolRetry(diagnostics);
+      const streamAbort = !toolRetry && !endedWithUnresolvedCompaction(worker.sessionDir)
+        ? getRecoverableStreamAbort(diagnostics)
+        : null;
+      const recovery = toolRetry ?? streamAbort;
+      const isStreamAbortRetry = !!streamAbort;
       if (recovery) {
         // Regenerate workerInstanceId so the v2 reducer classifies the resumed
         // attempt from spawn_started only, not from the prior process_exit fact
@@ -1808,12 +1903,15 @@ export class TeamLeader {
           this.upsertV2WorkerFromHandle(worker);
           this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
 
+          const retryNoteText = isStreamAbortRetry
+            ? `AUTO-RETRY: previous turn produced no output — the model stream aborted/errored before any content or tool calls (${recovery.error}). Retrying once with a continuation prompt.`
+            : `AUTO-RETRY: previous turn failed before tool execution due to malformed JSON tool arguments (${recovery.error}). Retrying once with escape guidance.`;
           await this.pi.exec(
             getMaiBin(),
             [
               "add-note",
               worker.ticketId,
-              `AUTO-RETRY: previous turn failed before tool execution due to malformed JSON tool arguments (${recovery.error}). Retrying once with escape guidance.`,
+              retryNoteText,
             ],
             { cwd: this.ctx.cwd, timeout: 5000 },
           ).catch(() => {});
@@ -1835,10 +1933,13 @@ export class TeamLeader {
 
           this.startActivityMonitor(name, worker);
           this.renderWidget();
+          const retryEventContent = isStreamAbortRetry
+            ? `${ICONS.warn} ${workerTag(worker)}:\nauto-retrying once after empty/aborted first-turn stream response: ${recovery.error}`
+            : `${ICONS.warn} ${workerTag(worker)}:\nauto-retrying once after malformed tool JSON: ${recovery.error}`;
           this.pi.sendMessage(
             {
               customType: "team-event",
-              content: `${ICONS.warn} ${workerTag(worker)}:\nauto-retrying once after malformed tool JSON: ${recovery.error}`,
+              content: retryEventContent,
               display: true,
             },
             { deliverAs: "followUp", triggerTurn: false },
