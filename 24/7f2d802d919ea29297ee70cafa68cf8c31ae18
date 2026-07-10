@@ -1,0 +1,24 @@
+packages/pi-mesh/extension/route-resolve.ts
+  s_c80280c75e1308::t_7156b0745029c0 31
+  s_c80280c75e1308::t_917b554ab29da0 73,82
+  s_c80280c75e1308::t_39fe62648f09e1 20-30,32-33
+  s_c80280c75e1308::t_c5bb49ff8ee86f 58,62
+packages/pi-mesh/extension/route-resolve.test.ts
+  s_c80280c75e1308::t_f339bd8e8816de 68-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "247f2d802d919ea29297ee70cafa68cf8c31ae18",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
