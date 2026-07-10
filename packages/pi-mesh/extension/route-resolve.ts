@@ -17,6 +17,20 @@ function peerLabel(peer: PeerInfo): string {
 	return peer.nickname?.trim() || peer.name?.trim() || peer.id.slice(0, 8);
 }
 
+/** Collapse peers that share a durable mesh id (or, lacking one, a connection id) into the
+ *  most-recently-seen one. Two entries for the SAME durable identity — e.g. a stale
+ *  clientId left by a restart before stale-peer eviction (~90s) — are one peer, not an
+ *  ambiguity. Prefer the live incarnation (highest lastSeen). */
+function dedupByIdentity(peers: PeerInfo[]): PeerInfo[] {
+	const best = new Map<string, PeerInfo>();
+	for (const p of peers) {
+		const key = p.meshId ?? p.id;
+		const ex = best.get(key);
+		if (!ex || (p.lastSeen ?? 0) > (ex.lastSeen ?? 0)) best.set(key, p);
+	}
+	return Array.from(best.values());
+}
+
 /**
  * Resolve a raw target (durable mesh id, sidecar clientId, session id, nickname,
  * or id/meshId prefix) to a concrete ROUTE — the durable id when the matched peer
@@ -41,11 +55,11 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 	if (byExact) return selectRoute(byExact);
 
 	// 2. Case-insensitive exact name/nickname match
-	const byLabel = peers.filter((peer) => {
+	const byLabel = dedupByIdentity(peers.filter((peer) => {
 		const nickname = peer.nickname?.trim().toLowerCase();
 		const name = peer.name?.trim().toLowerCase();
 		return nickname === needleLower || name === needleLower;
-	});
+	}));
 	if (byLabel.length === 1) return selectRoute(byLabel[0]);
 	if (byLabel.length > 1) {
 		const matched = byLabel
@@ -56,7 +70,7 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 
 	// 3. ID / meshId / sessionId prefix match
 	if (needle.length >= 6) {
-		const byPrefix = peers.filter((peer) => {
+		const byPrefix = dedupByIdentity(peers.filter((peer) => {
 			const peerId = peer.id ?? "";
 			const peerSessionId = peer.sessionId ?? "";
 			const peerMeshId = peer.meshId ?? "";
@@ -65,7 +79,7 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 				peerSessionId.startsWith(needle) ||
 				peerMeshId.startsWith(needle)
 			);
-		});
+		}));
 		if (byPrefix.length === 1) return selectRoute(byPrefix[0]);
 		if (byPrefix.length > 1) {
 			const matched = byPrefix

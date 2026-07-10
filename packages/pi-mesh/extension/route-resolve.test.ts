@@ -65,4 +65,14 @@ describe("resolveDurableTarget — durable-id routing", () => {
 		expect(resolveDurableTarget(legacy, "legacy-client")).toBe("legacy-client");
 		expect(resolveDurableTarget(legacy, "old timer")).toBe("legacy-client");
 	});
+
+	test("STALE-DUPLICATE PROOF: two clientIds for the same durable id+nickname (a restart before ~90s eviction) resolve, not ambiguous", () => {
+		const peers = [
+			peer({ id: "client-STALE", meshId: "durable-H", nickname: "The Hooman", lastSeen: 1000 }),
+			peer({ id: "client-LIVE", meshId: "durable-H", nickname: "The Hooman", lastSeen: 2000 }),
+		];
+		// Before the fix this threw "ambiguous"; the duplicate (same durable identity) now collapses to one.
+		expect(resolveDurableTarget(peers, "The Hooman")).toBe("durable-H");
+		expect(resolveDurableTarget(peers, "durable-H")).toBe("durable-H");
+	});
 });
