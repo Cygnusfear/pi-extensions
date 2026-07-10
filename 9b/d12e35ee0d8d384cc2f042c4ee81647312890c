@@ -1,0 +1,34 @@
+packages/mesh-telegram-bridge/.gitignore
+  s_c80280c75e1308::t_8528693595537b 1-5
+packages/mesh-telegram-bridge/src/mesh-client.ts
+  s_c80280c75e1308::t_88dfcf75067dfa 214-223
+  s_c80280c75e1308::t_122af01ac45814 1-213,224-299
+packages/mesh-telegram-bridge/src/config.ts
+  s_c80280c75e1308::t_a40a3e440c257c 1-59
+packages/mesh-telegram-bridge/src/index.ts
+  s_c80280c75e1308::t_12a99bec6e1030 1-24
+packages/mesh-telegram-bridge/README.md
+  s_c80280c75e1308::t_bb4d675ae89587 1-51
+packages/mesh-telegram-bridge/launchd/com.piextensions.mesh-telegram-bridge.plist
+  s_c80280c75e1308::t_c4a985539a22b0 1-18
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_c80280c75e1308::t_1edeb347825f53 1-106
+packages/mesh-telegram-bridge/package.json
+  s_c80280c75e1308::t_f334ef8bd32cda 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.11",
+  "base_commit_sha": "9bd12e35ee0d8d384cc2f042c4ee81647312890c",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
