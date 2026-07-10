@@ -23,6 +23,7 @@ export interface InboundTell {
 	fromMeshId?: string;
 	nickname: string;
 	text: string;
+	attachment?: string;
 	/** present ⇒ the sender asked for a delivery receipt; we ack it */
 	deliveryId?: string;
 }
@@ -227,6 +228,7 @@ export class MeshClient extends EventEmitter {
 				fromMeshId: peer?.meshId,
 				nickname: peer?.nickname ?? fromClientId.slice(0, 8),
 				text: this.display(message.payload),
+				attachment: this.attachmentOf(message.payload),
 				deliveryId,
 			} satisfies InboundTell);
 			return;
@@ -280,6 +282,15 @@ export class MeshClient extends EventEmitter {
 
 	private nick(clientId: string): string {
 		return this.peers.get(clientId)?.nickname ?? clientId.slice(0, 8);
+	}
+
+	private attachmentOf(payload: unknown): string | undefined {
+		if (payload && typeof payload === "object") {
+			const p = payload as Record<string, unknown>;
+			const a = p.attachment ?? p.image ?? p.file ?? p.path;
+			if (typeof a === "string" && a.trim()) return a.trim();
+		}
+		return undefined;
 	}
 
 	private display(payload: unknown): string {
