@@ -1,0 +1,14 @@
+{
+  "name": "@pi-extensions/mesh-telegram-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone bridge: the hooman as a durable mesh peer reachable from a Telegram group",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "grammy": "^1.30.0",
+    "@pi-extensions/pi-mesh": "workspace:*"
+  }
+}

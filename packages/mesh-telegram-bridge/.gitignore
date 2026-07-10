@@ -1,0 +1,5 @@
+config.env
+*.env
+.env
+*.log
+node_modules
