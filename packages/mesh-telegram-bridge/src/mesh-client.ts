@@ -24,6 +24,7 @@ export interface InboundTell {
 	nickname: string;
 	text: string;
 	attachment?: string;
+	sessionName?: string;
 	/** present ⇒ the sender asked for a delivery receipt; we ack it */
 	deliveryId?: string;
 }
@@ -229,6 +230,7 @@ export class MeshClient extends EventEmitter {
 				nickname: peer?.nickname ?? fromClientId.slice(0, 8),
 				text: this.display(message.payload),
 				attachment: this.attachmentOf(message.payload),
+				sessionName: peer?.name,
 				deliveryId,
 			} satisfies InboundTell);
 			return;

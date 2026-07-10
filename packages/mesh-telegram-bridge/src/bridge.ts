@@ -88,6 +88,33 @@ export class Bridge {
 		}
 	}
 
+	/** Resolve a mesh peer by nickname / session-name / id prefix or substring. */
+	private resolvePeer(query: string): { meshId?: string; clientId: string; nickname: string; name?: string } | null {
+		const q = query.trim().toLowerCase();
+		if (!q) return null;
+		const peers = [...this.mesh.peers.values()];
+		let m = peers.find((p) => (p.nickname ?? "").toLowerCase() === q || (p.name ?? "").toLowerCase() === q);
+		if (!m && q.length >= 3) m = peers.find((p) => (p.nickname ?? "").toLowerCase().startsWith(q) || (p.name ?? "").toLowerCase().startsWith(q) || (p.meshId ?? "").startsWith(q) || (p.id ?? "").startsWith(q));
+		if (!m && q.length >= 3) m = peers.find((p) => (p.nickname ?? "").toLowerCase().includes(q) || (p.name ?? "").toLowerCase().includes(q));
+		return m ? { meshId: m.meshId, clientId: m.id, nickname: m.nickname ?? m.id.slice(0, 8), name: m.name } : null;
+	}
+
+	/** Create (idempotently) a topic for an arbitrary peer — used by /dm. */
+	private async ensureTopicForPeer(peer: { meshId?: string; clientId: string; nickname: string; name?: string }): Promise<number | null> {
+		const key = peer.meshId ?? peer.clientId;
+		if (this.chatId == null || !key) return null;
+		if (this.agentTopic.has(key)) return this.agentTopic.get(key)!;
+		try {
+			const name = (peer.name ? peer.nickname + " · " + peer.name : peer.nickname).slice(0, 128);
+			const topic = await this.bot.api.createForumTopic(this.chatId!, name);
+			this.agentTopic.set(key, topic.message_thread_id);
+			this.topicAgent.set(topic.message_thread_id, { clientId: peer.clientId, meshId: peer.meshId, nickname: peer.nickname });
+			this.saveState();
+			console.log("[bridge] created topic \"" + name + "\" (" + topic.message_thread_id + ") for " + peer.nickname + " (via /dm)");
+			return topic.message_thread_id;
+		} catch (e) { console.error("[bridge] /dm createForumTopic failed:", (e as Error).message); return null; }
+	}
+
 	private async ensureAgentTopic(t: InboundTell): Promise<number | null> {
 		const key = t.fromMeshId ?? t.fromClientId;
 		if (!key || this.chatId == null) return null;
@@ -97,7 +124,7 @@ export class Bridge {
 		}
 		this.creating.add(key);
 		try {
-			const name = t.nickname.slice(0, 128);
+			const name = (t.sessionName ? t.nickname + " · " + t.sessionName : t.nickname).slice(0, 128);
 			const topic = await this.bot.api.createForumTopic(this.chatId!, name);
 			this.agentTopic.set(key, topic.message_thread_id);
 			this.topicAgent.set(topic.message_thread_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname });
@@ -161,6 +188,18 @@ export class Bridge {
 			else if (msg.document) text = await this.inboundFileText(msg.document.file_id, "document", msg.caption, msg.document.file_name);
 		} catch (e) { console.error("[bridge] inbound media failed:", (e as Error).message); return; }
 		if (!text) return;
+
+		// /dm <agent> — create a topic for any mesh peer on demand (forum mode only).
+		if (this.forumMode && text.startsWith("/dm") && (text.length === 3 || text[3] === " " || text[3] === "@")) {
+			let q = text.slice(3).trim();
+			if (q.startsWith("@")) { const sp = q.indexOf(" "); q = sp >= 0 ? q.slice(sp + 1).trim() : ""; }
+			if (!q) { void ctx.reply("Usage: /dm <agent nickname, name, or id>"); return; }
+			const peer = this.resolvePeer(q);
+			if (!peer) { void ctx.reply("No mesh peer matching '" + q + "'."); return; }
+			const topic = await this.ensureTopicForPeer(peer);
+			void ctx.reply(topic != null ? ("✉️ Topic ready for " + peer.nickname + (peer.name ? " · " + peer.name : "") + " — message me there.") : ("Couldn't create a topic for " + peer.nickname + "."));
+			return;
+		}
 
 		if (this.forumMode) {
 			const topicId = typeof m.message_thread_id === "number" ? m.message_thread_id : undefined;
