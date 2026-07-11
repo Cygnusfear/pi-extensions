@@ -46,6 +46,9 @@ function routeRejectionToTui(err: unknown): void {
 }
 
 export type PollEventType = PollEvent["type"];
+/** "terminal" is a filter alias, not an emitted PollEvent type. */
+export type PollEventFilterType = PollEventType | "terminal";
+const TERMINAL_EVENT_TYPES = new Set<PollEventType>(["completed", "turn_finished", "warning", "failed"]);
 
 /**
  * DOM-style event wrapper dispatched to subscription listeners.
@@ -113,7 +116,7 @@ export interface EventFilter {
 	/** Match a specific worker by name. */
 	name?: string;
 	/** Match a specific PollEvent type. */
-	type?: PollEventType;
+	type?: PollEventFilterType;
 	/** Match against event.comment (only meaningful when type omitted or "comment").
 	 *  String → substring match. RegExp → regex test. */
 	comment?: string | RegExp;
@@ -129,14 +132,12 @@ export interface EventFilter {
 
 /** Callback signature — receives the wrapped TeamsEvent (PollEvent + DOM methods).
  *
- * Inside a callback you have access to all sandbox globals, so the canonical
- * way to trigger a coordinator turn from a background event is:
+ * Prefer the host-owned `.wake()` chain when a callback only needs to wake the
+ * coordinator. It runs synchronously during leader dispatch:
  *
  *   teams.on("fixer", "completed")
  *     .preventDefault()
- *     .each(e => console.wake(`fixer done: ${e.result.slice(0, 500)}`));
- *
- * console.wake is the single wake primitive. Do not reinvent it per tool. */
+ *     .wake(e => `fixer ${e.type}`); */
 export type EventCallback = (event: TeamsEvent) => void;
 
 /**
@@ -162,6 +163,8 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	private autoPreventDefault = false;
 	/** Pre-registered: call stopPropagation() on every matched event. */
 	private autoStopPropagation = false;
+	/** A host-owned wake is dispatched synchronously, unlike a .then continuation. */
+	private wakeMessage: string | ((event: TeamsEvent) => string) | undefined;
 
 	constructor(
 		private readonly leader: TeamLeader,
@@ -200,11 +203,18 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		}
 	}
 
-	private checkCurrent(name: string, type: PollEventType): void {
+	private checkCurrent(name: string, type: PollEventFilterType): void {
+		const retained = this.leader.getCurrentTerminalEvent?.(name, type);
+		if (retained) {
+			queueMicrotask(() => this.handle(wrapPollEvent(retained)));
+			return;
+		}
 		const worker = this.leader.getWorker(name);
 		if (!worker) return;
 
-		const synthetic = synthesizeFromWorker(worker, type);
+		const synthetic = type === "terminal"
+			? synthesizeAnyTerminalFromWorker(worker)
+			: synthesizeFromWorker(worker, type);
 		if (synthetic) {
 			// Fire asynchronously so callers have a chance to attach .then/.each/.wake
 			// before the event arrives. Synthetic events are freshly wrapped — since
@@ -222,6 +232,14 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		// see defaultPrevented / propagationStopped already set.
 		if (this.autoPreventDefault) event.preventDefault();
 		if (this.autoStopPropagation) event.stopPropagation();
+		if (this.wakeMessage !== undefined) {
+			try {
+				const content = typeof this.wakeMessage === "function" ? this.wakeMessage(event) : this.wakeMessage;
+				this.leader.wakeFromSubscription?.(event, content);
+			} catch (err) {
+				console.warn("[teams.on] wake handler threw:", err instanceof Error ? err.message : String(err));
+			}
+		}
 
 		// Fire each callbacks every match.
 		for (const cb of this.eachCallbacks) {
@@ -354,6 +372,21 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		return this;
 	}
 
+	/**
+	 * Send a coordinator wake from the host during the matching dispatch pass.
+	 * Unlike `.then(e => console.wake(...))`, this does not depend on a later
+	 * sandbox promise microtask. It automatically replaces the leader's normal
+	 * batched wake rather than adding a duplicate.
+	 */
+	wake(message?: string | ((event: TeamsEvent) => string)): this {
+		// A host wake is an explicit replacement for the leader's default batched
+		// wake. Make the safe path the default: callers can no longer accidentally
+		// create two coordinator turns by omitting a separate preventDefault().
+		this.autoPreventDefault = true;
+		this.wakeMessage = message ?? ((event) => `[teams] ${event.worker.name}: ${event.type}`);
+		return this;
+	}
+
 	/** Manually stop receiving events. Idempotent. */
 	unsubscribe(): void {
 		this.dispose();
@@ -386,7 +419,7 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
  */
 export function buildPredicate(
 	target: string | EventFilter,
-	eventType?: PollEventType,
+	eventType?: PollEventFilterType,
 ): { filter: EventFilter; predicate: (event: PollEvent) => boolean } {
 	const filter: EventFilter =
 		typeof target === "string"
@@ -397,7 +430,11 @@ export function buildPredicate(
 
 	const predicate = (event: PollEvent): boolean => {
 		if (filter.name !== undefined && event.worker.name !== filter.name) return false;
-		if (filter.type !== undefined && event.type !== filter.type) return false;
+		if (filter.type !== undefined) {
+			if (filter.type === "terminal") {
+				if (!TERMINAL_EVENT_TYPES.has(event.type)) return false;
+			} else if (event.type !== filter.type) return false;
+		}
 		if (filter.comment !== undefined) {
 			if (event.type !== "comment") return false;
 			const body = (event as { comment: string }).comment;
@@ -442,4 +479,23 @@ function synthesizeFromWorker(worker: WorkerHandle, type: PollEventType): PollEv
 		default:
 			return null;
 	}
+}
+
+/** Compatibility fallback for terminal workers restored from snapshots written
+ * before the terminal-event ledger existed. New terminal transitions replay
+ * from the ledger above, preserving their original event payload. */
+function synthesizeAnyTerminalFromWorker(worker: WorkerHandle): PollEvent | null {
+	if (worker.status === "warning") {
+		return { type: "warning", worker: { ...worker }, reason: worker.terminalSummary ?? worker.lastNote ?? "already in warning state" };
+	}
+	if (worker.status === "failed" || worker.status === "killed") {
+		return { type: "failed", worker: { ...worker }, reason: worker.spawnError ?? (worker.status === "killed" ? "worker killed" : "failed") };
+	}
+	if (worker.status === "done" || worker.status === "grace") {
+		if (worker.freeform && worker.terminalStatus !== "done") {
+			return { type: "turn_finished", worker: { ...worker }, result: worker.lastNote ?? "" };
+		}
+		return { type: "completed", worker: { ...worker }, result: worker.lastNote ?? "" };
+	}
+	return null;
 }

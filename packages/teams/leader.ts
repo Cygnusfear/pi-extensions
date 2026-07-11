@@ -110,9 +110,29 @@ interface LeaderStateSnapshot {
   v2TeamId?: string | null;
   v2TeamRecord?: TeamRecord | null;
   workers: Record<string, PersistedWorkerState>;
+  terminalEvents?: TerminalEventLedgerEntry[];
   savedAt: number;
   clearedAt?: number;
 }
+
+type TerminalPollEvent = Extract<PollEvent, { type: "completed" | "turn_finished" | "warning" | "failed" }>;
+
+/** A compact, replayable terminal event retained after widget cleanup/reload.
+ * It deliberately stores data, not callbacks: callers must re-arm after a reload. */
+interface TerminalEventLedgerEntry {
+  recordedAt: number;
+  event: TerminalPollEvent;
+}
+
+const terminalEventTtlRaw = Number(process.env.PI_TEAMS_TERMINAL_EVENT_TTL_MS ?? `${24 * 60 * 60_000}`);
+const TERMINAL_EVENT_TTL_MS = Number.isFinite(terminalEventTtlRaw) && terminalEventTtlRaw >= 60_000
+  ? Math.floor(terminalEventTtlRaw)
+  : 24 * 60 * 60_000;
+const terminalEventMaxRaw = Number(process.env.PI_TEAMS_TERMINAL_EVENT_MAX ?? "100");
+const TERMINAL_EVENT_MAX = Number.isFinite(terminalEventMaxRaw) && terminalEventMaxRaw >= 1
+  ? Math.floor(terminalEventMaxRaw)
+  : 100;
+const TERMINAL_EVENT_TYPES = new Set<PollEvent["type"]>(["completed", "turn_finished", "warning", "failed"]);
 
 /**
  * Derive a short human label from a session entry.
@@ -801,6 +821,7 @@ export class TeamLeader {
     },
   );
   private notifiedTerminal = new Set<string>();
+  private terminalEventLedger: TerminalEventLedgerEntry[] = [];
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
   /** External subscribers to the PollEvent stream (teams.on).
    *  Listeners receive a wrapped TeamsEvent — they can call preventDefault()
@@ -926,6 +947,7 @@ export class TeamLeader {
       v2TeamRecord: this.v2TeamRecord,
       cleared,
       workers,
+      terminalEvents: this.terminalEventLedger,
     });
   }
 
@@ -956,6 +978,7 @@ export class TeamLeader {
           v2TeamId: this.v2TeamId,
         v2TeamRecord: this.v2TeamRecord,
         workers,
+        terminalEvents: this.terminalEventLedger,
         savedAt: Date.now(),
         ...(options?.cleared ? { clearedAt: Date.now() } : {}),
       };
@@ -1073,6 +1096,7 @@ export class TeamLeader {
 		this.workers.clear();
 		this.childProcesses.clear();
 		this.meshDelivered.clear();
+		this.terminalEventLedger = this.normalizeTerminalEventLedger(lastState.terminalEvents, Date.now());
 		this.v2TeamId = lastState.v2TeamId ?? this.v2TeamId;
 
 		if (lastState.v2TeamRecord?.teamId === this.v2TeamId) {
@@ -2618,6 +2642,56 @@ export class TeamLeader {
     };
   }
 
+  /** Replay the latest retained terminal event matching a worker/filter. */
+  getCurrentTerminalEvent(name: string, type: PollEvent["type"] | "terminal"): PollEvent | null {
+    this.terminalEventLedger = this.normalizeTerminalEventLedger(this.terminalEventLedger, Date.now());
+    for (let i = this.terminalEventLedger.length - 1; i >= 0; i--) {
+      const event = this.terminalEventLedger[i]!.event;
+      if (event.worker.name !== name) continue;
+      if (type !== "terminal" && event.type !== type) continue;
+      return structuredClone(event);
+    }
+    return null;
+  }
+
+  /** Host-owned synchronous wake for TeamsSubscription.wake(). */
+  wakeFromSubscription(event: PollEvent, content: string): void {
+    this.pi.sendMessage(
+      { customType: "team-event", content, display: true },
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+  }
+
+  private normalizeTerminalEventLedger(entries: unknown, now: number): TerminalEventLedgerEntry[] {
+    if (!Array.isArray(entries)) return [];
+    const cutoff = now - TERMINAL_EVENT_TTL_MS;
+    const latestByKey = new Map<string, TerminalEventLedgerEntry>();
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      const candidate = entry as Partial<TerminalEventLedgerEntry>;
+      if (!Number.isFinite(candidate.recordedAt) || (candidate.recordedAt ?? 0) < cutoff) continue;
+      const event = candidate.event;
+      if (!event || !TERMINAL_EVENT_TYPES.has(event.type) || !event.worker?.workerInstanceId) continue;
+      const key = `${event.worker.workerInstanceId}:${event.type}`;
+      const normalized = { recordedAt: candidate.recordedAt!, event: structuredClone(event) as TerminalPollEvent };
+      const existing = latestByKey.get(key);
+      if (!existing || normalized.recordedAt >= existing.recordedAt) latestByKey.set(key, normalized);
+    }
+    return Array.from(latestByKey.values()).sort((a, b) => a.recordedAt - b.recordedAt).slice(-TERMINAL_EVENT_MAX);
+  }
+
+  private retainTerminalEvent(event: PollEvent): void {
+    if (!TERMINAL_EVENT_TYPES.has(event.type)) return;
+    const terminal = structuredClone(event) as TerminalPollEvent;
+    const key = `${terminal.worker.workerInstanceId}:${terminal.type}`;
+    const now = Date.now();
+    this.terminalEventLedger = this.normalizeTerminalEventLedger(this.terminalEventLedger, now)
+      .filter((entry) => `${entry.event.worker.workerInstanceId}:${entry.event.type}` !== key);
+    this.terminalEventLedger.push({ recordedAt: now, event: terminal });
+    this.terminalEventLedger = this.terminalEventLedger.slice(-TERMINAL_EVENT_MAX);
+    this.persistStateIfHydrated();
+  }
+
   /** Register a disposal callback for a specific worker. Called when the worker
    *  is killed, so subscriptions can clean up without waiting for timeout. */
   subscribeToWorkerDisposal(workerName: string, cb: () => void): () => void {
@@ -2654,6 +2728,7 @@ export class TeamLeader {
     //   - Re-check each listener is still in the live set before invoking, so a
     //     listener that unsubscribes another (not-yet-visited) listener correctly
     //     prevents that listener from firing on this event.
+    this.retainTerminalEvent(event);
     const wrapped = wrapPollEvent(event);
     if (this.eventListeners.size > 0) {
       const snapshot = [...this.eventListeners];

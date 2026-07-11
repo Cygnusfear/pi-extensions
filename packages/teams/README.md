@@ -213,11 +213,11 @@ Coordinators wait for worker lifecycle events using `teams.on(...)`, a typed, th
 const event = await teams.on("fixer", "completed").timeout(600_000);
 console.log("fixer done:", event.result);
 
-// Background wake — fire a coordinator turn when the event arrives,
-// even after the enclosing execute_code block has returned
-teams.on("fixer", "completed")
+// Background wake — host-owned and synchronous with Teams event dispatch.
+// It does not depend on a later sandbox Promise/.then continuation.
+teams.on("fixer", "terminal")
   .preventDefault()
-  .then(e => console.wake(`fixer done: ${e.result.slice(0, 500)}`));
+  .wake(e => `fixer ${e.type}`);
 
 // Streaming — react to every matching event until unsubscribed
 const sub = teams.on({ name: "oracle", type: "comment" }).each(e => {
@@ -238,6 +238,7 @@ const first = await Promise.race([
 |------|---------|
 | `teams.on("fixer")` | Any event from worker `"fixer"` |
 | `teams.on("fixer", "completed")` | Only `completed` events from `"fixer"` |
+| `teams.on("fixer", "terminal")` | Any terminal outcome: `completed`, `warning`, `failed`, or `turn_finished` |
 | `teams.on({ name: "oracle", type: "comment" })` | Every comment from `"oracle"` |
 | `teams.on({ name: "oracle", comment: /DONE:/ })` | Comment events whose body matches the regex |
 | `teams.on({ name: "oracle", comment: "DONE:" })` | Comment events whose body contains the substring |
@@ -257,6 +258,8 @@ type PollEvent =
   | { type: "alive"; worker: WorkerHandle };
 ```
 
+`"terminal"` is a **filter alias**, not an additional emitted event type.
+
 ### DOM-style chain API
 
 `teams.on(...)` returns a `TeamsSubscription` that is thenable and chainable. It mirrors the DOM Event API:
@@ -266,6 +269,7 @@ type PollEvent =
 | `.each(cb)` | Streaming listener — fires on every matching event until unsubscribed |
 | `.timeout(ms)` | Reject the promise if no matching event arrives within `ms` |
 | `.preventDefault()` | Pre-register `preventDefault()` on every match — suppresses the leader's default batch notifyLLM so you don't get a duplicate team-event wake on top of your handler |
+| `.wake(message?)` | Send an immediate, host-owned coordinator wake during dispatch and automatically suppress the default batched wake. `message` may be a string or `(event) => string`. |
 | `.stopPropagation()` | Pre-register `stopPropagation()` on every match — stops later subscription listeners from seeing the event |
 | `.unsubscribe()` / `.cancel()` | Manually stop receiving events (idempotent) |
 | `.then(onFulfilled, onRejected)` | Thenable — `await sub` resolves on the first match |
@@ -286,7 +290,7 @@ These must be called **synchronously** inside a handler callback (`.each` or the
 
 ### Why `.preventDefault()`?
 
-Without it, the leader's existing `notifyLLM` batch pipeline also fires on worker events, giving you a duplicate team-event wake on top of your own handler. That's usually not what you want if you're explicitly calling `console.wake()` yourself. Chaining `.preventDefault()` tells the leader "I'm handling this one, skip your default action." Exactly DOM semantics.
+Without it, the leader's existing `notifyLLM` batch pipeline also fires on worker events, giving you a duplicate team-event wake on top of a custom `.each()` handler. `.wake()` automatically applies the same suppression; chaining `.preventDefault()` remains useful for custom handlers. Exactly DOM semantics.
 
 If you want BOTH your handler and the leader's batch notify to fire, simply omit `.preventDefault()`.
 
@@ -301,34 +305,29 @@ await teams.delegate([
 
 await supervise(false); // don't burn context while idle
 
-// Arm background subscriptions — coordinator goes idle, wakes when workers finish
-teams.on("impl", "completed")
+// Arm background subscriptions — coordinator goes idle, wakes on every
+// terminal outcome. `.wake()` is host-owned; no Promise continuation is needed.
+teams.on("impl", "terminal")
   .preventDefault()
   .timeout(30 * 60 * 1000)
-  .then(
-    e => console.wake(`impl done: ${e.result.slice(0, 500)}`),
-    err => console.wake(`impl failed/timed out: ${err.message}`),
-  );
+  .wake(e => `impl ${e.type}`);
 
-teams.on("review", "completed")
+teams.on("review", "terminal")
   .preventDefault()
   .timeout(30 * 60 * 1000)
-  .then(
-    e => console.wake(`review done: ${e.result.slice(0, 500)}`),
-    err => console.wake(`review failed/timed out: ${err.message}`),
-  );
+  .wake(e => `review ${e.type}`);
 
 console.log("Workers spawned, subscriptions armed. Going idle.");
-// Block returns here. Agent goes idle. Leader fires events as workers finish.
-// Each .then() fires → console.wake() triggers a new coordinator turn.
+// Block returns here. Agent goes idle. Leader fires events as workers stop.
+// Each host-owned .wake() triggers a new coordinator turn.
 ```
 
 ### Rules
 
 - **Always chain `.timeout(ms)`**. Silent hangs are worse than loud failures.
-- **Chain `.preventDefault()`** if you're using `console.wake()` yourself — avoids duplicate leader batch wakes.
-- **Use `console.wake()` inside `.then()` / `.each()` callbacks** to trigger a coordinator turn from a background event. `console.wake` is the single canonical wake primitive — do not reinvent it per-subscription.
-- **Terminal state short-circuit**: if the target worker is already in the requested terminal state when you subscribe, the subscription resolves immediately via a synthesized event from the current `WorkerHandle`. No hangs.
+- **Prefer `.wake(...)`** for a sole background-wake route. It sends from the host during event dispatch, suppresses the duplicate default batch automatically, and does not rely on a sandbox `.then(console.wake)` continuation.
+- **Use `"terminal"`** when you need to know that a worker stopped; `completed` only means explicit success. A clean un-finished worker can emit `warning`, and a freeform turn can emit `turn_finished`.
+- **Terminal state replay**: retained terminal events survive widget cleanup and session reload for 24 hours by default (`PI_TEAMS_TERMINAL_EVENT_TTL_MS`, bounded to 100 records by `PI_TEAMS_TERMINAL_EVENT_MAX`). Re-arm subscriptions after runtime reload; arbitrary JavaScript callbacks themselves are intentionally not serialized.
 - **Listener errors are isolated** — one throwing `.each()` callback cannot break the event pipeline for other subscribers.
 - **Auto-unsubscribe** on first match (one-shot), timeout, or abort. Adding `.each()` switches to streaming mode, which keeps the subscription alive until `.unsubscribe()`.
 - **Dispatch is DOM-compliant**: listeners are snapshotted before iteration, so a listener added mid-dispatch does NOT see the current event (only future ones). A listener that unsubscribes another listener mid-dispatch correctly blocks it from firing.

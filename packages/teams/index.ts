@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
-import { buildPredicate, setTeamsNotifyFn, TeamsSubscription, type EventFilter, type PollEventType } from "./subscription.js";
+import { buildPredicate, setTeamsNotifyFn, TeamsSubscription, type EventFilter, type PollEventFilterType } from "./subscription.js";
 import { registerTeamsTool, runTeamsAction } from "./tool.js";
 import { runWorker } from "./worker.js";
 import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
@@ -52,9 +52,9 @@ export default function (pi: ExtensionAPI) {
 	// .timeout(), .preventDefault(), .stopPropagation(), or .unsubscribe().
 	// No polling, no sleeps.
 	//
-	// To trigger a coordinator turn from a background event, call console.wake()
-	// from inside your .each() or .then() callback — console.wake is the single
-	// canonical wake primitive. Do not reinvent it per-subscription.
+	// To trigger a coordinator turn from a background event, prefer the host-owned
+	// `.wake(...)` chain. It runs during leader dispatch rather
+	// than relying on a later sandbox promise continuation.
 	//
 	// Supported signatures (all return TeamsSubscription):
 	//   teams.on("fixer")
@@ -65,12 +65,12 @@ export default function (pi: ExtensionAPI) {
 	//   teams.on({ name: "oracle" }, (event) => { ... })
 	(teamsFn as any).on = (
 		targetOrFilter: string | EventFilter,
-		typeOrCallback?: PollEventType | ((event: unknown) => void),
+		typeOrCallback?: PollEventFilterType | ((event: unknown) => void),
 		callback?: (event: unknown) => void,
 	): TeamsSubscription => {
 		// Disambiguate overloads. Rule: first arg string + second arg is a poll-event-type string
 		// → two-positional form. Anything else with second-arg function → streaming callback.
-		let eventType: PollEventType | undefined;
+		let eventType: PollEventFilterType | undefined;
 		let eachCb: ((event: unknown) => void) | undefined;
 
 		if (typeof targetOrFilter === "string") {

@@ -39,8 +39,10 @@ function section(name: string) {
 class FakeLeader {
 	private listeners = new Set<(event: TeamsEvent) => void>();
 	private workers = new Map<string, WorkerHandle>();
+	private retainedTerminalEvents: PollEvent[] = [];
 	/** Most recent default-action run. Used to verify preventDefault suppressed it. */
 	defaultActionRanFor: PollEvent | null = null;
+	wakes: Array<{ event: PollEvent; content: string }> = [];
 
 	subscribeToEvents(listener: (event: TeamsEvent) => void): () => void {
 		this.listeners.add(listener);
@@ -55,6 +57,22 @@ class FakeLeader {
 
 	setWorker(w: WorkerHandle) {
 		this.workers.set(w.name, w);
+	}
+
+	setRetainedTerminalEvent(event: PollEvent) {
+		this.retainedTerminalEvents.push(event);
+	}
+
+	getCurrentTerminalEvent(name: string, type: PollEvent["type"] | "terminal"): PollEvent | null {
+		for (let i = this.retainedTerminalEvents.length - 1; i >= 0; i--) {
+			const event = this.retainedTerminalEvents[i]!;
+			if (event.worker.name === name && (type === "terminal" || type === event.type)) return event;
+		}
+		return null;
+	}
+
+	wakeFromSubscription(event: PollEvent, content: string) {
+		this.wakes.push({ event, content });
 	}
 
 	listenerCount(): number {
@@ -195,6 +213,46 @@ async function run() {
 		const event = await sub;
 		assert("resolved defaultPrevented=false", event.defaultPrevented === false);
 		assert("default action ran", leader.defaultActionRanFor?.type === "completed");
+	}
+
+	section("TeamsSubscription — host-owned .wake() is synchronous and composes with preventDefault");
+	{
+		const leader = new FakeLeader();
+		const sub = newSub(leader, "wake", "completed")
+			.wake((event) => `wake:${event.worker.name}:${event.type}`);
+		leader.emit(completedEvent("wake"));
+		assert("host wake sent during dispatch", leader.wakes.length === 1 && leader.wakes[0]?.content === "wake:wake:completed");
+		assert("host wake does not need a promise continuation", leader.wakes[0]?.event.type === "completed");
+		assert("wake automatically suppresses the duplicate default action", leader.defaultActionRanFor === null);
+		await sub;
+	}
+
+	section("buildPredicate — terminal alias matches every terminal outcome only");
+	{
+		const { predicate } = buildPredicate("terminal-worker", "terminal");
+		assert("terminal matches completed", predicate(completedEvent("terminal-worker")));
+		assert("terminal matches warning", predicate({ type: "warning", worker: makeWorker("terminal-worker", "warning"), reason: "warn" }));
+		assert("terminal matches failed", predicate({ type: "failed", worker: makeWorker("terminal-worker", "failed"), reason: "fail" }));
+		assert("terminal matches turn_finished", predicate({ type: "turn_finished", worker: makeWorker("terminal-worker", "done"), result: "later" }));
+		assert("terminal rejects comments", !predicate(commentEvent("terminal-worker", "still running")));
+	}
+
+	section("TeamsSubscription — retained terminal event replays for typed and aggregate filters");
+	{
+		const leader = new FakeLeader();
+		leader.setRetainedTerminalEvent(completedEvent("replay"));
+		const completed = newSub(leader, "replay", "completed");
+		const terminal = newSub(leader, "replay", "terminal");
+		assert("typed replay resolves", (await completed).type === "completed");
+		assert("terminal replay resolves", (await terminal).type === "completed");
+	}
+
+	section("TeamsSubscription — terminal filter has a compatibility fallback for pre-ledger worker snapshots");
+	{
+		const leader = new FakeLeader();
+		leader.setWorker(makeWorker("legacy-warning", "warning"));
+		const terminal = newSub(leader, "legacy-warning", "terminal");
+		assert("restored warning resolves terminal filter", (await terminal).type === "warning");
 	}
 
 	section("TeamsSubscription — .stopPropagation() blocks later listeners");

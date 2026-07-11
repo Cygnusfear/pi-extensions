@@ -1,3 +1,6 @@
+---
+mai-id: pe-fd61lah9
+---
 # Welcome to pi-extensions 👋🍌
 
 ---
@@ -85,13 +88,10 @@ console.log("Monitoring — I'll wake up when it's done.");
 For **team workers** specifically there's a cleaner, event-driven path — `teams.on(name, type)` rides the leader's typed `PollEvent` stream, so you never poll:
 
 ```javascript
-teams.on("fixer", "completed")
+teams.on("fixer", "terminal")
   .preventDefault()
   .timeout(30 * 60 * 1000)
-  .then(
-    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
-    (err) => console.wake(`fixer timed out: ${err.message}`),
-  );
+  .wake((e) => `fixer ${e.type}`);
 ```
 
 No polling by a human. No keeping the terminal open. **The agent monitors itself.**

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { TeamLeader } from "./leader.ts";
+import { TeamsSubscription, buildPredicate } from "./subscription.ts";
 import type { WorkerHandle } from "./types.js";
 import { createWorkerCommentEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
 import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION } from "@pi-extensions/shared/session-phase-event";
@@ -44,10 +45,12 @@ function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 
 function makeHarness(branch: any[] = []) {
 	const appended: Array<{ customType: string; data: unknown }> = [];
+	const sent: Array<{ message: unknown; options: unknown }> = [];
 	const fakePi = {
 		appendEntry: (customType: string, data: unknown) => {
 			appended.push({ customType, data });
 		},
+		sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
 	};
 	const leader = new TeamLeader(fakePi as any);
 	const leaderAny = leader as any;
@@ -58,7 +61,7 @@ function makeHarness(branch: any[] = []) {
 		},
 	};
 	leaderAny.stateHydrated = true;
-	return { leader: leaderAny, appended };
+	return { leader: leaderAny, appended, sent };
 }
 
 describe("TeamLeader state persistence", () => {
@@ -162,6 +165,54 @@ describe("TeamLeader state persistence", () => {
 		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("done");
 		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
 		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
+	});
+
+	test("terminal event ledger survives terminal widget cleanup and state restore", () => {
+		const { leader, appended } = makeHarness();
+		const worker = makeWorker({ name: "finished", workerInstanceId: "attempt-finished", status: "done", lastNote: "ship it" });
+		leader.workers.set(worker.name, worker);
+		// Keep this focused on persistence/replay, not the normal host notify queue.
+		leader.subscribeToEvents((event: any) => event.preventDefault());
+		leader.notifyLLM({ type: "completed", worker: { ...worker }, result: "ship it" });
+		leader.workers.clear();
+		leader.persistStateIfHydrated({ cleared: true });
+
+		const snapshot = appended.at(-1)?.data as any;
+		expect(snapshot.workers).toEqual({});
+		expect(snapshot.terminalEvents).toHaveLength(1);
+		expect(snapshot.terminalEvents[0].event).toMatchObject({ type: "completed", worker: { name: "finished" }, result: "ship it" });
+
+		const restored = makeHarness([{ type: "custom", customType: "teams-leader-state", data: snapshot }]);
+		restored.leader.restoreState(restored.leader.ctx);
+		expect(restored.leader.getWorker("finished")).toBeUndefined();
+		expect(restored.leader.getCurrentTerminalEvent("finished", "completed")).toMatchObject({ type: "completed", result: "ship it" });
+		expect(restored.leader.getCurrentTerminalEvent("finished", "terminal")).toMatchObject({ type: "completed", result: "ship it" });
+	});
+
+	test("terminal event ledger normalization keeps the latest duplicate record", () => {
+		const { leader } = makeHarness();
+		const worker = makeWorker({ name: "duplicate", workerInstanceId: "attempt-duplicate", status: "done" });
+		const old = { recordedAt: 100, event: { type: "completed", worker: { ...worker }, result: "old" } };
+		const latest = { recordedAt: 200, event: { type: "completed", worker: { ...worker }, result: "latest" } };
+		const normalized = leader.normalizeTerminalEventLedger([old, latest], 200) as any[];
+		expect(normalized).toHaveLength(1);
+		expect(normalized[0]).toMatchObject({ recordedAt: 200, event: { result: "latest" } });
+	});
+
+	test("subscription wake sends exactly one host follow-up in the terminal dispatch pass", () => {
+		const { leader, sent } = makeHarness();
+		const worker = makeWorker({ name: "wake-worker", status: "done" });
+		leader.workers.set(worker.name, worker);
+		const { filter, predicate } = buildPredicate("wake-worker", "completed");
+		new TeamsSubscription(leader, filter, predicate)
+			.preventDefault()
+			.wake((event) => `host wake: ${event.worker.name}`);
+
+		leader.notifyLLM({ type: "completed", worker: { ...worker }, result: "done" });
+		expect(sent).toEqual([{
+			message: { customType: "team-event", content: "host wake: wake-worker", display: true },
+			options: { deliverAs: "followUp", triggerTurn: true },
+		}]);
 	});
 
 	test("mesh message handler wires once and is removed on stopPolling", () => {

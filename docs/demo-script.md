@@ -1,3 +1,6 @@
+---
+mai-id: pe-vwzc2sfz
+---
 # pi-extensions Demo Script
 ## "One Code Block to Rule Them All"
 
@@ -223,11 +226,11 @@ await teams.delegate([
   { text: "Review everything", assignee: "review" },
 ]);
 
-// Race them — whoever finishes first wakes the coordinator
-teams.on({ type: "completed" })
+// Race their terminal outcomes — whichever arrives first wakes the coordinator.
+teams.on({ type: "terminal" })
   .preventDefault()
   .timeout(30 * 60 * 1000)
-  .then(e => console.wake(`${e.worker.name} finished first: ${e.result.slice(0, 300)}`));
+  .wake(e => `${e.worker.name} stopped first: ${e.type}`);
 
 console.log("Three workers running, event subscription armed. Going idle.");
 ```
