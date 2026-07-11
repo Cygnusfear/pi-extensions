@@ -1,0 +1,23 @@
+packages/notify/extensions/tg-relay.ts
+  s_c80280c75e1308::t_ed8c2624207d91 1-91
+packages/notify/extensions/notify.ts
+  s_c80280c75e1308::t_f2aaa094780c0d 2,11-18,28,38,41,43-44,49,57-59
+package.json
+  s_c80280c75e1308::t_50d73320181914 72-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "bc51456bdf31928dcf486a137a5a8ea52f86124f",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
