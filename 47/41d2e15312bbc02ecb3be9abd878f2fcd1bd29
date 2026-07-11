@@ -1,0 +1,42 @@
+packages/teams/README.md
+  s_4cd904c7dbe2a1::t_369254738bc529 293
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 321-322
+  s_4cd904c7dbe2a1::t_8bdcb636187a7b 216-218,220,241,261-262,272,308-310,313,315,318,328-330
+docs/demo-script.md
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 229-230,233
+packages/teams/subscription.ts
+  s_4cd904c7dbe2a1::t_b706fb16124e02 49-51,119,166-167,206-211,235-242,375-385,418,429-433
+  s_4cd904c7dbe2a1::t_369254738bc529 135-136,140
+  s_4cd904c7dbe2a1::t_b1fcf925825794 215-217,479-496
+  c74893e35f864293 497
+packages/teams/test/subscription.test.ts
+  s_4cd904c7dbe2a1::t_b1fcf925825794 251-258
+  s_4cd904c7dbe2a1::t_ab1bda541335d8 250
+  s_4cd904c7dbe2a1::t_fb334565e9d909 42,45,62-77,218-249
+docs/walkthrough.md
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 91,94
+packages/teams/leader.ts
+  s_4cd904c7dbe2a1::t_e6b4d5dff0814e 113,118-136,824,950,981,1099,2645-2695,2732
+packages/teams/index.ts
+  s_4cd904c7dbe2a1::t_369254738bc529 55-57
+  s_4cd904c7dbe2a1::t_7845867be00cc4 3,68,73
+packages/teams/leader.state.test.ts
+  s_4cd904c7dbe2a1::t_9b8b7ddc23d406 170-189,206-207
+  s_4cd904c7dbe2a1::t_dcb853825900ec 5,48,53,64,190-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "4741d2e15312bbc02ecb3be9abd878f2fcd1bd29",
+  "prompts": {},
+  "sessions": {
+    "s_4cd904c7dbe2a1": {
+      "agent_id": {
+        "tool": "Kirsten Accretion Queloz",
+        "id": "019f51f0-e8dc-7f7f-ae6b-d60f046d4897",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": null
+    }
+  }
+}
