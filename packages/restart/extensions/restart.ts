@@ -1,6 +1,29 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
+/** Custom entry the restart_runtime TOOL appends right before re-exec, marking an
+ *  AGENT-triggered restart. The human /restart-runtime command does NOT append it,
+ *  so the marker cleanly separates "the agent restarted itself" (resume with a
+ *  turn) from "a human restarted it" (resume idle). */
+const RESTART_RESUME_TURN_TYPE = "restart-resume-turn";
+
+/** Appended once the resume-turn has fired, so a later /reload or restart of the
+ *  same session does not re-fire it. Order vs the marker gives once-only semantics. */
+const RESTART_RESUME_CONSUMED_TYPE = "restart-resume-consumed";
+
+/** True when the session carries an UNCONSUMED agent-restart marker — this session
+ *  just resumed from a restart_runtime call and the agent should get a turn to
+ *  continue. Order-based: the last marker sits after the last consumed entry. */
+function hasUnconsumedRestartMarker(entries: Array<{ customType?: string }>): boolean {
+	let lastMarker = -1;
+	let lastConsumed = -1;
+	entries.forEach((e, i) => {
+		if (e.customType === RESTART_RESUME_TURN_TYPE) lastMarker = i;
+		else if (e.customType === RESTART_RESUME_CONSUMED_TYPE) lastConsumed = i;
+	});
+	return lastMarker > lastConsumed;
+}
+
 /**
  * Expose pi's restart as both a slash command and a tool.
  *
@@ -28,6 +51,25 @@ import { Type } from "@sinclair/typebox";
  *     replaced and the session resumes fresh.
  */
 export default function (pi: ExtensionAPI) {
+	// Agent-triggered restart (restart_runtime tool) resumes with a turn so the
+	// agent continues its work instead of coming back idle. On session_start, if
+	// this session carries an unconsumed restart marker, consume it and fire a
+	// hidden triggerTurn continuation. Mirrors pi-mesh's rebirth-wake.
+	pi.on("session_start", (_event, ctx) => {
+		const entries = ctx.sessionManager.getEntries();
+		if (!hasUnconsumedRestartMarker(entries)) return;
+		pi.appendEntry(RESTART_RESUME_CONSUMED_TYPE, { at: Date.now() });
+		pi.sendMessage(
+			{
+				customType: "restart-resume",
+				content:
+					"[restart] This session just resumed after your restart_runtime call. Your full context is intact — continue what you were doing before the restart.",
+				display: false,
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+	});
+
 	// ── /restart-runtime ── full process restart, resuming the current session.
 	pi.registerCommand("restart-runtime", {
 		description:
@@ -73,15 +115,20 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+			// Mark this restart as agent-triggered so the resumed process fires a
+			// continuation turn (see the session_start handler above). Appended
+			// BEFORE the re-exec so it persists in the session file.
+			pi.appendEntry(RESTART_RESUME_TURN_TYPE, { at: Date.now() });
 			await pi.restart();
-			// restart() re-execs the process, so this is typically unreachable —
-			// returned only if a host implementation resolves without replacing
-			// the process.
+			// On a current host, pi.restart() DEFERS the re-exec to the end of this
+			// turn (a mid-turn restart cannot re-exec while streaming), so this line
+			// runs: the process re-execs once the turn settles, then resumes and
+			// fires a continuation turn from the marker above.
 			return {
 				content: [
 					{
 						type: "text",
-						text: "✅ Restarting pi — fresh process, resuming this session…",
+						text: "Restart queued — pi will re-exec when this turn finishes, then resume and continue.",
 					},
 				],
 			};
