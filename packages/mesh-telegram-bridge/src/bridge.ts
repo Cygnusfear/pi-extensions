@@ -367,7 +367,17 @@ export class Bridge {
 	private async onReaction(ctx: Context): Promise<void> {
 		const ur = ctx.update.message_reaction as { chat?: { id?: number }; message_id: number; user?: { first_name?: string; username?: string }; old_reaction?: Array<{ type: string; emoji?: string }>; new_reaction?: Array<{ type: string; emoji?: string }> } | undefined;
 		if (!ur || ur.chat?.id !== this.chatId) return;
-		const target = this.msgToAgent.get(ur.message_id);
+		let target = this.msgToAgent.get(ur.message_id);
+		console.log("[bridge] reaction EVENT msg=" + ur.message_id + " new=" + JSON.stringify(ur.new_reaction ?? []) + " old=" + JSON.stringify(ur.old_reaction ?? []) + " tracked=" + (target ? target.nickname : "NO"));
+		if (!target) {
+			// Fallback: derive the agent from the reacted message's topic (persists across restarts).
+			try {
+				const m = await this.bot.api.getMessage(this.chatId, ur.message_id) as { message_thread_id?: number };
+				const topicId = m.message_thread_id;
+				const a = topicId != null ? this.topicAgent.get(topicId) : undefined;
+				if (a) { target = { meshId: a.meshId, clientId: a.clientId, nickname: a.nickname, preview: "" }; console.log("[bridge] reaction fallback: derived " + a.nickname + " from topic " + topicId); }
+			} catch (e) { console.warn("[bridge] reaction getMessage fallback failed: " + (e as Error).message); }
+		}
 		if (!target) return;
 		const oldE = new Set((ur.old_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!));
 		const added = (ur.new_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!).filter((e) => !oldE.has(e));
