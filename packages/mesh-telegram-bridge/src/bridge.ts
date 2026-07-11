@@ -43,6 +43,10 @@ export class Bridge {
 	private readonly msgToAgent = new Map<number, { meshId?: string; clientId: string; nickname: string; preview: string }>();
 	/** per topic, the hooman's most recent inbound message_id (so an agent emoji reaction lands on it). */
 	private readonly lastHoomanInTopic = new Map<number, number>();
+	/** AFK mode: hooman is away from pi-chat, on Telegram only. Agents get a reminder. */
+	private afk: { on: boolean; message: string; since: number } = { on: false, message: "", since: 0 };
+	/** agents already auto-acked during the current AFK stint (avoid spam). Cleared on toggle. */
+	private readonly afkNotified = new Set<string>();
 
 	constructor(private readonly cfg: Config) {
 		this.chatId = cfg.chatId;
@@ -56,10 +60,12 @@ export class Bridge {
 			if (!existsSync(STATE_PATH)) return;
 			const s = JSON.parse(readFileSync(STATE_PATH, "utf8")) as {
 				broadcastTopicId?: number; agentTopic?: Record<string, number>;
-				topicAgent?: Record<string, { clientId?: string; meshId?: string; nickname: string }> };
+				topicAgent?: Record<string, { clientId?: string; meshId?: string; nickname: string }>;
+				afk?: { on?: boolean; message?: string; since?: number }; };
 			if (typeof s.broadcastTopicId === "number") this.broadcastTopicId = s.broadcastTopicId;
 			if (s.agentTopic) for (const [k, v] of Object.entries(s.agentTopic)) this.agentTopic.set(k, v);
 			if (s.topicAgent) for (const [k, v] of Object.entries(s.topicAgent)) this.topicAgent.set(Number(k), { clientId: v.clientId ?? "", meshId: v.meshId, nickname: v.nickname });
+			if (s.afk?.on) { this.afk = { on: true, message: s.afk.message ?? "away from pi-chat", since: s.afk.since ?? Date.now() }; console.log("[bridge] loaded AFK: on (" + this.afk.message + ")"); }
 			console.log(`[bridge] loaded state: ${this.agentTopic.size} agent topics, broadcast=${this.broadcastTopicId}`);
 		} catch (e) { console.warn("[bridge] state load failed:", (e as Error).message); }
 	}
@@ -68,8 +74,37 @@ export class Bridge {
 			mkdirSync(join(homedir(), ".config", "mesh-telegram-bridge"), { recursive: true });
 			const obj: Record<string, unknown> = { agentTopic: Object.fromEntries(this.agentTopic), topicAgent: Object.fromEntries(this.topicAgent) };
 			if (this.broadcastTopicId != null) obj.broadcastTopicId = this.broadcastTopicId;
+			if (this.afk.on) obj.afk = this.afk;
 			writeFileSync(STATE_PATH, JSON.stringify(obj, null, 2));
 		} catch (e) { console.warn("[bridge] state save failed:", (e as Error).message); }
+	}
+
+	/** /afk [on|off|status] [msg] — toggle AFK mode. While on, agents are reminded to use Telegram. */
+	private async handleAfkCommand(text: string, ctx: Context): Promise<void> {
+		const parts = text.replace(/@ramdock_bot\b/gi, "").split(/\s+/).filter(Boolean);
+		const sub = (parts[1] ?? "").toLowerCase();
+		if (sub === "status") {
+			void ctx.reply(this.afk.on ? ("AFK: on (" + this.afk.message + "), since " + new Date(this.afk.since).toLocaleString()) : "AFK: off").catch(() => {});
+			return;
+		}
+		if (sub === "off") {
+			this.afk = { on: false, message: "", since: 0 };
+			this.afkNotified.clear();
+			this.saveState();
+			this.mesh.broadcast("📢 The Hooman is back.");
+			void ctx.reply("✅ AFK off — agents notified you're back.").catch(() => {});
+			console.log("[bridge] afk off");
+			return;
+		}
+		// on (default). Message = words after "on", or after "/afk" if bare.
+		const msgParts = sub === "on" ? parts.slice(2) : parts.slice(1);
+		const message = msgParts.join(" ").trim() || "away from pi-chat";
+		this.afk = { on: true, message, since: Date.now() };
+		this.afkNotified.clear();
+		this.saveState();
+		this.mesh.broadcast("📢 The Hooman is AFK (" + message + "). They're on Telegram only — use mesh.tell or notify() to reach them; pi-chat / desktop pings may go unseen until they return.");
+		void ctx.reply("✅ AFK on (" + message + "). Agents reminded to use Telegram.").catch(() => {});
+		console.log("[bridge] afk on (" + message + ")");
 	}
 
 	async start(): Promise<void> {
@@ -167,6 +202,13 @@ export class Bridge {
 			}
 			await this.uploadAttachment(t, topic);
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
+		// AFK auto-ack: tell the agent (once per AFK stint) the hooman won't reply immediately.
+		if (this.afk.on && t.fromClientId && !this.afkNotified.has(t.fromClientId)) {
+			this.afkNotified.add(t.fromClientId);
+			const since = new Date(this.afk.since).toLocaleTimeString();
+			this.mesh.tellAgent({ clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname },
+				"📢 The Hooman is AFK (" + this.afk.message + ", since " + since + "). They'll see your message on Telegram but may not reply immediately.");
+		}
 	}
 
 	private async onMeshChannel(c: InboundChannel): Promise<void> {
@@ -231,6 +273,17 @@ export class Bridge {
 			if (!peer) { void ctx.reply("No mesh peer matching '" + q + "'."); return; }
 			const topic = await this.ensureTopicForPeer(peer);
 			void ctx.reply(topic != null ? ("✉️ Topic ready for " + peer.nickname + (peer.name ? " · " + peer.name : "") + " — message me there.") : ("Couldn't create a topic for " + peer.nickname + "."));
+			return;
+		}
+
+		// /afk [on|off|status] [msg] — AFK mode: reminds agents to reach you on Telegram.
+		if (this.forumMode && text.startsWith("/afk") && (text.length === 4 || text[4] === " " || text[4] === "@")) {
+			await this.handleAfkCommand(text, ctx);
+			return;
+		}
+		// Unknown slash command — reply with the menu instead of routing "/foo" to an agent.
+		if (text.startsWith("/") && text.trim().length > 1) {
+			void ctx.reply("Unknown command. Try:\n/agents — live agent roster\n/dm <agent> — open an agent's topic\n/afk [on|off] [msg] — AFK mode").catch(() => {});
 			return;
 		}
 
