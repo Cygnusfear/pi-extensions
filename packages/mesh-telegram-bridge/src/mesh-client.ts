@@ -24,6 +24,7 @@ export interface InboundTell {
 	nickname: string;
 	text: string;
 	attachment?: string;
+	reaction?: string;
 	sessionName?: string;
 	/** present ⇒ the sender asked for a delivery receipt; we ack it */
 	deliveryId?: string;
@@ -230,6 +231,7 @@ export class MeshClient extends EventEmitter {
 				nickname: peer?.nickname ?? fromClientId.slice(0, 8),
 				text: this.display(message.payload),
 				attachment: this.attachmentOf(message.payload),
+				reaction: this.reactionOf(message.payload),
 				sessionName: peer?.name,
 				deliveryId,
 			} satisfies InboundTell);
@@ -295,6 +297,16 @@ export class MeshClient extends EventEmitter {
 		return undefined;
 	}
 
+	/** An agent may attach an emoji reaction (reaction | react | emoji). */
+	private reactionOf(payload: unknown): string | undefined {
+		if (payload && typeof payload === "object") {
+			const p = payload as Record<string, unknown>;
+			const r = p.reaction ?? p.react ?? p.emoji;
+			if (typeof r === "string" && r.trim()) return r.trim();
+		}
+		return undefined;
+	}
+
 	private display(payload: unknown): string {
 		if (typeof payload === "string") return payload;
 		if (payload && typeof payload === "object") {
@@ -302,6 +314,8 @@ export class MeshClient extends EventEmitter {
 			if (typeof p.text === "string") return p.text;
 			if (typeof p.body === "string") return (p.subject ? `${p.subject}\n` : "") + p.body;
 			if (typeof p.message === "string") return p.message;
+			// object carrying only non-text fields (reaction/attachment/…) → no text body
+			if ("reaction" in p || "react" in p || "attachment" in p || "image" in p || "file" in p || "path" in p) return "";
 		}
 		try {
 			return JSON.stringify(payload);

@@ -39,6 +39,10 @@ export class Bridge {
 	private readonly topicAgent = new Map<number, ReplyTarget & { nickname: string }>();
 	private readonly creating = new Set<string>();
 	private readonly replyTargets = new Map<number, ReplyTarget & { nickname: string }>();
+	/** outbound msg_id → agent (so a hooman emoji reaction on it can be relayed back to the sender). */
+	private readonly msgToAgent = new Map<number, { meshId?: string; clientId: string; nickname: string; preview: string }>();
+	/** per topic, the hooman's most recent inbound message_id (so an agent emoji reaction lands on it). */
+	private readonly lastHoomanInTopic = new Map<number, number>();
 
 	constructor(private readonly cfg: Config) {
 		this.chatId = cfg.chatId;
@@ -74,10 +78,12 @@ export class Bridge {
 		this.mesh.start();
 		if (this.chatId != null) void this.detectForum();
 		this.bot.on("message", (ctx) => void this.onTelegramMessage(ctx));
+		this.bot.on("message_reaction", (ctx) => void this.onReaction(ctx));
 		this.bot.on("callback_query", (ctx) => void this.onCallbackQuery(ctx));
 		this.bot.on("inline_query", (ctx) => void this.onInlineQuery(ctx));
 		this.bot.catch((err) => console.error("[tg] bot error:", err.message));
 		void this.bot.start({
+			allowed_updates: ["message", "message_reaction", "callback_query", "inline_query"],
 			onStart: (bi) => console.log(`[tg] @${bi.username} polling; chat=${this.chatId ?? "(awaiting)"} forum=${this.forumMode}`),
 		});
 	}
@@ -147,13 +153,17 @@ export class Bridge {
 
 	// ── mesh → telegram ────────────────────────────────────────────────
 	private async onMeshTell(t: InboundTell): Promise<void> {
-		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${t.text.slice(0, 60)}`); return; }
+		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${(t.text ?? "").slice(0, 60)}`); return; }
 		const topic = this.forumMode ? await this.ensureAgentTopic(t) : null;
+		if (t.reaction) await this.setHoomanReaction(t.reaction, topic);
 		const thread = topic != null ? { message_thread_id: topic } : {};
 		try {
-			for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
-				const sent = await this.bot.api.sendMessage(this.chatId, chunk, thread);
-				if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
+			if (t.text && t.text.trim()) {
+				for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
+					const sent = await this.bot.api.sendMessage(this.chatId, chunk, thread);
+					if (this.forumMode) this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
+					else { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
+				}
 			}
 			await this.uploadAttachment(t, topic);
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
@@ -165,7 +175,8 @@ export class Bridge {
 		try {
 			for (const chunk of this.chunkText(`📢 ${c.nickname} · #${c.channel}`, c.text)) {
 				const sent = await this.bot.api.sendMessage(this.chatId, chunk, thread);
-				if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
+				if (this.forumMode) this.trackSent(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
+				else { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
 			}
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
 	}
@@ -226,7 +237,10 @@ export class Bridge {
 		if (this.forumMode) {
 			const topicId = typeof m.message_thread_id === "number" ? m.message_thread_id : undefined;
 			const agent = topicId != null ? this.topicAgent.get(topicId) : undefined;
-			if (agent) { this.mesh.tellAgent(agent, text); console.log(`[bridge] topic → ${agent.nickname}: ${text.slice(0, 60)}`); void ctx.react("👍").catch(() => {}); }
+			if (agent) {
+				if (topicId != null) this.lastHoomanInTopic.set(topicId, msg.message_id);
+				this.mesh.tellAgent(agent, text); console.log(`[bridge] topic → ${agent.nickname}: ${text.slice(0, 60)}`); void ctx.react("👍").catch(() => {});
+			}
 			else { this.mesh.broadcast(text); console.log(`[bridge] broadcast → #${this.cfg.channel}: ${text.slice(0, 60)}`); }
 			return;
 		}
@@ -329,6 +343,41 @@ export class Bridge {
 		await ctx.answerInlineQuery(results, { cache_time: 5 });
 	}
 
+	/** Record an outbound message so a hooman emoji reaction on it can be relayed back. */
+	private trackSent(msgId: number, target: { meshId?: string; clientId: string; nickname: string }, preview: string): void {
+		this.msgToAgent.set(msgId, { meshId: target.meshId, clientId: target.clientId, nickname: target.nickname, preview: (preview ?? "").slice(0, 40) });
+		if (this.msgToAgent.size > 2000) {
+			let i = 0; const excess = this.msgToAgent.size - 2000;
+			for (const k of this.msgToAgent.keys()) { if (i++ >= excess) break; this.msgToAgent.delete(k); }
+		}
+	}
+
+	/** Agent → Hooman: set an emoji reaction on the hooman's last message in the topic. */
+	private async setHoomanReaction(emoji: string, topic: number | null): Promise<void> {
+		if (this.chatId == null || topic == null) return;
+		const target = this.lastHoomanInTopic.get(topic);
+		if (target == null) { console.warn(`[bridge] agent reaction ${emoji} but no inbound msg to react to (topic ${topic})`); return; }
+		try {
+			await this.bot.api.setMessageReaction(this.chatId, target, [{ type: "emoji", emoji }]);
+			console.log(`[bridge] set reaction ${emoji} on msg ${target} (topic ${topic})`);
+		} catch (e) { console.warn(`[bridge] setMessageReaction failed (${emoji}):`, (e as Error).message); }
+	}
+
+	/** Hooman → Agent: relay an emoji reaction on a bridge-sent message back to its sender. */
+	private async onReaction(ctx: Context): Promise<void> {
+		const ur = ctx.update.message_reaction as { chat?: { id?: number }; message_id: number; user?: { first_name?: string; username?: string }; old_reaction?: Array<{ type: string; emoji?: string }>; new_reaction?: Array<{ type: string; emoji?: string }> } | undefined;
+		if (!ur || ur.chat?.id !== this.chatId) return;
+		const target = this.msgToAgent.get(ur.message_id);
+		if (!target) return;
+		const oldE = new Set((ur.old_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!));
+		const added = (ur.new_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!).filter((e) => !oldE.has(e));
+		if (!added.length) return;
+		const who = ur.user?.first_name ?? ur.user?.username ?? "The Hooman";
+		const preview = target.preview ? ` ("${target.preview}")` : "";
+		this.mesh.tellAgent(target, `${added.join("")} ${who} reacted to your message${preview}`);
+		console.log(`[bridge] reaction ${added.join("")} on msg ${ur.message_id} → ${target.nickname}`);
+	}
+
 	// ── media helpers ──────────────────────────────────────────────────
 	private async tgDownload(fileId: string): Promise<Buffer> {
 		const f = await this.bot.api.getFile(fileId);
@@ -378,7 +427,8 @@ export class Bridge {
 					await this.bot.api.sendMessage(this.chatId, `⚠️ ${t.nickname} sent an image that hadn't finished rendering — skipped. Ask them to resend once it's done.`, thread).catch(() => {});
 					return;
 				}
-				await this.bot.api.sendPhoto(this.chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+				const sent = await this.bot.api.sendPhoto(this.chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+				this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
 				console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
 			} else {
 				await this.bot.api.sendDocument(this.chatId, new InputFile(t.attachment), { ...thread, caption: cap });
