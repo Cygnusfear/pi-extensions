@@ -96,6 +96,7 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 			`If you are quitting or blocked, call team_finish with status=quit and explain why.`,
 			"",
 			"GUARD PROTOCOL: YOU MUST DECLARE YOUR TERMINAL STATE VIA team_finish.",
+			"ASYNC HANDOFF: if execute_code says it was auto-promoted to async, that is NOT completion. The background job is still part of your task. Do NOT write a final answer or stop; make a follow-up tool call to wait for/inspect it, then continue.",
 			"Do not end by only writing raw mai notes or closing the ticket manually.",
 			"team_finish is the authoritative terminal signal for the coordinator.",
 			"",
