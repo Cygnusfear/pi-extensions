@@ -1,0 +1,34 @@
+packages/mesh-model-control/extensions/mesh-model-control.ts
+  s_c80280c75e1308::t_3694ef7faa7db6 1-113
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_c80280c75e1308::t_a326f061fca95d 284-300,302
+package.json
+  s_c80280c75e1308::t_7805b6ddd2b544 44
+packages/pi-mesh/extension/pi-mesh.ts
+  s_c80280c75e1308::t_f5e200e0a315b2 1943-1947
+  s_c80280c75e1308::t_6c263b701dafcd 1141-1181
+  s_c80280c75e1308::t_cd0f1a6f5b7e58 1941-1942,1948-1957
+  s_c80280c75e1308::t_89eaff04a785ce 1391-1395
+packages/mesh-telegram-bridge/src/mesh-client.ts
+  s_c80280c75e1308::t_c39ec97e602fad 244-253,259
+packages/mesh-model-control/package.json
+  s_c80280c75e1308::t_049e99420b8daf 1-22
+packages/model-shortcuts/extensions/model-shortcuts.ts
+  s_c80280c75e1308::t_ce4bb8ae260e86 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "d932a0b582f7317ab1392119afd93a041980c08e",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
