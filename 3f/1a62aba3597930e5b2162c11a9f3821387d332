@@ -1,0 +1,23 @@
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_c80280c75e1308::t_dab9d5f0396fa1 18-21
+  s_c80280c75e1308::t_c8a9f9ff3a37cd 366-367,383-387
+  s_c80280c75e1308::t_2cac7d0a8f9f93 5
+  s_c80280c75e1308::t_437f33e83c9840 369-370,372-382,388-421
+  s_c80280c75e1308::t_4f7feb34a7fb58 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "3f1a62aba3597930e5b2162c11a9f3821387d332",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
