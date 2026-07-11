@@ -1,0 +1,30 @@
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_c80280c75e1308::t_2c8ab6f91110d8 346-380
+  s_c80280c75e1308::t_b4b4e3b7146e46 430-431
+  s_c80280c75e1308::t_34e28b78567458 240-243
+  s_c80280c75e1308::t_777c564d402a65 42-45
+  s_c80280c75e1308::t_7d65426082da95 81,86
+  s_c80280c75e1308::t_c742f8b3d4017c 156,158,161-166
+  s_c80280c75e1308::t_587dd2b69e5466 178-179
+packages/mesh-telegram-bridge/src/mesh-client.ts
+  s_c80280c75e1308::t_b9e772609acc87 27
+  s_c80280c75e1308::t_61940afedc31dc 317-318
+  s_c80280c75e1308::t_5dd5139742bd18 234
+  s_c80280c75e1308::t_e97b6895b6cdff 300-309
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "5a96499fa45724e383dd74271f367fa95cb126d8",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
