@@ -1,0 +1,19 @@
+packages/teams/spawner.ts
+  s_4cd904c7dbe2a1::t_d0bd73f6f7faba 99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "2f4552b2eafc5b940026a052749067e07cfec954",
+  "prompts": {},
+  "sessions": {
+    "s_4cd904c7dbe2a1": {
+      "agent_id": {
+        "tool": "Kirsten Accretion Queloz",
+        "id": "019f51f0-e8dc-7f7f-ae6b-d60f046d4897",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
