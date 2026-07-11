@@ -102,7 +102,7 @@ export class Bridge {
 		this.afk = { on: true, message, since: Date.now() };
 		this.afkNotified.clear();
 		this.saveState();
-		this.mesh.broadcast("📢 The Hooman is AFK (" + message + "). They're on Telegram only — use mesh.tell or notify() to reach them; pi-chat / desktop pings may go unseen until they return.");
+		this.mesh.broadcast("📢 The Hooman is not at the terminal (AFK: " + message + "). Reach them via mesh.tell or notify() — both land on their Telegram. Keep working; they'll respond from Telegram when they can.");
 		void ctx.reply("✅ AFK on (" + message + "). Agents reminded to use Telegram.").catch(() => {});
 		console.log("[bridge] afk on (" + message + ")");
 	}
@@ -205,9 +205,8 @@ export class Bridge {
 		// AFK auto-ack: tell the agent (once per AFK stint) the hooman won't reply immediately.
 		if (this.afk.on && t.fromClientId && !this.afkNotified.has(t.fromClientId)) {
 			this.afkNotified.add(t.fromClientId);
-			const since = new Date(this.afk.since).toLocaleTimeString();
 			this.mesh.tellAgent({ clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname },
-				"📢 The Hooman is AFK (" + this.afk.message + ", since " + since + "). They'll see your message on Telegram but may not reply immediately.");
+				"📢 The Hooman is not at the terminal (AFK: " + this.afk.message + "). Reach them with mesh.tell — it lands on their Telegram. Keep working; don't block waiting for a reply.");
 		}
 	}
 
