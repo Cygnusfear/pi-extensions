@@ -1,0 +1,49 @@
+packages/teams/README.md
+  s_4cd904c7dbe2a1::t_ace38347aa488a 293
+  s_4cd904c7dbe2a1::t_2f5f5ef7574fd6 272,328
+  s_4cd904c7dbe2a1::t_8bdcb636187a7b 216-218,220,241,261-262,308-310,313,315,318,329-330
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 321-322
+packages/teams/index.ts
+  s_4cd904c7dbe2a1::t_369254738bc529 55,57
+  s_4cd904c7dbe2a1::t_7845867be00cc4 3,68,73
+  s_4cd904c7dbe2a1::t_ace38347aa488a 56
+docs/walkthrough.md
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 91,94
+packages/teams/leader.ts
+  s_4cd904c7dbe2a1::t_2f5f5ef7574fd6 2668,2676-2678,2680
+  s_4cd904c7dbe2a1::t_e6b4d5dff0814e 113,118-136,824,950,981,1099,2645-2667,2669-2675,2679,2681-2694,2731
+docs/demo-script.md
+  s_4cd904c7dbe2a1::t_c3b4df4f30b3a7 229-230,233
+packages/teams/test/subscription.test.ts
+  s_4cd904c7dbe2a1::t_b1fcf925825794 250-257
+  s_4cd904c7dbe2a1::t_ab1bda541335d8 249
+  s_4cd904c7dbe2a1::t_fb334565e9d909 42,45,62-77,218-225,227-248
+  s_4cd904c7dbe2a1::t_2f5f5ef7574fd6 226
+packages/teams/subscription.ts
+  s_4cd904c7dbe2a1::t_b1fcf925825794 215-217,483-500
+  s_4cd904c7dbe2a1::t_369254738bc529 135-136,140
+  s_4cd904c7dbe2a1::t_b706fb16124e02 49-51,119,166-167,206-211,235-242,375-377,380-381,386-389,422,433-437
+  s_4cd904c7dbe2a1::t_ace38347aa488a 378-379
+  s_4cd904c7dbe2a1::t_2f5f5ef7574fd6 382-385
+  s_4cd904c7dbe2a1::t_620a5995e1101b 501
+packages/teams/leader.state.test.ts
+  s_4cd904c7dbe2a1::t_ace38347aa488a 192-201
+  s_4cd904c7dbe2a1::t_dcb853825900ec 5,48,53,64,190-191,202-215
+  s_4cd904c7dbe2a1::t_9b8b7ddc23d406 170-189,216-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "8b3c71343bec44197fc54029ae79dec6afbf8f29",
+  "prompts": {},
+  "sessions": {
+    "s_4cd904c7dbe2a1": {
+      "agent_id": {
+        "tool": "Kirsten Accretion Queloz",
+        "id": "019f51f0-e8dc-7f7f-ae6b-d60f046d4897",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": null
+    }
+  }
+}
