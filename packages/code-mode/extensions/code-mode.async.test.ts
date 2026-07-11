@@ -701,5 +701,30 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 			delete process.env.PI_CODE_MODE_PROMOTE_MS;
 		}
 	});
+	test("Teams workers keep a slow synchronous execute_code in the same turn", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "50";
+		process.env.PI_TEAMS_WORKER = "1";
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+			const result = await executeCode.execute(
+				"tc-worker-no-promote",
+				{ code: "await new Promise((r) => setTimeout(r, 120)); console.log('worker finished');" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(result.details.jobId).toBeUndefined();
+			expect(result.details.asyncStatus).toBeUndefined();
+			const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(text).toContain("worker finished");
+			expect(text).not.toContain("auto-promoted");
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+			delete process.env.PI_TEAMS_WORKER;
+		}
+	});
+
 });
 

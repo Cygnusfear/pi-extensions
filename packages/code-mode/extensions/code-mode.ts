@@ -910,42 +910,46 @@ export default function (pi: ExtensionAPI) {
       const syncMutex = syncPromise.then(() => undefined, () => undefined);
       pendingExecution = syncMutex;
 
-      const promoteMs = getSyncPromoteThresholdMs();
-      // We race two timers:
-      //   - the default promote timer (60s by default)
-      //   - a polling timer that fires every 500ms; once a blocking confirm
-      //     dialog is open AND the work has been running ≥3s, promote early
-      //     so the agent gets the explicit "blocked on confirm" stub fast
-      //     enough to call notify() and pull the hooman in.
+      // A Teams worker is a non-interactive, one-shot `pi -p` process: returning an
+      // auto-promotion stub ends its turn, and some providers legitimately stop instead
+      // of waiting for the promised follow-up. There is no TUI to free in that process,
+      // so preserve the synchronous turn (including normal RLM/Ouija use). An explicit
+      // `async: true` request remains available when a worker intentionally wants one.
+      const workerOwnedTurn = process.env.PI_TEAMS_WORKER === "1";
+      const promoteMs = workerOwnedTurn ? undefined : getSyncPromoteThresholdMs();
       let promoteHandle: ReturnType<typeof setTimeout> | undefined;
       let pollHandle: ReturnType<typeof setInterval> | undefined;
-      // Widened via cast so TS flow analysis doesn't narrow to the literal
-      // "timeout" — the value is mutated from the setInterval closure below
-      // and read after the race resolves.
       let promoteReason = "timeout" as "timeout" | "blocked-confirm";
-      const promotePromise = new Promise<"PROMOTE">((resolve) => {
-        promoteHandle = setTimeout(() => {
-          promoteReason = "timeout";
-          resolve("PROMOTE");
-        }, promoteMs);
-        pollHandle = setInterval(() => {
-          if (
-            pendingConfirmCount() > 0 &&
-            Date.now() - syncStartedAt >= CONFIRM_BLOCKED_PROMOTE_THRESHOLD_MS
-          ) {
-            promoteReason = "blocked-confirm";
-            resolve("PROMOTE");
-          }
-        }, 500);
-      });
 
       type RaceWinner =
         | { kind: "result"; r: { output: string; error?: string; duration: number } }
         | { kind: "promote" };
-      const winner = await Promise.race<RaceWinner>([
-        syncPromise.then((r) => ({ kind: "result" as const, r })),
-        promotePromise.then(() => ({ kind: "promote" as const })),
-      ]);
+      let winner: RaceWinner;
+      if (workerOwnedTurn) {
+        winner = { kind: "result", r: await syncPromise };
+      } else {
+        // Interactive sessions race the normal 60s TUI-freeze safety net and the
+        // fast pending-confirm path.
+        const promotePromise = new Promise<"PROMOTE">((resolve) => {
+          promoteHandle = setTimeout(() => {
+            promoteReason = "timeout";
+            resolve("PROMOTE");
+          }, promoteMs);
+          pollHandle = setInterval(() => {
+            if (
+              pendingConfirmCount() > 0 &&
+              Date.now() - syncStartedAt >= CONFIRM_BLOCKED_PROMOTE_THRESHOLD_MS
+            ) {
+              promoteReason = "blocked-confirm";
+              resolve("PROMOTE");
+            }
+          }, 500);
+        });
+        winner = await Promise.race<RaceWinner>([
+          syncPromise.then((r) => ({ kind: "result" as const, r })),
+          promotePromise.then(() => ({ kind: "promote" as const })),
+        ]);
+      }
       if (promoteHandle) clearTimeout(promoteHandle);
       if (pollHandle) clearInterval(pollHandle);
 
