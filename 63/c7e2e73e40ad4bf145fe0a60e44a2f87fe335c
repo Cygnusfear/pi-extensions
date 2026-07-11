@@ -1,0 +1,21 @@
+packages/code-mode/extensions/code-mode.async.test.ts
+  s_4cd904c7dbe2a1::t_7f8ef13c3fabee 704-728
+packages/code-mode/extensions/code-mode.ts
+  s_4cd904c7dbe2a1::t_d7f4affd096cfe 913-919,927-952
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "63c7e2e73e40ad4bf145fe0a60e44a2f87fe335c",
+  "prompts": {},
+  "sessions": {
+    "s_4cd904c7dbe2a1": {
+      "agent_id": {
+        "tool": "Kirsten Accretion Queloz",
+        "id": "019f51f0-e8dc-7f7f-ae6b-d60f046d4897",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
