@@ -1,0 +1,29 @@
+packages/rate-limit-recovery/extensions/rate-limit-recovery.ts
+  s_c80280c75e1308::t_4ba8e35a1963d2 442
+  s_c80280c75e1308::t_a40608d8733472 55
+  s_c80280c75e1308::t_5b5e008b126bff 341-343
+  s_c80280c75e1308::t_f4923e3e348708 355
+  s_c80280c75e1308::t_a7cbeca11d129e 390
+  s_c80280c75e1308::t_9616a1ded8033f 403
+  s_c80280c75e1308::t_6963a36dc6e7af 429
+packages/notify/extensions/tg-relay.ts
+  s_c80280c75e1308::t_255de5aa54cabd 2,4-6,8,13-14,25,27
+packages/shared/src/relay-to-hooman.ts
+  s_c80280c75e1308::t_5f9bf2aca17e17 1-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "53241ab68276760f7e62502445c95ff5ce469a33",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
