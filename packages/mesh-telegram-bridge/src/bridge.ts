@@ -1,4 +1,4 @@
-import { Bot, InputFile, type Context } from "grammy";
+import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
 import { type Config, persistChatId } from "./config.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,6 +11,10 @@ const BROADCAST_TOPIC_NAME = "📢 Broadcast";
 const TG_MAX = 4000;
 const INBOX_DIR = join(homedir(), ".config", "mesh-telegram-bridge", "inbox");
 const STATE_PATH = join(homedir(), ".config", "mesh-telegram-bridge", "state.json");
+/** 🟢 live if a peer announced within the sidecar's eviction window (~90s). */
+const LIVE_MS = 90_000;
+/** Tappable agents per /agents roster page. */
+const AGENTS_PER_PAGE = 8;
 
 /**
  * Wires the mesh ↔ Telegram in both directions. Supports two modes:
@@ -66,6 +70,8 @@ export class Bridge {
 		this.mesh.start();
 		if (this.chatId != null) void this.detectForum();
 		this.bot.on("message", (ctx) => void this.onTelegramMessage(ctx));
+		this.bot.on("callback_query", (ctx) => void this.onCallbackQuery(ctx));
+		this.bot.on("inline_query", (ctx) => void this.onInlineQuery(ctx));
 		this.bot.catch((err) => console.error("[tg] bot error:", err.message));
 		void this.bot.start({
 			onStart: (bi) => console.log(`[tg] @${bi.username} polling; chat=${this.chatId ?? "(awaiting)"} forum=${this.forumMode}`),
@@ -183,11 +189,23 @@ export class Bridge {
 		let text: string | null = null;
 		try {
 			if (typeof msg.text === "string") text = msg.text;
-			else if (msg.voice) text = `🎤 ${await this.transcribeVoice(msg.voice.file_id)}`;
+			else if (msg.voice) {
+				const t = await this.transcribeVoice(msg.voice.file_id);
+				void ctx.reply("🎤 transcribed: " + t).catch(() => {});
+				text = t;
+			}
 			else if (msg.photo && msg.photo.length) text = await this.inboundFileText(msg.photo[msg.photo.length - 1].file_id, "photo", msg.caption);
 			else if (msg.document) text = await this.inboundFileText(msg.document.file_id, "document", msg.caption, msg.document.file_name);
 		} catch (e) { console.error("[bridge] inbound media failed:", (e as Error).message); return; }
 		if (!text) return;
+
+		// /agents — post a tappable live roster (tap a button → opens that agent's topic).
+		if (text.startsWith("/agents") && (text.length === 7 || text[7] === " " || text[7] === "@")) {
+			if (!this.forumMode || this.chatId == null) { void ctx.reply("Forum mode required for /agents."); return; }
+			const r = this.buildAgentsRoster(1);
+			void ctx.reply(r.text, { reply_markup: r.keyboard }).catch((e) => console.error("[bridge] /agents send:", (e as Error).message));
+			return;
+		}
 
 		// /dm <agent> — create a topic for any mesh peer on demand (forum mode only).
 		if (this.forumMode && text.startsWith("/dm") && (text.length === 3 || text[3] === " " || text[3] === "@")) {
@@ -212,6 +230,99 @@ export class Bridge {
 		const target = replyTo != null ? this.replyTargets.get(replyTo) : undefined;
 		if (target) { this.mesh.tellAgent(target, text); console.log(`[bridge] reply → ${target.nickname}: ${text.slice(0, 60)}`); void ctx.react("👍").catch(() => {}); }
 		else { this.mesh.broadcast(text); console.log(`[bridge] broadcast → #${this.cfg.channel}: ${text.slice(0, 60)}`); }
+	}
+
+	// ── agent roster (Tier 1) + inline autocomplete (Tier 2) ───────────
+	/** All known peers except the bridge itself, freshest first. */
+	private livePeersSorted() {
+		return [...this.mesh.peers.values()]
+			.filter((p) => p.meshId !== this.cfg.hoomanMeshId)
+			.sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
+	}
+
+	/** Build a tappable roster message + inline keyboard for the given page. */
+	private buildAgentsRoster(page: number): { text: string; keyboard: InlineKeyboard } {
+		const now = Date.now();
+		const peers = this.livePeersSorted();
+		const total = peers.length;
+		const live = peers.filter((p) => now - (p.lastSeen ?? 0) < LIVE_MS).length;
+		const totalPages = Math.max(1, Math.ceil(total / AGENTS_PER_PAGE));
+		const p = Math.min(Math.max(1, page), totalPages);
+		const slice = peers.slice((p - 1) * AGENTS_PER_PAGE, p * AGENTS_PER_PAGE);
+		const kb = new InlineKeyboard();
+		for (const peer of slice) {
+			const dot = now - (peer.lastSeen ?? 0) < LIVE_MS ? "🟢" : "⚪";
+			const label = `${dot} ${peer.nickname ?? peer.id.slice(0, 8)}${peer.name ? " · " + peer.name : ""}`.slice(0, 60);
+			const key = (peer.meshId ?? peer.id).slice(0, 60);
+			kb.text(label, `a:${key}`).row();
+		}
+		if (totalPages > 1) {
+			if (p > 1) kb.text("◀", `ap:${p - 1}`);
+			kb.text(`${p}/${totalPages}`, "noop");
+			if (p < totalPages) kb.text("▶", `ap:${p + 1}`);
+		}
+		const text = `🤖 Mesh agents — ${live}🟢 / ${total} total${totalPages > 1 ? ` · page ${p}/${totalPages}` : ""}\nTap an agent to open their topic.`;
+		return { text, keyboard: kb };
+	}
+
+	/** Look up a peer by the callback key (meshId or clientId). */
+	private findPeerByKey(key: string): { meshId?: string; clientId: string; nickname: string; name?: string } | null {
+		for (const p of this.mesh.peers.values()) {
+			if ((p.meshId ?? "") === key || p.id === key) return { meshId: p.meshId, clientId: p.id, nickname: p.nickname ?? p.id.slice(0, 8), name: p.name };
+		}
+		return null;
+	}
+
+	/** Inline-keyboard tap — open an agent's topic, or paginate the roster. */
+	private async onCallbackQuery(ctx: Context): Promise<void> {
+		const data = ctx.callbackQuery?.data ?? "";
+		try {
+			if (data === "noop") { await ctx.answerCallbackQuery(); return; }
+			if (data.startsWith("ap:")) {
+				const page = Number(data.slice(3)) || 1;
+				const r = this.buildAgentsRoster(page);
+				await ctx.editMessageText(r.text, { reply_markup: r.keyboard });
+			await ctx.answerCallbackQuery();
+			return;
+			}
+			if (data.startsWith("a:")) {
+				const key = data.slice(2);
+				const peer = this.findPeerByKey(key);
+				if (!peer) { await ctx.answerCallbackQuery({ text: "That agent went offline.", show_alert: true }); return; }
+				if (this.chatId == null) { await ctx.answerCallbackQuery({ text: "No chat yet.", show_alert: true }); return; }
+				const topic = await this.ensureTopicForPeer(peer);
+				if (topic == null) { await ctx.answerCallbackQuery({ text: "Couldn't create a topic.", show_alert: true }); return; }
+				await this.bot.api.sendMessage(this.chatId, `✉️ Topic for ${peer.nickname}${peer.name ? " · " + peer.name : ""} — message me here.`, { message_thread_id: topic });
+				await ctx.answerCallbackQuery({ text: `✅ Opened ${peer.nickname}` });
+				return;
+			}
+			await ctx.answerCallbackQuery();
+		} catch (e) {
+			console.error("[bridge] callback err:", (e as Error).message);
+			try { await ctx.answerCallbackQuery(); } catch {}
+		}
+	}
+
+	/** Tier 2 — "@ramdock_bot <query>" autocomplete; tap inserts "/dm <agent>". */
+	private async onInlineQuery(ctx: Context): Promise<void> {
+		const q = (ctx.inlineQuery?.query ?? "").trim().toLowerCase();
+		const peers = this.livePeersSorted();
+		const matches = q
+			? peers.filter((p) => (p.nickname ?? "").toLowerCase().includes(q) || (p.name ?? "").toLowerCase().includes(q) || (p.meshId ?? "").includes(q))
+			: peers.slice(0, 8);
+		const now = Date.now();
+		const results = matches.slice(0, 20).map((p) => {
+			const dot = now - (p.lastSeen ?? 0) < LIVE_MS ? "🟢" : "⚪";
+			const nick = p.nickname ?? p.id.slice(0, 8);
+			return {
+				type: "article" as const,
+				id: (p.meshId ?? p.id).slice(0, 64),
+				title: `${dot} ${nick}${p.name ? " · " + p.name : ""}`.slice(0, 128),
+				description: p.name ? `@ ${p.name}` : "mesh agent",
+				input_message_content: { message_text: `/dm ${nick}` },
+			};
+		});
+		await ctx.answerInlineQuery(results, { cache_time: 5 });
 	}
 
 	// ── media helpers ──────────────────────────────────────────────────
