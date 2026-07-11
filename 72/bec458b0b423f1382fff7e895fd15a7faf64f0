@@ -1,0 +1,21 @@
+packages/restart/extensions/restart.ts
+  s_c80280c75e1308::t_a23c0fe947f653 4-26
+  s_c80280c75e1308::t_eca7d64684f38c 118-121,123-126,131
+  s_c80280c75e1308::t_d2adff1a1b932f 54-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "72bec458b0b423f1382fff7e895fd15a7faf64f0",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
