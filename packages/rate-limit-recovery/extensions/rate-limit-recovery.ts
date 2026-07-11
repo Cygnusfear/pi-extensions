@@ -52,6 +52,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { requestStage, getActiveStage } from "../../shared/src/stage-control.ts";
 import { fireNotification } from "../../shared/src/desktop-notify.ts";
+import { relayToHooman } from "../../shared/src/relay-to-hooman.ts";
 
 /**
  * Normalized provider error response metadata, mirrored from the host's
@@ -337,6 +338,9 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 		timers = [];
 	};
 
+	/** Current model id for hooman-facing Telegram messages (best-effort). */
+	const modelName = (): string => ctx?.model?.id ?? "the model";
+
 	/**
 	 * Enter (or stay in) the rate-limited state and flip the tab icon to 🚓.
 	 * Always refreshes the captured providerError for the episode; only notifies
@@ -348,6 +352,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 			active = true;
 			const cur = getActiveStage();
 			priorStage = cur && cur !== RATE_LIMITED_STAGE ? cur : FALLBACK_STAGE;
+			relayToHooman("🚓 rate-limited on " + modelName() + " — pi is retrying.");
 		}
 		requestStage(RATE_LIMITED_STAGE);
 	};
@@ -382,6 +387,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 				title: "🚓 Manual wake needed",
 				body: "Rate limit with no schedulable reset time (none known, or beyond the auto-wake horizon). Resume by hand.",
 			});
+			relayToHooman("🚓 " + modelName() + ": rate limit with no known reset time — needs a manual wake, or switch me to another model.");
 			return;
 		}
 
@@ -394,6 +400,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 					: `Provider TPM storm — auto-resuming in ${describeDelay(first)}${delays.length > 1 ? ` then ${describeDelay(delays[delays.length - 1] - first)} later` : ""}.`,
 		});
 
+		relayToHooman((mode === "quota" ? "🚓 quota/usage window on " : "🚓 rate-limited on ") + modelName() + " — auto-resuming in " + describeDelay(first) + ".");
 		delays.forEach((delay, i) => {
 			const t = setTimeout(() => {
 				// Still throttled when this fires — nudge the agent to retry.
@@ -419,6 +426,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 							title: "🚓 Session may be dead",
 							body: `Still rate-limited after ${describeDelay(delay)} of auto-resumes. Needs attention.`,
 						});
+						relayToHooman("🚓 " + modelName() + ": still rate-limited after auto-resumes — may be stuck. Consider switching me to another model.");
 					}, 5_000);
 					timers.push(t2);
 				}
@@ -431,6 +439,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	const recover = (): void => {
 		if (!active) return;
 		active = false;
+		relayToHooman("✅ recovered on " + modelName() + ".");
 		scheduled = false;
 		episodeProviderError = undefined;
 		clearTimers();
