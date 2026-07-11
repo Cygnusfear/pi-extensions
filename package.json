@@ -69,7 +69,8 @@
       "./packages/lipgloss-theme/themes"
     ],
     "skills": [
-      "./packages/frontpage/skills"
+      "./packages/frontpage/skills",
+      "./packages/mesh-telegram-bridge/skills"
     ]
   },
   "dependencies": {
