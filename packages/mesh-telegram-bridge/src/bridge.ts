@@ -1,8 +1,8 @@
 import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
 import { type Config, persistChatId } from "./config.ts";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { homedir } from "node:os";
 
 /** When the group is a forum, broadcasts (agent channel-posts + your plain messages) land here. */
@@ -15,6 +15,10 @@ const STATE_PATH = join(homedir(), ".config", "mesh-telegram-bridge", "state.jso
 const LIVE_MS = 90_000;
 /** Tappable agents per /agents roster page. */
 const AGENTS_PER_PAGE = 8;
+/** File extensions we send as photos (vs documents). */
+const IMG_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+/** How long to wait for an image to finish being written before giving up. */
+const IMG_STABLE_MS = 8000;
 
 /**
  * Wires the mesh ↔ Telegram in both directions. Supports two modes:
@@ -359,14 +363,62 @@ export class Bridge {
 
 	/** Upload an agent's file/image attachment (if any) into its topic. */
 	private async uploadAttachment(t: InboundTell, topic: number | null): Promise<void> {
-		if (!t.attachment || !existsSync(t.attachment)) return;
+		if (!t.attachment) return;
+		if (!existsSync(t.attachment)) { console.warn(`[bridge] attachment not found: ${t.attachment} (from ${t.nickname})`); return; }
 		const thread = topic != null ? { message_thread_id: topic } : {};
+		const cap = `${IMG_RE.test(t.attachment) ? "🖼" : "📎"} ${t.nickname}`;
+		const fname = basename(t.attachment);
 		try {
-			const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(t.attachment);
-			const cap = `${isImg ? "🖼" : "📎"} ${t.nickname}`;
-			if (isImg) await this.bot.api.sendPhoto(this.chatId, new InputFile(t.attachment), { ...thread, caption: cap });
-			else await this.bot.api.sendDocument(this.chatId, new InputFile(t.attachment), { ...thread, caption: cap });
-		} catch (e) { console.error("[bridge] attachment upload failed:", (e as Error).message); }
+			if (IMG_RE.test(t.attachment)) {
+				// Wait for the render to finish writing, then verify the file is complete
+				// (has its end marker) before sending — never ship a truncated photo.
+				const buf = await this.readStableImage(t.attachment);
+				if (!buf) {
+					console.warn(`[bridge] image never finished writing — skipped: ${t.attachment}`);
+					await this.bot.api.sendMessage(this.chatId, `⚠️ ${t.nickname} sent an image that hadn't finished rendering — skipped. Ask them to resend once it's done.`, thread).catch(() => {});
+					return;
+				}
+				await this.bot.api.sendPhoto(this.chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+				console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
+			} else {
+				await this.bot.api.sendDocument(this.chatId, new InputFile(t.attachment), { ...thread, caption: cap });
+				console.log(`[bridge] sent document: ${t.attachment} → topic ${topic ?? "(main)"}`);
+			}
+		} catch (e) { console.error(`[bridge] attachment upload failed (${t.attachment}):`, (e as Error).message); }
+	}
+
+	/**
+	 * Read an image only once its size has stopped changing (render-write safe)
+	 * and confirm it carries its format's end marker. Returns null if it never
+	 * completes within IMG_STABLE_MS — so we never ship a truncated photo.
+	 */
+	private async readStableImage(path: string): Promise<Buffer | null> {
+		const step = 300;
+		let lastSize = -1;
+		const deadline = Date.now() + IMG_STABLE_MS;
+		while (Date.now() < deadline) {
+			let size: number;
+			try { size = statSync(path).size; } catch { return null; }
+			if (size > 0 && size === lastSize) {
+				const buf = readFileSync(path);
+				if (this.imageComplete(buf, path)) return buf;
+			}
+			lastSize = size;
+			await sleep(step);
+		}
+		return null;
+	}
+
+	/** A stable image buffer is "complete" if it has its format's end marker. */
+	private imageComplete(buf: Buffer, path: string): boolean {
+		if (buf.length < 12) return false;
+		const low = path.toLowerCase();
+		if (low.endsWith(".png")) return buf.subarray(buf.length - 8, buf.length - 4).toString("latin1") === "IEND";
+		if (low.endsWith(".jpg") || low.endsWith(".jpeg")) return buf[buf.length - 2] === 0xff && buf[buf.length - 1] === 0xd9;
+		if (low.endsWith(".gif")) return buf[buf.length - 1] === 0x3b;
+		if (low.endsWith(".webp")) return buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP";
+		if (low.endsWith(".bmp")) return buf.subarray(0, 2).toString("latin1") === "BM";
+		return true;
 	}
 
 	/** Split a header+body into Telegram-sized chunks (char-based; rare for short tells). */
