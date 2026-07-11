@@ -1138,6 +1138,47 @@ function isTeamsLifecyclePayload(payload: unknown): boolean {
   return kind !== "teams:comment"; // comments are user content — show them
 }
 
+/** Payload marker for control-plane tells — harness commands (setModel, …), not
+ *  conversation. Routed to a registered handler and never surfaced to the LLM. */
+const MESH_CONTROL_KIND = "mesh:control";
+
+/** Handler for a control-plane op. Receives the op name, the raw payload, and the
+ *  sender's id (for authorization — the handler decides who may issue the op). */
+type MeshControlHandler = (input: {
+  op: string;
+  payload: Record<string, unknown>;
+  from: string | undefined;
+}) => void;
+
+/** Registry other extensions populate to handle mesh:control ops. Symmetric with
+ *  globalThis.__piMesh (which exposes SENDING) — this exposes inbound control. */
+function meshControlRegistry(): Map<string, MeshControlHandler> {
+  const g = globalThis as unknown as { __piMeshControls?: Map<string, MeshControlHandler> };
+  if (!g.__piMeshControls) g.__piMeshControls = new Map();
+  return g.__piMeshControls;
+}
+
+/** Route a control-plane tell to its registered handler. Returns true when the
+ *  payload IS a control tell (so the caller must NOT surface it to the LLM),
+ *  whether or not a handler was registered for the op. */
+function routeControlTell(payload: unknown, from: string | undefined): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Record<string, unknown>;
+  if (p.kind !== MESH_CONTROL_KIND) return false;
+  const op = typeof p.op === "string" ? p.op : "";
+  const handler = op ? meshControlRegistry().get(op) : undefined;
+  if (!handler) {
+    console.warn("[pi-mesh] control tell with no handler for op:", op || "(missing)");
+    return true;
+  }
+  try {
+    handler({ op, payload: p, from });
+  } catch (e) {
+    console.warn("[pi-mesh] control handler error for op", op, ":", e);
+  }
+  return true;
+}
+
 function getPeerLabel(peer: PeerInfo): string {
   return peer.nickname?.trim() || peer.name?.trim() || peer.id.slice(0, 8);
 }
@@ -1347,6 +1388,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
   // Expose mesh instance for other extensions (e.g. teams) — avoids duplicate connections
   (globalThis as any).__piMesh = mesh;
+  // Expose the inbound control-plane registry too (symmetric with the send-side
+  // __piMesh above). Extensions register harness ops (e.g. setModel) here; a
+  // mesh:control tell is routed to its handler instead of the LLM. See
+  // routeControlTell / MeshControlHandler.
+  meshControlRegistry();
   // Resolve a raw target to a concrete ROUTE. Durable-id aware: matches on the
   // stable meshId (not just the sidecar clientId) and returns the durable id as
   // the route when the peer has one, so routing survives clientId churn. See
@@ -1892,6 +1938,23 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       mesh.on("message", (inbound) => {
         const { message: msg, deliveryId, ackRequested, preempt, originalFrom } = inbound;
         if (isTeamsLifecyclePayload(msg.payload)) return;
+        // Control-plane: a mesh:control tell is a harness command (setModel, …),
+        // not conversation. Route it to its handler and never surface to the LLM.
+        // We pass the sender's DURABLE mesh id (resolved from the ephemeral
+        // clientId via peers) so the handler can authorize by durable identity.
+        // Ack 'delivered' when requested so the sender knows it was accepted.
+        const controlFrom = mesh.peers().find((p) => p.id === msg.from)?.meshId ?? msg.from;
+        if (routeControlTell(msg.payload, controlFrom)) {
+          if (deliveryId && originalFrom && ackRequested) {
+            mesh.sendTellReceipt(
+              originalFrom,
+              buildTellReceiptAck(deliveryId, mesh.self().id, "delivered", {
+                receiverBusy: agentBusy,
+              }),
+            );
+          }
+          return;
+        }
         const senderPeer = mesh.peers().find((p) => p.id === msg.from);
         const senderLabel = senderPeer
           ? getPeerLabel(senderPeer)

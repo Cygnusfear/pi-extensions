@@ -281,8 +281,25 @@ export class Bridge {
 			return;
 		}
 		// Unknown slash command — reply with the menu instead of routing "/foo" to an agent.
+		// /model <name> — switch THIS agent's model (topic-scoped). Sends a
+		// mesh:control tell that pi-mesh routes to the harness (never the LLM).
+		if (this.forumMode && text.startsWith("/model") && (text.length === 6 || text[6] === " " || text[6] === "@")) {
+			const topicId = typeof m.message_thread_id === "number" ? m.message_thread_id : undefined;
+			const agent = topicId != null ? this.topicAgent.get(topicId) : undefined;
+			let rest = text.slice(6).trim();
+			if (rest.startsWith("@")) { const parts = rest.split(" ").filter(Boolean); parts.shift(); rest = parts.join(" "); }
+			const name = rest.trim();
+			if (!agent) { void ctx.reply("Use /model <name> inside an agent's topic — it switches THAT agent's model.").catch(() => {}); return; }
+			if (!name) { void ctx.reply("Usage: /model <name> — e.g. /model opus, /model glm-5.2, /model kimi").catch(() => {}); return; }
+			this.mesh.tellAgentControl(agent, { kind: "mesh:control", op: "setModel", model: name });
+			console.log("[bridge] /model " + name + " -> " + agent.nickname);
+			void ctx.reply("switching " + agent.nickname + " to " + name + "… they'll confirm here.").catch(() => {});
+			void ctx.react("👍").catch(() => {});
+			return;
+		}
+
 		if (text.startsWith("/") && text.trim().length > 1) {
-			void ctx.reply("Unknown command. Try:\n/agents — live agent roster\n/dm <agent> — open an agent's topic\n/afk [on|off] [msg] — AFK mode").catch(() => {});
+			void ctx.reply("Unknown command. Try:\n/agents — live agent roster\n/dm <agent> — open an agent's topic\n/afk [on|off] [msg] — AFK mode\n/model <name> — switch this agent's model (in its topic)").catch(() => {});
 			return;
 		}
 

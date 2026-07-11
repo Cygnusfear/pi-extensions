@@ -241,12 +241,22 @@ export class MeshClient extends EventEmitter {
 
 	/** Direct mesh tell to a specific agent — durable-id routed when known. */
 	tellAgent(target: ReplyTarget, text: string): void {
+		this.sendTellPayload(target, { text, from: this.opts.nickname });
+	}
+
+	/** Control-plane tell — the inner payload is a harness command (e.g. setModel)
+	 *  that pi-mesh routes to a handler instead of the LLM. See mesh-model-control. */
+	tellAgentControl(target: ReplyTarget, payload: Record<string, unknown>): void {
+		this.sendTellPayload(target, payload);
+	}
+
+	private sendTellPayload(target: ReplyTarget, payload: Record<string, unknown>): void {
 		const route = target.meshId ?? target.clientId;
 		const tellEnvelope: MeshTellEnvelope = {
 			kind: "mesh:tell",
 			deliveryId: createDeliveryId(),
 			from: this.clientId,
-			payload: { text, from: this.opts.nickname },
+			payload,
 			timestamp: Date.now(),
 		};
 		const envelope: MeshMessage = {

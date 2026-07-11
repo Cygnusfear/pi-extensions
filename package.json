@@ -41,6 +41,7 @@
       "./packages/model-hints/extensions/model-hints.ts",
     "./packages/model-router/extensions/model-router.ts",
       "./packages/model-shortcuts/extensions/model-shortcuts.ts",
+      "./packages/mesh-model-control/extensions/mesh-model-control.ts",
       "./packages/notify/extensions/notify.ts",
       "./packages/powerline-footer/index.ts",
       "./packages/session-tab-title/extensions/session-tab-title.ts",

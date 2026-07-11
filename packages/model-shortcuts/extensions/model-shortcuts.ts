@@ -6,7 +6,7 @@ import { findLatest } from "@pi-extensions/shared/model-utils";
  * Resolves latest from registry dynamically. Zero maintenance.
  */
 
-const SHORTCUTS = [
+export const SHORTCUTS = [
   { command: "opus", provider: "anthropic", family: /^claude-opus-/, label: "Opus" },
   { command: "sonnet", provider: "anthropic", family: /^claude-sonnet-/, label: "Sonnet" },
   { command: "haiku", provider: "anthropic", family: /^claude-haiku-/, label: "Haiku" },
