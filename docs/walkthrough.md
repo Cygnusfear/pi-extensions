@@ -89,7 +89,6 @@ For **team workers** specifically there's a cleaner, event-driven path — `team
 
 ```javascript
 teams.on("fixer", "terminal")
-  .preventDefault()
   .timeout(30 * 60 * 1000)
   .wake((e) => `fixer ${e.type}`);
 ```

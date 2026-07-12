@@ -215,6 +215,30 @@ describe("TeamLeader state persistence", () => {
 		}]);
 	});
 
+	test("terminal wake sends one host follow-up for every terminal outcome", () => {
+		const { leader, sent } = makeHarness();
+		const { filter, predicate } = buildPredicate({ type: "terminal" });
+		const subscription = new TeamsSubscription(leader, filter, predicate)
+			.each(() => {})
+			.wake((event) => `${event.type}: ${event.worker.name}`);
+		const events = [
+			{ type: "completed", worker: makeWorker({ name: "done", status: "done" }), result: "done" },
+			{ type: "warning", worker: makeWorker({ name: "quit", status: "warning" }), reason: "quit" },
+			{ type: "failed", worker: makeWorker({ name: "crash", status: "failed" }), reason: "crash" },
+			{ type: "turn_finished", worker: makeWorker({ name: "freeform", status: "done", freeform: true }), result: "finished" },
+		] as any[];
+		for (const event of events) leader.notifyLLM(event);
+		expect(sent).toHaveLength(events.length);
+		expect(sent.every((entry) => (entry.options as any).deliverAs === "followUp" && (entry.options as any).triggerTurn === true)).toBe(true);
+		expect(sent.map((entry) => (entry.message as any).content)).toEqual([
+			"completed: done",
+			"warning: quit",
+			"failed: crash",
+			"turn_finished: freeform",
+		]);
+		subscription.unsubscribe();
+	});
+
 	test("mesh message handler wires once and is removed on stopPolling", () => {
 		const { leader } = makeHarness();
 		const listeners = {

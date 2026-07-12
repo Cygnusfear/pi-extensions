@@ -49,7 +49,7 @@ export default function (pi: ExtensionAPI) {
 
 	// teams.on — subscribe to the leader's PollEvent stream with a predicate.
 	// Returns a thenable TeamsSubscription you can `await`, chain with .each(),
-	// .timeout(), .preventDefault(), .stopPropagation(), or .unsubscribe().
+	// .timeout(), .wake(), .preventDefault(), .stopPropagation(), or .unsubscribe().
 	// No polling, no sleeps.
 	//
 	// To trigger a coordinator turn from a background event, prefer the host-owned
@@ -58,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 	//
 	// Supported signatures (all return TeamsSubscription):
 	//   teams.on("fixer")
-	//   teams.on("fixer", "completed")
+	//   teams.on("fixer", "terminal").wake()
 	//   teams.on({ name: "oracle", comment: /DONE:/ })
 	//   teams.on({ predicate: e => ... })
 	//   teams.on("fixer", "completed", (event) => { ... })    // shorthand for .each()

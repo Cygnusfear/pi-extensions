@@ -228,7 +228,6 @@ await teams.delegate([
 
 // Race their terminal outcomes — whichever arrives first wakes the coordinator.
 teams.on({ type: "terminal" })
-  .preventDefault()
   .timeout(30 * 60 * 1000)
   .wake(e => `${e.worker.name} stopped first: ${e.type}`);
 
@@ -237,8 +236,7 @@ console.log("Three workers running, event subscription armed. Going idle.");
 
 **Narration:** "No polling loop. No sleep interval. The coordinator subscribes
 to the worker event stream and goes idle. The first worker to finish wakes
-it up. DOM-style `.preventDefault()` suppresses the duplicate leader notify.
-This is event-driven multi-agent orchestration."
+it up through the host-owned `.wake()` path. This is event-driven multi-agent orchestration."
 
 ### Demo 5.2: Full Pipeline in One Block
 

@@ -96,22 +96,20 @@ Use `console.log()` for final output you want the user to see.
 `console.log()` only writes to the current block output — gone when the block returns.
 `console.wake(message)` queues a message that **triggers a new agent turn** after this block finishes. It works from background promises that fire minutes later.
 
-`console.wake` is the **single canonical wake primitive**. Event sources (team workers, file watchers, timers, polling loops) all funnel into it via their own callbacks. Do not reinvent the wake API per tool.
+`console.wake` queues a new agent turn for generic background sources such as file watchers, timers, and mesh peer polling. Teams worker events have a durable host-owned wake API and must use it instead.
 
 **Pattern 1 — wait for a team worker (`teams.on`):**
 
 ```javascript
-// Event-driven — no polling, rides the leader's PollEvent stream.
-// .preventDefault() suppresses the leader's duplicate default batch wake.
-teams.on("fixer", "completed")
-  .preventDefault()
+// Background Teams wake — host-owned and synchronous with event dispatch.
+// Use "terminal" so success, quit, crash, and freeform completion all wake.
+teams.on("fixer", "terminal")
   .timeout(30 * 60 * 1000)
-  .then(
-    (e) => console.wake(`fixer done: ${e.result.slice(0, 500)}`),
-    (err) => console.wake(`fixer errored or timed out: ${err.message}`),
-  );
+  .wake((e) => `fixer ${e.type}`);
 console.log("Subscription armed — going idle until fixer completes.");
 ```
+
+Never combine `.preventDefault()` with `.then(...)` or `.each(...)` plus `console.wake()` for a Teams terminal event. That suppresses the host wake and depends on a later sandbox Promise callback.
 
 **Pattern 2 — watch a mesh peer or anything non-event-driven (background poll + wake):**
 
@@ -191,7 +189,7 @@ To inspect or kill an in-flight async job, use the **direct tools** `execute_cod
 - If the agent is idle → `console.wake` triggers a turn immediately.
 - If the agent is currently streaming a response → `console.wake` passes `deliverAs: "followUp"` to `pi.sendUserMessage`, which queues the wake safely. The wake lands as the next turn when the current one finishes. **Do NOT** call `pi.sendUserMessage` directly — it requires the explicit `deliverAs` option and throws `"Agent is already processing"` otherwise, silently losing your wake.
 - Multiple wakes from the same block are ALL delivered (each becomes its own follow-up turn trigger). There's no one-wake-per-block limit anymore — pi's own queue serializes them correctly.
-- For **team workers**, always prefer `teams.on(name, type)` over sleep-polling `teams.list()`. It's event-driven, faster, and the canonical pattern.
+- **For team workers**, use `teams.on(name, "terminal").wake(...)` for background completion wakes. It is host-owned and durable; do not use `.preventDefault().then/each(console.wake)`. Use `await teams.on(...)` for an in-turn result.
 - For **mesh peers**, the background-poll + `console.wake` pattern above is **the** canonical shape. Foreground sleep-loops and "ping me back" tells are both banned — the former blocks the agent, the latter creates babble-loops between linear synchronous agents.
 - For non-event sources (file tails, generic command output), use the same background-poll + `console.wake` shape.
 - For a **single execute_code block that just takes too long** to be a foreground tool call, prefer `execute_code({ async: true })` over hand-rolling a `console.wake` monitor — the async path uses the same follow-up channel but the boilerplate is gone.

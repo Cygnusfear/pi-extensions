@@ -1228,20 +1228,14 @@ declare function sessionTitle(title: string): Promise<string>;
  * const event = await teams.on("fixer", "completed").timeout(600_000);
  * console.log("fixer done:", event.result);
  *
- * // Background wake — fire a coordinator turn when the event arrives, even
- * // after this execute_code block has returned. Use console.wake() from
- * // inside the callback. console.wake is the single canonical wake primitive.
- * //
- * // Chain .preventDefault() so the leader's default batch wake doesn't also
- * // fire on top of your console.wake — DOM-style "I'm handling this event."
- * teams.on("fixer", "completed")
- *   .preventDefault()
- *   .each(e => console.wake(`fixer done: ${e.result.slice(0, 500)}`));
+ * // Background wake — host-owned and synchronous with Teams event dispatch.
+ * // Use "terminal" so success, quit, crash, and freeform completion all wake.
+ * teams.on("fixer", "terminal")
+ *   .timeout(30 * 60 * 1000)
+ *   .wake(e => `fixer ${e.type}`);
  *
- * // Awaited form with a custom wake message
- * teams.on("oracle", "completed")
- *   .preventDefault()
- *   .then(e => console.wake(`oracle finished: ${e.result.slice(0, 500)}`));
+ * // Never combine .preventDefault() with .then/.each plus console.wake()
+ * // for a Teams terminal event.
  *
  * // Streaming: react to every matching event until unsubscribed
  * const sub = teams.on({ name: "oracle", type: "comment" }).each(e => {
@@ -1328,7 +1322,7 @@ declare const teams: {
   on(filter: TeamsEventFilter, callback: (event: TeamsPollEvent) => void): TeamsSubscription;
 };
 
-type TeamsEventType = "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive";
+type TeamsEventType = "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive" | "terminal";
 
 interface TeamsEventFilter {
   name?: string;
@@ -1377,8 +1371,9 @@ type TeamsPollEventBase =
  * on an awaited value is a no-op — by the
  * time your code resumes, the dispatch loop has already decided.
  *
- * For "I'm awaiting and I want the default suppressed" use the chain shortcut:
- *   teams.on(...).preventDefault().then(e => console.wake(...))
+ * Use the host-owned `.wake(...)` chain for background terminal wakes. Use
+ * `.preventDefault()` only when the current in-turn handler owns the replacement
+ * action synchronously.
  */
 type TeamsPollEvent = TeamsPollEventBase & {
   preventDefault(): void;
@@ -1393,34 +1388,36 @@ type TeamsPollEvent = TeamsPollEventBase & {
  * Auto-unsubscribes after the first match UNLESS .each() has been attached
  * (then it keeps streaming until .unsubscribe()).
  *
- * DOM-style chain shortcuts — `.preventDefault()` / `.stopPropagation()` —
- * pre-register a handler that calls the corresponding method on every matched
- * event. Useful when you're handling the event via `.each()` / `.then()` +
- * `console.wake()` and want to suppress the leader's default batch wake on top.
+ * Chain `.wake(...)` for every background Teams terminal wake. It sends the
+ * coordinator follow-up from host dispatch and suppresses the duplicate default
+ * batch automatically. Use `await teams.on(...)` when the current turn needs the
+ * result inline.
  *
- * Wake semantics: there is NO `.wake()` method on the subscription. To trigger
- * a coordinator turn from a background event, call `console.wake(msg)` from
- * inside your `.each()` / `.then()` callback — `console.wake` is the single
- * canonical wake primitive. Do not reinvent it per tool.
+ * Never combine `.preventDefault()` with `.then(...)` or `.each(...)` plus
+ * `console.wake()` for a Teams terminal event. That suppresses the host wake and
+ * depends on a later sandbox Promise callback.
  */
 interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
   /**
    * Streaming callback. Fires on every matching event until unsubscribed.
-   * To trigger a coordinator turn from the callback, use `console.wake()` —
-   * it is the single canonical wake primitive and works from background
-   * promises that settle after the enclosing execute_code block has returned.
+   * Use `.wake(...)` for a background coordinator turn instead of calling
+   * `console.wake()` from this callback.
    */
   each(callback: (event: TeamsPollEvent) => void): this;
+
+  /**
+   * Send a host-owned coordinator wake during event dispatch. Automatically
+   * suppresses the duplicate default batch wake.
+   */
+  wake(message?: string | ((event: TeamsPollEvent) => string)): this;
 
   /** Reject with a timeout error if no matching event arrives within ms. */
   timeout(ms: number): this;
 
   /**
-   * Pre-register preventDefault() on every matched event. Suppresses the
-   * leader's default notifyLLM batch wake, so you won't get a duplicate
-   * team-event turn trigger on top of your .each/.then handler.
-   *
-   * Equivalent to `.each(e => e.preventDefault())` but chainable with .then.
+   * Pre-register preventDefault() on every matched event. Use this only when
+   * the current in-turn handler owns the replacement action synchronously.
+   * For a background Teams terminal wake, use .wake() instead.
    */
   preventDefault(): this;
 

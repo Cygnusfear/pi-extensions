@@ -148,7 +148,7 @@ console.log(`${first.worker.name} finished first:`, first.result.slice(0, 500));
 
 #### Pattern B: Background wake (for long waits or fire-and-forget)
 
-**Arm a subscription, end the block, go idle.** Agent yields the turn. When the event fires, `console.wake()` triggers a fresh turn.
+**Arm a subscription, end the block, go idle.** Agent yields the turn. For Teams, `.wake()` triggers the fresh turn from host dispatch.
 
 ```javascript
 await teams.delegate([
@@ -159,18 +159,14 @@ await teams.delegate([
 // "[SUPERVISOR] continue, go" every few seconds, eating context.
 await supervise(false);
 
-// Arm the subscription — fires console.wake when the worker completes.
-// Works even after this execute_code block returns.
-teams.on("refactor", "completed")
-  .preventDefault()
+// Arm the subscription — host-owned wake fires when the worker reaches any terminal state.
+// Works even after this execute_code block has returned.
+teams.on("refactor", "terminal")
   .timeout(60 * 60 * 1000)
-  .then(
-    (e) => console.wake(`refactor done: ${e.result.slice(0, 500)}`),
-    (err) => console.wake(`refactor timed out: ${err.message}`),
-  );
+  .wake((e) => `refactor ${e.type}: ${e.worker.name}`);
 
 console.log("Worker spawned, supervisor off, subscription armed. Going idle.");
-// Block ends here. Agent goes idle. console.wake triggers a new turn later.
+// Block ends here. Agent goes idle. Host-owned `.wake()` triggers a new turn later.
 ```
 
 **`supervise(false)` is MANDATORY for pattern B.** Without it, the supervisor injects `[SUPERVISOR] continue, go` every few seconds while the agent is idle, burning context with empty turns. Turn it off before going idle, turn it back on when you resume working.
@@ -206,18 +202,19 @@ await teams.on({ name: "oracle", comment: /DONE:|FINAL:/ })
 |---|---|---|
 | Short wait (< 10 min), need result immediately | **A** — `await` in-turn | Leave on (agent stays busy) |
 | Multiple workers, race for first result | **A** — `Promise.race([teams.on(...), ...])` | Leave on |
-| Long wait (30+ min), fire-and-forget | **B** — `.then(e => console.wake(...))` | **`supervise(false)` before going idle** |
+| Long wait (30+ min), fire-and-forget | **B** — host-owned Teams `.wake(...)` for Teams; `console.wake(...)` for generic sources | **`supervise(false)` before going idle** |
 | Babysitting (stream notes as they arrive) | **A** or **B** with `.each()` | Depends on whether you're blocking |
 
 ---
 
 **Key rules:**
 - `teams.on(name, type)` is **the** way to wait for a worker lifecycle event. Don't sleep-poll `teams.list()`.
-- `console.wake()` is the canonical wake primitive for background wakes. Call it from inside `.then()` or `.each()` — it queues via `deliverAs: "followUp"` and works even when the agent is mid-turn.
-- Chain `.preventDefault()` when you're handling the event yourself — avoids duplicate leader batch wakes.
+- For Teams worker background wakes, `.wake(...)` is the canonical primitive. It sends from host dispatch and suppresses the duplicate default batch automatically.
+- Never combine Teams `.preventDefault()` with a later `.then(...)` or `.each(...)` callback that calls `console.wake()`.
+- Use `console.wake()` for generic background sources such as file watchers, timers, and mesh peer polling.
 - Chain `.timeout(ms)` on every subscription. Silent hangs are worse than a loud timeout.
 - `supervise(false)` is only needed for pattern B (background wake). Pattern A (in-turn await) doesn't need it.
-- Event types: `completed | turn_finished | warning | failed | stuck | comment | alive`.
+- Event types: `completed | turn_finished | warning | failed | stuck | comment | alive`; use the `terminal` filter for any worker stop.
 - Filter shapes: `teams.on("name")` · `teams.on("name", "type")` · `teams.on({ name, type, comment: /regex/ })` · `teams.on({ predicate: e => ... })`.
 - For the full orchestration loop (implement → review → gate → next), see the 90-building-with-teams playbook.
 
@@ -347,7 +344,7 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Search prior context | `ouija({ action: "search", query })` |
 | Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |
 | Spawn a worker | `teams.delegate([{ text, assignee, model }])` |
-| Wait for worker to finish | `teams.on(name, "completed").preventDefault().then(e => console.wake(...))` — no polling |
+| Wait for worker to finish | `teams.on(name, "terminal").wake(...)` for background waits; `await teams.on(...)` in-turn |
 | Check worker status | `teams.list()` or `teams.view(name)` |
 | Resume from background | `console.wake("message")` in execute_code — triggers a new turn |
 | Control auto-continue | `supervise(true/false)` — turn off while waiting for workers |

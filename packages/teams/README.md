@@ -216,7 +216,6 @@ console.log("fixer done:", event.result);
 // Background wake — host-owned and synchronous with Teams event dispatch.
 // It does not depend on a later sandbox Promise/.then continuation.
 teams.on("fixer", "terminal")
-  .preventDefault()
   .wake(e => `fixer ${e.type}`);
 
 // Streaming — react to every matching event until unsubscribed
@@ -290,7 +289,7 @@ These must be called **synchronously** inside a handler callback (`.each` or the
 
 ### Why `.preventDefault()`?
 
-Without it, the leader's existing `notifyLLM` batch pipeline also fires on worker events, giving you a duplicate team-event wake on top of a custom `.each()` handler. `.wake()` automatically applies the same suppression; chaining `.preventDefault()` remains useful for custom handlers. Exactly DOM semantics.
+Without it, the leader's existing `notifyLLM` batch pipeline also fires on worker events, giving you a duplicate team-event wake on top of a custom `.each()` handler. `.wake()` automatically applies the same suppression. Use `.preventDefault()` only for an in-turn handler that intentionally owns the replacement action; never use it with a background terminal `.then(...)` or `.each(...)` callback that calls `console.wake()`.
 
 If you want BOTH your handler and the leader's batch notify to fire, simply omit `.preventDefault()`.
 
@@ -308,12 +307,10 @@ await supervise(false); // don't burn context while idle
 // Arm background subscriptions — coordinator goes idle, wakes on every
 // terminal outcome. `.wake()` is host-owned; no Promise continuation is needed.
 teams.on("impl", "terminal")
-  .preventDefault()
   .timeout(30 * 60 * 1000)
   .wake(e => `impl ${e.type}`);
 
 teams.on("review", "terminal")
-  .preventDefault()
   .timeout(30 * 60 * 1000)
   .wake(e => `review ${e.type}`);
 
@@ -325,7 +322,7 @@ console.log("Workers spawned, subscriptions armed. Going idle.");
 ### Rules
 
 - **Always chain `.timeout(ms)`**. Silent hangs are worse than loud failures.
-- **Prefer `.wake(...)`** for a sole background-wake route. It sends from the host during event dispatch, suppresses the duplicate default batch automatically, and does not rely on a sandbox `.then(console.wake)` continuation.
+- **Prefer `.wake(...)`** for every background Teams wake. It sends from the host during event dispatch, suppresses the duplicate default batch automatically, and does not rely on a sandbox Promise continuation. Never pair `.preventDefault()` with `.then(...)` or `.each(...)` plus `console.wake()` for a worker terminal event.
 - **Use `"terminal"`** when you need to know that a worker stopped; `completed` only means explicit success. A clean un-finished worker can emit `warning`, and a freeform turn can emit `turn_finished`.
 - **Terminal state replay**: retained terminal events survive widget cleanup and session reload for 24 hours by default (`PI_TEAMS_TERMINAL_EVENT_TTL_MS`, bounded to 100 records by `PI_TEAMS_TERMINAL_EVENT_MAX`). Re-arm subscriptions after runtime reload; arbitrary JavaScript callbacks themselves are intentionally not serialized.
 - **Listener errors are isolated** — one throwing `.each()` callback cannot break the event pipeline for other subscribers.

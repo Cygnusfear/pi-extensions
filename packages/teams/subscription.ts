@@ -3,7 +3,7 @@
  *
  * Design goals:
  * - Ergonomic: `await teams.on("fixer", "completed")` for one-shot, `.each(cb)`
- *   for streams, `.wake()` to trigger a coordinator turn from a background promise.
+ *   for streams, `.wake()` to trigger a coordinator turn from the host during dispatch.
  * - Safe: automatic unsubscribe on first match (unless .each is used), on timeout,
  *   and on abort. No listener leaks.
  * - Composable: thenable — works with `await`, `Promise.race`, `Promise.all`.
@@ -135,8 +135,7 @@ export interface EventFilter {
  * Prefer the host-owned `.wake()` chain when a callback only needs to wake the
  * coordinator. It runs synchronously during leader dispatch:
  *
- *   teams.on("fixer", "completed")
- *     .preventDefault()
+ *   teams.on("fixer", "terminal")
  *     .wake(e => `fixer ${e.type}`); */
 export type EventCallback = (event: TeamsEvent) => void;
 
@@ -349,11 +348,11 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	 * Suppresses the leader's default notifyLLM batch wake for this event,
 	 * so the coordinator is NOT triggered again from the leader side.
 	 *
-	 * Ergonomic for: "I'm handling this event via .wake() / .each() and I
-	 * don't want a duplicate turn from the leader's batch queue".
-	 *
-	 * Equivalent to:
-	 *   teams.on(...).each(e => e.preventDefault())
+	 * Use this only when the current turn is handling the event synchronously
+	 * (for example, an awaited subscription) or when a custom event handler owns
+	 * the replacement action. For a background worker wake, use .wake() instead;
+	 * .preventDefault() plus a later console.wake() is unsafe because the later
+	 * sandbox continuation can be lost after the terminal event.
 	 */
 	preventDefault(): this {
 		this.autoPreventDefault = true;
@@ -376,7 +375,8 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	 * Send a coordinator wake from the host during the matching dispatch pass.
 	 * Unlike `.then(e => console.wake(...))`, this does not depend on a later
 	 * sandbox promise microtask. It automatically replaces the leader's normal
-	 * batched wake rather than adding a duplicate.
+	 * batched wake rather than adding a duplicate. Use this for every background
+	 * Teams worker wake.
 	 */
 	wake(message?: string | ((event: TeamsEvent) => string)): this {
 		// A host wake is an explicit replacement for the leader's default batched
