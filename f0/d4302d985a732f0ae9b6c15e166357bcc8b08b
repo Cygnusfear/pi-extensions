@@ -1,0 +1,32 @@
+packages/teams/subscription.ts
+  s_c80280c75e1308::t_9298daa77dde81 138
+  s_c80280c75e1308::t_580eb04435b02b 378-379
+  s_c80280c75e1308::t_9ccbe7a738757b 6
+  s_c80280c75e1308::t_438224cfae0c58 351-355
+packages/teams/index.ts
+  s_c80280c75e1308::t_24cdc33224217d 61
+  s_c80280c75e1308::t_6aa3750749c6ec 52
+docs/demo-script.md
+  s_c80280c75e1308::t_b438af639cee43 239
+packages/teams/README.md
+  s_c80280c75e1308::t_d290c323647eaa 325
+packages/teams/test/wake-guidance.test.ts
+  s_c80280c75e1308::t_c2976b3b8ed59a 1-30
+  s_c80280c75e1308::t_1919c939169b75 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.12",
+  "base_commit_sha": "f0d4302d985a732f0ae9b6c15e166357bcc8b08b",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
