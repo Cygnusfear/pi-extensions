@@ -15,6 +15,7 @@ import type {
 	ChannelMessage,
 	PeerInfo,
 } from "@pi-extensions/pi-mesh/types";
+import { displayPayload } from "./format.ts";
 
 const DEFAULT_SOCK = join(process.env.HOME ?? "/tmp", ".pi", "mesh.sock");
 
@@ -318,19 +319,6 @@ export class MeshClient extends EventEmitter {
 	}
 
 	private display(payload: unknown): string {
-		if (typeof payload === "string") return payload;
-		if (payload && typeof payload === "object") {
-			const p = payload as Record<string, unknown>;
-			if (typeof p.text === "string") return p.text;
-			if (typeof p.body === "string") return (p.subject ? `${p.subject}\n` : "") + p.body;
-			if (typeof p.message === "string") return p.message;
-			// object carrying only non-text fields (reaction/attachment/…) → no text body
-			if ("reaction" in p || "react" in p || "attachment" in p || "image" in p || "file" in p || "path" in p) return "";
-		}
-		try {
-			return JSON.stringify(payload);
-		} catch {
-			return String(payload);
-		}
+		return displayPayload(payload);
 	}
 }

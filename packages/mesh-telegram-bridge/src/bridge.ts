@@ -1,5 +1,6 @@
 import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
+import { markdownToTelegramHtml } from "./format.ts";
 import { type Config, persistChatId } from "./config.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -195,7 +196,7 @@ export class Bridge {
 		try {
 			if (t.text && t.text.trim()) {
 				for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
-					const sent = await this.bot.api.sendMessage(this.chatId, chunk, thread);
+					const sent = await this.sendText(chunk, thread);
 					if (this.forumMode) this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
 					else { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
 				}
@@ -215,7 +216,7 @@ export class Bridge {
 		const thread = this.forumMode && this.broadcastTopicId != null ? { message_thread_id: this.broadcastTopicId } : {};
 		try {
 			for (const chunk of this.chunkText(`📢 ${c.nickname} · #${c.channel}`, c.text)) {
-				const sent = await this.bot.api.sendMessage(this.chatId, chunk, thread);
+				const sent = await this.sendText(chunk, thread);
 				if (this.forumMode) this.trackSent(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
 				else { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
 			}
@@ -548,6 +549,19 @@ export class Bridge {
 		if (low.endsWith(".webp")) return buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP";
 		if (low.endsWith(".bmp")) return buf.subarray(0, 2).toString("latin1") === "BM";
 		return true;
+	}
+
+	/** Send agent/channel text as Telegram HTML, falling back to plain text if parsing fails. */
+	private async sendText(text: string, thread: Record<string, unknown>): Promise<{ message_id: number }> {
+		const html = markdownToTelegramHtml(text);
+		if (html.length <= TG_MAX) {
+			try {
+				return await this.bot.api.sendMessage(this.chatId, html, { ...thread, parse_mode: "HTML" });
+			} catch (e) {
+				console.warn("[bridge] Telegram HTML formatting failed; sending plain text:", (e as Error).message);
+			}
+		}
+		return this.bot.api.sendMessage(this.chatId, text, thread);
 	}
 
 	/** Split a header+body into Telegram-sized chunks (char-based; rare for short tells). */
