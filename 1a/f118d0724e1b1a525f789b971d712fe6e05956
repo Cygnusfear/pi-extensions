@@ -1,0 +1,36 @@
+packages/code-mode/src/deferred-squash.ts
+  s_c80280c75e1308::t_92d14cd0d8350b 55-62
+  s_c80280c75e1308::t_39c1af1954f652 21-24
+  s_c80280c75e1308::t_a466da8359f067 31
+  s_c80280c75e1308::t_04b06023cbf324 18-20
+  s_c80280c75e1308::t_78ee9cb7c7f76c 25-30
+  s_c80280c75e1308::t_61abb3ba2ae866 32-34,52-54
+  s_c80280c75e1308::t_ed56bc1a9f9c19 63-65
+packages/code-mode/extensions/code-mode.ts
+  s_c80280c75e1308::t_48582433e8cffa 378-379
+  s_c80280c75e1308::t_3c3cfc05236aa7 52
+  s_c80280c75e1308::t_8d2f87540bd442 1335,1337-1349
+  s_c80280c75e1308::t_6aaa8be62bb44c 68-82
+  s_c80280c75e1308::t_cbcaa9cdc0ebf5 13
+packages/code-mode/src/deferred-squash.test.ts
+  s_c80280c75e1308::t_33382d1a2d89fc 25
+  s_c80280c75e1308::t_572a9ec76e36e6 1-24,26-37,59-113
+  s_c80280c75e1308::t_81984a1da9ab36 38-58
+  s_c80280c75e1308::t_151ea118523a2a 114-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "1af118d0724e1b1a525f789b971d712fe6e05956",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
