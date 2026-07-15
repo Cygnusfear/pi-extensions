@@ -16,6 +16,7 @@ import {
 import {
   evaluateIdleState,
   formatRuntimeSummary,
+  isReusedWorkerPid,
   sampleWorkerProcessSnapshotAsync,
 } from "./activity.js";
 import {
@@ -1885,7 +1886,12 @@ export class TeamLeader {
     }
   }
 
-  private async handleWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null) {
+  private async handleWorkerExit(
+    name: string,
+    worker: WorkerHandle,
+    exitCode: number | null,
+    observedDead = false,
+  ) {
     if (!this.ctx) return;
     // Guard: if this worker was explicitly killed and already removed from the map,
     // do NOT re-add it. The exit handler fires asynchronously after kill() deletes
@@ -1899,7 +1905,7 @@ export class TeamLeader {
     // Bun bug: fires child.on("exit") prematurely for workers 2+ in rapid spawns.
     // The process is actually still alive and running. If we detect it's alive,
     // bail out — the REAL exit event will fire when the process truly exits.
-    if (isProcessAlive(worker.pid)) {
+    if (!observedDead && isProcessAlive(worker.pid)) {
       // Bun can fire child "exit" prematurely; the process is still alive. The
       // real exit event is NOT guaranteed to fire again, so actually schedule a
       // bounded re-check instead of hoping (a dropped exit = a coordinator that
@@ -2408,9 +2414,13 @@ export class TeamLeader {
     void this.handleTicketChange(worker);
 
     const snapshot = await sampleWorkerProcessSnapshotAsync(worker.pid);
-    if (!snapshot.rootAlive) {
+    const incarnationStartedAt = worker.attempts?.at(-1)?.spawnedAt ?? worker.spawnedAt;
+    const pidReused = isReusedWorkerPid(snapshot, incarnationStartedAt, now);
+    if (!snapshot.rootAlive || pidReused) {
       if ((worker.status === "running" || worker.status === "spawning") && !isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) {
-        void this.handleWorkerExit(name, worker, worker.exitCode ?? 0);
+        // observedDead bypasses handleWorkerExit's process.kill(pid,0) guard:
+        // for PID reuse that guard sees the unrelated replacement process alive.
+        void this.handleWorkerExit(name, worker, worker.exitCode ?? 0, true);
       }
       return;
     }

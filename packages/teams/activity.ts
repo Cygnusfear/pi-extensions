@@ -57,6 +57,9 @@ export interface ProcessRow {
 
 export interface WorkerProcessSnapshot {
   rootAlive: boolean;
+  /** Elapsed lifetime of the process currently occupying workerPid. Used to
+   *  detect PID reuse (PID existence alone is not worker identity). */
+  rootElapsedSeconds?: number;
   hasActiveChildProcess: boolean;
   activeChildProcessCount: number;
   currentCommand?: string;
@@ -200,12 +203,31 @@ export function deriveWorkerProcessSnapshot(rows: ProcessRow[], workerPid: numbe
 
   return {
     rootAlive: !isZombie(root.state),
+    rootElapsedSeconds: root.elapsedSeconds,
     hasActiveChildProcess: activeChildren.length > 0,
     activeChildProcessCount: activeChildren.length,
     currentCommand: busiestChild?.command,
     currentCommandElapsedSeconds: busiestChild?.elapsedSeconds,
     maxChildCpuPercent: activeChildren.reduce((max, row) => Math.max(max, row.cpuPercent), 0),
   };
+}
+
+/**
+ * True when workerPid is occupied by a process born materially AFTER this
+ * worker incarnation. macOS reuses PIDs aggressively under fleet/process churn;
+ * process.kill(pid, 0) and a raw ps lookup then mistake an unrelated live tree
+ * for the dead worker forever. etime is second-granularity, hence tolerance.
+ */
+export function isReusedWorkerPid(
+  snapshot: WorkerProcessSnapshot,
+  incarnationStartedAt: number,
+  now = Date.now(),
+  toleranceMs = 30_000,
+): boolean {
+  if (!snapshot.rootAlive || snapshot.rootElapsedSeconds === undefined) return false;
+  const expectedAgeMs = Math.max(0, now - incarnationStartedAt);
+  const observedAgeMs = Math.max(0, snapshot.rootElapsedSeconds * 1000);
+  return observedAgeMs + toleranceMs < expectedAgeMs;
 }
 
 /**
