@@ -1,0 +1,38 @@
+packages/teams/tool.ts
+  s_c80280c75e1308::t_05323a2af402fd 330-336
+packages/teams/leader.ts
+  s_c80280c75e1308::t_1ea44b2a232306 1651-1657
+  s_c80280c75e1308::t_d617be4d729313 1700
+  s_c80280c75e1308::t_9c7e6d18595203 714-718
+  s_c80280c75e1308::t_6caa066653d92c 1695
+  s_c80280c75e1308::t_0ffb64ac445ab6 1903-1911
+  s_c80280c75e1308::t_9be212aea744da 829-831
+  s_c80280c75e1308::t_6d7edf1b91d7d0 1667,1672-1694,1696-1699,1701-1708,1710-1716
+  s_c80280c75e1308::t_6adaa8d636d655 1709
+  s_c80280c75e1308::t_ded2cb2258f1e2 2849-2852
+  s_c80280c75e1308::t_26dbb0c7b1f7a6 1914-1922
+  s_c80280c75e1308::t_18f0144256a9c8 2439,2445
+  s_c80280c75e1308::t_a927285e3641e2 1717-1718
+packages/teams/test/finish-emit.test.ts
+  s_c80280c75e1308::t_7af977c5b2a1f8 1-158
+  s_c80280c75e1308::t_ce7e2010300330 159-161
+packages/teams/types.ts
+  s_c80280c75e1308::t_523988ecebcbaf 109
+  s_c80280c75e1308::t_b39400c73ef584 42-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "ef28b6abb7767e388c63cec7655044e088f84f52",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-fable-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
