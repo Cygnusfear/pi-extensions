@@ -10,6 +10,7 @@
 
 import type {
   ExtensionAPI,
+  ExtensionContext,
   Theme,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -48,6 +49,7 @@ import {
   isContextGuardActive,
 } from "../src/context-usage";
 import { installCodeModeProcessGuard } from "../src/process-guard";
+import { awaitDeferredSquash, type DeferredSquashContext } from "../src/deferred-squash";
 
 // =============================================================================
 // Constants
@@ -62,6 +64,21 @@ function formatUnknownError(error: unknown): string {
   if (error instanceof Error) return error.stack ?? error.message;
   return String(error);
 }
+
+// The extension workspace compiles against the latest published host package,
+// while this lifecycle fix lands alongside the next host API. Keep the staged
+// surface explicit and hard-typed until that published dependency includes it.
+type RegisterAgentSettled = (
+  event: "agent_settled",
+  handler: (
+    event: { type: "agent_settled" },
+    ctx: ExtensionContext & DeferredSquashContext,
+  ) => Promise<void> | void,
+) => void;
+type SendUserMessageAndWait = (
+  content: string,
+  options?: { deliverAs?: "steer" | "followUp" },
+) => Promise<void>;
 
 function surfaceCodeModeInternalError(
   pi: ExtensionAPI,
@@ -358,6 +375,8 @@ const CODE_MODE_ONLY_TOOLS = new Set([
 ]);
 
 export default function (pi: ExtensionAPI) {
+  const registerAgentSettled = pi.on.bind(pi) as unknown as RegisterAgentSettled;
+  const sendUserMessageAndWait = pi.sendUserMessage.bind(pi) as unknown as SendUserMessageAndWait;
   // Process-level safety net: contain unhandled rejections / uncaught exceptions
   // from vm-context user code so the host pi process can't be taken out by a
   // background promise on $ that rejects with no .catch().
@@ -1313,22 +1332,21 @@ export default function (pi: ExtensionAPI) {
         }
       } catch {}
     }
+  });
 
-    if (pendingSquash) {
-      const squash = pendingSquash;
-      pendingSquash = null;
-      try {
-        const cmdCtx = ctx as any;
-        if (cmdCtx.compact) {
-          cmdCtx.compact({
-            onComplete: () => {
-              if (squash.continue) {
-                pi.sendUserMessage(squash.continue, { deliverAs: "followUp" });
-              }
-            },
-          });
-        }
-      } catch {}
+  // AgentSession.compact() waits for the active run to become idle, so deferred
+  // squash must run at settlement rather than agent_end. Await both compaction
+  // and its continuation to keep one-shot print/json runtimes alive throughout.
+  registerAgentSettled("agent_settled", async (_event, ctx) => {
+    if (!pendingSquash) return;
+    const squash = pendingSquash;
+    pendingSquash = null;
+    try {
+      await awaitDeferredSquash(ctx, squash, (continuation) =>
+        sendUserMessageAndWait(continuation, { deliverAs: "followUp" }),
+      );
+    } catch (error) {
+      surfaceCodeModeInternalError(pi, "Deferred session.squash() failed.", error);
     }
   });
 
