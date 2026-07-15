@@ -711,6 +711,11 @@ function isWorkerToLeaderEnvelope(payload: unknown): payload is TeamEnvelope<unk
 	return p.version === 1 && p.from === "worker" && p.to === "leader" && typeof p.type === "string";
 }
 
+/** Grace before a finished-but-lingering (non-freeform) worker process is reaped. */
+const FINISH_REAP_GRACE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_GRACE_MS ?? "60000");
+/** Settle time between SIGTERM → SIGKILL → explicit exit-pipeline drive. */
+const FINISH_REAP_KILL_SETTLE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_SETTLE_MS ?? "5000");
+
 function isTerminalV2Lifecycle(lifecycle: import("./v2/state.ts").WorkerLifecycleState | null): boolean {
 	return lifecycle === "done"
 		|| lifecycle === "warning"
@@ -821,6 +826,9 @@ export class TeamLeader {
     },
   );
   private notifiedTerminal = new Set<string>();
+  /** workerInstanceIds whose exit has been claimed by handleWorkerExit (dedupe
+   *  across child-exit event, finish-reap, and activity-monitor observation). */
+  private exitClaimedInstances = new Set<string>();
   private terminalEventLedger: TerminalEventLedgerEntry[] = [];
   private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
   /** External subscribers to the PollEvent stream (teams.on).
@@ -1639,9 +1647,14 @@ export class TeamLeader {
 				this.persistStateIfHydrated();
 				worker.lastOutputAt = Date.now();
 				worker.lastOutputLabel = "mesh done";
-				// Don't emit completion here — process exit handler is authoritative.
-				// But update the widget immediately.
 				this.renderWidget();
+				// The finish tell IS the authoritative terminal signal (that is what the
+				// worker guidance promises). Waiting for process exit silently loses the
+				// completion whenever the worker process lingers (team_finish does NOT
+				// exit the worker) or the exit is unobserved — the coordinator then never
+				// hears anything (no default batch, no subscription dispatch, no .wake()).
+				// notifiedTerminal dedupes against the later process-exit emit.
+				this.emitAuthoritativeFinish(workerName, worker, "done", finishSummary);
 			} else if (envelope.type === "worker.finish" && finishStatus === "quit") {
 				this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
 				this.bindWorkerRoute(worker, routeId, peerNickname);
@@ -1651,8 +1664,56 @@ export class TeamLeader {
 				worker.lastOutputAt = Date.now();
 				worker.lastOutputLabel = "mesh quit";
 				this.renderWidget();
+				this.emitAuthoritativeFinish(workerName, worker, "quit", finishSummary);
 			}
 		}
+	}
+
+	/** Emit the terminal notification from the worker's finish tell — immediately.
+	 *  The mesh finish envelope is the authoritative terminal signal; the process
+	 *  exit pipeline stays responsible for cleanup (branch/worktree preservation)
+	 *  and its notification is deduped via notifiedTerminal. A finished
+	 *  non-freeform worker whose process lingers is reaped after a grace period so
+	 *  cleanup still runs and no zombie pi process leaks. */
+	private emitAuthoritativeFinish(
+		name: string,
+		worker: WorkerHandle,
+		status: "done" | "quit",
+		summary: string,
+	): void {
+		const text = summary.trim() || (status === "done" ? "Task completed." : "Worker quit.");
+		if (status === "done") {
+			this.notifyLLM({ type: "completed", worker: { ...worker }, result: text });
+		} else {
+			this.notifyLLM({ type: "warning", worker: { ...worker }, reason: `QUIT: ${text}` });
+		}
+		if (worker.freeform) return; // persistent workers park intentionally (done/grace/resumable)
+		const instanceId = worker.workerInstanceId;
+		setTimeout(() => {
+			const current = this.workers.get(name);
+			if (!current || current.workerInstanceId !== instanceId) return;
+			if (current.status === "killed" || this.exitClaimedInstances.has(instanceId)) return;
+			if (isProcessAlive(current.pid)) {
+				try { process.kill(-current.pid, "SIGTERM"); } catch { try { process.kill(current.pid, "SIGTERM"); } catch {} }
+				setTimeout(() => {
+					const w = this.workers.get(name);
+					if (!w || w.workerInstanceId !== instanceId || this.exitClaimedInstances.has(instanceId)) return;
+					if (isProcessAlive(w.pid)) {
+						try { process.kill(-w.pid, "SIGKILL"); } catch { try { process.kill(w.pid, "SIGKILL"); } catch {} }
+					}
+					// Drive the exit pipeline explicitly — post-restart workers have no
+					// child handle and the activity monitor stops on terminal v2 state,
+					// so nothing else observes this death.
+					setTimeout(() => {
+						const w2 = this.workers.get(name);
+						if (!w2 || w2.workerInstanceId !== instanceId || this.exitClaimedInstances.has(instanceId)) return;
+						void this.handleWorkerExit(name, w2, 0);
+					}, FINISH_REAP_KILL_SETTLE_MS);
+				}, FINISH_REAP_KILL_SETTLE_MS);
+				return;
+			}
+			void this.handleWorkerExit(name, current, current.exitCode ?? 0);
+		}, FINISH_REAP_GRACE_MS);
 	}
 
 	/** Wire direct mesh tells into the existing notification pipeline. */
@@ -1839,8 +1900,25 @@ export class TeamLeader {
     // The process is actually still alive and running. If we detect it's alive,
     // bail out — the REAL exit event will fire when the process truly exits.
     if (isProcessAlive(worker.pid)) {
-      // Schedule a re-check — when the real exit fires, process will be dead
+      // Bun can fire child "exit" prematurely; the process is still alive. The
+      // real exit event is NOT guaranteed to fire again, so actually schedule a
+      // bounded re-check instead of hoping (a dropped exit = a coordinator that
+      // never learns its worker finished).
+      const attempts = (worker.exitRecheckAttempts ?? 0) + 1;
+      worker.exitRecheckAttempts = attempts;
+      if (attempts <= 30) {
+        setTimeout(() => void this.handleWorkerExit(name, worker, exitCode), 2000);
+      }
       return;
+    }
+    // Claim this INCARNATION's exit exactly once (child exit vs finish-reap vs
+    // monitor race). Keyed by workerInstanceId — respawn/resume paths regenerate
+    // it, so a retried worker's next death is a fresh, unclaimed incarnation.
+    if (this.exitClaimedInstances.has(worker.workerInstanceId)) return;
+    this.exitClaimedInstances.add(worker.workerInstanceId);
+    if (this.exitClaimedInstances.size > 200) {
+      const oldest = this.exitClaimedInstances.values().next().value;
+      if (oldest !== undefined) this.exitClaimedInstances.delete(oldest);
     }
 
     // v1c: the incarnation is confirmed dead — free its activation lease so a
@@ -2358,11 +2436,13 @@ export class TeamLeader {
       const cooldownExpired =
         !worker.lastStuckWarningAt || now - worker.lastStuckWarningAt >= STUCK_WARNING_COOLDOWN_MS;
       if (cooldownExpired) {
+        const first = !worker.lastStuckWarningAt;
         worker.lastStuckWarningAt = now;
         this.notifyLLM({
           type: "stuck",
           worker: { ...worker },
           idleSeconds: Math.floor(Math.min(idle.heartbeatIdleMs, idle.processIdleMs) / 1000),
+          first,
         });
       }
     } else {
@@ -2766,7 +2846,10 @@ export class TeamLeader {
     }
 
     const msg = formatPollEvent(event);
-    const triggerTurn = event.type === "stuck" ? false : true;
+    // A silent append is useless to an IDLE coordinator — it never reads it.
+    // Terminal + lifecycle events always wake. For stuck: the FIRST warning per
+    // worker wakes (a hung reviewer must surface); cooldown repeats stay silent.
+    const triggerTurn = event.type === "stuck" ? event.first === true : true;
     this.notifyQueue.push({ msg, triggerTurn });
     void this.drainNotifyQueue();
   }

@@ -327,6 +327,13 @@ async function runTeamsAction(
     }
 
     leader.startPolling();
+    const spawnedAny = results.some((r) => r.startsWith("Spawned"));
+    if (spawnedAny) {
+      results.push(
+        "🔔 You will be WOKEN automatically when each worker reaches a terminal state (done/failed/quit) — do NOT poll teams.list() in a loop. " +
+          'Optional: customize the wake with teams.on("<worker>", "terminal").wake((e) => `...`) (host-owned; never use .preventDefault() + console.wake() for terminal events).',
+      );
+    }
     return ok(results.join("\n"));
   }
 

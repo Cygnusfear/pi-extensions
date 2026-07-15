@@ -39,6 +39,8 @@ export interface WorkerHandle {
 	lastSeenCommentCount: number;
 	lastStuckWarningAt?: number;
 	exitCode?: number | null;
+	/** Bounded re-check counter for the Bun premature child-exit workaround. */
+	exitRecheckAttempts?: number;
 	spawnError?: string;
 	attempts?: WorkerAttempt[];
 	nickname?: string;
@@ -104,7 +106,7 @@ export type PollEvent =
 	| { type: "turn_finished"; worker: WorkerHandle; result: string }
 	| { type: "warning"; worker: WorkerHandle; reason: string }
 	| { type: "failed"; worker: WorkerHandle; reason: string }
-	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number }
+	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number; first?: boolean }
 	| { type: "comment"; worker: WorkerHandle; comment: string }
 	| { type: "phase"; worker: WorkerHandle; phase: SessionPhaseEvent }
 	| { type: "alive"; worker: WorkerHandle };
