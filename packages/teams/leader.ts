@@ -2857,10 +2857,9 @@ export class TeamLeader {
 
     const msg = formatPollEvent(event);
     // A silent append is useless to an IDLE coordinator — it never reads it.
-    // Terminal + lifecycle events always wake. For stuck: the FIRST warning per
-    // worker wakes (a hung reviewer must surface); cooldown repeats stay silent.
-    const triggerTurn = event.type === "stuck" ? event.first === true : true;
-    this.notifyQueue.push({ msg, triggerTurn });
+    // Every lifecycle event wakes, including repeated stuck warnings: the
+    // coordinator must re-evaluate a worker that remains stuck after intervention.
+    this.notifyQueue.push({ msg, triggerTurn: true });
     void this.drainNotifyQueue();
   }
 

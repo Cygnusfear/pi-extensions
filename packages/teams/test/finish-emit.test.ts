@@ -170,8 +170,8 @@ describe("authoritative mesh finish emits the terminal notification", () => {
 	});
 });
 
-describe("stuck events wake on first warning only", () => {
-	test("first stuck warning triggers a turn; cooldown repeats stay silent", async () => {
+describe("stuck events wake on every warning", () => {
+	test("first and cooldown-repeat stuck warnings both trigger turns", async () => {
 		const { leader, sent } = makeLeader();
 		const worker = makeWorker("slow-1");
 		const notify = (
@@ -194,6 +194,6 @@ describe("stuck events wake on first warning only", () => {
 		});
 		await settle();
 		expect(sent.length).toBe(2);
-		expect(sent[1].triggerTurn).toBe(false);
+		expect(sent[1].triggerTurn).toBe(true);
 	});
 });
