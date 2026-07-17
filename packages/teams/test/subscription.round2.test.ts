@@ -1,12 +1,15 @@
 // Round 2 red team — iteration safety, subscribe/unsubscribe during dispatch,
 // timeout-match race, stopImmediatePropagation, multi-sub fan-out.
+import { TeamsSubscription, buildPredicate } from "../subscription.ts";
+import type { PollEvent } from "../types.ts";
 import {
-	TeamsSubscription,
-	buildPredicate,
-	wrapPollEvent,
-	type TeamsEvent,
-} from "../subscription.ts";
-import type { PollEvent, WorkerHandle } from "../types.ts";
+	SubscriptionFakeLeader as FakeLeader,
+	commentSubscriptionEvent as commentEvent,
+	completedSubscriptionEvent as completedEvent,
+	makeSubscriptionWorker as makeWorker,
+	newTestSubscription as newSub,
+	runSubscriptionHarness,
+} from "./subscription-harness.ts";
 
 let passed = 0, failed = 0;
 const failures: string[] = [];
@@ -15,64 +18,6 @@ function assert(name: string, cond: unknown, detail?: string) {
 	else { failed++; failures.push(name + (detail ? " — " + detail : "")); console.log("  ✗", name, detail ? "— " + detail : ""); }
 }
 function section(name: string) { console.log("\n▸", name); }
-
-// Same fake leader but this time I want to check if it matches the REAL leader's
-// iteration semantics (for (const x of set) — live, not snapshotted).
-class FakeLeader {
-	listeners = new Set<(event: TeamsEvent) => void>();
-	private workers = new Map<string, WorkerHandle>();
-
-	subscribeToEvents(listener: (event: TeamsEvent) => void): () => void {
-		this.listeners.add(listener);
-		return () => { this.listeners.delete(listener); };
-	}
-	private disposalCallbacks = new Map<string, Set<() => void>>();
-	subscribeToWorkerDisposal(workerName: string, cb: () => void): () => void {
-		let set = this.disposalCallbacks.get(workerName);
-		if (!set) { set = new Set(); this.disposalCallbacks.set(workerName, set); }
-		set.add(cb);
-		return () => { set!.delete(cb); if (set!.size === 0) this.disposalCallbacks.delete(workerName); };
-	}
-	killWorker(workerName: string) {
-		const cbs = this.disposalCallbacks.get(workerName);
-		if (cbs) { for (const cb of cbs) cb(); this.disposalCallbacks.delete(workerName); }
-	}
-	getWorker(name: string): WorkerHandle | undefined { return this.workers.get(name); }
-	getCurrentAttemptId(name: string): string | undefined { return this.workers.get(name)?.workerInstanceId; }
-	setWorker(w: WorkerHandle) { this.workers.set(w.name, w); }
-
-	// MUST match leader.ts semantics exactly — snapshot + still-registered check for DOM parity.
-	emit(event: PollEvent) {
-		const wrapped = wrapPollEvent(event);
-		const snapshot = [...this.listeners];
-		for (const listener of snapshot) {
-			if (!this.listeners.has(listener)) continue;
-			try { listener(wrapped); } catch { /* ignore */ }
-			if (wrapped.propagationStopped) break;
-		}
-		return wrapped;
-	}
-}
-
-function makeWorker(name: string, status: WorkerHandle["status"] = "running"): WorkerHandle {
-	return {
-		workerInstanceId: name + "-wi", name, pid: 1, ticketId: "t-" + name,
-		sessionDir: "/tmp", sessionFile: "/tmp/" + name + ".jsonl", worktreePath: null,
-		status, spawnedAt: Date.now(), lastActivityAt: Date.now(),
-		lastProcessActivityAt: Date.now(), hasActiveChildProcess: false,
-		activeChildProcessCount: 0, lastSeenCommentCount: 0, routeState: "linked",
-	};
-}
-function completedEvent(name: string): PollEvent {
-	return { type: "completed", worker: makeWorker(name, "done"), result: "r-" + name };
-}
-function commentEvent(name: string, c: string): PollEvent {
-	return { type: "comment", worker: makeWorker(name), comment: c };
-}
-function newSub(leader: FakeLeader, target: any, type?: any) {
-	const { filter, predicate } = buildPredicate(target, type);
-	return new TeamsSubscription(leader as any, filter, predicate);
-}
 
 async function run() {
 	section("Iteration safety — listener unsubscribes self during dispatch");
@@ -276,13 +221,6 @@ async function run() {
 		assert("disposal beats timeout: no rejection", !rejected);
 	}
 
-	console.log("\n" + "━".repeat(60));
-	console.log("RESULT:", passed, "passed,", failed, "failed");
-	if (failed > 0) {
-		console.log("\nFailures:");
-		for (const f of failures) console.log("  •", f);
-		process.exit(1);
-	}
 }
 
-run().catch((err) => { console.error("runner threw:", err); process.exit(2); });
+runSubscriptionHarness("subscription.round2.test", 28, run, () => ({ passed, failed, failures }));

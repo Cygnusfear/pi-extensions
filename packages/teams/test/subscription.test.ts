@@ -7,9 +7,16 @@ import {
 	TeamsSubscription,
 	buildPredicate,
 	wrapPollEvent,
-	type TeamsEvent,
 } from "../subscription.ts";
-import type { PollEvent, WorkerHandle } from "../types.ts";
+import type { PollEvent } from "../types.ts";
+import {
+	SubscriptionFakeLeader as FakeLeader,
+	commentSubscriptionEvent as commentEvent,
+	completedSubscriptionEvent as completedEvent,
+	makeSubscriptionWorker as makeWorker,
+	newTestSubscription as newSub,
+	runSubscriptionHarness,
+} from "./subscription-harness.ts";
 
 // ────────────────────────────────────────────────────────────────────
 // Test harness
@@ -32,108 +39,6 @@ function assert(name: string, cond: unknown, detail?: string) {
 
 function section(name: string) {
 	console.log("\n▸", name);
-}
-
-// Build a minimal fake leader that mimics the real fan-out + preventDefault
-// short-circuit so we can verify subscription behavior end-to-end.
-class FakeLeader {
-	private listeners = new Set<(event: TeamsEvent) => void>();
-	private workers = new Map<string, WorkerHandle>();
-	private retainedTerminalEvents: PollEvent[] = [];
-	/** Most recent default-action run. Used to verify preventDefault suppressed it. */
-	defaultActionRanFor: PollEvent | null = null;
-	wakes: Array<{ event: PollEvent; content: string }> = [];
-
-	subscribeToEvents(listener: (event: TeamsEvent) => void): () => void {
-		this.listeners.add(listener);
-		return () => {
-			this.listeners.delete(listener);
-		};
-	}
-
-	getWorker(name: string): WorkerHandle | undefined {
-		return this.workers.get(name);
-	}
-
-	getCurrentAttemptId(name: string): string | undefined {
-		return this.workers.get(name)?.workerInstanceId;
-	}
-
-	setWorker(w: WorkerHandle) {
-		this.workers.set(w.name, w);
-	}
-
-	setRetainedTerminalEvent(event: PollEvent) {
-		this.retainedTerminalEvents.push(event);
-	}
-
-	getCurrentTerminalEvent(name: string, type: PollEvent["type"] | "terminal"): PollEvent | null {
-		for (let i = this.retainedTerminalEvents.length - 1; i >= 0; i--) {
-			const event = this.retainedTerminalEvents[i]!;
-			if (event.worker.name === name && (type === "terminal" || type === event.type)) return event;
-		}
-		return null;
-	}
-
-	wakeFromSubscription(event: PollEvent, content: string) {
-		this.wakes.push({ event, content });
-	}
-
-	listenerCount(): number {
-		return this.listeners.size;
-	}
-
-	// Mimics leader.notifyLLM's listener fan-out with propagation + default action.
-	emit(event: PollEvent) {
-		const wrapped = wrapPollEvent(event);
-		for (const listener of [...this.listeners]) {
-			try {
-				listener(wrapped);
-			} catch (err) {
-				console.warn("  ! listener threw:", (err as Error).message);
-			}
-			if (wrapped.propagationStopped) break;
-		}
-		if (wrapped.defaultPrevented) return;
-		// Default action runs only if not prevented.
-		this.defaultActionRanFor = event;
-	}
-}
-
-function makeWorker(name: string, status: WorkerHandle["status"] = "running"): WorkerHandle {
-	return {
-		workerInstanceId: name + "-wi",
-		name,
-		pid: 12345,
-		ticketId: "tt-" + name,
-		sessionDir: "/tmp",
-		sessionFile: "/tmp/" + name + ".jsonl",
-		worktreePath: null,
-		status,
-		spawnedAt: Date.now(),
-		lastActivityAt: Date.now(),
-		lastProcessActivityAt: Date.now(),
-		hasActiveChildProcess: false,
-		activeChildProcessCount: 0,
-		lastSeenCommentCount: 0,
-		routeState: "linked",
-		lastNote: "done-note-" + name,
-	};
-}
-
-function completedEvent(name: string): PollEvent {
-	return { type: "completed", worker: makeWorker(name, "done"), result: "result-" + name };
-}
-
-function commentEvent(name: string, comment: string): PollEvent {
-	return { type: "comment", worker: makeWorker(name, "running"), comment };
-}
-
-// Helper: create a subscription using the same constructor args that
-// teams/index.ts uses. (leader, filter, predicate)
-function newSub(leader: FakeLeader, target: string | Parameters<typeof buildPredicate>[0], type?: string) {
-	const { filter, predicate } = buildPredicate(target as any, type as any);
-	return new TeamsSubscription(leader as any, filter, predicate);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -243,6 +148,7 @@ async function run() {
 	section("TeamsSubscription — retained terminal event replays for typed and aggregate filters");
 	{
 		const leader = new FakeLeader();
+		leader.setWorker(makeWorker("replay"));
 		leader.setRetainedTerminalEvent(completedEvent("replay"));
 		const completed = newSub(leader, "replay", "completed");
 		const terminal = newSub(leader, "replay", "terminal");
@@ -356,17 +262,6 @@ async function run() {
 		a.unsubscribe();
 	}
 
-	// ────────────────────────────────────────────────────────────────
-	console.log("\n" + "━".repeat(60));
-	console.log(`RESULT: ${passed} passed, ${failed} failed`);
-	if (failed > 0) {
-		console.log("\nFailures:");
-		for (const f of failures) console.log("  •", f);
-		process.exit(1);
-	}
 }
 
-run().catch((err) => {
-	console.error("runner threw:", err);
-	process.exit(2);
-});
+runSubscriptionHarness("subscription.test", 50, run, () => ({ passed, failed, failures }));
