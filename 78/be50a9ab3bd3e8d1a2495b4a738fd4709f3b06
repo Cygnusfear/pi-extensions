@@ -1,0 +1,46 @@
+packages/teams/index.ts
+  s_c80280c75e1308::t_0f460f9b8e935c 27-30
+packages/teams/leader.ts
+  s_c80280c75e1308::t_7df2151c3ac118 49
+  s_c80280c75e1308::t_724e5a7d799d7b 3148-3151,3155-3157
+  s_c80280c75e1308::t_6eedad4f907dd3 3133-3134
+  s_c80280c75e1308::t_6aaaf4e5b4ef13 3126
+packages/teams/test/finish-emit.test.ts
+  s_c80280c75e1308::t_f067b8c72ce88f 27,29-31
+  s_c80280c75e1308::t_d0c95bdbf6fa18 171-172
+packages/teams/v2/session-facts.ts
+  s_c80280c75e1308::t_13f1004c3c14e3 26
+  s_c80280c75e1308::t_2b2ae333833e10 395-399
+  s_c80280c75e1308::t_2b9c2f58db0f67 13,15-16
+  s_c80280c75e1308::t_653ec305d1275d 328-346
+  s_c80280c75e1308::t_c4f5e101e859de 394
+packages/teams/v2/lifecycle-kernel.test.ts
+  s_c80280c75e1308::t_adf653215964d3 598-613
+  s_c80280c75e1308::t_4782b4b6a1200b 217,221-223
+  s_c80280c75e1308::t_8762d766a343e4 188
+  s_c80280c75e1308::t_af23faf7dc4391 20,24
+  s_c80280c75e1308::t_6649f0af84735d 94-97
+  s_c80280c75e1308::t_19fc0760764ee2 147,153,155-157
+  s_c80280c75e1308::t_88b395a43c2758 180,184-185
+  s_c80280c75e1308::t_5d74ae4f5ed1a7 228
+  s_c80280c75e1308::t_42df4327f0ddb1 621-622
+  s_c80280c75e1308::t_fee2ebb7cbf2f3 233-237
+packages/teams/v2/delivery.ts
+  s_c80280c75e1308::t_8fb5e4018e356d 4,25-38,41,43-44,49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "78be50a9ab3bd3e8d1a2495b4a738fd4709f3b06",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "anthropic/claude-fable-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
