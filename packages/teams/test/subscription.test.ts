@@ -8,8 +8,8 @@ import {
 	buildPredicate,
 	wrapPollEvent,
 	type TeamsEvent,
-} from "/Users/alexander/Projects/pi-extensions/packages/teams/subscription.ts";
-import type { PollEvent, WorkerHandle } from "/Users/alexander/Projects/pi-extensions/packages/teams/types.ts";
+} from "../subscription.ts";
+import type { PollEvent, WorkerHandle } from "../types.ts";
 
 // ────────────────────────────────────────────────────────────────────
 // Test harness
@@ -53,6 +53,10 @@ class FakeLeader {
 
 	getWorker(name: string): WorkerHandle | undefined {
 		return this.workers.get(name);
+	}
+
+	getCurrentAttemptId(name: string): string | undefined {
+		return this.workers.get(name)?.workerInstanceId;
 	}
 
 	setWorker(w: WorkerHandle) {
