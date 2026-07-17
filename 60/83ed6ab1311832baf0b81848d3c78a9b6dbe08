@@ -1,0 +1,51 @@
+packages/teams/worktree.test.ts
+  s_c80280c75e1308::t_c80d3077fe441b 198-208
+packages/teams/test/finish-emit.test.ts
+  s_c80280c75e1308::t_18da621ca15e22 146,148-152,154-156,160
+packages/teams/TEAMS_V2_ARCHITECTURE.md
+  s_c80280c75e1308::t_1586952e6fedf3 47
+packages/teams/worktree.ts
+  s_c80280c75e1308::t_5308e6d535a481 38-58,82-87
+packages/teams/index.ts
+  s_c80280c75e1308::t_009302dad975ee 37
+packages/teams/leader.ts
+  s_c80280c75e1308::t_044ff900d34ff7 1293,1299,1423,1427,1935,1939,2156,2181,2197,2294,2298,2381,2385,2511,2515
+  s_c80280c75e1308::t_2aee059690635f 46,1014-1018,1125,1259,1262-1269,1271,1273,1892-1896,2070-2074,2247,2569-2570,2576-2579,3175-3177,3180,3196
+  s_c80280c75e1308::t_6a1f4b4f22117c 2448-2463
+packages/teams/leader.retry.test.ts
+  s_c80280c75e1308::t_24e5b21254b844 530,532,1278,1431
+  s_c80280c75e1308::t_9c25aa664b91ed 1271-1277,1279-1320
+  s_c80280c75e1308::t_e1a67cfc667270 786,839
+  s_c80280c75e1308::t_4572459dce59d0 543,570,583,603,672,688,714,743,869
+  s_c80280c75e1308::t_109cb4ea105cc3 972-1012
+  s_c80280c75e1308::t_dc5c7739f70421 534,1678
+packages/teams/WORKER_LIFECYCLE.md
+  s_c80280c75e1308::t_8c2c1333bcd85a 63-65,68
+packages/teams/v2/legacy-migration.ts
+  s_c80280c75e1308::t_84a2892bfe977d 249-257,278,280-288,294-295
+packages/teams/v2/state.ts
+  s_c80280c75e1308::t_249d87c23a1dd5 247-248
+  s_c80280c75e1308::t_6a660170c983d2 239-246,249-257
+packages/teams/v2/lifecycle-kernel.test.ts
+  s_c80280c75e1308::t_5dbf69221c6077 595
+  s_c80280c75e1308::t_3a491a1b7db064 37,304-315,317-324
+  s_c80280c75e1308::t_26ef7fe2e93c53 284,292,303
+  s_c80280c75e1308::t_91f08310688025 325-330
+  s_c80280c75e1308::t_80f7fffc9a3722 316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "6083ed6ab1311832baf0b81848d3c78a9b6dbe08",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    }
+  }
+}
