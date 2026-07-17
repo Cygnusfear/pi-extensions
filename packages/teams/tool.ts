@@ -39,6 +39,7 @@ const TeamsParams = Type.Object({
       Type.Literal("tell_all"),
       Type.Literal("view"),
       Type.Literal("runtime"),
+      Type.Literal("history"),
     ]),
   ),
   tasks: Type.Optional(
@@ -76,6 +77,8 @@ const TeamsParams = Type.Object({
     ),
   ),
   name: Type.Optional(Type.String({ description: "Worker name for kill/tell action" })),
+  attemptId: Type.Optional(Type.String({ description: "Exact lifecycle attempt ID for view/history" })),
+  status: Type.Optional(Type.String({ description: "Lifecycle status filter for history" })),
   names: Type.Optional(Type.Array(Type.String({ description: "Worker names for bulk kill action" }))),
   message: Type.Optional(Type.String({ description: "Message to send to worker(s) for tell/tell_all action" })),
   start: Type.Optional(Type.Number({ description: "View window start offset. Defaults to -20." })),
@@ -95,9 +98,11 @@ const TeamsParams = Type.Object({
 });
 
 type TeamsActionParams = {
-  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
+  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime" | "history";
   tasks?: Array<{ text: string; ticketId?: string | { id: string; [k: string]: unknown }; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean; cwd?: string }>;
   name?: string;
+  attemptId?: string;
+  status?: string;
   names?: string[];
   message?: string;
   start?: number;
@@ -134,10 +139,11 @@ async function runTeamsAction(
 
   if (action === "list") {
     const workers = leader.getWorkers();
-    if (workers.length === 0) {
+    const recentAttempts = leader.getAttemptHistory({ start: -10 });
+    if (workers.length === 0 && recentAttempts.length === 0) {
       return ok("No active workers.");
     }
-    const v2Team = leader.getV2TeamRecord();
+    const lifecycleProjection = leader.getLifecycleProjectionRecord();
     const lines = workers.map((w) => {
       const modelSuffix = w.model ? ` | model ${w.model}` : "";
       const v2Lifecycle = leader.getV2WorkerLifecycle(w.name);
@@ -159,8 +165,12 @@ async function runTeamsAction(
       if (w.lastNote) parts.push(`  last note: ${w.lastNote.slice(0, 120)}`);
       return parts.join("\n");
     });
-    const header = v2Team ? `v2 team ${v2Team.teamId} · leaderEpoch ${v2Team.leaderEpoch}` : "v2 team unavailable";
-    return ok(`${header}\n\n${lines.join("\n")}`);
+    const activeAttemptIds = new Set(workers.map((worker) => worker.workerInstanceId));
+    const history = recentAttempts
+      .filter((attempt) => !activeAttemptIds.has(attempt.attemptId))
+      .map((attempt) => `${attempt.name}: ${attempt.declaration?.kind ?? attempt.assessment?.kind ?? attempt.process.phase} | attempt ${attempt.attemptId} | ticket #${attempt.ticketId}`);
+    const header = lifecycleProjection ? `team ${lifecycleProjection.teamId}` : "team unavailable";
+    return ok(`${header}\n\n${[...lines, ...history].join("\n")}`);
   }
 
   if (action === "kill") {
@@ -195,22 +205,35 @@ async function runTeamsAction(
   }
 
   if (action === "view") {
-    if (!params.name) {
-      return err("Provide worker name.");
+    if (!params.name && !params.attemptId) {
+      return err("Provide worker name or attemptId.");
     }
     try {
-      const viewed = await leader.viewWorker(params.name, params.start ?? -20, params.end ?? 0);
-      const v2Lifecycle = leader.getV2WorkerLifecycle(params.name);
-      const sessionMode = leader.getV2CurrentSessionMode(params.name);
+      const viewed = params.attemptId
+        ? await leader.viewAttempt(params.attemptId, params.start ?? -20, params.end ?? 0)
+        : await leader.viewWorker(params.name!, params.start ?? -20, params.end ?? 0);
+      const targetName = params.name ?? leader.getAttemptHistory({ attemptId: params.attemptId })[0]?.name ?? "unknown";
+      const v2Lifecycle = leader.getV2WorkerLifecycle(targetName);
+      const sessionMode = leader.getV2CurrentSessionMode(targetName);
       const sessionLabel = sessionMode ? (sessionMode.kind === "fork" ? `fork:${sessionMode.parentLeafId}` : sessionMode.kind) : "unknown";
-      return ok(`[source: ${viewed.source} · route: ${viewed.routeState} · v2: ${v2Lifecycle ?? "unknown"} · session: ${sessionLabel}]\n\n${viewed.text}`);
+	  const history = leader.getAttemptHistory({ name: targetName, start: -5 });
+	  const historyLines = history.map((attempt) =>
+		`- ${attempt.declaration?.kind ?? attempt.assessment?.kind ?? attempt.process.phase} · ${attempt.sessionMode.kind} · attempt ${attempt.attemptId}`,
+	  );
+	  const historyBlock = historyLines.length > 0 ? `\n\nRecent attempts:\n${historyLines.join("\n")}` : "";
+	  return ok(`[source: ${viewed.source} · route: ${viewed.routeState} · v2: ${v2Lifecycle ?? "unknown"} · session: ${sessionLabel}]\n\n${viewed.text}${historyBlock}`);
     } catch (error) {
       return err(`Error: ${formatActionError(error)}`);
     }
   }
 
+  if (action === "history") {
+    const attempts = leader.getAttemptHistory({ attemptId: params.attemptId, name: params.name, status: params.status, start: params.start, end: params.end });
+    return ok(JSON.stringify(attempts, null, 2));
+  }
+
   if (action === "runtime") {
-    const runtime = leader.getV2TeamRecord();
+    const runtime = leader.getLifecycleProjectionRecord();
     return ok(runtime ? JSON.stringify(runtime, null, 2) : "No v2 runtime state.");
   }
 
@@ -320,8 +343,12 @@ async function runTeamsAction(
           `Spawned "${workerName}" → ticket #${ticketId} (pid ${handle.pid})${modelInfo}${toolsInfo}${tmplInfo}${refInfo}`,
         );
       } catch (err) {
-        // Pre-flight auth failure or other spawn error — clean up the ticket
-        await pi.exec(getMaiBin(), ["close", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+        // Once spawn intent exists, the leader owns ticket/worktree cleanup as
+        // deterministic session-native effects. Only a pre-intent rejection
+        // (for example duplicate active name) needs direct ticket rollback.
+        if (!leader.hasLifecycleAttempt(workerName, ticketId)) {
+          await pi.exec(getMaiBin(), ["close", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+        }
         results.push(`Failed to spawn "${workerName}": ${err}`);
       }
     }

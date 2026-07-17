@@ -3,6 +3,7 @@ import type { SessionPhaseEvent } from "@pi-extensions/shared/session-phase-even
 import type { WorkerSessionMode } from "./v2/protocol.ts";
 
 export interface WorkerAttempt {
+	workerId: string;
 	workerInstanceId: string;
 	pid: number;
 	sessionDir: string;
@@ -14,6 +15,8 @@ export interface WorkerAttempt {
 }
 
 export interface WorkerHandle {
+	/** Stable logical worker/session identity. Display name is never an identity key. */
+	workerId: string;
 	workerInstanceId: string;
 	name: string;
 	pid: number;
@@ -81,6 +84,7 @@ export const RESUMABLE_WINDOW_MS =
 	Number.isFinite(resumableWindowMs) && resumableWindowMs >= 0 ? Math.floor(resumableWindowMs) : 120_000;
 
 export interface SpawnConfig {
+	workerId: string;
 	workerInstanceId: string;
 	ticketId: string;
 	workerName: string;
@@ -88,12 +92,16 @@ export interface SpawnConfig {
 	cwd: string;
 	/** Repo root — session dirs go here so worktree cleanup can't destroy them. */
 	repoRoot: string;
+	/** Attempt-stable directory chosen before spawn_requested is persisted. */
+	sessionDir: string;
 	leaderSessionFile: string;
 	model?: string;
 	hasTools?: boolean;
 	additionalPrompt?: string;
 	teamId?: string;
 	leaderEpoch?: string;
+	/** Canonical coordinator Pi session identity; distinct from the mesh route. */
+	coordinatorSessionId?: string;
 	coordinatorMeshId?: string;
 	ticketCwd?: string;
 	ticketText?: string;
@@ -101,7 +109,7 @@ export interface SpawnConfig {
 	sessionMode?: WorkerSessionMode;
 }
 
-export type PollEvent =
+export type PollEvent = (
 	| { type: "completed"; worker: WorkerHandle; result: string }
 	| { type: "turn_finished"; worker: WorkerHandle; result: string }
 	| { type: "warning"; worker: WorkerHandle; reason: string }
@@ -109,7 +117,8 @@ export type PollEvent =
 	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number; first?: boolean }
 	| { type: "comment"; worker: WorkerHandle; comment: string }
 	| { type: "phase"; worker: WorkerHandle; phase: SessionPhaseEvent }
-	| { type: "alive"; worker: WorkerHandle };
+	| { type: "alive"; worker: WorkerHandle }
+) & { lifecycleEventId?: string; attemptId?: string };
 
 const pollMs = Number(process.env.PI_TEAMS_POLL_INTERVAL_MS ?? "1000");
 export const POLL_INTERVAL_MS = Number.isFinite(pollMs) && pollMs >= 250 ? Math.floor(pollMs) : 1000;

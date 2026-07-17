@@ -1,78 +1,71 @@
-import type { TeamRecord, WorkerAttemptRecord, WorkerFact, WorkerRecord } from "./state.ts";
-import type { WorkerSessionMode } from "./protocol.ts";
-import { reduceTeam } from "./reducer.ts";
+import type { AttemptState, LifecycleFact, LifecycleProjection, WorkerState } from "./state.ts";
+import { LifecycleAccumulator } from "./reducer.ts";
+import { factsForSession, type SessionEntryLike } from "./session-facts.ts";
 
-export function createTeamRecord(teamId: string, leaderEpoch: string): TeamRecord {
-	return {
-		teamId,
-		leaderEpoch,
-		createdAt: Date.now(),
-		workers: {},
-	};
-}
+/**
+ * In-memory projection over the coordinator session's canonical lifecycle facts.
+ * Restore scans all entries once. Normal operation folds successful appends in O(1)
+ * and never calls getEntries on the per-turn hot path.
+ */
+export class LifecycleRuntimeStore {
+	private accumulator: LifecycleAccumulator;
+	private restoredEntryCount = 0;
 
-export function upsertWorker(team: TeamRecord, input: {
-	workerId: string;
-	name: string;
-	attemptId: string;
-	sessionMode: WorkerSessionMode;
-	sessionDir: string;
-	sessionFile?: string;
-	pid?: number;
-	startedAt: number;
-}): TeamRecord {
-	const existing = team.workers[input.workerId];
-	const nextAttempt: WorkerAttemptRecord = {
-		attemptId: input.attemptId,
-		workerId: input.workerId,
-		leaderEpoch: team.leaderEpoch,
-		sessionMode: input.sessionMode,
-		sessionDir: input.sessionDir,
-		sessionFile: input.sessionFile,
-		pid: input.pid,
-		startedAt: input.startedAt,
-		facts: [],
-	};
-	const nextWorker: WorkerRecord = existing
-		? {
-				...existing,
-				name: input.name,
-				currentAttemptId: input.attemptId,
-				attempts: [...existing.attempts, nextAttempt],
-			}
-		: {
-				workerId: input.workerId,
-				name: input.name,
-				desiredState: "running",
-				currentAttemptId: input.attemptId,
-				lifecycle: "created",
-				attempts: [nextAttempt],
-			};
-	return reduceTeam({
-		...team,
-		workers: {
-			...team.workers,
-			[input.workerId]: nextWorker,
-		},
-	});
-}
+	constructor(readonly coordinatorSessionId: string, entries: readonly SessionEntryLike[] = []) {
+		this.accumulator = new LifecycleAccumulator(coordinatorSessionId);
+		this.restore(entries);
+	}
 
-export function appendFact(team: TeamRecord, workerId: string, fact: WorkerFact): TeamRecord {
-	const worker = team.workers[workerId];
-	if (!worker || !worker.currentAttemptId) return team;
-	const nextWorker: WorkerRecord = {
-		...worker,
-		attempts: worker.attempts.map((attempt) =>
-			attempt.attemptId === worker.currentAttemptId
-				? { ...attempt, facts: [...attempt.facts, fact] }
-				: attempt,
-		),
-	};
-	return reduceTeam({
-		...team,
-		workers: {
-			...team.workers,
-			[workerId]: nextWorker,
-		},
-	});
+	restore(entries: readonly SessionEntryLike[]): void {
+		const next = new LifecycleAccumulator(this.coordinatorSessionId);
+		for (const fact of factsForSession(entries, this.coordinatorSessionId)) next.append(fact);
+		this.accumulator = next;
+		this.restoredEntryCount = entries.length;
+	}
+
+	append(fact: LifecycleFact): "accepted" | "duplicate" | "conflict" | "foreign" {
+		return this.accumulator.append(fact);
+	}
+
+	projection(): LifecycleProjection {
+		return this.accumulator.current();
+	}
+
+	worker(workerId: string): WorkerState | undefined {
+		return this.projection().workers.get(workerId);
+	}
+
+	workerByName(name: string): WorkerState | undefined {
+		const matches = [...this.projection().workers.values()].filter((worker) => worker.name === name);
+		return matches.at(-1);
+	}
+
+	attempt(attemptId: string): AttemptState | undefined {
+		return this.projection().attempts.get(attemptId);
+	}
+
+	currentAttempt(workerIdOrName: string): AttemptState | undefined {
+		const worker = this.worker(workerIdOrName) ?? this.workerByName(workerIdOrName);
+		return worker?.currentAttemptId ? this.attempt(worker.currentAttemptId) : undefined;
+	}
+
+	history(input: { attemptId?: string; name?: string; status?: string; start?: number; end?: number }): AttemptState[] {
+		let attempts = [...this.projection().attempts.values()];
+		if (input.attemptId) attempts = attempts.filter((attempt) => attempt.attemptId === input.attemptId);
+		if (input.name) attempts = attempts.filter((attempt) => attempt.name === input.name);
+		if (input.status) {
+			attempts = attempts.filter((attempt) => {
+				if (input.status === "done" || input.status === "completed") return attempt.declaration?.kind === "done";
+				if (input.status === "quit" || input.status === "warning") return attempt.declaration?.kind === "quit" || attempt.assessment?.kind === "missing_finish" || attempt.assessment?.kind === "legacy_ambiguous";
+				if (input.status === "failed") return !!attempt.assessment && !["missing_finish", "legacy_ambiguous"].includes(attempt.assessment.kind);
+				if (input.status === "running") return attempt.process.phase === "running" || attempt.process.phase === "spawning";
+				return true;
+			});
+		}
+		const start = input.start ?? 0;
+		const end = input.end ?? attempts.length;
+		return attempts.slice(start < 0 ? Math.max(0, attempts.length + start) : start, end <= 0 ? attempts.length + end : end);
+	}
+
+	get restoredEntries(): number { return this.restoredEntryCount; }
 }

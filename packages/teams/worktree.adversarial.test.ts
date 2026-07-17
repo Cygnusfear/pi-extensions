@@ -47,7 +47,10 @@ function createBareRemote(): { sourceDir: string; remoteDir: string } {
   const sourceDir = createTestRepo();
   const remoteDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "teams-wt-remote-")));
   fs.rmSync(remoteDir, { recursive: true, force: true });
-  git(["clone", "--bare", sourceDir, remoteDir], path.dirname(sourceDir));
+  // Isolate the fixture object database. Local-clone hardlinks can race with
+  // concurrent Git packing in the full test suite and fail with
+  // "hardlink different from source" on APFS.
+  git(["clone", "--bare", "--no-hardlinks", sourceDir, remoteDir], path.dirname(sourceDir));
   return { sourceDir, remoteDir };
 }
 

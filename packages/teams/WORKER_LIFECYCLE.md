@@ -1,235 +1,128 @@
-# Teams v2 worker lifecycle
+# Teams worker lifecycle
 
-This document describes the target lifecycle model in the `teams-v2-cutover` branch.
+This is the operational contract for delegated and persistent Teams workers. The complete storage and reducer design is in [TEAMS_V2_ARCHITECTURE.md](./TEAMS_V2_ARCHITECTURE.md).
 
-The critical change from Teams v1 is this:
+## Identity and attempts
 
-- workers do not speak ad-hoc mesh payloads anymore
-- workers emit typed v2 envelopes
-- the leader ingests worker facts into a reducer-first runtime store
-- lifecycle truth comes from worker attempts plus reduced facts, not from ticket heuristics or widget state
+A logical worker owns a stable `workerId`. Every process incarnation owns a fresh `attemptId`; retries and persistent resumes do not reuse the prior attempt. The display name can be reused and is not identity.
 
----
+The coordinator injects the worker's complete identity separately from its mesh route:
 
-## Core identities
+```text
+PI_TEAMS_COORDINATOR_SESSION_ID  canonical Pi session identity
+PI_TEAMS_TEAM_ID                 team identity
+PI_TEAMS_WORKER_ID               logical worker identity
+PI_TEAMS_WORKER_INSTANCE_ID      attempt identity
+PI_TEAMS_LEADER_EPOCH            runtime epoch
+PI_TEAMS_COORDINATOR_ID          mesh delivery route only
+```
 
-Every worker run is identified by four layers:
+## Spawn
 
-- `teamId` — stable logical delegation batch
-- `leaderEpoch` — current leader ownership instance; changes on reload / restart
-- `workerId` — stable logical worker name
-- `attemptId` — one concrete process attempt
+Delegation proceeds in this order:
 
-This lets the system distinguish:
-- same worker, new process attempt
-- same team, new leader after reload
-- stale events from an older attempt
+1. verify that the coordinator session is persisted and has an assistant message;
+2. append `team_created` if needed;
+3. append `spawn_requested` with the fixed attempt identity and session/worktree inputs;
+4. request and execute worktree creation through the durable effect ledger;
+5. spawn the worker process;
+6. append `process_started` with PID and process-birth evidence;
+7. expose the runtime handle and begin activity monitoring.
 
----
+A storage append failure puts the runtime in `storage_degraded`. The process refuses later lifecycle writes and releases no dependent effect or application acknowledgement. `--no-session` delegation is rejected before step 3.
 
-## Runtime envelope
+## Running
 
-Workers are spawned with an explicit runtime envelope, including:
+A worker announces its durable mesh identity with `worker.hello`; that route can reconnect without becoming lifecycle truth. Comments and phase events are live telemetry.
 
-- `teamId`
-- `leaderEpoch`
-- `workerId`
-- `attemptId`
-- coordinator session id
-- channel id
-- lease path
-- session mode
+Repeated inactivity warnings are canonical `stuck` facts. Each cooldown uses its own persisted cooldown index, deterministic event ID, wake, and branch-local delivery acknowledgement.
 
-Session mode is explicit:
+PID checks combine liveness with process birth. A reused PID is treated as the original attempt's death, not as a living worker.
 
-- `fresh`
-- `fork`
-- `resume`
+## Declared finish
 
-In the cutover branch, normal delegated workers prefer a real `fork` session when the leader session manager can create one. Otherwise they fall back to `fresh`.
+`team_finish(status="done"|"quit", summary=...)` is authoritative. A worker must not close its own ticket.
 
----
+Before the tool can report success, the worker:
 
-## State model
+1. requires its own persisted Pi session and an assistant message;
+2. writes `teams-worker-finish-pending-v1` with the complete attempt identity;
+3. sends a deterministic `worker.finish` event and retries it if necessary;
+4. waits for `leader.ack` with phase `persisted`;
+5. writes `teams-worker-finish-completed-v1` locally;
+6. posts the `DONE:` or `QUIT:` mai note as a secondary human record.
 
-### Worker attempt
-A worker attempt is one concrete spawned process.
+The leader sends the persistence acknowledgement only after the declaration fact is in the coordinator session. Exact retries are re-acknowledged without changing state. A conflicting declaration produces a protocol violation and does not replace the first declaration.
 
-It owns:
-- pid
-- session dir / session file
-- session mode
-- started / ended timestamps
-- process exit data
-- reduced lifecycle facts
+## Process exit and assessment
 
-### Worker record
-A worker record owns:
-- logical worker identity
-- current attempt id
-- all attempts for that worker
-- reduced lifecycle state
+Process exit is always recorded independently from declaration:
 
-### Team record
-A team record owns:
-- `teamId`
-- `leaderEpoch`
-- all worker records
+- declaration before exit: the declaration is already actionable; exit later unlocks cleanup;
+- exit before declaration: the leader waits a bounded settle window and checks the worker's persisted pending finish;
+- exit without finish: the attempt becomes `missing_finish` warning, regardless of exit code zero;
+- startup failure or crash without finish: the attempt receives the corresponding failure assessment;
+- coordinator kill: `assessment_killed` and process termination are recorded separately.
 
-The leader keeps this in the v2 runtime store.
+Ticket state, notes, output, and exit code may help diagnostics or crash classification. They do not manufacture `done` or `quit`.
 
----
+If a valid declaration is recovered after a provisional assessment, its outcome wins and one deterministic `outcome_corrected` event explains the correction.
 
-## Fact model
+## Persistent workers
 
-Workers do not directly set lifecycle state.
+A persistent worker that declares done and whose process exits becomes `resumable`. Sending it a new message:
 
-The leader appends facts such as:
-- `spawn_requested`
-- `spawn_started`
-- `worker_hello`
-- `comment_posted`
-- `finish_done`
-- `finish_quit`
-- `process_exit`
-- `lease_stale`
+1. preserves the stable logical `workerId`;
+2. creates a new `attemptId` and `spawn_requested` fact;
+3. resumes the existing worker Pi session;
+4. records a new process birth and `process_started` fact.
 
-The reducer maps those facts to lifecycle states.
+The completed prior attempt remains in history. Declaration, exit, assessment, stuck, and cleanup state never bleed into the new attempt.
 
----
+## Cleanup and ticket effects
 
-## Lifecycle states
+Cleanup begins only after process death. The settled outcome chooses preservation:
 
-Current reducer lifecycle states:
+- declared done: auto-commit and preserve deliverable branch;
+- declared quit or ambiguous missing finish: preserve evidence according to cleanup policy;
+- crash/startup failure: retain canonical history even when the runtime handle is removed;
+- coordinator kill: terminate, close the coordinator-owned ticket, and clean through durable effects.
 
-- `created`
-- `spawning`
-- `running`
-- `finishing`
-- `done`
-- `warning`
-- `failed`
-- `killed`
-- `orphaned`
-- `resumable`
+Worktree creation, process termination, ticket close, and cleanup use deterministic effect IDs with request-before-execution and completion-after-execution facts. Startup reconciliation resumes incomplete effects. Cleanup Git commits carry `Teams-Effect-Id` trailers.
 
-Current reduced meaning:
+## Restore
 
-| Reduced state | Meaning |
-|---|---|
-| `created` | worker record exists but no spawn fact yet |
-| `spawning` | spawn started but worker has not said hello yet |
-| `running` | worker has sent `worker.hello` |
-| `done` | explicit `finish_done` fact |
-| `warning` | explicit `finish_quit` fact |
-| `failed` | process exited without a terminal success/quit fact |
-| `orphaned` | lease went stale |
+Restore scans all coordinator session entries in physical append order and folds the v4 facts once. It reconstructs running and resumable handles, verifies PID birth, imports pending worker finish records when necessary, reconciles incomplete effects, and leaves dead ambiguous attempts explicit.
 
----
+It does not restore outcome from:
 
-## Worker protocol
+- worker/ticket snapshots;
+- old terminal notification sets;
+- exit code zero;
+- the active branch alone;
+- mesh reachability;
+- ticket closure.
 
-Workers currently emit typed v2 envelopes.
+Roster eviction affects only the live widget/list. Attempt history and undelivered lifecycle events remain.
 
-### Channel traffic
-Over the team channel, workers emit:
-- `worker.hello`
-- `worker.comment`
+## Delivery
 
-### Direct leader traffic
-Directly to the coordinator, workers emit:
-- `worker.finish`
+Every actionable event is rendered with a durable event marker. The event remains pending until that marker is present in the final successful provider request and the terminal assistant result is successful. Failed/aborted provider turns do not acknowledge it. Branch rewind can expose it again on that branch.
 
-That means the old free-form payloads like `teams:init`, `teams:comment`, `teams:done` are no longer the primary runtime contract in the cutover branch.
+## Shutdown and forks
 
----
+`session_shutdown` releases only runtime resources. It does not kill workers and does not create an outcome.
 
-## Session strategy
+Forks and cloned/branched sessions use a new coordinator session identity. Copied parent lifecycle facts and legacy snapshots cannot become child truth.
 
-### Normal delegated worker
-Preferred mode:
-- `fork`
+## Public inspection
 
-This uses a real branched session file when possible, preserving:
-- the real parent branch point
-- prior conversation context
-- actual session lineage
+```ts
+await teams.list();
+await teams.view("worker");
+await teams.view({ attemptId: "..." });
+await teams.history({ name: "worker" });
+await teams.history({ status: "warning", start: -20 });
+```
 
-### Fallback
-If the current context cannot create a branched session:
-- `fresh`
-
-### Resume path
-When a worker is resumed from an existing session:
-- `resume`
-
----
-
-## Leader responsibilities
-
-The leader is responsible for:
-- assigning `teamId` and `leaderEpoch`
-- spawning workers with explicit session mode
-- ingesting v2 envelopes into the runtime store
-- appending attempt facts
-- reducing the team state
-- projecting reduced lifecycle into the current worker handle / widget layer
-
-The leader is **not** supposed to treat mesh payloads as lifecycle truth directly.
-
----
-
-## Ticket semantics
-
-Tickets are still workflow artifacts, not lifecycle truth.
-
-Important rules remain:
-- `team_finish(done)` is authoritative success
-- `team_finish(quit)` is authoritative warning-style terminal exit
-- `session_shutdown` never mutates ticket outcome
-- process exit alone is not success
-
----
-
-## Reload / restore
-
-On restore, the leader:
-1. reloads persisted worker snapshot state
-2. restores `v2TeamId` if present
-3. rebuilds an in-memory v2 team record
-4. seeds worker attempts from restored handles
-5. continues ingesting new v2 facts from live mesh events and process exits
-
-This is still in progress in the cutover branch, but the architecture direction is fixed.
-
----
-
-## Current cutover status
-
-As of the current branch state:
-
-Implemented:
-- typed v2 protocol
-- reducer-first runtime store
-- team channel id builder
-- worker emits v2 hello/comment/finish
-- leader ingests those envelopes
-- leader records spawn / hello / comment / finish / exit facts
-- leader persists `v2TeamId`
-- spawn session mode is explicit and prefers real fork sessions
-
-Still being migrated:
-- remaining ad-hoc worker-handle lifecycle mutations
-- full projection of widget/tool surfaces from v2 store only
-- complete removal of legacy compatibility assumptions outside the cutover branch
-
----
-
-## Practical rule of thumb
-
-If you are changing lifecycle behavior in Teams v2:
-
-1. add / emit a fact
-2. reduce lifecycle from facts
-3. project UI from reduced state
-4. do not invent another side channel of truth
+Subscriptions bind to a concrete attempt. Creating a same-name worker later cannot satisfy a subscription for an older attempt, and an older retained terminal event cannot satisfy a new future binding.

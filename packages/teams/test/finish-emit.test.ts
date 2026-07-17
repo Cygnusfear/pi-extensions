@@ -12,6 +12,7 @@ import { TeamLeader } from "../leader.ts";
 import type { WorkerHandle } from "../types.ts";
 import { NOTIFY_BATCH_WINDOW_MS } from "../types.ts";
 import { createWorkerFinishEnvelope } from "../v2/mesh-adapter.ts";
+import { createDeclarationEventId, createLeaderEventId } from "../v2/session-facts.ts";
 
 const TEAM_ID = "team-test1234";
 
@@ -19,34 +20,33 @@ type SentMessage = { content: string; triggerTurn: boolean };
 
 function makeLeader() {
 	const sent: SentMessage[] = [];
+	const entries: any[] = [{ type: "message", id: "assistant", message: { role: "assistant", content: [] } }];
 	const fakePi = {
+		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
 		exec: async () => ({ stdout: "" }),
-		sendMessage: (
-			msg: { content: string },
-			options?: { triggerTurn?: boolean },
-		) => {
-			sent.push({
-				content: msg.content,
-				triggerTurn: options?.triggerTurn === true,
-			});
+		sendMessage: (msg: { content: string }, options?: { triggerTurn?: boolean }) => {
+			sent.push({ content: msg.content, triggerTurn: options?.triggerTurn === true });
 		},
 	};
-	const leader = new TeamLeader(fakePi as never) as unknown as Record<
-		string,
-		unknown
-	> &
-		TeamLeader;
-	const leaderAny = leader as never as Record<string, never>;
-	Object.assign(leaderAny, {
-		renderWidget: () => {},
-		persistStateIfHydrated: () => {},
-		startActivityMonitor: () => {},
-		scheduleWorkerCleanup: () => {},
-		queueAmbientChatForResumableWorkers: () => {},
-		v2TeamId: TEAM_ID,
-	});
-	(leader as never as { ensureV2Team: () => void }).ensureV2Team();
-	return { leader, sent };
+	const leader = new TeamLeader(fakePi as never) as any;
+	const ctx = {
+		cwd: "/tmp/test-repo",
+		ui: { setWidget: () => {} },
+		sessionManager: {
+			getSessionFile: () => "/tmp/finish-leader.jsonl",
+			getSessionId: () => "finish-leader-session",
+			getEntries: () => entries,
+			getBranch: () => entries,
+			getHeader: () => null,
+		},
+	};
+	leader.restoreState(ctx);
+	leader.teamId = TEAM_ID;
+	leader.renderWidget = () => {};
+	leader.startActivityMonitor = () => {};
+	leader.scheduleWorkerCleanup = () => {};
+	leader.queueAmbientChatForResumableWorkers = () => {};
+	return { leader: leader as TeamLeader, sent };
 }
 
 function makeWorker(
@@ -54,6 +54,7 @@ function makeWorker(
 	overrides?: Partial<WorkerHandle>,
 ): WorkerHandle {
 	return {
+		workerId: name,
 		workerInstanceId: `${name}-instance`,
 		name,
 		pid: 999999999, // never a live pid
@@ -87,12 +88,20 @@ function finishEnvelope(
 		leaderEpoch: (TeamLeader as never as { prototype: never })
 			? "epoch-1"
 			: "epoch-1",
-		workerId: worker.name,
+		workerId: worker.workerId,
 		attemptId: worker.workerInstanceId,
 		seq: 1,
 		status,
 		summary,
+		eventId: createDeclarationEventId({ coordinatorSessionId: "finish-leader-session", teamId: TEAM_ID, workerId: worker.workerId, attemptId: worker.workerInstanceId }, status, summary),
 	});
+}
+
+function registerWorker(leader: TeamLeader, worker: WorkerHandle) {
+	const l = leader as any;
+	l.recordSpawnRequested({ workerId: worker.workerId, workerInstanceId: worker.workerInstanceId, ticketId: worker.ticketId, workerName: worker.name, useWorktree: false, cwd: "/tmp/test-repo", repoRoot: "/tmp/test-repo", sessionDir: worker.sessionDir, leaderSessionFile: "/tmp/finish-leader.jsonl", teamId: TEAM_ID, leaderEpoch: l.leaderEpoch, coordinatorSessionId: "finish-leader-session", freeform: true, sessionMode: { kind: "fresh" } }, worker.sessionFile);
+	l.workers.set(worker.name, worker);
+	l.recordProcessStart(worker, worker.spawnedAt, worker.pid);
 }
 
 function dispatchFinish(
@@ -106,7 +115,7 @@ function dispatchFinish(
 		leaderEpoch: string;
 		handleWorkerToLeaderEnvelope: (envelope: unknown, from: string) => void;
 	};
-	l.workers.set(worker.name, worker);
+	registerWorker(leader, worker);
 	const envelope = finishEnvelope(worker, status, summary) as {
 		leaderEpoch: string;
 	};
@@ -174,26 +183,19 @@ describe("stuck events wake on every warning", () => {
 	test("first and cooldown-repeat stuck warnings both trigger turns", async () => {
 		const { leader, sent } = makeLeader();
 		const worker = makeWorker("slow-1");
-		const notify = (
-			leader as never as { notifyLLM: (e: unknown) => void }
-		).notifyLLM.bind(leader);
-		notify({
-			type: "stuck",
-			worker: { ...worker },
-			idleSeconds: 300,
-			first: true,
-		});
-		await settle();
-		expect(sent.length).toBe(1);
-		expect(sent[0].triggerTurn).toBe(true);
-		notify({
-			type: "stuck",
-			worker: { ...worker },
-			idleSeconds: 360,
-			first: false,
-		});
-		await settle();
-		expect(sent.length).toBe(2);
-		expect(sent[1].triggerTurn).toBe(true);
+		registerWorker(leader, worker);
+		const l = leader as any;
+		const identity = { coordinatorSessionId: "finish-leader-session", teamId: TEAM_ID, workerId: worker.workerId, attemptId: worker.workerInstanceId };
+		for (const [cooldownIndex, idleSeconds] of [[0, 300], [1, 360]] as const) {
+			const eventId = createLeaderEventId(identity, "stuck", `stuck:${cooldownIndex}`, { cooldownIndex });
+			l.appendLifecycleFact({
+				schemaVersion: 4, ...identity, eventId, kind: "stuck", occurredAt: Date.now(),
+				payload: { cooldownIndex, idleSeconds },
+			});
+			l.notifyLLM({ type: "stuck", worker: { ...worker }, idleSeconds, first: cooldownIndex === 0, lifecycleEventId: eventId, attemptId: worker.workerInstanceId });
+			await settle();
+		}
+		expect(sent).toHaveLength(2);
+		expect(sent.every((message) => message.triggerTurn)).toBe(true);
 	});
 });

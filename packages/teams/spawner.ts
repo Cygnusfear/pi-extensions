@@ -111,6 +111,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
 		PI_TEAMS_WORKER: "1",
+		PI_TEAMS_WORKER_ID: config.workerId,
 		PI_TEAMS_WORKER_INSTANCE_ID: config.workerInstanceId,
 		PI_TEAMS_TICKET_ID: config.ticketId,
 		PI_TEAMS_LEADER_SESSION: config.leaderSessionFile,
@@ -120,6 +121,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 
 	if (config.teamId) env.PI_TEAMS_TEAM_ID = config.teamId;
 	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
+	if (config.coordinatorSessionId) env.PI_TEAMS_COORDINATOR_SESSION_ID = config.coordinatorSessionId;
 	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
 	if (config.ticketCwd) env.PI_TEAMS_TICKET_CWD = config.ticketCwd;
 	if (config.freeform) env.PI_TEAMS_FREEFORM = "1";
@@ -136,8 +138,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 	// if sessions lived there, a cleanup of one worker could destroy the session
 	// of another worker sharing the same worktree path, or even the same worker
 	// on a retry. Using repoRoot ensures sessions survive worktree lifecycle.
-	const baseSessionDir = path.join(config.repoRoot, ".pi", "sessions", "teams-workers");
-	const sessionDir = path.join(baseSessionDir, `team-${config.workerName}-${config.ticketId}-${Date.now()}`);
+	const sessionDir = config.sessionDir;
 
 	// Ensure session dir exists so we can write stdout/stderr logs
 	fs.mkdirSync(sessionDir, { recursive: true });
@@ -190,6 +191,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 
 	const now = Date.now();
 	const handle: WorkerHandle = {
+		workerId: config.workerId,
 		workerInstanceId: config.workerInstanceId,
 		name: config.workerName,
 		pid: child.pid!,
@@ -210,7 +212,7 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		activeChildProcessCount: 0,
 		lastSeenCommentCount: 0,
 		routeState: "pending",
-		attempts: [{ workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
+		attempts: [{ workerId: config.workerId, workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
 	};
 
 	// v1c: this fresh incarnation holds the activation lease so a concurrent resume
@@ -226,10 +228,14 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 }
 
 /** Find the session JSONL file in a worker's session directory. */
-function findSessionFile(sessionDir: string): string | null {
+
+function findSessionFile(handle: Pick<WorkerHandle, "sessionDir" | "sessionFile">): string | null {
+	if (handle.sessionFile && fs.existsSync(handle.sessionFile)) return handle.sessionFile;
 	try {
-		const files = fs.readdirSync(sessionDir).filter((f) => f.endsWith(".jsonl"));
-		return files.length > 0 ? path.join(sessionDir, files[0]) : null;
+		const files = fs.readdirSync(handle.sessionDir).filter((f) => f.endsWith(".jsonl"));
+		// Without the durable path, exactly one candidate is recoverable. Choosing
+		// arbitrarily from multiple Pi sessions could continue the wrong worker.
+		return files.length === 1 ? path.join(handle.sessionDir, files[0]) : null;
 	} catch {
 		return null;
 	}
@@ -244,7 +250,7 @@ export function resumeWorker(
 	message: string,
 	env: Record<string, string>,
 ): ChildProcess | null {
-	const sessionFile = findSessionFile(handle.sessionDir);
+	const sessionFile = findSessionFile(handle);
 	if (!sessionFile) return null;
 
 	// v1c per-worker activation LOCK (part C): refuse a concurrent resume of the
@@ -299,11 +305,16 @@ export function resumeWorker(
 
 	const now = Date.now();
 	handle.pid = child.pid!;
+	handle.spawnedAt = now;
 	handle.status = "running";
+	handle.exitCode = undefined;
+	handle.spawnError = undefined;
+	handle.terminalStatus = undefined;
+	handle.terminalSummary = undefined;
 	handle.lastActivityAt = now;
 	handle.lastProcessActivityAt = now;
 	handle.attempts = handle.attempts ?? [];
-	handle.attempts.push({ workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now, sessionMode: { kind: "resume", sessionFile } });
+	handle.attempts.push({ workerId: handle.workerId, workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now, sessionMode: { kind: "resume", sessionFile } });
 
 	// Commit the reservation to the new incarnation's pid so single-activation
 	// liveness tracks the actual `pi` process; store the epoch for release on exit.

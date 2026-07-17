@@ -40,24 +40,38 @@ function makeHarness(opts: {
 	execResponder?: (cmd: string, args: string[]) => Promise<{ stdout?: string; stderr?: string; code?: number; killed?: boolean }>;
 } = {}) {
 	const appended: Array<{ customType: string; data: unknown }> = [];
+	const entries = [
+		{ type: "message", id: "assistant-1", parentId: null, timestamp: new Date().toISOString(), message: { role: "assistant", content: [] } },
+	];
 	const fakePi = {
-		appendEntry: (customType: string, data: unknown) => { appended.push({ customType, data }); },
+		appendEntry: (customType: string, data: unknown) => {
+			appended.push({ customType, data });
+			entries.push({ type: "custom", id: `custom-${entries.length}`, parentId: entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), customType, data } as any);
+		},
 		exec: opts.execResponder ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
 	};
 	const leader = new TeamLeader(fakePi as any);
 	const leaderAny = leader as any;
-	leaderAny.ctx = {
+	const sessionManager = {
+		getSessionId: () => "destruction-session",
+		getSessionFile: () => "/tmp/destruction-session.jsonl",
+		getEntries: () => entries,
+		getBranch: () => entries,
+		getHeader: () => ({ id: "destruction-session" }),
+	};
+	const ctx = {
 		cwd: opts.cwd ?? "/tmp",
 		ui: { setWidget: () => {} },
-		sessionManager: { getBranch: () => [] },
+		sessionManager,
 	};
-	leaderAny.stateHydrated = true;
+	leader.restoreState(ctx as any);
 	return { leader: leaderAny, appended };
 }
 
 function makeWorker(name: string, pid: number, overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 	const now = Date.now();
 	return {
+		workerId: `worker-${name}`,
 		workerInstanceId: `inst-${name}`,
 		name,
 		pid,

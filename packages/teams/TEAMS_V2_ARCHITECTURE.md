@@ -1,416 +1,150 @@
-# Teams v2 architecture plan
+# Teams session-native lifecycle architecture
 
-Status: draft planning doc for `pe-0umh`
+Teams derives orchestration state from the coordinator's Pi session. This document describes the production v4 kernel.
 
-## Why this exists
+## Canonical store
 
-Teams v1 accumulated real fixes for lifecycle correctness:
-- explicit `team_finish`
-- `warning` terminal state
-- session bloat reduction
-- lease-based coordinator liveness
-- attempt-aware crash reporting
+The coordinator Pi session JSONL is the only lifecycle store.
 
-But the human wants two deeper problems solved at the architecture level:
+- `teams-lifecycle-fact-v4` entries contain session-global lifecycle facts.
+- `teams-lifecycle-ack-v1` entries record branch-local notification delivery.
+- `teams-lifecycle-migration-v1` records the one-time legacy import.
+- Runtime handles, widgets, mesh routes, ticket fields, and worker-session records are projections or transport evidence. They are never lifecycle authority.
+- Teams does not maintain a SQLite database, sidecar journal, snapshot checkpoint, or writer lock.
 
-1. workers should not need raw peer discovery to find their coordinator
-2. session-to-session / coordinator-to-worker messaging must be reliable, explicit, and diagnosable
-
-This doc defines the target architecture before any rewrite.
-
----
-
-## Non-negotiables
-
-These are contract requirements, not optional design preferences.
-
-### Worker lifecycle
-- explicit terminal state is authoritative
-- `team_finish(done)` = success
-- `team_finish(quit)` = intentional non-success
-- ambiguous exit after real work = `warning`
-- startup / provider / init failure = `failed`
-- `session_shutdown` never mutates ticket outcome
-- diagnostics must preserve per-attempt truth
-
-### Coordination
-- workers do not use `mesh_peers` in the normal path
-- workers do not invent transport envelopes ad hoc
-- reload must not create duplicate leader ownership or ghost workers
-- the leader is the only lifecycle reducer
-
-### Session model
-- worker session mode is explicit: `fresh`, `fork`, or `resume`
-- session mode is persisted and never re-guessed heuristically
-- `fork` is preferred for normal delegated work
-
-### Messaging
-- transport receipt and agent processing are separate states
-- direct tells must be diagnosable as: sent, delivered, visible, handled
-- busy sessions must support show-now / process-later semantics
-
----
-
-## The core design shift
-
-Mesh is a transport.
-
-It is **not** the user-facing protocol.
-
-Teams v2 should be a protocol-driven orchestration system that happens to use mesh underneath.
-
-That means:
-- no worker sees raw peer discovery in the normal path
-- no worker decides between `mesh_tell` and `mesh_ask`
-- no lifecycle state is derived from widget snapshots, tickets, or mesh payloads directly
-
-Instead:
-- the coordinator injects a runtime envelope at spawn time
-- workers use only `team_*` tools
-- the leader reduces typed facts into canonical worker state
-
----
+A session must be persisted and must already contain an assistant message before Teams can append lifecycle truth. Delegation in `--no-session` mode, or during Pi's pre-first-assistant buffering window, is refused before any process or worktree side effect.
 
 ## Identities
 
-We need stable identities with explicit epochs.
+An attempt is identified by the tuple:
 
-```ts
-type TeamId = string
-
-type LeaderEpoch = string
-
-type WorkerId = string
-
-type AttemptId = string
+```text
+(coordinatorSessionId, teamId, workerId, attemptId)
 ```
 
-### Meaning
-- `teamId`: stable logical team run
-- `leaderEpoch`: specific leader ownership instance; changes on reload / restart
-- `workerId`: stable logical worker
-- `attemptId`: one process attempt for one worker
-
-This lets us distinguish:
-- same worker, new attempt
-- same team, new leader
-- stale leader vs current leader
-
----
-
-## Runtime envelope injected at spawn
-
-Every worker is born with a fully specified runtime envelope.
-
-```ts
-type WorkerRuntimeEnvelope = {
-  protocolVersion: 1
-  teamId: TeamId
-  leaderEpoch: LeaderEpoch
-  workerId: WorkerId
-  attemptId: AttemptId
-  coordinatorSessionId: string
-  coordinatorRoute: {
-    kind: 'direct-session'
-    sessionId: string
-  }
-  leasePath: string
-  sessionMode:
-    | { kind: 'fresh' }
-    | { kind: 'fork'; parentSessionFile: string; parentLeafId: string }
-    | { kind: 'resume'; sessionFile: string }
-}
-```
-
-### Consequences
-- workers never discover the coordinator dynamically
-- workers never need the peer list for normal operation
-- reload and recovery have explicit reattachment metadata
-
----
-
-## Session strategy
-
-### Default modes
-- normal delegated workers: `fork`
-- isolated utility workers: `fresh`
-- retry / recovery attempts: `resume`
-
-### Why `fork`
-It is stronger than prompt-summary injection because it preserves:
-- the real branch point
-- the real message history
-- prior tool evidence and decisions
-- less prompt drift
-
-### Rule
-The session mode is part of worker state and attempt state. It is not recomputed from current circumstances.
-
----
-
-## Source-of-truth boundaries
-
-| Component | Responsibility |
-|---|---|
-| worker session file | local execution truth |
-| leader runtime store | canonical orchestration truth |
-| mesh | transient transport only |
-| mai ticket | workflow artifact only |
-| widget | projection only |
-| worktree | filesystem isolation only |
-
-This means:
-- mesh messages are facts, not state
-- tickets are not lifecycle truth
-- widget snapshots are never lifecycle truth
-- `session_shutdown` is never ticket outcome logic
-
----
-
-## Attempts are first-class
-
-```ts
-type WorkerAttempt = {
-  attemptId: AttemptId
-  workerId: WorkerId
-  leaderEpoch: LeaderEpoch
-  pid?: number
-  sessionDir: string
-  sessionFile?: string
-  startedAt: number
-  endedAt?: number
-  exitCode?: number | null
-  spawnError?: string
-  facts: WorkerFact[]
-}
-```
-
-```ts
-type WorkerRecord = {
-  workerId: WorkerId
-  desiredState: 'running' | 'stopped'
-  currentAttemptId?: AttemptId
-  attempts: WorkerAttempt[]
-  lifecycle: WorkerLifecycleState
-}
-```
-
-No respawn is allowed to overwrite the previous attempt’s evidence.
-
----
-
-## Worker fact model
-
-The reducer consumes facts.
-
-```ts
-type WorkerFact =
-  | { type: 'spawn_requested'; at: number }
-  | { type: 'spawn_started'; at: number; pid?: number }
-  | { type: 'session_detected'; at: number; sessionFile: string }
-  | { type: 'worker_hello'; at: number }
-  | { type: 'comment_posted'; at: number; text: string }
-  | { type: 'finish_done'; at: number; summary: string }
-  | { type: 'finish_quit'; at: number; summary: string }
-  | { type: 'process_exit'; at: number; exitCode: number | null }
-  | { type: 'lease_stale'; at: number }
-  | { type: 'leader_shutdown'; at: number }
-  | { type: 'resume_attached'; at: number }
-```
-
-The worker lifecycle is reduced from these facts only.
-
----
-
-## Lifecycle states
-
-```ts
-type WorkerLifecycleState =
-  | 'created'
-  | 'spawning'
-  | 'running'
-  | 'finishing'
-  | 'done'
-  | 'warning'
-  | 'failed'
-  | 'killed'
-  | 'orphaned'
-  | 'resumable'
-```
-
-### Rules
-- only the leader reducer emits lifecycle transitions
-- mesh listeners, session readers, and ticket adapters only emit raw facts
-- result classification never depends primarily on “produced output” heuristics
-
----
-
-## Mesh v2 protocol
-
-Mesh needs explicit envelopes and receipt states.
-
-```ts
-type TeamEnvelope = {
-  version: 1
-  teamId: TeamId
-  leaderEpoch: LeaderEpoch
-  workerId?: WorkerId
-  attemptId?: AttemptId
-  from: 'leader' | 'worker'
-  to: 'leader' | 'worker'
-  seq: number
-  correlationId?: string
-  requiresAck?: boolean
-  sentAt: number
-  type:
-    | 'worker.hello'
-    | 'worker.comment'
-    | 'worker.finish'
-    | 'worker.heartbeat'
-    | 'leader.ack'
-    | 'leader.cancel'
-    | 'leader.resume'
-    | 'leader.shutdown'
-  payload: unknown
-}
-```
-
-### Explicit semantics per message type
-Every protocol message must define:
-- delivery mode: fire-and-forget vs request/reply
-- ack requirement
-- timeout
-- retry behavior
-- idempotency key
-- ordering guarantee expectations
-
----
-
-## Direct mesh reliability requirements
-
-This is needed for both Teams and general session-to-session usage.
-
-### Delivery states
-For direct tells, we need to distinguish:
-- `sent`: sender submitted to local mesh runtime
-- `delivered`: target session extension received it
-- `visible`: target session surfaced it to UI/session log
-- `handled`: app-level acknowledgment, optional
-
-### Busy-session behavior
-We need a first-class delivery mode equivalent to:
-- show now
-- do not interrupt current run
-- process on next safe turn
-
-Current `followUp` is insufficient because it hides delivery behind long tool-heavy runs.
-
----
-
-## Teams worker-facing tool surface
-
-Workers should only use:
-- `team_comment`
-- `team_finish`
-- `team_request_help` (optional)
-
-Normal workers should never need:
-- `mesh_peers`
-- raw `mesh_tell`
-- raw `mesh_ask`
-
-Mesh should be internal to the runtime envelope and protocol adapter.
-
----
-
-## Storage model
-
-### Persisted
-- team record
-- leader epoch
-- worker records
-- attempt records
-- stable routing metadata
-- selected session mode
-
-### Volatile
-- widget-only timestamps
-- transient display summaries
-- current tool labels
-- last rendered activity strings
-
-This preserves fast restore and avoids state spam.
-
----
-
-## Reload behavior
-
-Reload means:
-1. new leader epoch
-2. old listeners unsubscribed exactly once
-3. persisted team state reloaded
-4. active workers reconcile against current epoch
-5. orphan / resumable / dead classification computed from facts, not guessed
-
-Workers should be able to distinguish:
-- stale leader, wait briefly
-- new leader epoch, reattach
-- no valid leader lease, self-terminate or enter orphan handling
-
----
-
-## Migration strategy
-
-Recommended path: greenfield kernel plus compatibility shell.
-
-### Phase 1
-Build a new kernel under a separate namespace:
-- protocol
-- runtime store
-- reducer
-- spawn/runtime envelope
-- worker tool adapter
-
-### Phase 2
-Adapt current surfaces:
-- `teams` tool API
-- widget
-- ticket bridge
-- worktree management
-
-### Phase 3
-Run v1 and v2 behind a feature flag.
-
-### Phase 4
-Stress/fault test both, then migrate default.
-
----
-
-## Test matrix
-
-Minimum fault matrix for implementation:
-- parallel spawn under provider quota failures
-- leader reload mid-run
-- stale lease / coordinator death
-- orphan adoption / resumable recovery
-- duplicate delivery
-- out-of-order delivery
-- missing ack
-- session file appears late
-- first attempt contains real stderr, retry attempt empty
-- forked session correctness
-- busy session receives direct tell and surfaces it immediately
-
----
-
-## Immediate short-term fix guidance
-
-Even before Teams v2, mesh should change direct tell semantics for busy sessions so they are visible immediately instead of disappearing behind `followUp`-only delivery.
-
-That short-term fix does not replace the need for:
-- protocol envelopes
-- receipt states
-- ack/retry semantics
-- coordinator-addressable workers
-
-It only removes the worst visible failure mode while the bigger rewrite is planned.
+- `coordinatorSessionId` scopes facts to one Pi session.
+- `teamId` is deterministic for that coordinator session.
+- `workerId` is the stable logical worker identity.
+- `attemptId` identifies one process incarnation. Every spawn, retry, and persistent resume gets a new attempt.
+- A worker's display name is presentation only. It is never an idempotency key.
+- `leaderEpoch` identifies a runtime incarnation, not lifecycle truth. A new epoch adopts the session facts.
+
+PID liveness is checked with the recorded process birth observation. A live, reused PID is not accepted as the original worker.
+
+## Fact stream
+
+The authoritative entry type is `teams-lifecycle-fact-v4`. Facts include the full attempt identity, a deterministic `eventId`, a kind, authoritative `payload`, and optional `diagnostics`.
+
+Important kinds are:
+
+- team and spawn: `team_created`, `spawn_requested`, `process_started`
+- liveness: `process_exited`, `stuck`
+- declarations: `declaration_done`, `declaration_quit`
+- assessments: `assessment_missing_finish`, `assessment_startup_failure`, `assessment_crash`, `assessment_killed`
+- integrity: `protocol_violation`, `outcome_corrected`
+- cleanup/effects: `cleanup_requested`, `cleanup_completed`, `cleanup_failed`, `effect_requested`, `effect_completed`, `effect_failed`
+
+`team_finish(done|quit)` is the only declared task outcome. Process exit is an independent liveness fact. Exit code zero, ticket state, a note, or ordinary session shutdown cannot fabricate a successful declaration.
+
+The first valid declaration for an attempt is immutable. An exact retry is idempotent. A different declaration, or a reused event ID with a different authoritative identity, produces a protocol violation and cannot overwrite the first declaration.
+
+## Deterministic identity
+
+All fact conflicts and effect IDs use canonical JSON:
+
+- object keys are sorted recursively;
+- only finite JSON values are accepted;
+- `occurredAt`, `sourceLeaderEpoch`, Pi entry IDs, and `diagnostics` are excluded from logical identity;
+- the authoritative tuple is schema, attempt identity, kind, and payload;
+- SHA-256 IDs use the `teams:event:v4:` or `teams:effect:v1:` namespace.
+
+Consequently, a retry with reordered keys, a different observation time, or different diagnostics remains an exact duplicate. Changing authoritative payload does not.
+
+## Reducer and runtime projection
+
+`reduceLifecycleFacts` is a pure physical-order fold. Restore calls `SessionManager.getEntries()` once and folds facts from every leaf. It never restores canonical state from only the selected branch.
+
+`LifecycleRuntimeStore` holds the resulting in-memory projection. Successful appends are folded incrementally; the normal-turn path does not rescan all lifecycle facts. The projection contains:
+
+- logical workers and their current attempt;
+- every historical attempt;
+- actionable lifecycle events;
+- effect request/completion state;
+- integrity violations.
+
+Roster cleanup only removes runtime presentation handles. `teams.history`, attempt views, and pending lifecycle notifications remain available from the projection.
+
+## Worker finish protocol
+
+A worker cannot report completion only over transport.
+
+1. The worker verifies its Pi session is persisted and contains an assistant message.
+2. It appends `teams-worker-finish-pending-v1` to its own session with the full canonical attempt identity and deterministic event ID.
+3. It sends `worker.finish` over mesh and retries the same event until the leader answers.
+4. The leader validates the attempt and event ID, appends the coordinator fact, then sends `leader.ack(..., "persisted")`.
+5. Only after that acknowledgement does the worker append its local completion record and let `team_finish` return successfully.
+
+If the acknowledgement is lost, the same declaration is resent and re-acknowledged idempotently. If the leader is unavailable and the worker exits, restore reads the recorded worker session and imports the pending declaration. When a provisional missing-finish assessment already exists, the leader appends one deterministic `outcome_corrected` event.
+
+## Delivery outbox
+
+Actionable facts form a durable notification outbox. Each rendered event carries `[teams-event:<eventId>]`.
+
+- Pending events are actionable projection events minus acknowledgements visible on the active branch.
+- One delivery contains at most 20 events and 12,000 characters.
+- Background events trigger a supported follow-up turn; `before_agent_start` repairs missed wakes.
+- Rewinding before an acknowledgement makes the event pending on that branch again without changing canonical truth.
+
+A delivery acknowledgement is appended only after correlation proves that the marker reached the terminal successful provider request:
+
+1. `context` observes candidate markers.
+2. `before_provider_request` records the actual request payload markers and an ordinal.
+3. `after_provider_response` records HTTP status.
+4. assistant `message_end` records the paired stop reason.
+5. `agent_end` acknowledges only `delivered batch ∩ markers in the last successful terminal request`.
+
+429-only runs, network failures, streaming errors, aborted runs, and markers stripped before the final request are not acknowledged. A later successful request can acknowledge only the markers it actually contains.
+
+## Durable effects
+
+Effects are allowed only after their deterministic request fact has been appended. Completion or failure is also appended. Startup reconciliation finds requested-without-completion effects and executes the same effect ID again.
+
+The ledger covers worktree creation, cleanup, ticket close, and process termination. Cleanup commits include a `Teams-Effect-Id` trailer so a restart after the Git commit but before the completion fact can reconcile without creating a duplicate commit.
+
+Cleanup eligibility begins at `process_exited`. The settled declaration or assessment selects preservation policy; it does not decide whether the process is dead. Protocol-violating attempts are blocked from unsafe effects.
+
+## Sessions, branches, and forks
+
+Lifecycle facts are session-global within one coordinator session tree. Delivery acknowledgements are branch-local.
+
+Forked, cloned/branched, and cross-directory child sessions have a new session ID and a header `parentSession`. Copied parent facts are ignored because their coordinator session identity differs. Legacy migration is also skipped in a child session, so a child cannot reinterpret copied parent snapshots as its own state.
+
+`session_shutdown` releases timers, subscriptions, mesh listeners, and other runtime resources only. It does not kill workers or mutate task outcome.
+
+## Legacy migration
+
+On the first eligible restore, Teams scans every physical session entry and unions all legacy `teams-leader-state` snapshots, including embedded v2 reducer attempts. It imports explicit declarations, process evidence, and historical attempts. Dead attempts without an explicit declaration become conservative legacy-ambiguous warnings; they never become done.
+
+The import uses deterministic v4 fact IDs and appends one migration marker. Subsequent restores do not migrate again. Parent-derived child sessions skip migration entirely.
+
+Historical snapshot entries remain in append-only session history but have no runtime authority after import.
+
+## Public history and subscriptions
+
+- `teams.list()` shows the current logical roster.
+- `teams.view(name)` addresses the current attempt for a display name.
+- `teams.view({ attemptId })` reads an exact historical attempt; `teams.view(name)` resolves the logical worker’s current attempt.
+- `teams.history({ name?, attemptId?, status?, start?, end? })` queries canonical attempt history.
+- `teams.on(...)` binds a name subscription to the current attempt at creation, or to the first future matching attempt. It never replays an older same-name attempt into a new binding.
+
+Terminal subscription replay comes from reducer history, not a volatile notification ledger.
+
+## Complexity and performance
+
+- restore: `O(total session entries + accepted lifecycle facts)`
+- incremental fact append/fold: amortized `O(1)`
+- branch acknowledgement scan: `O(active branch depth)`
+- delivery construction: bounded by pending actionable events and delivery caps
+- persisted storage: one normalized fact per transition; no growing whole-state snapshots
+
+The test suite includes 1,000-attempt/20,000-fact restore and 10,000-entry branch scans to protect these shapes.

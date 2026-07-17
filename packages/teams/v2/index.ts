@@ -3,3 +3,7 @@ export * from "./state.ts";
 export * from "./reducer.ts";
 export * from "./mesh-adapter.ts";
 export * from "./runtime-store.ts";
+export * from "./session-facts.ts";
+export * from "./delivery.ts";
+export * from "./effects.ts";
+export * from "./legacy-migration.ts";

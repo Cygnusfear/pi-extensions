@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { parseSessionEntries, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMaiBin } from "../shared/src/mai-binary.js";
 import type { ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
@@ -17,6 +17,7 @@ import {
   evaluateIdleState,
   formatRuntimeSummary,
   isReusedWorkerPid,
+  sampleWorkerProcessSnapshot,
   sampleWorkerProcessSnapshotAsync,
 } from "./activity.js";
 import {
@@ -40,9 +41,15 @@ import {
   STUCK_WARNING_COOLDOWN_MS,
 } from "./types.js";
 import { createTeamsWidget } from "./widget.js";
-import type { TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload } from "./v2/protocol.ts";
-import type { TeamRecord } from "./v2/state.ts";
-import { appendFact as applyV2Fact, createTeamRecord, upsertWorker as upsertV2Worker } from "./v2/runtime-store.ts";
+import type { LeaderAckPayload, TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload } from "./v2/protocol.ts";
+import type { AttemptIdentity, AttemptState, JsonValue, LifecycleFact, WorkerLifecycleState } from "./v2/state.ts";
+import { attemptStatus } from "./v2/state.ts";
+import { LifecycleRuntimeStore } from "./v2/runtime-store.ts";
+import { SessionFactWriter, createDeclarationEventId, createEffectId, createLeaderEventId, createRootEventId, sha256Id, workerFinishPendingForAttempt } from "./v2/session-facts.ts";
+import { buildPendingDelivery, ProviderDeliveryTracker, type DeliveryBatch } from "./v2/delivery.ts";
+import { runLegacyMigration } from "./v2/legacy-migration.ts";
+import { executeDurableEffect, pendingEffects } from "./v2/effects.ts";
+import { createLeaderPersistedAckEnvelope } from "./v2/mesh-adapter.ts";
 import { createWorktree, resolveGitToplevel, workerWorktreePath } from "./worktree.js";
 
 /** Entry types that represent real agent work (talking, tool use). */
@@ -75,65 +82,6 @@ interface WorkerExitAssessment {
   reason?: string;
 }
 
-interface PersistedWorkerState {
-  workerInstanceId: string;
-  attempts?: WorkerAttempt[];
-  name: string;
-  pid: number;
-  ticketId: string;
-  ticketStatus?: string;
-  lastNote?: string;
-  sessionDir: string;
-  sessionFile: string;
-  worktreePath: string | null;
-  model?: string;
-  hasTools?: boolean;
-  status: WorkerHandle["status"] | "idle";
-  spawnedAt: number;
-  sessionMode?: import("./v2/protocol.ts").WorkerSessionMode;
-  freeform?: boolean;
-  nickname?: string;
-  durableMeshId?: string;
-  routeState?: WorkerHandle["routeState"];
-  terminalStatus?: "done" | "quit";
-  terminalSummary?: string;
-  lastActivityAt?: number;
-  lastOutputAt?: number;
-  lastSeenCommentCount?: number;
-  doneAt?: number;
-  graceAt?: number;
-  resumableUntilAt?: number;
-  killedAt?: number;
-}
-
-interface LeaderStateSnapshot {
-  version: number;
-  v2TeamId?: string | null;
-  v2TeamRecord?: TeamRecord | null;
-  workers: Record<string, PersistedWorkerState>;
-  terminalEvents?: TerminalEventLedgerEntry[];
-  savedAt: number;
-  clearedAt?: number;
-}
-
-type TerminalPollEvent = Extract<PollEvent, { type: "completed" | "turn_finished" | "warning" | "failed" }>;
-
-/** A compact, replayable terminal event retained after widget cleanup/reload.
- * It deliberately stores data, not callbacks: callers must re-arm after a reload. */
-interface TerminalEventLedgerEntry {
-  recordedAt: number;
-  event: TerminalPollEvent;
-}
-
-const terminalEventTtlRaw = Number(process.env.PI_TEAMS_TERMINAL_EVENT_TTL_MS ?? `${24 * 60 * 60_000}`);
-const TERMINAL_EVENT_TTL_MS = Number.isFinite(terminalEventTtlRaw) && terminalEventTtlRaw >= 60_000
-  ? Math.floor(terminalEventTtlRaw)
-  : 24 * 60 * 60_000;
-const terminalEventMaxRaw = Number(process.env.PI_TEAMS_TERMINAL_EVENT_MAX ?? "100");
-const TERMINAL_EVENT_MAX = Number.isFinite(terminalEventMaxRaw) && terminalEventMaxRaw >= 1
-  ? Math.floor(terminalEventMaxRaw)
-  : 100;
-const TERMINAL_EVENT_TYPES = new Set<PollEvent["type"]>(["completed", "turn_finished", "warning", "failed"]);
 
 /**
  * Derive a short human label from a session entry.
@@ -247,16 +195,6 @@ export function assessWorkerExit(
   } else if (explicitTerminal === "quit") {
     classification = "warning";
     reason = worker.terminalSummary || lastNote || "worker quit";
-  } else if (worker.freeform && cleanExit && outputMeaningful) {
-    // A freeform worker that ended a turn cleanly AND produced meaningful output is
-    // resumable idle. Requiring outputMeaningful keeps an empty/aborted FIRST turn
-    // (no content, no tool calls — a stream flake) from being misclassified as a
-    // useful turn; it must fall through to the !outputMeaningful → failure branch so
-    // the bounded recovery block can retry it.
-    classification = "turn_finished";
-  } else if (!forcedExit && ticketClosed && (lastNote.startsWith("DONE:") || cleanExit)) {
-    // Legacy compatibility for workers that still closed the ticket directly.
-    classification = "success";
   } else if (forcedExit) {
     classification = "failure";
     reason = lastNote;
@@ -621,6 +559,7 @@ function getBestAttempt(worker: WorkerHandle): WorkerAttempt {
   const attempts = worker.attempts ?? [];
   if (attempts.length === 0) {
     return {
+      workerId: worker.workerId,
       workerInstanceId: worker.workerInstanceId,
       pid: worker.pid,
       sessionDir: worker.sessionDir,
@@ -716,6 +655,7 @@ function isWorkerToLeaderEnvelope(payload: unknown): payload is TeamEnvelope<unk
 const FINISH_REAP_GRACE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_GRACE_MS ?? "60000");
 /** Settle time between SIGTERM → SIGKILL → explicit exit-pipeline drive. */
 const FINISH_REAP_KILL_SETTLE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_SETTLE_MS ?? "5000");
+export const FINISH_EXIT_SETTLE_MS = 1500;
 
 function isTerminalV2Lifecycle(lifecycle: import("./v2/state.ts").WorkerLifecycleState | null): boolean {
 	return lifecycle === "done"
@@ -826,12 +766,13 @@ export class TeamLeader {
       return mode.kind === "fork" ? `fork:${mode.parentLeafId}` : mode.kind;
     },
   );
-  private notifiedTerminal = new Set<string>();
-  /** workerInstanceIds whose exit has been claimed by handleWorkerExit (dedupe
-   *  across child-exit event, finish-reap, and activity-monitor observation). */
-  private exitClaimedInstances = new Set<string>();
-  private terminalEventLedger: TerminalEventLedgerEntry[] = [];
-  private notifyQueue: Array<{ msg: string; triggerTurn: boolean }> = [];
+  private lifecycleStore: LifecycleRuntimeStore | null = null;
+  private factWriter: SessionFactWriter | null = null;
+  private readonly deliveryTracker = new ProviderDeliveryTracker();
+  private activeDelivery: DeliveryBatch | null = null;
+  private teamId: string | null = null;
+  private leaderAckSeq = 0;
+  private dispatchedEventIds = new Set<string>();
   /** External subscribers to the PollEvent stream (teams.on).
    *  Listeners receive a wrapped TeamsEvent — they can call preventDefault()
    *  to suppress the leader's default notifyLLM batch, or stopPropagation()
@@ -840,9 +781,6 @@ export class TeamLeader {
   /** Per-worker disposal callbacks — subscriptions register these to clean up
    *  when the target worker is killed, avoiding stale timeout spam. */
   private workerDisposalCallbacks = new Map<string, Set<() => void>>();
-  private notifyDraining = false;
-  private stateHydrated = false;
-  private lastSavedStateSignature: string | null = null;
   showComments = true;
 
   // Mesh — shared instance from pi-mesh extension, set via setMesh().
@@ -857,8 +795,6 @@ export class TeamLeader {
     peers: () => Array<{ id: string; sessionId?: string; nickname?: string; name?: string; meshId?: string }>;
     self: () => { id: string };
   } | null = null;
-  private v2TeamId: string | null = null;
-  private v2TeamRecord: TeamRecord | null = null;
 	private readonly leaderEpoch = crypto.randomUUID();
 	private meshDelivered = new Map<string, Set<string>>(); // workerName → set of comment texts already delivered via mesh
 	private meshEventDedup = new Map<string, number>(); // transport event key → first-seen timestamp
@@ -868,7 +804,6 @@ export class TeamLeader {
   private leaseTimer: ReturnType<typeof setInterval> | null = null;
   private meshMessageHandler?: MessageHandler;
 
-  private static readonly STATE_ENTRY_TYPE = "teams-leader-state";
   private static readonly STALE_RESTORE_PRUNE_MS = 60_000;
 
   constructor(pi: ExtensionAPI) {
@@ -913,274 +848,229 @@ export class TeamLeader {
     }
   }
 
-  private buildPersistedWorkers(): Record<string, PersistedWorkerState> {
-    const workers: Record<string, PersistedWorkerState> = {};
-    for (const [name, w] of this.workers) {
-      // Persist only lifecycle state needed for reload recovery.
-      // Do NOT persist volatile poll/widget fields like lastActivityAt,
-      // lastOutputAt, ticketStatus, lastNote, or comment counters — those change
-      // constantly and were bloating sessions with near-duplicate snapshots.
-      workers[name] = {
-        workerInstanceId: w.workerInstanceId,
-        attempts: w.attempts,
-        name: w.name,
-        pid: w.pid,
-        ticketId: w.ticketId,
-        sessionDir: w.sessionDir,
-        sessionFile: w.sessionFile,
-        worktreePath: w.worktreePath,
-        model: w.model,
-        hasTools: w.hasTools,
-        status: w.status,
-        spawnedAt: w.spawnedAt,
-        sessionMode: w.attempts?.at(-1)?.sessionMode,
-        freeform: w.freeform,
-        nickname: w.nickname,
-        durableMeshId: w.durableMeshId,
-        routeState: w.routeState,
-        terminalStatus: w.terminalStatus,
-        terminalSummary: w.terminalSummary,
-        doneAt: w.doneAt,
-        graceAt: w.graceAt,
-        resumableUntilAt: w.resumableUntilAt,
-        killedAt: w.killedAt,
-      };
-    }
-    return workers;
-  }
-
-  private buildStateSignature(workers: Record<string, PersistedWorkerState>, cleared = false): string {
-    return JSON.stringify({
-      version: 3,
-      v2TeamId: this.v2TeamId,
-      v2TeamRecord: this.v2TeamRecord,
-      cleared,
-      workers,
-      terminalEvents: this.terminalEventLedger,
-    });
-  }
-
-  private persistStateIfHydrated(options?: { cleared?: boolean }) {
-    if (!this.stateHydrated) return;
-    this.saveState(options);
-  }
-
-  /**
-   * Snapshot current worker state to the session JSONL.
-   * This is reload-recovery state only, not a general branch/fork state store.
-   * Empty state is written only on explicit clears to avoid wiping good state during reload churn.
-   *
-   * Dedupe identical snapshots. This method may be called frequently from UI
-   * update paths, but we only persist when lifecycle state actually changed.
-   */
-  private saveState(options?: { cleared?: boolean }) {
-    try {
-      const workers = this.buildPersistedWorkers();
-      if (Object.keys(workers).length === 0 && !options?.cleared) return;
-
-      const signature = this.buildStateSignature(workers, Boolean(options?.cleared));
-      if (signature === this.lastSavedStateSignature) return;
-      this.lastSavedStateSignature = signature;
-
-      const snapshot: LeaderStateSnapshot = {
-        version: 3,
-          v2TeamId: this.v2TeamId,
-        v2TeamRecord: this.v2TeamRecord,
-        workers,
-        terminalEvents: this.terminalEventLedger,
-        savedAt: Date.now(),
-        ...(options?.cleared ? { clearedAt: Date.now() } : {}),
-      };
-      this.pi.appendEntry(TeamLeader.STATE_ENTRY_TYPE, snapshot);
-    } catch {
-      // best effort
-    }
-  }
-
-  private static readonly TERMINAL_RESTORE_TTL_MS = 30 * 60_000; // 30 minutes
-
-  private deriveRestoredStatus(saved: PersistedWorkerState, now: number): WorkerHandle["status"] | null {
-    if (saved.killedAt) return null;
-
-    // Prune terminal workers (done/warning/failed) older than TTL — they're stale
-    // and will never be interacted with again. Prevents accumulation across reloads.
-    const terminalCutoff = now - TeamLeader.TERMINAL_RESTORE_TTL_MS;
-    if (saved.terminalStatus || saved.status === "done" || saved.status === "warning" || saved.status === "failed") {
-      const terminalAt = saved.doneAt ?? saved.lastActivityAt ?? saved.spawnedAt;
-      if (terminalAt && terminalAt < terminalCutoff) return null;
-    }
-
-    // Explicit terminal, persisted from the worker's team_finish (v1d — replaces the retired
-    // heartbeat read from the worker's session file on restore).
-    if (saved.terminalStatus === "done") {
-      return saved.freeform
-        ? (saved.graceAt && now >= saved.graceAt ? "grace" : "done")
-        : "done";
-    }
-    if (saved.terminalStatus === "quit") return "warning";
-
-    const legacyStatus = saved.status === "idle" ? "grace" : saved.status;
-
-    if (saved.freeform) {
-      if (saved.resumableUntilAt && now > saved.resumableUntilAt) return null;
-      if (saved.doneAt) {
-        if (saved.graceAt && now >= saved.graceAt) return "grace";
-        return "done";
-      }
-      if (legacyStatus === "grace") return "grace";
-    }
-
-    if ((legacyStatus === "running" || legacyStatus === "spawning") && !isProcessAlive(saved.pid)) {
-      return saved.freeform ? (saved.graceAt && now >= saved.graceAt ? "grace" : "done") : "done";
-    }
-
-    return legacyStatus as WorkerHandle["status"];
-  }
-
-  private deriveRestoredRouteState(
-    saved: PersistedWorkerState,
-    status: WorkerHandle["status"],
-  ): WorkerHandle["routeState"] {
-    if (status === "warning" || status === "failed" || status === "killed") return "dead";
-    if (saved.freeform && (status === "done" || status === "grace")) return "resumable";
-    if ((status === "running" || status === "spawning") && saved.durableMeshId) return "linked";
-    if (status === "running" || status === "spawning") return "pending";
-    return "dead";
+  private projectedHandle(attempt: AttemptState): WorkerHandle {
+    const workerState = this.lifecycleStore?.projection().workers.get(attempt.workerId);
+    const status = attempt.declaration?.kind === "done"
+      ? (attempt.persistent && attempt.process.phase === "exited" ? "grace" : "done")
+      : attempt.declaration?.kind === "quit"
+        ? "warning"
+        : attempt.assessment?.kind === "killed"
+          ? "killed"
+          : attempt.assessment
+            ? (attempt.assessment.kind === "missing_finish" || attempt.assessment.kind === "legacy_ambiguous" ? "warning" : "failed")
+            : attempt.process.phase === "running"
+              ? "running"
+              : "spawning";
+    const spawnedAt = attempt.process.birth?.startedAt ?? 0;
+    const workerSessionFile = attempt.process.workerSessionFile ?? "";
+    const lastStuck = [...(this.lifecycleStore?.projection().actionableEvents.values() ?? [])]
+      .filter((event) => event.attemptId === attempt.attemptId && event.type === "stuck")
+      .at(-1);
+    return {
+      workerId: attempt.workerId,
+      workerInstanceId: attempt.attemptId,
+      name: attempt.name,
+      pid: attempt.process.pid ?? 0,
+      ticketId: attempt.ticketId,
+      ticketStatus: attempt.declaration || attempt.assessment ? "closed" : "open",
+      lastNote: attempt.declaration?.summary ?? attempt.assessment?.reason,
+      sessionDir: attempt.process.sessionDir ?? "",
+      sessionFile: workerSessionFile,
+      worktreePath: attempt.worktreePath,
+      model: attempt.model,
+      hasTools: attempt.hasTools,
+      status,
+      spawnedAt,
+      lastActivityAt: spawnedAt,
+      lastProcessActivityAt: spawnedAt,
+      lastOutputAt: spawnedAt,
+      hasActiveChildProcess: false,
+      activeChildProcessCount: 0,
+      lastSeenCommentCount: 0,
+      lastStuckWarningAt: lastStuck?.occurredAt,
+      routeState: workerState?.route ?? "dead",
+      terminalStatus: attempt.declaration?.kind,
+      terminalSummary: attempt.declaration?.summary,
+      freeform: attempt.persistent,
+      attempts: [{
+        workerId: attempt.workerId,
+        workerInstanceId: attempt.attemptId,
+        pid: attempt.process.pid ?? 0,
+        sessionDir: attempt.process.sessionDir ?? "",
+        sessionFile: workerSessionFile,
+        spawnedAt,
+        sessionMode: attempt.sessionMode,
+        exitCode: attempt.process.exit?.code,
+      }],
+      exitCode: attempt.process.exit?.code,
+      doneAt: attempt.declaration?.at,
+    };
   }
 
   private rearmPersistentLifecycle(workerName: string, worker: WorkerHandle, now = Date.now()) {
-    if (!worker.freeform || !worker.doneAt || !worker.graceAt || !worker.resumableUntilAt) return;
-
+    if (!worker.freeform || !worker.doneAt) return;
+    worker.graceAt ??= worker.doneAt + DONE_GRACE_MS;
+    worker.resumableUntilAt ??= worker.graceAt + RESUMABLE_WINDOW_MS;
     const toGraceMs = Math.max(0, worker.graceAt - now);
     const graceTimer = setTimeout(() => {
       const current = this.workers.get(workerName);
-      if (!current || current.status !== "done") return;
+      if (!current || current.workerInstanceId !== worker.workerInstanceId || current.status !== "done") return;
       current.status = "grace";
+      current.routeState = "resumable";
       this.renderWidget();
-      this.persistStateIfHydrated();
     }, toGraceMs);
     this.trackWorkerTimer(workerName, graceTimer);
-
-    const toExpireMs = Math.max(0, worker.resumableUntilAt - now);
-    const expireTimer = setTimeout(() => {
-      const current = this.workers.get(workerName);
-      if (!current) return;
-      if (current.freeform && current.resumableUntilAt && Date.now() >= current.resumableUntilAt) {
-        // Silent cleanup — coordinator already got turn_finished and can see
-        // the widget. A stale "completed" 2+ minutes later would just confuse it.
-        this.workers.delete(workerName);
-        this.meshDelivered.delete(workerName);
-        this.childProcesses.delete(workerName);
-        this.clearPendingAmbientChat(workerName);
-        this.cancelWorkerTimers(workerName);
-        this.renderWidget();
-        this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
-      }
-    }, toExpireMs);
-    this.trackWorkerTimer(workerName, expireTimer);
   }
 
-  /** Restore worker state from the session JSONL after a reload. */
+  /** Restore canonical lifecycle state from every physical session entry. */
   restoreState(ctx: ExtensionContext) {
+	// A leader instance can observe more than one Pi session over its lifetime.
+	// Detach old child callbacks and timers before rebinding canonical storage so
+	// no late process event can append old-session truth into the new session.
+	for (const child of this.childProcesses.values()) {
+	  child.removeAllListeners("exit");
+	  child.removeAllListeners("error");
+	}
+	this.clearWorkerRuntimeTimers();
+    const entries = ctx.sessionManager.getEntries();
+    const coordinatorSessionId = ctx.sessionManager.getSessionId();
+    this.ctx = ctx;
+    this.workers.clear();
+    this.childProcesses.clear();
+    this.meshDelivered.clear();
+    this.teamId = sha256Id("teams:team:v4:", { coordinatorSessionId });
+    this.factWriter = new SessionFactWriter(this.pi, ctx.sessionManager, entries);
+    this.lifecycleStore = new LifecycleRuntimeStore(coordinatorSessionId, entries);
+    this.teamId = this.lifecycleStore.projection().teamId ?? this.teamId;
+
     try {
-      const branch = ctx.sessionManager.getBranch();
-      let lastState: LeaderStateSnapshot | null = null;
-      for (let i = branch.length - 1; i >= 0; i--) {
-        const entry = branch[i];
-        if (entry.type === "custom" && entry.customType === TeamLeader.STATE_ENTRY_TYPE) {
-          const data = entry.data;
-          if (data && typeof data === "object") {
-            lastState = data as LeaderStateSnapshot;
-            break;
-          }
-        }
-      }
-      if (!lastState) {
-        this.lastSavedStateSignature = null;
-        this.stateHydrated = true;
-        this.renderWidget();
-        return;
-      }
-
-		this.workers.clear();
-		this.childProcesses.clear();
-		this.meshDelivered.clear();
-		this.terminalEventLedger = this.normalizeTerminalEventLedger(lastState.terminalEvents, Date.now());
-		this.v2TeamId = lastState.v2TeamId ?? this.v2TeamId;
-
-		if (lastState.v2TeamRecord?.teamId === this.v2TeamId) {
-			this.v2TeamRecord = structuredClone(lastState.v2TeamRecord);
-		} else if (this.v2TeamId) {
-			this.v2TeamRecord = createTeamRecord(this.v2TeamId, this.leaderEpoch);
-		}
-
-		const now = Date.now();
-      for (const [name, saved] of Object.entries(lastState.workers ?? {})) {
-        const status = this.deriveRestoredStatus(saved, now);
-        if (!status) continue;
-        const routeState = this.deriveRestoredRouteState(saved, status);
-        const restoredAttempts = saved.attempts?.length
-          ? saved.attempts
-          : [{
-              workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
-              pid: saved.pid,
-              sessionDir: saved.sessionDir,
-              sessionFile: saved.sessionFile,
-              spawnedAt: saved.spawnedAt,
-              sessionMode: saved.sessionMode,
-            }];
-
-        const handle: WorkerHandle = {
-          workerInstanceId: saved.workerInstanceId ?? `${saved.name}:${saved.ticketId}:${saved.spawnedAt}`,
-          name: saved.name,
-          pid: saved.pid,
-          ticketId: saved.ticketId,
-          ticketStatus: saved.ticketStatus ?? (status === "done" || status === "grace" || status === "warning" || status === "failed" ? "closed" : "unknown"),
-          lastNote: saved.lastNote,
-          sessionDir: saved.sessionDir,
-          sessionFile: saved.sessionFile,
-          worktreePath: saved.worktreePath,
-          model: saved.model,
-          hasTools: saved.hasTools,
-          status,
-          spawnedAt: saved.spawnedAt,
-          freeform: saved.freeform,
-          nickname: saved.nickname,
-          durableMeshId: saved.durableMeshId,
-          routeState,
-          terminalStatus: saved.terminalStatus,
-          terminalSummary: saved.terminalSummary,
-          lastActivityAt: saved.lastActivityAt ?? now,
-          lastProcessActivityAt: now,
-          lastOutputAt: saved.lastOutputAt,
-          lastSeenCommentCount: saved.lastSeenCommentCount ?? 0,
-          hasActiveChildProcess: false,
-          activeChildProcessCount: 0,
-          attempts: restoredAttempts,
-          doneAt: saved.doneAt,
-          graceAt: saved.graceAt,
-          resumableUntilAt: saved.resumableUntilAt,
-          killedAt: saved.killedAt,
-        };
-        this.workers.set(name, handle);
-        if (!this.v2TeamRecord?.workers[name]) {
-          this.upsertV2WorkerFromHandle(handle);
-          this.seedV2FactsFromRestoredHandle(handle);
-        } else {
-          this.projectV2WorkerRuntime(name);
-        }
-        if (status === "running" || status === "spawning") this.startActivityMonitor(name, handle);
-        if (status === "done" || status === "grace") this.rearmPersistentLifecycle(name, handle, now);
-      }
-
-      this.lastSavedStateSignature = this.buildStateSignature(this.buildPersistedWorkers());
-      this.stateHydrated = true;
-      this.renderWidget();
-    } catch {
-      this.lastSavedStateSignature = null;
-      this.stateHydrated = true;
-      this.renderWidget();
+      runLegacyMigration(
+        this.factWriter,
+        entries,
+        ctx.sessionManager.getHeader(),
+        this.teamId,
+        (fact) => { this.lifecycleStore?.append(fact); },
+        this.leaderEpoch,
+      );
+    } catch (error) {
+      console.error(`[teams] lifecycle migration failed closed: ${error instanceof Error ? error.message : String(error)}`);
     }
+
+    const now = Date.now();
+    const deadOnRestore: WorkerHandle[] = [];
+    const unstartedOnRestore: AttemptState[] = [];
+    const exitedOnRestore = [...this.lifecycleStore.projection().attempts.values()]
+      .filter((attempt) => attempt.process.phase === "exited" && !attempt.declaration);
+    for (const workerState of this.lifecycleStore.projection().workers.values()) {
+      if (!workerState.currentAttemptId) continue;
+      const attempt = this.lifecycleStore.attempt(workerState.currentAttemptId);
+      if (!attempt) continue;
+      const recordedRunning = attempt.process.phase === "running" && Boolean(attempt.process.pid);
+      const processSnapshot = recordedRunning ? sampleWorkerProcessSnapshot(attempt.process.pid!) : null;
+      const pidReused = processSnapshot && attempt.process.birth
+        ? isReusedWorkerPid(processSnapshot, attempt.process.birth.startedAt, now)
+        : false;
+      const activeProcess = Boolean(recordedRunning && processSnapshot?.rootAlive && !pidReused);
+      const resumable = workerState.route === "resumable" && attempt.persistent;
+      if (!activeProcess && !resumable && !recordedRunning) {
+        if (attempt.process.phase === "spawning" && !attempt.assessment && !attempt.declaration) unstartedOnRestore.push(attempt);
+        continue;
+      }
+      const handle = this.projectedHandle(attempt);
+      if (activeProcess) {
+        handle.status = "running";
+        handle.routeState = "pending";
+        this.startActivityMonitor(handle.name, handle);
+      } else if (resumable) {
+        handle.status = "grace";
+        handle.routeState = "resumable";
+        this.rearmPersistentLifecycle(handle.name, handle, now);
+      } else {
+        handle.status = "running";
+        handle.routeState = "pending";
+        deadOnRestore.push(handle);
+      }
+      this.workers.set(handle.name, handle);
+    }
+    this.renderWidget();
+    // Pending worktree creation must settle before an unstarted spawn is
+    // classified and cleaned; otherwise reconciliation could create and remove
+    // the same worktree concurrently.
+    void this.reconcilePendingEffects().then(() => {
+      for (const attempt of unstartedOnRestore) {
+        const current = this.lifecycleStore?.attempt(attempt.attemptId);
+        if (current?.process.phase !== "spawning" || current.assessment || current.declaration) continue;
+        this.recordStartupFailure(current, "Coordinator restarted before the worker process start was durably recorded");
+      }
+      // Worker-local pending declarations remain recoverable even when the
+      // coordinator crashed after process_exited or after a provisional warning.
+      for (const attempt of exitedOnRestore) {
+        let current = this.lifecycleStore?.attempt(attempt.attemptId);
+        if (!current || current.declaration) continue;
+        const recoveryHandle = this.projectedHandle(current);
+        this.recoverPendingWorkerFinish(recoveryHandle);
+        current = this.lifecycleStore?.attempt(attempt.attemptId);
+        if (!current || current.declaration || current.assessment || !current.process.exit) continue;
+        const eventId = createLeaderEventId(current, "assessment_missing_finish", current.process.exit.eventId);
+        this.appendLifecycleFact({
+          schemaVersion: 4,
+          ...current,
+          eventId,
+          kind: "assessment_missing_finish",
+          sourceLeaderEpoch: this.leaderEpoch,
+          occurredAt: Date.now(),
+          payload: { reason: "Worker exited without an explicit team_finish declaration", provisional: true },
+          ...(recoveryHandle.lastNote ? { diagnostics: { detail: recoveryHandle.lastNote } } : {}),
+        });
+        this.schedulePendingDelivery(true);
+      }
+      for (const workerState of this.lifecycleStore?.projection().workers.values() ?? []) {
+        if (!workerState.currentAttemptId) continue;
+        const current = this.lifecycleStore?.attempt(workerState.currentAttemptId);
+        if (current?.declaration || current?.assessment) this.beginSettledAttemptEffects(current);
+      }
+      for (const worker of deadOnRestore) void this.handleWorkerExit(worker.name, worker, worker.exitCode ?? null, true);
+    }).catch((error) => {
+      console.error(`[teams] lifecycle reconciliation failed closed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  noteAssistantMessage(): void {
+    this.factWriter?.noteAssistantMessage();
+  }
+
+  isStorageDegraded(): boolean {
+    return this.factWriter?.storageDegraded ?? false;
+  }
+
+  private requireKernel(): { writer: SessionFactWriter; store: LifecycleRuntimeStore; teamId: string } {
+    if (!this.factWriter || !this.lifecycleStore || !this.teamId) throw new Error("Teams lifecycle kernel is not initialized");
+    this.factWriter.assertWritable();
+    return { writer: this.factWriter, store: this.lifecycleStore, teamId: this.teamId };
+  }
+
+  private appendLifecycleFact(fact: LifecycleFact): "appended" | "duplicate" {
+    const { writer, store } = this.requireKernel();
+    const result = writer.appendFact(fact);
+    if (result.status === "appended") store.append(fact);
+    return result.status;
+  }
+
+  private identityFor(worker: Pick<WorkerHandle, "workerId" | "workerInstanceId">): AttemptIdentity {
+    const { writer, teamId } = this.requireKernel();
+    return {
+      coordinatorSessionId: writer.coordinatorSessionId,
+      teamId,
+      workerId: worker.workerId,
+      attemptId: worker.workerInstanceId,
+    };
+  }
+
+  /** PID liveness is valid only while the recorded process birth still matches. */
+  private isAttemptProcessAlive(worker: Pick<WorkerHandle, "pid" | "spawnedAt">): boolean {
+    if (!worker.pid || worker.pid <= 0) return false;
+    const snapshot = sampleWorkerProcessSnapshot(worker.pid);
+    return snapshot.rootAlive && !isReusedWorkerPid(snapshot, worker.spawnedAt, Date.now());
   }
 
   private unwireMeshMessageEvents() {
@@ -1196,70 +1086,131 @@ export class TeamLeader {
     this.wireMeshMessageEvents();
   }
 
-  private ensureV2Team(): TeamRecord {
-    if (!this.v2TeamId) {
-      this.v2TeamId = `team-${crypto.randomUUID().slice(0, 8)}`;
-    }    if (!this.v2TeamRecord || this.v2TeamRecord.teamId !== this.v2TeamId || this.v2TeamRecord.leaderEpoch !== this.leaderEpoch) {
-      this.v2TeamRecord = createTeamRecord(this.v2TeamId, this.leaderEpoch);
+  private ensureTeamCreated(): string {
+    const { writer, teamId } = this.requireKernel();
+    if (this.lifecycleStore?.projection().teamId) return teamId;
+    const identity: AttemptIdentity = {
+      coordinatorSessionId: writer.coordinatorSessionId,
+      teamId,
+      workerId: "__team__",
+      attemptId: "__team__",
+    };
+    const eventId = createRootEventId("team_created", { coordinatorSessionId: writer.coordinatorSessionId, teamId });
+    this.appendLifecycleFact({
+      schemaVersion: 4,
+      ...identity,
+      eventId,
+      kind: "team_created",
+      sourceLeaderEpoch: this.leaderEpoch,
+      occurredAt: Date.now(),
+      payload: { root: "coordinator_session" },
+    });
+    return teamId;
+  }
+
+  private spawnRequestEventId(identity: AttemptIdentity): string {
+    return createRootEventId("spawn_requested", {
+      coordinatorSessionId: identity.coordinatorSessionId,
+      teamId: identity.teamId,
+      workerId: identity.workerId,
+      attemptId: identity.attemptId,
+    });
+  }
+
+  private beginSettledAttemptEffects(attempt: AttemptState): void {
+    if (attempt.protocolViolation) return;
+    if (this.lifecycleStore?.worker(attempt.workerId)?.currentAttemptId !== attempt.attemptId) return;
+    if (attempt.persistent && attempt.sessionMode.kind === "resume" && attempt.assessment?.kind === "startup_failure") return;
+    const worker = this.projectedHandle(attempt);
+    // Ticket closure is eligible as soon as a declaration or terminal
+    // assessment is canonical. Cleanup additionally requires process exit,
+    // except for a startup failure where no process was ever recorded.
+    void this.closeTicketWithEffect(worker).catch(() => {});
+    const cleanupEligible = attempt.process.phase === "exited" || attempt.assessment?.kind === "startup_failure";
+    if (!cleanupEligible) return;
+    const ambiguous = attempt.assessment?.kind === "missing_finish" || attempt.assessment?.kind === "legacy_ambiguous";
+    const preserveBranch = Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed";
+	const resumable = attempt.persistent && (attempt.declaration?.kind === "done" || attempt.assessment?.kind === "missing_finish");
+    const preserveWorktree = ambiguous || resumable;
+    void this.cleanupWithEffect(worker, { preserveBranch, preserveWorktree });
+  }
+
+
+  private recordStartupFailure(identity: AttemptIdentity, reason: string): void {
+    const eventId = createLeaderEventId(identity, "assessment_startup_failure", this.spawnRequestEventId(identity));
+    this.appendLifecycleFact({
+      schemaVersion: 4,
+      ...identity,
+      eventId,
+      kind: "assessment_startup_failure",
+      sourceLeaderEpoch: this.leaderEpoch,
+      occurredAt: Date.now(),
+	  payload: { reason: "Worker failed before the worker process start was durably recorded", provisional: false },
+	  diagnostics: { detail: reason },
+    });
+    const attempt = this.lifecycleStore?.attempt(identity.attemptId);
+    if (attempt) {
+      this.beginSettledAttemptEffects(attempt);
+      this.projectV2WorkerRuntime(attempt.name);
     }
-    return this.v2TeamRecord;
+    this.schedulePendingDelivery(true);
+  }
+
+  private recordSpawnRequested(config: SpawnConfig, workerSessionFile: string): void {
+    this.ensureTeamCreated();
+    const identity: AttemptIdentity = {
+      coordinatorSessionId: this.factWriter!.coordinatorSessionId,
+      teamId: this.teamId!,
+      workerId: config.workerId,
+      attemptId: config.workerInstanceId,
+    };
+    const eventId = this.spawnRequestEventId(identity);
+    this.appendLifecycleFact({
+      schemaVersion: 4,
+      ...identity,
+      eventId,
+      kind: "spawn_requested",
+      sourceLeaderEpoch: this.leaderEpoch,
+      occurredAt: Date.now(),
+      payload: {
+        name: config.workerName,
+        ticketId: config.ticketId,
+        persistent: Boolean(config.freeform),
+        sessionMode: config.sessionMode ?? { kind: "fresh" },
+        sessionDir: config.sessionDir,
+        workerSessionFile,
+        worktreePath: config.useWorktree ? config.cwd : null,
+        ...(config.model ? { model: config.model } : {}),
+        ...(config.hasTools !== undefined ? { hasTools: config.hasTools } : {}),
+      },
+    });
   }
 
   private upsertV2WorkerFromHandle(worker: WorkerHandle): void {
-    const team = this.ensureV2Team();
-    const latestAttempt = worker.attempts?.at(-1);
-    this.v2TeamRecord = upsertV2Worker(team, {
-      workerId: worker.name,
-      name: worker.name,
-      attemptId: latestAttempt?.workerInstanceId ?? worker.workerInstanceId,
-      sessionMode: latestAttempt?.sessionMode ?? (latestAttempt?.sessionFile ? { kind: "resume", sessionFile: latestAttempt.sessionFile } : { kind: "fresh" }),
-      sessionDir: latestAttempt?.sessionDir ?? worker.sessionDir,
-      sessionFile: latestAttempt?.sessionFile ?? worker.sessionFile,
-      pid: latestAttempt?.pid ?? worker.pid,
-      startedAt: latestAttempt?.spawnedAt ?? worker.spawnedAt,
-    });
-    this.projectV2WorkerRuntime(worker.name);
-  }
-
-  private seedV2FactsFromRestoredHandle(worker: WorkerHandle): void {
-    const latestAttempt = worker.attempts?.at(-1);
-    const pid = latestAttempt?.pid ?? worker.pid;
-    const restoredStatus = worker.status;
-    this.appendV2Fact(worker.name, { type: "spawn_started", at: worker.spawnedAt, pid });
-
-    switch (restoredStatus) {
-      case "spawning":
-        return;
-      case "running":
-        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
-        return;
-      case "done":
-      case "grace":
-        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
-        this.appendV2Fact(worker.name, {
-          type: "finish_done",
-          at: worker.doneAt ?? Date.now(),
-          summary: worker.lastNote ?? "restored done worker",
-        });
-        return;
-      case "warning":
-        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
-        this.appendV2Fact(worker.name, {
-          type: "finish_quit",
-          at: worker.doneAt ?? Date.now(),
-          summary: worker.lastNote ?? "restored warning worker",
-        });
-        return;
-      case "failed":
-      case "killed":
-        this.appendV2Fact(worker.name, { type: "worker_hello", at: worker.spawnedAt });
-        this.appendV2Fact(worker.name, {
-          type: "process_exit",
-          at: worker.killedAt ?? Date.now(),
-          exitCode: worker.exitCode ?? 1,
-        });
-        return;
+    if (this.lifecycleStore?.attempt(worker.workerInstanceId)) {
+      this.projectV2WorkerRuntime(worker.name);
+      return;
     }
+    const current = worker.attempts?.at(-1);
+    const config: SpawnConfig = worker.spawnConfig ?? {
+      workerId: worker.workerId,
+      workerInstanceId: worker.workerInstanceId,
+      ticketId: worker.ticketId,
+      workerName: worker.name,
+      useWorktree: worker.worktreePath !== null,
+      cwd: worker.worktreePath ?? this.ctx?.cwd ?? process.cwd(),
+      repoRoot: this.ctx?.cwd ?? process.cwd(),
+      sessionDir: current?.sessionDir ?? worker.sessionDir,
+      leaderSessionFile: this.ctx?.sessionManager.getSessionFile() ?? "",
+      model: worker.model,
+      hasTools: worker.hasTools,
+      teamId: this.teamId ?? undefined,
+      leaderEpoch: this.leaderEpoch,
+      freeform: worker.freeform,
+      sessionMode: current?.sessionMode ?? { kind: "fresh" },
+    };
+    this.recordSpawnRequested(config, current?.sessionFile ?? worker.sessionFile);
+    this.projectV2WorkerRuntime(worker.name);
   }
 
   private buildSpawnSessionMode(): import("./v2/protocol.ts").WorkerSessionMode {
@@ -1296,48 +1247,87 @@ export class TeamLeader {
     return { kind: "fresh" };
   }
 
-  private appendV2Fact(workerName: string, fact: import("./v2/state.ts").WorkerFact): void {
-    if (!this.v2TeamRecord) return;
-    this.v2TeamRecord = applyV2Fact(this.v2TeamRecord, workerName, fact);
-    this.projectV2WorkerRuntime(workerName);
+  private recordProcessStart(worker: WorkerHandle, occurredAt: number, pid = worker.pid): void {
+	const identity = this.identityFor(worker);
+	const attempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+	if (!attempt) throw new Error(`Cannot start unknown lifecycle attempt ${worker.workerInstanceId}`);
+	const eventId = createLeaderEventId(identity, "process_started", this.spawnRequestEventId(identity));
+	this.appendLifecycleFact({
+	  schemaVersion: 4, ...identity, eventId, kind: "process_started", sourceLeaderEpoch: this.leaderEpoch,
+	  occurredAt,
+	  payload: {
+		pid,
+		processBirth: { startedAt: worker.spawnedAt },
+		sessionMode: attempt.sessionMode,
+		workerSessionFile: worker.sessionFile,
+		sessionDir: worker.sessionDir,
+	  },
+	});
+	this.projectV2WorkerRuntime(worker.name);
+  }
+
+  private recordMissingFinishAssessment(worker: WorkerHandle, occurredAt: number, diagnostics?: JsonValue): void {
+	const identity = this.identityFor(worker);
+	const attempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+	if (!attempt || attempt.declaration) return;
+	const exitEventId = attempt.process.exit?.eventId
+	  ?? createLeaderEventId(identity, "process_exited", `${worker.pid}:${worker.spawnedAt}`);
+	const eventId = createLeaderEventId(identity, "assessment_missing_finish", exitEventId);
+	this.appendLifecycleFact({
+	  schemaVersion: 4, ...identity, eventId, kind: "assessment_missing_finish", sourceLeaderEpoch: this.leaderEpoch,
+	  occurredAt,
+	  payload: { reason: "Worker exited without an explicit team_finish declaration", provisional: true },
+	  ...(diagnostics === undefined ? {} : { diagnostics }),
+	});
+	this.projectV2WorkerRuntime(worker.name);
+  }
+
+  private recordKilledAssessment(worker: WorkerHandle, occurredAt: number): void {
+	const identity = this.identityFor(worker);
+	const attempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+	if (!attempt) return;
+	const cause = attempt.process.exit?.eventId ?? this.spawnRequestEventId(identity);
+	const eventId = createLeaderEventId(identity, "assessment_killed", cause);
+	this.appendLifecycleFact({
+	  schemaVersion: 4, ...identity, eventId, kind: "assessment_killed", sourceLeaderEpoch: this.leaderEpoch,
+	  occurredAt,
+	  payload: { reason: "worker killed by coordinator", provisional: false },
+	});
+	this.projectV2WorkerRuntime(worker.name);
+  }
+
+  private recordProcessExit(worker: WorkerHandle, exitCode: number | null, occurredAt = Date.now()): void {
+    const identity = this.identityFor(worker);
+    const eventId = createLeaderEventId(identity, "process_exited", `${worker.pid}:${worker.spawnedAt}`);
+    this.appendLifecycleFact({
+      schemaVersion: 4, ...identity, eventId, kind: "process_exited", sourceLeaderEpoch: this.leaderEpoch,
+      occurredAt,
+      payload: { pid: worker.pid, processBirth: { startedAt: worker.spawnedAt }, code: exitCode },
+    });
   }
 
   private projectV2WorkerRuntime(workerName: string): void {
-    const v2Worker = this.v2TeamRecord?.workers[workerName];
     const worker = this.workers.get(workerName);
-    if (!v2Worker || !worker) return;
+    if (!worker || !this.lifecycleStore) return;
+    const attempt = this.lifecycleStore.attempt(worker.workerInstanceId);
+    if (!attempt) return;
+    const status = attemptStatus(attempt);
+    if (status === "completed") worker.status = "done";
+    else if (status === "warning") worker.status = "warning";
+    else if (status === "failed") worker.status = "failed";
+    else if (status === "killed") worker.status = "killed";
+    else if (attempt.process.phase === "running") worker.status = "running";
+    else if (attempt.process.phase === "spawning") worker.status = "spawning";
 
-    switch (v2Worker.lifecycle) {
-      case "created":
-      case "spawning":
-        worker.status = "spawning";
-        if (worker.routeState === "dead") worker.routeState = "pending";
-        break;
-      case "running":
-        worker.status = "running";
-        if (worker.routeState === "dead") worker.routeState = worker.durableMeshId ? "linked" : "pending";
-        break;
-      case "done":
-        worker.status = "done";
-        break;
-      case "warning":
-        worker.status = "warning";
-        break;
-      case "failed":
-        worker.status = "failed";
-        worker.routeState = "dead";
-        break;
-      case "orphaned":
-        worker.status = worker.status === "failed" ? "failed" : "warning";
-        worker.routeState = "dead";
-        break;
-      case "resumable":
-        worker.status = "grace";
-        worker.routeState = "resumable";
-        break;
-      case "finishing":
-      case "killed":
-        break;
+    // Attempt outcome and logical-session route are deliberately independent.
+    // A failed activation of a persistent session is a failed attempt while the
+    // logical worker remains resumable for a later attempt.
+    const logicalRoute = this.lifecycleStore.projection().workers.get(attempt.workerId)?.route;
+    if (logicalRoute === "resumable") worker.routeState = "resumable";
+    else if (logicalRoute === "dead") worker.routeState = "dead";
+    else if (worker.routeState !== "linked") worker.routeState = "pending";
+    if (attempt.persistent && attempt.declaration?.kind === "done" && attempt.process.phase === "exited") {
+      worker.status = "grace";
     }
   }
 
@@ -1367,12 +1357,14 @@ export class TeamLeader {
   }
 
   async viewWorker(name: string, start = -20, end = 0): Promise<{ text: string; source: "mesh" | "session-log"; routeState: WorkerHandle["routeState"] }> {
-    const worker = this.workers.get(name);
+	const live = this.workers.get(name);
+	const historicalAttempt = this.lifecycleStore?.currentAttempt(name);
+	const worker = live ?? (historicalAttempt ? this.projectedHandle(historicalAttempt) : undefined);
     if (!worker) throw new Error(`Unknown worker \"${name}\"`);
 
-    if (worker.routeState === "linked" && worker.durableMeshId && this.mesh) {
+	if (live?.routeState === "linked" && live.durableMeshId && this.mesh) {
       try {
-        const reply = await this.mesh.ask(worker.durableMeshId, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
+		const reply = await this.mesh.ask(live.durableMeshId, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
         if (reply?.error) throw new Error(String(reply.error));
         return {
           text: typeof reply?.text === "string" ? reply.text : JSON.stringify(reply),
@@ -1395,6 +1387,23 @@ export class TeamLeader {
     };
   }
 
+  async viewAttempt(attemptId: string, start = -20, end = 0): Promise<{ text: string; source: "mesh" | "session-log"; routeState: WorkerHandle["routeState"] }> {
+    const attempt = this.lifecycleStore?.attempt(attemptId);
+    if (!attempt) throw new Error(`Unknown attempt "${attemptId}"`);
+    const live = [...this.workers.values()].find((worker) => worker.workerInstanceId === attemptId);
+    const worker = live ?? this.projectedHandle(attempt);
+    if (live?.routeState === "linked" && live.durableMeshId && this.mesh) {
+      try {
+        const reply = await this.mesh.ask(live.durableMeshId, { kind: "mesh:view", start, end }, 10_000) as Record<string, unknown>;
+        if (!reply?.error) return { text: typeof reply?.text === "string" ? reply.text : JSON.stringify(reply), source: "mesh", routeState: live.routeState };
+      } catch {}
+    }
+    const sessionFile = this.resolveWorkerSessionFile(worker);
+    if (!sessionFile) throw new Error(`Attempt "${attemptId}" has no readable session log`);
+    const entries = readMeaningfulSessionEntriesFromFile(sessionFile);
+    return { text: formatSessionViewEntries(sliceSessionViewEntries(entries, start, end)), source: "session-log", routeState: worker.routeState };
+  }
+
   /** Send a turn-triggering message to a specific worker by name.
    *  If the worker is in done/grace (persistent, between turns), resumes it via session continuation. */
   async tellWorker(name: string, message: unknown): Promise<boolean> {
@@ -1404,9 +1413,7 @@ export class TeamLeader {
     // Resumable persistent worker — continue the existing session with a new process.
     if (worker.routeState === "resumable" && worker.freeform) {
       const text = typeof message === "string" ? message : JSON.stringify(message);
-      const env = this.buildWorkerResumeEnv(worker);
-
-      const child = resumeWorker(worker, text, env);
+      const child = this.resumeAsNewAttempt(worker, text);
       if (!child) return false;
 
       this.clearPendingAmbientChat(name);
@@ -1417,7 +1424,7 @@ export class TeamLeader {
       worker.resumableUntilAt = undefined;
       worker.killedAt = undefined;
       this.upsertV2WorkerFromHandle(worker);
-      this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
+      this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
       this.childProcesses.set(name, child);
       child.on("exit", (code) => {
         worker.exitCode = code;
@@ -1434,7 +1441,6 @@ export class TeamLeader {
       });
       this.startActivityMonitor(name, worker);
       this.renderWidget();
-      this.persistStateIfHydrated();
       return true;
     }
 
@@ -1472,12 +1478,18 @@ export class TeamLeader {
   }
 
   private buildWorkerResumeEnv(worker: WorkerHandle): Record<string, string> {
+	const resumeMode = worker.spawnConfig?.sessionMode ?? { kind: "resume" as const, sessionFile: worker.sessionFile };
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       PI_TEAMS_WORKER: "1",
+	  PI_TEAMS_WORKER_ID: worker.workerId,
       PI_TEAMS_WORKER_INSTANCE_ID: worker.workerInstanceId,
       PI_TEAMS_TICKET_ID: worker.ticketId,
       PI_TEAMS_WORKER_NAME: worker.name,
+	  PI_TEAMS_TEAM_ID: this.teamId ?? worker.ticketId,
+	  PI_TEAMS_LEADER_EPOCH: this.leaderEpoch,
+	  PI_TEAMS_COORDINATOR_SESSION_ID: this.factWriter?.coordinatorSessionId ?? "",
+	  PI_TEAMS_SESSION_MODE: JSON.stringify(resumeMode),
     };
 
     if (worker.freeform) env.PI_TEAMS_FREEFORM = "1";
@@ -1492,6 +1504,58 @@ export class TeamLeader {
     if (this.ctx) env.PI_TEAMS_LEADER_SESSION = this.ctx.sessionManager.getSessionFile() ?? "";
 
     return env;
+  }
+
+	private recordResumeRequested(worker: WorkerHandle): void {
+		const sessionFile = this.resolveWorkerSessionFile(worker);
+		if (!sessionFile) throw new Error(`Worker "${worker.name}" has no persisted session to resume`);
+		const config: SpawnConfig = {
+			...(worker.spawnConfig ?? {
+				ticketId: worker.ticketId,
+				workerName: worker.name,
+				useWorktree: worker.worktreePath !== null,
+				cwd: worker.worktreePath ?? this.ctx?.cwd ?? process.cwd(),
+				repoRoot: this.ctx?.cwd ?? process.cwd(),
+				leaderSessionFile: this.ctx?.sessionManager.getSessionFile() ?? "",
+			}),
+			workerId: worker.workerId,
+			workerInstanceId: worker.workerInstanceId,
+			sessionDir: worker.sessionDir,
+			teamId: this.teamId ?? worker.ticketId,
+			leaderEpoch: this.leaderEpoch,
+			coordinatorSessionId: this.factWriter?.coordinatorSessionId,
+			freeform: worker.freeform,
+			sessionMode: { kind: "resume", sessionFile },
+		};
+		worker.spawnConfig = config;
+		this.recordSpawnRequested(config, sessionFile);
+	}
+
+  private resumeAsNewAttempt(worker: WorkerHandle, message: string): ChildProcess | null {
+    const previousAttemptId = worker.workerInstanceId;
+    const previousConfig = worker.spawnConfig;
+    worker.workerInstanceId = crypto.randomUUID();
+    try {
+      this.recordResumeRequested(worker);
+    } catch (error) {
+      // No canonical attempt exists when intent persistence fails.
+      worker.workerInstanceId = previousAttemptId;
+      worker.spawnConfig = previousConfig;
+      throw error;
+    }
+
+    const identity = this.identityFor(worker);
+    try {
+      const child = resumeWorker(worker, message, this.buildWorkerResumeEnv(worker));
+      if (child) return child;
+      this.recordStartupFailure(identity, "Worker session resume was refused because no persisted session or activation lease was available");
+    } catch (error) {
+      worker.spawnError = error instanceof Error ? error.message : String(error);
+      this.recordStartupFailure(identity, `Worker session resume failed: ${worker.spawnError}`);
+    }
+    this.projectV2WorkerRuntime(worker.name);
+    this.renderWidget();
+    return null;
   }
 
   private queueAmbientChatForResumableWorkers(fromWorkerName: string, message: string) {
@@ -1539,11 +1603,22 @@ export class TeamLeader {
   startPolling() {}
 
   stopPolling() {
-    if (this.batchTimer) { clearInterval(this.batchTimer); this.batchTimer = null; }
-    this.monitoredWorkers.clear();
+	this.clearWorkerRuntimeTimers();
     this.stopLeaseHeartbeat();
     this.unwireMeshMessageEvents();
   }
+
+	private clearWorkerRuntimeTimers(): void {
+	  if (this.batchTimer) { clearInterval(this.batchTimer); this.batchTimer = null; }
+	  this.monitoredWorkers.clear();
+	  for (const timers of this.workerTimers.values()) for (const timer of timers) clearTimeout(timer);
+	  this.workerTimers.clear();
+	  for (const timer of this.pendingAmbientTimers.values()) clearTimeout(timer);
+	  this.pendingAmbientTimers.clear();
+	  this.pendingAmbientChat.clear();
+	  this.activeDelivery = null;
+	  this.deliveryTracker.beginRun();
+	}
 
   /** Bind a worker handle to its DURABLE mesh id (v1a). The id is DECLARED by the
    *  worker in its envelope (envelope.meshId) and is stable across resume/reconnect,
@@ -1555,7 +1630,6 @@ export class TeamLeader {
 	  worker.durableMeshId = durableMeshId;
 	  worker.routeState = "linked";
 	  if (nickname) worker.nickname = nickname;
-	  if (changed) this.persistStateIfHydrated();
 	}
 
 	private claimMeshEvent(key: string): boolean {
@@ -1574,7 +1648,7 @@ export class TeamLeader {
 	  const worker = this.workers.get(workerName);
 	  if (!worker) return;
 	  if (event.attemptId && event.attemptId !== worker.workerInstanceId) return;
-	  if (this.v2TeamId && event.teamId !== this.v2TeamId) return;
+	  if (this.teamId && event.teamId !== this.teamId) return;
 	  if (event.leaderEpoch && event.leaderEpoch !== this.leaderEpoch) return;
 	  if (!this.claimMeshEvent(`phase:${event.teamId}:${event.leaderEpoch}:${event.workerId}:${event.attemptId}:${event.seq}`)) return;
 
@@ -1588,132 +1662,147 @@ export class TeamLeader {
     worker.lastActivityAt = Date.now();
     worker.lastOutputAt = Date.now();
     worker.lastOutputLabel = `phase:${event.payload.stage}`;
-    this.appendV2Fact(workerName, { type: "phase_event", at: Date.now(), stage: event.payload.stage });
+
     this.notifyLLM({ type: "phase", worker: { ...worker }, phase: event });
 	  this.renderWidget();
 	}
 
 	private handleWorkerToLeaderEnvelope(envelope: TeamEnvelope<unknown>, transportFrom: string): void {
-		const p = envelope.payload as Record<string, unknown> | undefined;
-		if (!p || typeof p !== "object") return;
-		const workerName = envelope.workerId ?? "unknown";
-		const workerInstanceId = envelope.attemptId ?? "";
-		const ticketId = typeof p.ticketId === "string" ? p.ticketId : "";
-		const worker = this.workers.get(workerName);
-		if (!worker) return;
-		if (workerInstanceId && workerInstanceId !== worker.workerInstanceId) return;
-		if (ticketId && ticketId !== worker.ticketId) return;
-		if (!this.claimMeshEvent(`worker:${envelope.teamId}:${envelope.leaderEpoch}:${workerName}:${workerInstanceId}:${envelope.type}:${envelope.seq}`)) return;
-
+		const payload = envelope.payload as Record<string, unknown> | undefined;
+		if (!payload || typeof payload !== "object" || envelope.teamId !== this.teamId) return;
+		const worker = [...this.workers.values()].find((candidate) =>
+			candidate.workerId === envelope.workerId || (candidate.name === envelope.workerId && !process.env.PI_TEAMS_REQUIRE_V4_IDENTITY),
+		);
+		if (!worker || envelope.attemptId !== worker.workerInstanceId) return;
+		const workerName = worker.name;
 		const routeId = envelope.meshId ?? transportFrom;
 		let peerNickname: string | undefined;
 		if (!worker.nickname && this.mesh) {
-			const peer = this.mesh.peers().find((pr) => pr.id === transportFrom || pr.meshId === routeId || pr.sessionId === transportFrom);
+			const peer = this.mesh.peers().find((candidate) => candidate.id === transportFrom || candidate.meshId === routeId || candidate.sessionId === transportFrom);
 			if (peer?.nickname) peerNickname = peer.nickname;
 		}
 
-		const commentText = typeof p.text === "string" ? p.text : null;
+		if (envelope.type === "worker.finish") {
+			const status = payload.status;
+			const summary = typeof payload.summary === "string" ? payload.summary : "";
+			const eventId = typeof payload.eventId === "string" ? payload.eventId : "";
+			if ((status !== "done" && status !== "quit") || !eventId) return;
+			const identity = this.identityFor(worker);
+			const expectedEventId = createDeclarationEventId(identity, status, summary);
+			if (eventId !== expectedEventId) {
+				const conflictId = createLeaderEventId(identity, "protocol_violation", eventId, { expectedEventId });
+				try {
+					this.appendLifecycleFact({
+						schemaVersion: 4, ...identity, eventId: conflictId, kind: "protocol_violation",
+						sourceLeaderEpoch: this.leaderEpoch, occurredAt: Date.now(),
+						payload: { conflictingEventId: eventId, reason: "Worker declaration eventId does not match its canonical attempt identity and payload" },
+					});
+					this.schedulePendingDelivery(true);
+				} catch {}
+				return;
+			}
+			try {
+				this.appendLifecycleFact({
+					schemaVersion: 4,
+					...identity,
+					eventId,
+					kind: status === "done" ? "declaration_done" : "declaration_quit",
+					sourceLeaderEpoch: this.leaderEpoch,
+					occurredAt: Date.now(),
+					payload: { summary },
+					diagnostics: { transportFrom, senderLeaderEpoch: envelope.leaderEpoch },
+				});
+				const attempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+				if (attempt?.assessment?.provisional) {
+					const correctionId = createLeaderEventId(identity, "outcome_corrected", attempt.assessment.eventId, { declarationEventId: eventId });
+					this.appendLifecycleFact({
+						schemaVersion: 4,
+						...identity,
+						eventId: correctionId,
+						kind: "outcome_corrected",
+						sourceLeaderEpoch: this.leaderEpoch,
+						occurredAt: Date.now(),
+						payload: { provisionalEventId: attempt.assessment.eventId, declarationEventId: eventId, summary: `Outcome corrected: ${summary}` },
+					});
+				}
+			} catch (error) {
+				if (error instanceof Error && error.message.startsWith("Conflicting lifecycle eventId")) {
+					const conflictId = createLeaderEventId(identity, "protocol_violation", eventId);
+					try {
+						this.appendLifecycleFact({
+							schemaVersion: 4, ...identity, eventId: conflictId, kind: "protocol_violation",
+							sourceLeaderEpoch: this.leaderEpoch,
+							occurredAt: Date.now(),
+							payload: { conflictingEventId: eventId, reason: `Conflicting declaration event ${eventId}` },
+						});
+						this.schedulePendingDelivery(true);
+					} catch {}
+				}
+				console.error(`[teams] finish persistence failed closed: ${error instanceof Error ? error.message : String(error)}`);
+				return;
+			}
+			const acceptedAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+			const accepted = acceptedAttempt?.declaration;
+			if (!accepted || accepted.eventId !== eventId) {
+				this.schedulePendingDelivery(true);
+				return;
+			}
+			if (acceptedAttempt) this.beginSettledAttemptEffects(acceptedAttempt);
+			this.bindWorkerRoute(worker, routeId, peerNickname);
+			worker.terminalStatus = accepted.kind;
+			worker.terminalSummary = summary;
+			worker.lastOutputAt = Date.now();
+			worker.lastOutputLabel = `mesh ${status}`;
+			this.projectV2WorkerRuntime(workerName);
+			if (this.mesh) {
+				this.mesh.tell(routeId, createLeaderPersistedAckEnvelope({
+					teamId: this.teamId!, leaderEpoch: this.leaderEpoch, workerId: worker.workerId,
+					attemptId: worker.workerInstanceId, seq: ++this.leaderAckSeq, eventId,
+				}));
+			}
+			this.emitAuthoritativeFinish(workerName, worker, status, summary);
+			this.renderWidget();
+			return;
+		}
+
+		if (!this.claimMeshEvent(`worker:${envelope.teamId}:${worker.workerId}:${envelope.attemptId}:${envelope.type}:${envelope.seq}`)) return;
+		const commentText = typeof payload.text === "string" ? payload.text : null;
 		if (envelope.type === "worker.comment" && commentText !== null) {
-			this.appendV2Fact(workerName, { type: "comment_posted", at: Date.now(), text: commentText });
 			this.bindWorkerRoute(worker, routeId, peerNickname);
 			worker.lastOutputAt = Date.now();
 			worker.lastOutputLabel = "mesh comment";
 			if (!this.meshDelivered.has(workerName)) this.meshDelivered.set(workerName, new Set());
 			const seen = this.meshDelivered.get(workerName)!;
 			seen.add(commentText);
-			if (seen.size > 50) {
-				const first = seen.values().next().value;
-				if (first !== undefined) seen.delete(first);
-			}
+			while (seen.size > 50) seen.delete(seen.values().next().value!);
 			this.notifyLLM({ type: "comment", worker: { ...worker }, comment: commentText });
 			this.queueAmbientChatForResumableWorkers(workerName, commentText);
-			this.renderWidget();
 		} else if (envelope.type === "worker.hello") {
-			this.appendV2Fact(workerName, { type: "worker_hello", at: Date.now() });
 			worker.lastActivityAt = Date.now();
 			this.bindWorkerRoute(worker, routeId, peerNickname);
-			this.renderWidget();
-		} else {
-			const finishStatus = p.status;
-			const finishSummary = typeof p.summary === "string" ? p.summary : "";
-			if (envelope.type === "worker.finish" && finishStatus === "done") {
-				this.appendV2Fact(workerName, { type: "finish_done", at: Date.now(), summary: finishSummary });
-				// Capture the EXPLICIT terminal status from the durable finish tell — the
-				// authoritative terminal source assessWorkerExit reads on process exit (replaces
-				// the heartbeat worker_terminal entry). The SAME leader instance that receives
-				// this tell runs handleWorkerExit, so the handle is populated before assessment.
-				this.bindWorkerRoute(worker, routeId, peerNickname);
-				worker.terminalStatus = "done";
-				worker.terminalSummary = finishSummary;
-				this.persistStateIfHydrated();
-				worker.lastOutputAt = Date.now();
-				worker.lastOutputLabel = "mesh done";
-				this.renderWidget();
-				// The finish tell IS the authoritative terminal signal (that is what the
-				// worker guidance promises). Waiting for process exit silently loses the
-				// completion whenever the worker process lingers (team_finish does NOT
-				// exit the worker) or the exit is unobserved — the coordinator then never
-				// hears anything (no default batch, no subscription dispatch, no .wake()).
-				// notifiedTerminal dedupes against the later process-exit emit.
-				this.emitAuthoritativeFinish(workerName, worker, "done", finishSummary);
-			} else if (envelope.type === "worker.finish" && finishStatus === "quit") {
-				this.appendV2Fact(workerName, { type: "finish_quit", at: Date.now(), summary: finishSummary });
-				this.bindWorkerRoute(worker, routeId, peerNickname);
-				worker.terminalStatus = "quit";
-				worker.terminalSummary = finishSummary;
-				this.persistStateIfHydrated();
-				worker.lastOutputAt = Date.now();
-				worker.lastOutputLabel = "mesh quit";
-				this.renderWidget();
-				this.emitAuthoritativeFinish(workerName, worker, "quit", finishSummary);
-			}
 		}
+		this.renderWidget();
 	}
 
-	/** Emit the terminal notification from the worker's finish tell — immediately.
-	 *  The mesh finish envelope is the authoritative terminal signal; the process
-	 *  exit pipeline stays responsible for cleanup (branch/worktree preservation)
-	 *  and its notification is deduped via notifiedTerminal. A finished
-	 *  non-freeform worker whose process lingers is reaped after a grace period so
-	 *  cleanup still runs and no zombie pi process leaks. */
-	private emitAuthoritativeFinish(
-		name: string,
-		worker: WorkerHandle,
-		status: "done" | "quit",
-		summary: string,
-	): void {
+	private emitAuthoritativeFinish(name: string, worker: WorkerHandle, status: "done" | "quit", summary: string): void {
 		const text = summary.trim() || (status === "done" ? "Task completed." : "Worker quit.");
-		if (status === "done") {
-			this.notifyLLM({ type: "completed", worker: { ...worker }, result: text });
-		} else {
-			this.notifyLLM({ type: "warning", worker: { ...worker }, reason: `QUIT: ${text}` });
-		}
-		if (worker.freeform) return; // persistent workers park intentionally (done/grace/resumable)
+		this.notifyLLM(status === "done"
+			? { type: "completed", worker: { ...worker }, result: text }
+			: { type: "warning", worker: { ...worker }, reason: `QUIT: ${text}` });
+		if (worker.freeform) return;
 		const instanceId = worker.workerInstanceId;
 		setTimeout(() => {
 			const current = this.workers.get(name);
 			if (!current || current.workerInstanceId !== instanceId) return;
-			if (current.status === "killed" || this.exitClaimedInstances.has(instanceId)) return;
-			if (isProcessAlive(current.pid)) {
-				try { process.kill(-current.pid, "SIGTERM"); } catch { try { process.kill(current.pid, "SIGTERM"); } catch {} }
+			if (current.status === "killed" || this.lifecycleStore?.attempt(instanceId)?.process.phase === "exited") return;
+			void this.terminateProcessWithEffect(current, "finish_reap").finally(() => {
 				setTimeout(() => {
-					const w = this.workers.get(name);
-					if (!w || w.workerInstanceId !== instanceId || this.exitClaimedInstances.has(instanceId)) return;
-					if (isProcessAlive(w.pid)) {
-						try { process.kill(-w.pid, "SIGKILL"); } catch { try { process.kill(w.pid, "SIGKILL"); } catch {} }
+					const final = this.workers.get(name);
+					if (final && final.workerInstanceId === instanceId && this.lifecycleStore?.attempt(instanceId)?.process.phase !== "exited") {
+						void this.handleWorkerExit(name, final, final.exitCode ?? 0, true);
 					}
-					// Drive the exit pipeline explicitly — post-restart workers have no
-					// child handle and the activity monitor stops on terminal v2 state,
-					// so nothing else observes this death.
-					setTimeout(() => {
-						const w2 = this.workers.get(name);
-						if (!w2 || w2.workerInstanceId !== instanceId || this.exitClaimedInstances.has(instanceId)) return;
-						void this.handleWorkerExit(name, w2, 0);
-					}, FINISH_REAP_KILL_SETTLE_MS);
 				}, FINISH_REAP_KILL_SETTLE_MS);
-				return;
-			}
-			void this.handleWorkerExit(name, current, current.exitCode ?? 0);
+			});
 		}, FINISH_REAP_GRACE_MS);
 	}
 
@@ -1749,99 +1838,117 @@ export class TeamLeader {
     explicitCwd?: string,
   ): Promise<WorkerHandle> {
     if (!this.ctx) throw new Error("Leader context not set");
-
+    this.requireKernel();
     const existing = this.workers.get(workerName);
     if (existing && !["done", "warning", "failed", "killed", "grace"].includes(existing.status)) {
-      throw new Error(`Worker name \"${workerName}\" is already active on ticket #${existing.ticketId}`);
+      throw new Error(`Worker name "${workerName}" is already active on ticket #${existing.ticketId}`);
     }
-
-    const isNestedWorker = process.env.PI_TEAMS_WORKER === "1";
-
-    // Worker-leaders must not create worktrees — sub-workers share the parent's working directory.
-    // Creating nested worktrees off a worktree causes git confusion and cleanup headaches.
-    if (isNestedWorker && useWorktree) {
-      useWorktree = false;
-    }
+    if (process.env.PI_TEAMS_WORKER === "1" && useWorktree) useWorktree = false;
 
     const repoDir = explicitCwd ?? this.ctx.cwd;
-    let cwd = repoDir;
-
-    if (useWorktree) {
-      // Resolve the real repo root so worker worktrees are never nested inside
-      // another worktree. If ctx.cwd is already the repo root this is a no-op.
-      const toplevel = await resolveGitToplevel(repoDir);
-      let worktreeTimestamp = Date.now();
-      let wtPath = workerWorktreePath(toplevel, workerName, worktreeTimestamp);
-      while (fs.existsSync(wtPath)) {
-        worktreeTimestamp += 1;
-        wtPath = workerWorktreePath(toplevel, workerName, worktreeTimestamp);
-      }
-      const result = await createWorktree(toplevel, workerName, ticketId, wtPath, baseRef);
-      if (!result.success) throw new Error(`Worktree creation failed: ${result.error}`);
-      cwd = wtPath;
-    }
-
-    // Resolve effective model: verify requested model is available, fall back to leader's
     const effectiveModel = this.resolveWorkerModel(model);
+    const workerId = crypto.randomUUID();
     const workerInstanceId = crypto.randomUUID();
-
-    const sessionFile = this.ctx.sessionManager.getSessionFile() ?? "";
-
-    this.ensureV2Team();
-    this.wireMeshMessageEvents();
-
+    const sessionDir = path.join(repoDir, ".pi", "sessions", "teams-workers", `team-${workerName}-${ticketId}-${workerInstanceId}`);
+    let cwd = repoDir;
+    let toplevel = repoDir;
+    if (useWorktree) {
+      toplevel = await resolveGitToplevel(repoDir);
+      cwd = workerWorktreePath(toplevel, workerName, Date.now());
+      while (fs.existsSync(cwd)) cwd = workerWorktreePath(toplevel, workerName, Date.now() + 1);
+    }
+    const sessionMode = this.buildSpawnSessionMode();
+    const sessionFile = this.ctx.sessionManager.getSessionFile()!;
+    const workerSessionFile = sessionMode.kind === "fresh" ? path.join(sessionDir, "session.jsonl") : sessionMode.sessionFile;
     const config: SpawnConfig = {
+      workerId,
       workerInstanceId,
       ticketId,
       workerName,
       useWorktree,
       cwd,
       repoRoot: repoDir,
+      sessionDir,
       leaderSessionFile: sessionFile,
       model: effectiveModel,
       hasTools,
       additionalPrompt,
-      teamId: this.v2TeamId ?? ticketId,
+      teamId: this.teamId!,
       leaderEpoch: this.leaderEpoch,
+      coordinatorSessionId: this.factWriter?.coordinatorSessionId,
       coordinatorMeshId: this.getDurableMeshId() || undefined,
       ticketCwd: this.ctx.cwd,
       ticketText,
       freeform,
-      sessionMode: this.buildSpawnSessionMode(),
+      sessionMode,
     };
 
-    const { process: child, handle } = spawnWorker(config);
-    this.upsertV2WorkerFromHandle(handle);
-    this.appendV2Fact(workerName, { type: "spawn_requested", at: Date.now() });
-    this.appendV2Fact(workerName, { type: "spawn_started", at: Date.now(), pid: handle.pid });
+    // Canonical intent precedes every spawn-side effect.
+    this.recordSpawnRequested(config, workerSessionFile);
+    this.wireMeshMessageEvents();
+
+    if (useWorktree) {
+      const identity: AttemptIdentity = { coordinatorSessionId: this.factWriter!.coordinatorSessionId, teamId: this.teamId!, workerId, attemptId: workerInstanceId };
+	  let effect: { value?: Awaited<ReturnType<typeof createWorktree>> };
+	  try {
+		effect = await executeDurableEffect(
+		  this.factWriter!,
+		  this.lifecycleStore!.projection(),
+		  { identity, effectKind: "worktree_create", normalizedInputs: { toplevel, workerName, ticketId, cwd, baseRef: baseRef ?? "HEAD" }, sourceLeaderEpoch: this.leaderEpoch },
+		  () => createWorktree(toplevel, workerName, ticketId, cwd, baseRef),
+		  (fact) => { this.lifecycleStore?.append(fact); },
+		);
+	  } catch (error) {
+		try {
+		  this.recordStartupFailure(identity, "Worktree creation failed: " + (error instanceof Error ? error.message : String(error)));
+		} catch {}
+		throw error;
+	  }
+      const result = effect.value ?? { success: fs.existsSync(cwd), path: cwd, branch: `teams/${workerName}/${ticketId}`, error: "worktree effect completed without a live return value" };
+      if (!result.success) {
+        const reason = `Worktree creation failed: ${result.error}`;
+        this.recordStartupFailure(identity, reason);
+        throw new Error(reason);
+      }
+    }
+
+    let spawned: ReturnType<typeof spawnWorker>;
+    try {
+      spawned = spawnWorker(config);
+    } catch (error) {
+      const identity: AttemptIdentity = { coordinatorSessionId: this.factWriter!.coordinatorSessionId, teamId: this.teamId!, workerId, attemptId: workerInstanceId };
+      this.recordStartupFailure(identity, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+    const { process: child, handle } = spawned;
     if (freeform) handle.freeform = true;
     handle.spawnConfig = config;
     this.workers.set(workerName, handle);
     this.childProcesses.set(workerName, child);
+    try {
+      this.recordProcessStart(handle, handle.spawnedAt, handle.pid);
+    } catch (error) {
+      try { killWorker(handle.pid); } catch {}
+      this.workers.delete(workerName);
+      this.childProcesses.delete(workerName);
+      throw error;
+    }
 
-    // Process exit — the definitive completion signal
     child.on("exit", (code) => {
       handle.exitCode = code;
       const attempt = getCurrentAttempt(handle);
       if (attempt) attempt.exitCode = code;
       void this.handleWorkerExit(workerName, handle, code);
     });
-
-    // Spawn failure — if the OS can't create the process at all (EMFILE, EAGAIN, etc.)
-    // the "error" event fires and "exit" may never come.
-    child.on("error", (err) => {
+    child.on("error", (error) => {
       handle.exitCode = null;
-      handle.spawnError = err.message;
+      handle.spawnError = error.message;
       const attempt = getCurrentAttempt(handle);
-      if (attempt) attempt.spawnError = err.message;
+      if (attempt) attempt.spawnError = error.message;
       void this.handleWorkerExit(workerName, handle, null);
     });
-
-    // Activity + stuck detection
     this.startActivityMonitor(workerName, handle);
-
     this.renderWidget();
-    this.persistStateIfHydrated();
     return handle;
   }
 
@@ -1886,6 +1993,159 @@ export class TeamLeader {
     }
   }
 
+  private async terminateProcessWithEffect(worker: WorkerHandle, reason: string): Promise<void> {
+    if (!this.factWriter || !this.lifecycleStore) return;
+    const identity = this.identityFor(worker);
+    await executeDurableEffect(
+      this.factWriter,
+      this.lifecycleStore.projection(),
+      { identity, effectKind: "process_terminate", normalizedInputs: { pid: worker.pid, processBirth: { startedAt: worker.spawnedAt }, reason }, sourceLeaderEpoch: this.leaderEpoch },
+      async () => { if (this.isAttemptProcessAlive(worker)) killWorker(worker.pid); },
+      (fact) => { this.lifecycleStore?.append(fact); },
+    ).then(() => undefined);
+  }
+
+  private async closeTicketWithEffect(worker: WorkerHandle): Promise<void> {
+    if (!this.ctx || !this.factWriter || !this.lifecycleStore) return;
+    const identity = this.identityFor(worker);
+    await executeDurableEffect(
+      this.factWriter,
+      this.lifecycleStore.projection(),
+      { identity, effectKind: "ticket_close", normalizedInputs: { ticketId: worker.ticketId }, sourceLeaderEpoch: this.leaderEpoch },
+      async () => {
+        await this.pi.exec(getMaiBin(), ["close", worker.ticketId], { cwd: this.ctx!.cwd, timeout: 5000 });
+      },
+      (fact) => { this.lifecycleStore?.append(fact); },
+    ).then(() => undefined);
+  }
+
+  private async cleanupWithEffect(
+    worker: WorkerHandle,
+    options: { preserveBranch: boolean; preserveWorktree: boolean },
+  ): Promise<Awaited<ReturnType<typeof cleanupWorker>> | undefined> {
+    if (!this.ctx || !this.factWriter || !this.lifecycleStore) return undefined;
+    const identity = this.identityFor(worker);
+    const normalizedInputs = {
+      repoDir: this.ctx.cwd,
+      worktreePath: worker.worktreePath,
+      preserveBranch: options.preserveBranch,
+      preserveWorktree: options.preserveWorktree,
+    } as const;
+    try {
+      const execution = await executeDurableEffect(
+        this.factWriter,
+        this.lifecycleStore.projection(),
+        { identity, effectKind: "cleanup", normalizedInputs, sourceLeaderEpoch: this.leaderEpoch },
+        (effectId) => cleanupWorker(this.ctx!.cwd, worker, { ...options, effectId }),
+        (fact) => { this.lifecycleStore?.append(fact); },
+      );
+      return execution.value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async reconcilePendingEffects(): Promise<void> {
+    if (!this.lifecycleStore) return;
+    const reconciliations: Promise<unknown>[] = [];
+    for (const effect of pendingEffects(this.lifecycleStore.projection())) {
+      const attempt = this.lifecycleStore.attempt(effect.attemptId);
+      if (!attempt) continue;
+	  if (effect.kind === "worktree_create" && attempt.assessment?.kind === "startup_failure") continue;
+      const inputs = effect.normalizedInputs as Record<string, unknown>;
+      const worker = this.workers.get(attempt.name) ?? this.projectedHandle(attempt);
+      if (effect.kind === "cleanup") {
+        reconciliations.push(this.cleanupWithEffect(worker, {
+          preserveBranch: inputs.preserveBranch === true,
+          preserveWorktree: inputs.preserveWorktree === true,
+        }));
+      } else if (effect.kind === "ticket_close") {
+        reconciliations.push(this.closeTicketWithEffect(worker));
+      } else if (effect.kind === "process_terminate") {
+        reconciliations.push(this.terminateProcessWithEffect(worker, String(inputs.reason ?? "reconcile")));
+      } else if (effect.kind === "worktree_create" && this.factWriter) {
+        const identity = this.identityFor(worker);
+        reconciliations.push(executeDurableEffect(
+          this.factWriter,
+          this.lifecycleStore.projection(),
+          { identity, effectKind: "worktree_create", normalizedInputs: effect.normalizedInputs, sourceLeaderEpoch: this.leaderEpoch },
+          () => createWorktree(String(inputs.toplevel), String(inputs.workerName), String(inputs.ticketId), String(inputs.cwd), String(inputs.baseRef)),
+          (fact) => { this.lifecycleStore?.append(fact); },
+        ));
+      }
+    }
+    await Promise.allSettled(reconciliations);
+  }
+
+  private recoverPendingWorkerFinish(worker: WorkerHandle): boolean {
+	// Recovery is identity-bearing, not a best-effort log view. Only the exact
+	// worker session path persisted in process_started may supply declaration
+	// evidence; choosing another JSONL from the directory risks cross-attempt data.
+	const sessionFile = worker.sessionFile && fs.existsSync(worker.sessionFile) ? worker.sessionFile : null;
+    if (!sessionFile) return false;
+    let entries: ReturnType<typeof parseSessionEntries>;
+    try {
+      entries = parseSessionEntries(fs.readFileSync(sessionFile, "utf8"));
+    } catch (error) {
+      worker.lastNote = `worker session unreadable during finish recovery: ${error instanceof Error ? error.message : String(error)}`;
+      return false;
+    }
+    const identity = this.identityFor(worker);
+	const pending = workerFinishPendingForAttempt(entries, identity);
+	if (!pending) return false;
+	const status = pending.status;
+	const summary = pending.summary;
+	const eventId = pending.eventId;
+	const expectedEventId = createDeclarationEventId(identity, status, summary);
+	if (eventId !== expectedEventId) {
+	  const conflictId = createLeaderEventId(identity, "protocol_violation", eventId, { expectedEventId });
+	  try {
+		this.appendLifecycleFact({
+		  schemaVersion: 4, ...identity, eventId: conflictId, kind: "protocol_violation",
+		  sourceLeaderEpoch: this.leaderEpoch, occurredAt: Date.now(),
+		  payload: { conflictingEventId: eventId, reason: "Recovered worker declaration eventId does not match its canonical attempt identity and payload" },
+		});
+	  } catch {}
+	  this.schedulePendingDelivery(true);
+	  return false;
+	}
+    const provisional = this.lifecycleStore?.attempt(worker.workerInstanceId)?.assessment;
+    try {
+      this.appendLifecycleFact({
+        schemaVersion: 4, ...identity, eventId,
+        kind: status === "done" ? "declaration_done" : "declaration_quit",
+        sourceLeaderEpoch: this.leaderEpoch,
+        occurredAt: Date.now(),
+        payload: { summary },
+        diagnostics: { recoveredFromWorkerSession: sessionFile },
+      });
+      if (provisional?.provisional) {
+        const correctionId = createLeaderEventId(identity, "outcome_corrected", provisional.eventId, { declarationEventId: eventId });
+        this.appendLifecycleFact({
+          schemaVersion: 4, ...identity, eventId: correctionId, kind: "outcome_corrected",
+          sourceLeaderEpoch: this.leaderEpoch,
+          occurredAt: Date.now(),
+          payload: { provisionalEventId: provisional.eventId, declarationEventId: eventId, summary: `Outcome corrected: ${summary}` },
+        });
+      }
+    } catch (error) {
+      worker.lastNote = `finish recovery persistence failed: ${error instanceof Error ? error.message : String(error)}`;
+      return false;
+    }
+    worker.terminalStatus = status;
+    worker.terminalSummary = summary;
+    const recoveredAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+    if (recoveredAttempt) this.beginSettledAttemptEffects(recoveredAttempt);
+    if (this.mesh && worker.durableMeshId) {
+      this.mesh.tell(worker.durableMeshId, createLeaderPersistedAckEnvelope({
+        teamId: this.teamId!, leaderEpoch: this.leaderEpoch, workerId: worker.workerId,
+        attemptId: worker.workerInstanceId, seq: ++this.leaderAckSeq, eventId,
+      }));
+    }
+    this.schedulePendingDelivery(true);
+    return true;
+  }
+
   private async handleWorkerExit(
     name: string,
     worker: WorkerHandle,
@@ -1893,6 +2153,8 @@ export class TeamLeader {
     observedDead = false,
   ) {
     if (!this.ctx) return;
+	const handlingSessionId = this.factWriter?.coordinatorSessionId;
+	if (worker.spawnConfig?.coordinatorSessionId && worker.spawnConfig.coordinatorSessionId !== handlingSessionId) return;
     // Guard: if this worker was explicitly killed and already removed from the map,
     // do NOT re-add it. The exit handler fires asynchronously after kill() deletes
     // the worker — re-adding creates a zombie that persists forever. (RC-A4)
@@ -1900,12 +2162,12 @@ export class TeamLeader {
     if (!this.workers.has(name)) {
       this.workers.set(name, worker);
     }
-    if (["done", "warning", "failed", "killed", "grace"].includes(worker.status) || isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) return;
+    if (this.lifecycleStore?.attempt(worker.workerInstanceId)?.process.phase === "exited") return;
 
     // Bun bug: fires child.on("exit") prematurely for workers 2+ in rapid spawns.
     // The process is actually still alive and running. If we detect it's alive,
     // bail out — the REAL exit event will fire when the process truly exits.
-    if (!observedDead && isProcessAlive(worker.pid)) {
+    if (!observedDead && this.isAttemptProcessAlive(worker)) {
       // Bun can fire child "exit" prematurely; the process is still alive. The
       // real exit event is NOT guaranteed to fire again, so actually schedule a
       // bounded re-check instead of hoping (a dropped exit = a coordinator that
@@ -1917,32 +2179,28 @@ export class TeamLeader {
       }
       return;
     }
-    // Claim this INCARNATION's exit exactly once (child exit vs finish-reap vs
-    // monitor race). Keyed by workerInstanceId — respawn/resume paths regenerate
-    // it, so a retried worker's next death is a fresh, unclaimed incarnation.
-    if (this.exitClaimedInstances.has(worker.workerInstanceId)) return;
-    this.exitClaimedInstances.add(worker.workerInstanceId);
-    if (this.exitClaimedInstances.size > 200) {
-      const oldest = this.exitClaimedInstances.values().next().value;
-      if (oldest !== undefined) this.exitClaimedInstances.delete(oldest);
-    }
-
     // v1c: the incarnation is confirmed dead — free its activation lease so a
     // resume/revive of this session can re-acquire (recovery below re-acquires a
     // fresh lease; a terminal worker leaves no leftover).
     releaseWorkerActivation(worker);
 
-    if (!this.v2TeamRecord?.workers[name]) {
+    if (!this.lifecycleStore?.attempt(worker.workerInstanceId)) {
       this.upsertV2WorkerFromHandle(worker);
     }
 
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);
 
-    this.appendV2Fact(name, { type: "process_exit", at: Date.now(), exitCode });
+    this.recordProcessExit(worker, exitCode, Date.now());
+
+    // A worker can persist its declaration immediately before the process exit
+    // while the mesh envelope or application ack is still in flight.
+    await new Promise((resolve) => setTimeout(resolve, FINISH_EXIT_SETTLE_MS));
+	if (this.factWriter?.coordinatorSessionId !== handlingSessionId) return;
+    if (!worker.terminalStatus) this.recoverPendingWorkerFinish(worker);
 
     // Read ticket to get final state
-    let lastNote = "(no notes left by worker)";
+    let lastNote = worker.lastNote ?? "(no notes left by worker)";
     let ticketClosed = false;
     try {
       const maiExitResult = await this.pi.exec(getMaiBin(), ["--json", "show", worker.ticketId], {
@@ -1955,6 +2213,7 @@ export class TeamLeader {
     } catch {
       // mai read failed — proceed with what we have
     }
+	if (this.factWriter?.coordinatorSessionId !== handlingSessionId) return;
 
     const assessment = assessWorkerExit(worker, exitCode, ticketClosed, lastNote);
     const classification = assessment.classification;
@@ -1980,6 +2239,10 @@ export class TeamLeader {
       lastNote = `${lastNote}${diagnostics}`;
     }
 
+    // Settle the exited attempt before any retry creates the next attempt. The
+    // retry is a new process attempt, never a rewrite of the failed history.
+    this.recordMissingFinishAssessment(worker, Date.now(), { detail: lastNote });
+
     if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       // Try the malformed-tool-JSON classifier first; if it doesn't match, try the
       // empty-aborted-first-turn stream flake. Both reuse the SAME bounded path
@@ -1999,9 +2262,9 @@ export class TeamLeader {
         // (same pattern as the compaction auto-resume below and the no-session
         // respawn at line ~2011). Without this, v2 lifecycle stays "failed"
         // even though the new pi process is spawning.
-        worker.workerInstanceId = crypto.randomUUID();
-        const child = resumeWorker(worker, recovery.prompt, this.buildWorkerResumeEnv(worker));
-        if (child) {
+        const child = this.resumeAsNewAttempt(worker, recovery.prompt);
+        if (!child) return;
+        {
           worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
           worker.routeState = "pending";
           worker.durableMeshId = undefined;
@@ -2009,7 +2272,7 @@ export class TeamLeader {
           worker.lastProcessActivityAt = Date.now();
           worker.lastNote = `AUTO-RETRY: ${recovery.error.slice(0, 120)}`;
           this.upsertV2WorkerFromHandle(worker);
-          this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
+          this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
 
           const retryNoteText = isStreamAbortRetry
             ? `AUTO-RETRY: previous turn produced no output — the model stream aborted/errored before any content or tool calls (${recovery.error}). Retrying once with a continuation prompt.`
@@ -2089,9 +2352,9 @@ export class TeamLeader {
       // upsertV2WorkerFromHandle then creates a fresh v2 attempt under that id,
       // and the reducer classifies it from spawn_started only — not from the
       // prior exit. Mirrors the no-session respawn pattern at line ~2011.
-      worker.workerInstanceId = crypto.randomUUID();
-      const child = resumeWorker(worker, resumePrompt, this.buildWorkerResumeEnv(worker));
-      if (child) {
+      const child = this.resumeAsNewAttempt(worker, resumePrompt);
+      if (!child) return;
+      {
         worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
         worker.routeState = "pending";
         worker.durableMeshId = undefined;
@@ -2099,7 +2362,7 @@ export class TeamLeader {
         worker.lastProcessActivityAt = Date.now();
         worker.lastNote = "AUTO-RESUME: continuing after mid-turn auto-compaction";
         this.upsertV2WorkerFromHandle(worker);
-        this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
+        this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
 
         await this.pi.exec(
           getMaiBin(),
@@ -2177,9 +2440,26 @@ export class TeamLeader {
 
       // Respawn if: no session file AND (startup-window death OR session dir was destroyed)
       if (noSessionFile && worker.spawnConfig && (runtimeMs < STARTUP_WINDOW_MS || sessionDirGone)) {
-        // Fresh respawn with a new session dir
-        const config = { ...worker.spawnConfig, workerInstanceId: crypto.randomUUID() };
-        const { process: child, handle: newHandle } = spawnWorker(config);
+        // A fresh retry is a new canonical attempt. Persist its intent before
+        // session-file creation, revive-descriptor writes, or process spawn.
+        const config = { ...worker.spawnConfig, workerId: worker.workerId, workerInstanceId: crypto.randomUUID() };
+        const workerSessionFile = config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
+          ? config.sessionMode.sessionFile
+          : path.join(config.sessionDir, "session.jsonl");
+        this.recordSpawnRequested(config, workerSessionFile);
+        let spawned: ReturnType<typeof spawnWorker>;
+        try {
+          spawned = spawnWorker(config);
+        } catch (error) {
+          this.recordStartupFailure({
+            coordinatorSessionId: this.factWriter!.coordinatorSessionId,
+            teamId: this.teamId!,
+            workerId: config.workerId,
+            attemptId: config.workerInstanceId,
+          }, error instanceof Error ? error.message : String(error));
+          return;
+        }
+        const { process: child, handle: newHandle } = spawned;
 
         // Carry over state from the old handle
         worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
@@ -2201,7 +2481,7 @@ export class TeamLeader {
         worker.lastNote = `AUTO-RESPAWN: ${reason}, retrying once`;
         worker.spawnConfig = config;
         this.upsertV2WorkerFromHandle(worker);
-        this.appendV2Fact(name, { type: "spawn_started", at: Date.now(), pid: child.pid ?? undefined });
+        this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
 
         await this.pi.exec(
           getMaiBin(),
@@ -2238,7 +2518,6 @@ export class TeamLeader {
       }
     }
 
-    this.appendV2Fact(name, { type: "exit_assessed", at: Date.now(), outcome: classification === "failure" ? "failed" : classification, reason: lastNote });
     worker.ticketStatus = ticketClosed ? "closed" : worker.ticketStatus;
     worker.lastNote = lastNote;
     worker.lastActivityAt = Date.now();
@@ -2251,10 +2530,14 @@ export class TeamLeader {
       worker.graceAt = now + DONE_GRACE_MS;
       worker.resumableUntilAt = worker.graceAt + RESUMABLE_WINDOW_MS;
       this.projectV2WorkerRuntime(name);
+	  // A normal persistent print-mode turn is not a fabricated task success.
+	  // The attempt remains a missing-finish warning while the logical route is
+	  // explicitly reusable for the next, distinct attempt.
+	  worker.status = "grace";
+	  worker.routeState = "resumable";
       this.childProcesses.delete(name);
       this.notifyLLM({ type: "turn_finished", worker: { ...worker }, result: lastNote });
       this.renderWidget();
-      this.persistStateIfHydrated();
       this.rearmPersistentLifecycle(name, worker, now);
       return;
     }
@@ -2262,18 +2545,25 @@ export class TeamLeader {
     // Build crash report BEFORE cleanup — cleanup may remove the worker worktree
     const crashReport = classification === "failure" ? buildWorkerCrashReport(worker, exitCode) : "";
     this.projectV2WorkerRuntime(name);
-    worker.routeState = "dead";
+	const canonicalAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+	const canonicalStatus = canonicalAttempt ? attemptStatus(canonicalAttempt) : "unknown";
+	const logicalRoute = this.lifecycleStore?.projection().workers.get(worker.workerId)?.route;
+	worker.routeState = logicalRoute ?? "dead";
     worker.durableMeshId = undefined;
 
     // Cleanup: auto-commit dirty files, preserve success/warning branches, and
     // keep ambiguous warning worktrees on disk so failed terminal signaling does
     // not destroy post-mortem evidence.
     const explicitTerminal = assessment.explicitTerminal;
-    const preserveBranch = (classification === "success" || classification === "warning") && worker.worktreePath !== null;
-    const preserveWorktree = classification === "warning" && !explicitTerminal && worker.worktreePath !== null;
-    const cleanupResult = await cleanupWorker(this.ctx.cwd, worker, { preserveBranch, preserveWorktree }).catch(() => undefined);
+	const preserveBranch = (canonicalStatus === "completed" || canonicalStatus === "warning") && worker.worktreePath !== null;
+    const preserveWorktree = (
+	  (classification === "warning" && !explicitTerminal)
+	  || (Boolean(worker.freeform) && logicalRoute === "resumable")
+	) && worker.worktreePath !== null;
+    await this.closeTicketWithEffect(worker).catch(() => {});
+    const cleanupResult = await this.cleanupWithEffect(worker, { preserveBranch, preserveWorktree });
 
-    if (classification === "success") {
+	if (canonicalStatus === "completed") {
       const branch = `teams/${worker.name}/${worker.ticketId}`;
       const doneBranch = `${branch}.done`;
       const hasMergeableWork = cleanupResult?.branchHasMergeableWork;
@@ -2284,7 +2574,7 @@ export class TeamLeader {
         type: "completed",
         worker: { ...worker },        result: `${lastNote}${mergeHint}`,
       });
-    } else if (classification === "warning") {
+	} else if (canonicalStatus === "warning") {
       const warningHint = cleanupResult?.worktreePreserved && worker.worktreePath
         ? `\n📌 Worktree preserved for inspection: ${worker.worktreePath}`
         : "";
@@ -2315,7 +2605,6 @@ export class TeamLeader {
     // newer worker that reused the same name.
     this.scheduleWorkerCleanup(name, worker.ticketId, worker.spawnedAt);
     this.renderWidget();
-    this.persistStateIfHydrated();
   }
 
   // ── Batched activity monitor ───────────────────────────────────────────
@@ -2448,11 +2737,21 @@ export class TeamLeader {
       if (cooldownExpired) {
         const first = !worker.lastStuckWarningAt;
         worker.lastStuckWarningAt = now;
+		const identity = this.identityFor(worker);
+		const cooldownIndex = this.lifecycleStore?.attempt(worker.workerInstanceId)?.stuckCount ?? 0;
+		const eventId = createLeaderEventId(identity, "stuck", `stuck:${cooldownIndex}`, { cooldownIndex });
+		this.appendLifecycleFact({
+		  schemaVersion: 4, ...identity, eventId, kind: "stuck", sourceLeaderEpoch: this.leaderEpoch,
+		  occurredAt: now,
+		  payload: { cooldownIndex, idleSeconds: Math.floor(Math.min(idle.heartbeatIdleMs, idle.processIdleMs) / 1000) },
+		});
         this.notifyLLM({
           type: "stuck",
           worker: { ...worker },
           idleSeconds: Math.floor(Math.min(idle.heartbeatIdleMs, idle.processIdleMs) / 1000),
           first,
+		  lifecycleEventId: eventId,
+		  attemptId: worker.workerInstanceId,
         });
       }
     } else {
@@ -2478,7 +2777,7 @@ export class TeamLeader {
 
     // ── Phase 1: Immediate synchronous teardown ──────────────────────────
     // Everything here is synchronous and fast. No await, no throws.
-    this.appendV2Fact(workerName, { type: "worker_killed", at: Date.now() });
+    this.recordKilledAssessment(worker, Date.now());
     worker.status = "killed";
     worker.routeState = "dead";
     worker.durableMeshId = undefined;
@@ -2504,12 +2803,14 @@ export class TeamLeader {
 
     // Persist cleared state immediately — even if background cleanup fails (RC-B1)
     this.renderWidget();
-    this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
 
     // ── Phase 2: Fire-and-forget background cleanup ──────────────────────
     // Kill the process, close the ticket, clean worktree. All best-effort.
     // Never blocks the caller and never throws back into kill().
-    void this.backgroundCleanup(workerName, worker, child);
+    // Defer the cleanup to the next macrotask. Process-birth verification may
+    // invoke a synchronous OS snapshot; entering that work before this async
+    // method resolves would make the public kill hot path block on `ps`.
+    setTimeout(() => { void this.backgroundCleanup(workerName, worker, child); }, 0);
   }
 
   /**
@@ -2527,17 +2828,24 @@ export class TeamLeader {
       // worker's PID directly (restored workers may not have a ChildProcess ref).
       const pid = child?.pid ?? worker.pid;
       if (pid && pid > 0) {
-        try { killWorker(pid); } catch { /* process may already be dead */ }
+		worker.pid = pid;
+		await this.terminateProcessWithEffect(worker, "coordinator_kill").catch(() => {});
+		for (let attempt = 0; attempt < 25 && this.isAttemptProcessAlive(worker); attempt++) {
+		  await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		if (this.isAttemptProcessAlive(worker)) return;
+		if (this.lifecycleStore?.attempt(worker.workerInstanceId)?.process.phase !== "exited") {
+		  this.recordProcessExit(worker, worker.exitCode ?? null);
+		}
       }
 
       // Close mai ticket (best-effort, 5s timeout)
       if (this.ctx) {
-        await this.pi.exec(getMaiBin(), ["close", worker.ticketId], {
-          cwd: this.ctx.cwd, timeout: 5000,
-        }).catch(() => {});
-        await cleanupWorker(this.ctx.cwd, worker, {
-          preserveBranch: true, // always preserve branch on kill
-        }).catch(() => {});
+        await this.closeTicketWithEffect(worker).catch(() => {});
+        await this.cleanupWithEffect(worker, {
+          preserveBranch: true,
+          preserveWorktree: false,
+        });
       }
     } catch {
       // Swallow everything — this is background best-effort cleanup
@@ -2572,18 +2880,51 @@ export class TeamLeader {
     return [...this.workers.values()];
   }
 
-  getV2TeamRecord(): TeamRecord | null {
-    return this.v2TeamRecord ? structuredClone(this.v2TeamRecord) : null;
+  hasLifecycleAttempt(name: string, ticketId: string): boolean {
+    return [...(this.lifecycleStore?.projection().attempts.values() ?? [])]
+      .some((attempt) => attempt.name === name && attempt.ticketId === ticketId);
   }
 
-  getV2WorkerLifecycle(workerName: string): import("./v2/state.ts").WorkerLifecycleState | null {
-    return this.v2TeamRecord?.workers[workerName]?.lifecycle ?? null;
+  getLifecycleProjectionRecord(): { teamId: string; coordinatorSessionId: string; leaderEpoch: string; storage: { status: "ok" | "degraded"; error?: string }; workers: Record<string, unknown>; attempts: Record<string, AttemptState> } | null {
+    const projection = this.lifecycleStore?.projection();
+    if (!projection || !this.teamId) return null;
+    return {
+      teamId: this.teamId,
+      coordinatorSessionId: projection.coordinatorSessionId,
+      leaderEpoch: this.leaderEpoch,
+	  storage: this.factWriter?.storageDegraded
+		? { status: "degraded", error: this.factWriter.storageError?.message }
+		: { status: "ok" },
+      workers: Object.fromEntries([...projection.workers].map(([id, worker]) => [id, structuredClone(worker)])),
+      attempts: Object.fromEntries([...projection.attempts].map(([id, attempt]) => [id, structuredClone(attempt)])),
+    };
+  }
+
+  getV2WorkerLifecycle(workerName: string): WorkerLifecycleState | null {
+    const logicalWorker = this.lifecycleStore?.workerByName(workerName);
+    const attempt = this.lifecycleStore?.currentAttempt(workerName);
+    if (!attempt) return null;
+    if (logicalWorker?.route === "resumable") return "resumable";
+    const status = attemptStatus(attempt);
+    if (status === "completed") return "done";
+    if (status === "warning") return "warning";
+    if (status === "failed") return "failed";
+    if (status === "killed") return "killed";
+    if (attempt.process.phase === "exited") return "finishing";
+    if (attempt.process.phase === "running") return "running";
+    return "spawning";
   }
 
   getV2CurrentSessionMode(workerName: string): import("./v2/protocol.ts").WorkerSessionMode | null {
-    const worker = this.v2TeamRecord?.workers[workerName];
-    if (!worker?.currentAttemptId) return null;
-    return worker.attempts.find((attempt) => attempt.attemptId === worker.currentAttemptId)?.sessionMode ?? null;
+    return this.lifecycleStore?.currentAttempt(workerName)?.sessionMode ?? null;
+  }
+
+  getAttemptHistory(input: { attemptId?: string; name?: string; status?: string; start?: number; end?: number }): AttemptState[] {
+    return this.lifecycleStore?.history(input).map((attempt) => structuredClone(attempt)) ?? [];
+  }
+
+  getCurrentAttemptId(name: string): string | undefined {
+    return this.lifecycleStore?.currentAttempt(name)?.attemptId;
   }
 
   /** Current live workers — used by teams.on to check for already-terminal
@@ -2599,7 +2940,7 @@ export class TeamLeader {
     let pruned = false;
     for (const [name, worker] of this.workers) {
       if (worker.status !== "spawning" && worker.status !== "running") continue;
-      if (isProcessAlive(worker.pid)) continue;
+      if (this.isAttemptProcessAlive(worker)) continue;
       if (now - worker.spawnedAt < TeamLeader.STALE_RESTORE_PRUNE_MS) continue;
 
       let hasMeaningfulSession = false;
@@ -2611,16 +2952,14 @@ export class TeamLeader {
       } catch {}
       if (hasMeaningfulSession) continue;
 
-      worker.status = "failed";
-      worker.routeState = "dead";
-      worker.durableMeshId = undefined;
-      worker.lastNote = worker.lastNote ?? "stale recovered worker pruned after reload";
+      // Never fabricate a presentation-only failure. Let the canonical exit
+      // path append process/assessment facts and update the projection.
+      void this.handleWorkerExit(name, worker, worker.exitCode ?? null, true);
       pruned = true;
     }
     // Persist prune results so reload doesn't restore the same stale workers again (RC-B3)
     if (pruned) {
       this.renderWidget();
-      this.persistStateIfHydrated();
     }
   }
 
@@ -2637,7 +2976,6 @@ export class TeamLeader {
         this.childProcesses.delete(workerName);
         this.clearPendingAmbientChat(workerName);
         this.renderWidget();
-        this.persistStateIfHydrated({ cleared: this.workers.size === 0 });
       }
     }, 180_000);
     this.trackWorkerTimer(workerName, timer);
@@ -2732,54 +3070,126 @@ export class TeamLeader {
     };
   }
 
-  /** Replay the latest retained terminal event matching a worker/filter. */
-  getCurrentTerminalEvent(name: string, type: PollEvent["type"] | "terminal"): PollEvent | null {
-    this.terminalEventLedger = this.normalizeTerminalEventLedger(this.terminalEventLedger, Date.now());
-    for (let i = this.terminalEventLedger.length - 1; i >= 0; i--) {
-      const event = this.terminalEventLedger[i]!.event;
-      if (event.worker.name !== name) continue;
-      if (type !== "terminal" && event.type !== type) continue;
-      return structuredClone(event);
+  /** Replay terminal history from the canonical reducer, independent of live handles. */
+  getCurrentTerminalEvent(name: string, type: PollEvent["type"] | "terminal", attemptId?: string): PollEvent | null {
+	const targetAttempt = attemptId
+	  ? this.lifecycleStore?.attempt(attemptId)
+	  : this.lifecycleStore?.currentAttempt(name);
+	if (!targetAttempt || targetAttempt.name !== name) return null;
+	const status = attemptStatus(targetAttempt);
+	const authoritativeType = status === "completed"
+	  ? "completed"
+	  : status === "warning"
+		? "warning"
+		: status === "failed" || status === "killed"
+		  ? "failed"
+		  : null;
+	if (!authoritativeType || (type !== "terminal" && type !== authoritativeType)) return null;
+    const events = [...(this.lifecycleStore?.projection().actionableEvents.values() ?? [])].reverse();
+    for (const lifecycle of events) {
+	  if (lifecycle.name !== name || lifecycle.attemptId !== targetAttempt.attemptId) continue;
+      if (lifecycle.type === "stuck") continue;
+      const attempt = this.lifecycleStore?.attempt(lifecycle.attemptId);
+      if (!attempt) continue;
+      const eventType = lifecycle.type === "completed"
+        ? "completed"
+        : lifecycle.type === "warning"
+          ? "warning"
+          : lifecycle.type === "outcome_corrected"
+            ? (attempt.declaration?.kind === "done" ? "completed" : "warning")
+            : "failed";
+	  if (eventType !== authoritativeType) continue;
+      const worker = this.workers.get(name) ?? this.projectedHandle(attempt);
+      if (eventType === "completed") return { type: "completed", worker, result: lifecycle.summary, lifecycleEventId: lifecycle.eventId, attemptId: lifecycle.attemptId };
+      if (eventType === "warning") return { type: "warning", worker, reason: lifecycle.summary, lifecycleEventId: lifecycle.eventId, attemptId: lifecycle.attemptId };
+      return { type: "failed", worker, reason: lifecycle.summary, lifecycleEventId: lifecycle.eventId, attemptId: lifecycle.attemptId };
     }
     return null;
   }
 
+  private eventIdForPollEvent(event: PollEvent): string | undefined {
+    if (event.lifecycleEventId) return event.lifecycleEventId;
+    const attemptId = event.attemptId ?? event.worker.workerInstanceId;
+    const candidates = [...(this.lifecycleStore?.projection().actionableEvents.values() ?? [])].reverse();
+    return candidates.find((candidate) => {
+      if (candidate.attemptId !== attemptId) return false;
+      if (event.type === "stuck") return candidate.type === "stuck";
+      const candidateAttempt = this.lifecycleStore?.attempt(candidate.attemptId);
+      const candidateType = candidate.type === "completed"
+        ? "completed"
+        : candidate.type === "warning"
+          ? "warning"
+          : candidate.type === "outcome_corrected"
+            ? (candidateAttempt?.declaration?.kind === "done" ? "completed" : "warning")
+            : "failed";
+      return event.type === candidateType;
+    })?.eventId;
+  }
+
   /** Host-owned synchronous wake for TeamsSubscription.wake(). */
   wakeFromSubscription(event: PollEvent, content: string): void {
+    const eventId = this.eventIdForPollEvent(event);
+    const marked = eventId ? `[teams-event:${eventId}] ${content}` : content;
+    this.activeDelivery = eventId ? { eventIds: [eventId], content: marked } : null;
+    if (eventId) this.deliveryTracker.setDeliveredBatch([eventId]);
     this.pi.sendMessage(
-      { customType: "team-event", content, display: true },
+      { customType: "team-event", content: marked, display: true },
       { deliverAs: "followUp", triggerTurn: true },
     );
   }
 
-  private normalizeTerminalEventLedger(entries: unknown, now: number): TerminalEventLedgerEntry[] {
-    if (!Array.isArray(entries)) return [];
-    const cutoff = now - TERMINAL_EVENT_TTL_MS;
-    const latestByKey = new Map<string, TerminalEventLedgerEntry>();
-    for (const entry of entries) {
-      if (!entry || typeof entry !== "object") continue;
-      const candidate = entry as Partial<TerminalEventLedgerEntry>;
-      if (!Number.isFinite(candidate.recordedAt) || (candidate.recordedAt ?? 0) < cutoff) continue;
-      const event = candidate.event;
-      if (!event || !TERMINAL_EVENT_TYPES.has(event.type) || !event.worker?.workerInstanceId) continue;
-      const key = `${event.worker.workerInstanceId}:${event.type}`;
-      const normalized = { recordedAt: candidate.recordedAt!, event: structuredClone(event) as TerminalPollEvent };
-      const existing = latestByKey.get(key);
-      if (!existing || normalized.recordedAt >= existing.recordedAt) latestByKey.set(key, normalized);
-    }
-    return Array.from(latestByKey.values()).sort((a, b) => a.recordedAt - b.recordedAt).slice(-TERMINAL_EVENT_MAX);
+  private pendingDelivery(): DeliveryBatch | null {
+    if (!this.ctx || !this.lifecycleStore) return null;
+    return buildPendingDelivery(this.lifecycleStore.projection(), this.ctx.sessionManager.getBranch());
   }
 
-  private retainTerminalEvent(event: PollEvent): void {
-    if (!TERMINAL_EVENT_TYPES.has(event.type)) return;
-    const terminal = structuredClone(event) as TerminalPollEvent;
-    const key = `${terminal.worker.workerInstanceId}:${terminal.type}`;
-    const now = Date.now();
-    this.terminalEventLedger = this.normalizeTerminalEventLedger(this.terminalEventLedger, now)
-      .filter((entry) => `${entry.event.worker.workerInstanceId}:${entry.event.type}` !== key);
-    this.terminalEventLedger.push({ recordedAt: now, event: terminal });
-    this.terminalEventLedger = this.terminalEventLedger.slice(-TERMINAL_EVENT_MAX);
-    this.persistStateIfHydrated();
+  private schedulePendingDelivery(triggerTurn: boolean): void {
+    const batch = this.pendingDelivery();
+    if (!batch) return;
+    this.activeDelivery = batch;
+    this.deliveryTracker.setDeliveredBatch(batch.eventIds);
+    this.pi.sendMessage(
+      { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } },
+      { deliverAs: "followUp", triggerTurn },
+    );
+  }
+
+  prepareDeliveryForAgentRun(): { customType: string; content: string; display: boolean; details: { eventIds: string[] } } | undefined {
+    this.deliveryTracker.beginRun();
+    const batch = this.pendingDelivery();
+    this.activeDelivery = batch;
+    this.deliveryTracker.setDeliveredBatch(batch?.eventIds ?? []);
+    if (!batch) return undefined;
+    return { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } };
+  }
+
+  observeProviderContext(messages: unknown): void { this.deliveryTracker.observeContext(messages); }
+  observeProviderRequest(payload: unknown): void {
+    // Pi adapters that cannot expose the serialized request provide undefined;
+    // in that case the immediately preceding context hook is the last honest
+    // marker observation. An exposed empty payload must remain empty.
+    this.deliveryTracker.beforeProviderRequest(payload);
+  }
+  observeProviderResponse(status: number): void { this.deliveryTracker.afterProviderResponse(status); }
+  observeMessageEnd(message: unknown): void {
+    this.noteAssistantMessage();
+    this.deliveryTracker.messageEnd(message);
+  }
+  completeAgentRun(aborted = false): void {
+    if (aborted) this.deliveryTracker.markAborted();
+    if (!this.factWriter) return;
+    try {
+      this.deliveryTracker.acknowledgeSuccessfulDelivery(this.factWriter);
+    } catch (error) {
+      console.error(`[teams] lifecycle delivery acknowledgement failed closed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    this.activeDelivery = null;
+    if (this.pendingDelivery()) queueMicrotask(() => this.schedulePendingDelivery(true));
+  }
+
+  branchChanged(): void {
+    if (this.pendingDelivery()) this.schedulePendingDelivery(true);
   }
 
   /** Register a disposal callback for a specific worker. Called when the worker
@@ -2808,90 +3218,37 @@ export class TeamLeader {
   }
 
   private notifyLLM(event: PollEvent) {
-    // Wrap once so every listener shares the same preventDefault/stopPropagation
-    // state. Listeners run synchronously, in insertion order, before the
-    // default dedupe/queue/turn-trigger path.
-    //
-    // DOM-style dispatch semantics:
-    //   - Snapshot the listener set before iterating so listeners added mid-dispatch
-    //     do NOT fire on the current event (they'll see the NEXT one).
-    //   - Re-check each listener is still in the live set before invoking, so a
-    //     listener that unsubscribes another (not-yet-visited) listener correctly
-    //     prevents that listener from firing on this event.
-    this.retainTerminalEvent(event);
-    const wrapped = wrapPollEvent(event);
+    const eventId = this.eventIdForPollEvent(event);
+    const identified = eventId ? { ...event, lifecycleEventId: eventId, attemptId: event.worker.workerInstanceId } as PollEvent : event;
+    if (eventId && this.dispatchedEventIds.has(eventId)) return;
+    if (eventId) this.dispatchedEventIds.add(eventId);
+
+    const wrapped = wrapPollEvent(identified);
     if (this.eventListeners.size > 0) {
-      const snapshot = [...this.eventListeners];
-      for (const listener of snapshot) {
-        if (!this.eventListeners.has(listener)) continue; // unsubscribed mid-dispatch
-        try {
-          listener(wrapped);
-        } catch (err) {
-          console.warn("[teams] event listener threw:", err instanceof Error ? err.message : String(err));
-        }
+      const listeners = [...this.eventListeners];
+      for (const listener of listeners) {
+        if (!this.eventListeners.has(listener)) continue;
+        try { listener(wrapped); }
+        catch (error) { console.warn("[teams] event listener threw:", error instanceof Error ? error.message : String(error)); }
         if (wrapped.propagationStopped) break;
       }
     }
-
-    // DOM-style: any listener that called preventDefault() suppresses the
-    // leader's entire default action for this event (no dedupe recording,
-    // no notify queue push, no coordinator wake). The listeners have taken
-    // responsibility for the event.
     if (wrapped.defaultPrevented) return;
+    if (event.type === "comment") return;
 
-    if (event.type === "completed" || event.type === "warning" || event.type === "failed") {
-      const key = `${event.worker.name}:terminal`;
-      if (this.notifiedTerminal.has(key)) return;
-      this.notifiedTerminal.add(key);
-    }
-
-    if (event.type === "comment" && (event.comment.startsWith("DONE:") || event.comment.startsWith("QUIT:"))) {
+    if (eventId) {
+      this.schedulePendingDelivery(true);
       return;
     }
-
-    // Comments are delivered instantly via the teams direct mesh envelope — skip the
-    // delayed team-event duplicate. Lifecycle events (completed/failed/stuck) still go through.
-    if (event.type === "comment") {
-      return;
-    }
-
-    const msg = formatPollEvent(event);
-    // A silent append is useless to an IDLE coordinator — it never reads it.
-    // Every lifecycle event wakes, including repeated stuck warnings: the
-    // coordinator must re-evaluate a worker that remains stuck after intervention.
-    this.notifyQueue.push({ msg, triggerTurn: true });
-    void this.drainNotifyQueue();
-  }
-
-  private async drainNotifyQueue() {
-    if (this.notifyDraining) return;
-    this.notifyDraining = true;
-    try {
-      // Wait briefly to let concurrent events accumulate before sending
-      await new Promise((r) => setTimeout(r, NOTIFY_BATCH_WINDOW_MS));
-
-      // Collate all queued messages into a single update
-      const batch: Array<{ msg: string; triggerTurn: boolean }> = [];
-      while (this.notifyQueue.length > 0) {
-        batch.push(this.notifyQueue.shift()!);
-      }
-      if (batch.length === 0) return;
-
-      const combined = batch.map((b) => b.msg).join("\n\n");
-      const triggerTurn = batch.some((b) => b.triggerTurn);
-
+    // Phase/alive events are live telemetry rather than lifecycle outcomes.
+    if (event.type === "phase" || event.type === "alive" || event.type === "turn_finished") {
       this.pi.sendMessage(
-        {
-          customType: "team-event",
-          content: combined,
-          display: true,
-        },
-        { deliverAs: "followUp", triggerTurn },
+        { customType: "team-event", content: formatPollEvent(event), display: true },
+        { deliverAs: "followUp", triggerTurn: true },
       );
-    } finally {
-      this.notifyDraining = false;
     }
   }
+
 }
 
 const GREEN = "\x1b[32m";

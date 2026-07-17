@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMaiBin } from "../shared/src/mai-binary.js";
 import { Type } from "@sinclair/typebox";
 import { readFile } from "node:fs/promises";
@@ -6,9 +6,17 @@ import { resolve } from "node:path";
 import type { PiMesh } from "@pi-extensions/pi-mesh/extension/pi-mesh.js";
 import { LEASE_STALE_AFTER_MS, isLeaderLeaseStale } from "./lease.js";
 import { createWorkerCommentEnvelope, createWorkerFinishEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
-import type { WorkerSessionMode } from "./v2/protocol.ts";
+import type { LeaderAckPayload, TeamEnvelope, WorkerSessionMode } from "./v2/protocol.ts";
+import {
+	WORKER_FINISH_PENDING_ENTRY_TYPE,
+	createDeclarationEventId,
+	hasAssistantMessage,
+	parseWorkerFinishPending,
+	type WorkerFinishPending,
+} from "./v2/session-facts.ts";
 
 const HEARTBEAT_ENTRY_TYPE = "teams-worker-heartbeat";
+const WORKER_FINISH_COMPLETED_ENTRY_TYPE = "teams-worker-finish-completed-v1";
 
 type TerminalStatus = "done" | "quit";
 
@@ -21,6 +29,7 @@ function resolveHeartbeatIntervalMs(): number {
 export function runWorker(pi: ExtensionAPI): void {
 	const ticketId = process.env.PI_TEAMS_TICKET_ID ?? "";
 	const workerName = process.env.PI_TEAMS_WORKER_NAME ?? "worker";
+	const workerId = process.env.PI_TEAMS_WORKER_ID ?? workerName;
 	const workerInstanceId = process.env.PI_TEAMS_WORKER_INSTANCE_ID ?? "unknown-worker-instance";
 
 	const teamId = process.env.PI_TEAMS_TEAM_ID ?? ticketId;
@@ -33,8 +42,11 @@ export function runWorker(pi: ExtensionAPI): void {
 		}
 	})();
 	const coordinatorId = process.env.PI_TEAMS_COORDINATOR_ID;
+	const coordinatorSessionId = process.env.PI_TEAMS_COORDINATOR_SESSION_ID ?? "";
 	const leaseFile = process.env.PI_TEAMS_LEASE_FILE;
 	let meshSeq = 0;
+	const acknowledgedFinishEvents = new Set<string>();
+	const finishAckWaiters = new Map<string, Set<() => void>>();
 
 	if (!ticketId) {
 		console.error("[teams-worker] PI_TEAMS_TICKET_ID not set");
@@ -48,13 +60,24 @@ export function runWorker(pi: ExtensionAPI): void {
 			try { mesh.tell(coordinatorId, payload); } catch {}
 		}
 	};
-	const meshTellCritical = async (payload: unknown) => {
-		if (!mesh || !coordinatorId) return;
-		try {
-			await mesh.tellAndWaitForReceipt(coordinatorId, payload, "delivered", 5000);
-		} catch {
-			try { mesh.tell(coordinatorId, payload); } catch {}
+	const waitForPersistedAck = (eventId: string, timeoutMs: number): Promise<boolean> => {
+		if (acknowledgedFinishEvents.has(eventId)) return Promise.resolve(true);
+		return new Promise((resolveAck) => {
+			const done = () => { clearTimeout(timer); finishAckWaiters.get(eventId)?.delete(done); resolveAck(true); };
+			const timer = setTimeout(() => { finishAckWaiters.get(eventId)?.delete(done); resolveAck(false); }, timeoutMs);
+			const waiters = finishAckWaiters.get(eventId) ?? new Set<() => void>();
+			waiters.add(done);
+			finishAckWaiters.set(eventId, waiters);
+		});
+	};
+	const sendFinishUntilPersisted = async (payload: unknown, eventId: string) => {
+		if (!mesh || !coordinatorId) throw new Error("Teams coordinator route is unavailable; finish remains pending in the worker session");
+		for (let attempt = 0; attempt < 3; attempt++) {
+			try { await mesh.tellAndWaitForReceipt(coordinatorId, payload, "delivered", 5000); }
+			catch { try { mesh.tell(coordinatorId, payload); } catch {} }
+			if (await waitForPersistedAck(eventId, 5000)) return;
 		}
+		throw new Error("Teams coordinator did not acknowledge durable finish persistence; finish remains pending in the worker session");
 	};
 	const nextSeq = () => ++meshSeq;
 	// Our durable mesh identity (shared instance). Declared on every worker→leader
@@ -63,31 +86,68 @@ export function runWorker(pi: ExtensionAPI): void {
 
 	let lastStopReason: string | undefined;
 	let terminalStatus: TerminalStatus | null = null;
+	let workerSessionFile = "";
 
 
 
-	const finalizeTask = async (cwd: string, status: TerminalStatus, summary: string) => {
+	const finalizeTask = async (ctx: ExtensionContext, status: TerminalStatus, summary: string) => {
 		if (terminalStatus) return;
-		terminalStatus = status;
-
+		if (!coordinatorSessionId) throw new Error("team_finish requires the canonical coordinator session identity");
 		const normalizedSummary = summary.trim() || (status === "done" ? "Task completed." : "Worker quit.");
-		const note = status === "done"
-			? `DONE: ${normalizedSummary}`
-			: `QUIT: ${normalizedSummary}`;
-
-		writeHeartbeat("worker_terminal", { status, summary: normalizedSummary });
-		await meshTellCritical(
+		const entries = ctx.sessionManager.getEntries();
+		if (!ctx.sessionManager.getSessionFile() || !hasAssistantMessage(entries)) {
+			throw new Error("team_finish requires a persisted worker Pi session with an assistant message");
+		}
+		const existing = entries
+			.filter((entry): entry is Extract<(typeof entries)[number], { type: "custom" }> => entry.type === "custom" && entry.customType === WORKER_FINISH_PENDING_ENTRY_TYPE)
+			.map((entry) => parseWorkerFinishPending(entry.data))
+			.filter((entry): entry is WorkerFinishPending => entry !== null)
+			.find((entry) => entry.coordinatorSessionId === coordinatorSessionId && entry.teamId === teamId && entry.workerId === workerId && entry.attemptId === workerInstanceId);
+		if (existing) {
+			const expectedExistingEventId = createDeclarationEventId(
+				{ coordinatorSessionId, teamId, workerId, attemptId: workerInstanceId },
+				existing.status,
+				existing.summary,
+			);
+			if (existing.eventId !== expectedExistingEventId) {
+				throw new Error("team_finish found corrupt pending declaration evidence in the worker session");
+			}
+			if (existing.status !== status || existing.summary !== normalizedSummary) {
+				throw new Error("team_finish conflicts with the declaration already pending for this attempt");
+			}
+		}
+		const eventId = typeof existing?.eventId === "string"
+			? existing.eventId
+			: createDeclarationEventId({ coordinatorSessionId, teamId, workerId, attemptId: workerInstanceId }, status, normalizedSummary);
+		const pending: WorkerFinishPending = {
+			schemaVersion: 1,
+			coordinatorSessionId,
+			teamId,
+			workerId,
+			attemptId: workerInstanceId,
+			status: existing?.status === "done" || existing?.status === "quit" ? existing.status : status,
+			summary: typeof existing?.summary === "string" ? existing.summary : normalizedSummary,
+			eventId,
+			createdAt: typeof existing?.createdAt === "number" ? existing.createdAt : Date.now(),
+		};
+		if (!existing) pi.appendEntry(WORKER_FINISH_PENDING_ENTRY_TYPE, pending);
+		const note = pending.status === "done" ? `DONE: ${pending.summary}` : `QUIT: ${pending.summary}`;
+		await sendFinishUntilPersisted(
 			createWorkerFinishEnvelope({
 				teamId,
 				leaderEpoch,
-				workerId: workerName,
+				workerId,
 				attemptId: workerInstanceId,
 				seq: nextSeq(),
-				status,
-				summary: normalizedSummary,
+				status: pending.status,
+				summary: pending.summary,
+				eventId,
 				meshId: selfMeshId(),
 			}),
+			eventId,
 		);
+		pi.appendEntry(WORKER_FINISH_COMPLETED_ENTRY_TYPE, { ...pending, completedAt: Date.now() });
+		terminalStatus = pending.status;
 		// Report status ONLY — the worker does NOT close its own ticket. A terminal
 		// signal is a STATUS REPORT (done/quit + summary via the note + the honest
 		// mesh finish tell above), not a lifecycle decision. Auto-closing a
@@ -100,7 +160,7 @@ export function runWorker(pi: ExtensionAPI): void {
 			// LEADER's cwd, which can be a non-repo (Cecilia bug 4: leader launched from
 			// /Users/alexander/Projects → "not a git repository" → silent note loss).
 			// maitake is global + ticket-id-keyed, so the note attaches by id from any repo.
-			const effectiveCwd = cwd;
+			const effectiveCwd = ctx.cwd;
 			await pi.exec(getMaiBin(), ["add-note", ticketId, note], { cwd: effectiveCwd, timeout: 5000 });
 		} catch {
 			// best effort
@@ -167,7 +227,7 @@ export function runWorker(pi: ExtensionAPI): void {
 			createWorkerHelloEnvelope({
 				teamId,
 				leaderEpoch,
-				workerId: workerName,
+				workerId,
 				attemptId: workerInstanceId,
 				seq: nextSeq(),
 				meshId: durableId,
@@ -175,11 +235,12 @@ export function runWorker(pi: ExtensionAPI): void {
 					protocolVersion: 1,
 					teamId,
 					leaderEpoch,
-					workerId: workerName,
+					workerId,
 					attemptId: workerInstanceId,
-					coordinatorSessionId: coordinatorId ?? "",
+					coordinatorSessionId,
 					leasePath: leaseFile ?? "",
 					sessionMode,
+					workerSessionFile,
 				},
 			}),
 		);
@@ -190,11 +251,22 @@ export function runWorker(pi: ExtensionAPI): void {
 	// identity. Minting a second PiMesh here (the old behaviour) created a second
 	// sidecar clientId that defeated the pinned id and forced the stale-route +
 	// identity-churn bugs. Exactly one PiMesh per worker.
-	pi.on("session_start", (_event, _ctx) => {
+	pi.on("session_start", (_event, ctx) => {
+		workerSessionFile = ctx.sessionManager.getSessionFile() ?? "";
 		try {
 			mesh = (globalThis as { __piMesh?: PiMesh }).__piMesh ?? null;
 			if (!mesh) { console.warn("[teams-worker] shared mesh instance not available"); }
 			else {
+				mesh.on("message", (inbound: { message: { from: string; payload: unknown } }) => {
+					if (!coordinatorId || inbound.message.from !== coordinatorId) return;
+					const envelope = inbound.message.payload as TeamEnvelope<LeaderAckPayload>;
+					if (!envelope || envelope.version !== 1 || envelope.from !== "leader" || envelope.type !== "leader.ack" || envelope.to !== "worker") return;
+					if (envelope.teamId !== teamId || envelope.workerId !== workerId || envelope.attemptId !== workerInstanceId) return;
+					if (envelope.payload?.phase !== "persisted" || typeof envelope.payload.eventId !== "string" || envelope.correlationId !== envelope.payload.eventId) return;
+					acknowledgedFinishEvents.add(envelope.payload.eventId);
+					for (const resolveAck of finishAckWaiters.get(envelope.payload.eventId) ?? []) resolveAck();
+					finishAckWaiters.delete(envelope.payload.eventId);
+				});
 				announceInitWhenReady();
 			}
 		} catch (e) {
@@ -310,7 +382,7 @@ export function runWorker(pi: ExtensionAPI): void {
 				createWorkerCommentEnvelope({
 					teamId,
 					leaderEpoch,
-					workerId: workerName,
+					workerId,
 					attemptId: workerInstanceId,
 					seq: nextSeq(),
 					text: commentText,
@@ -327,7 +399,7 @@ export function runWorker(pi: ExtensionAPI): void {
 		description: `Mark your assigned ticket (${ticketId}) as done or quit. This is the authoritative terminal signal for teams workers.`,
 		parameters: FinishParams,
 		async execute(_id, params: { status: TerminalStatus; summary: string }, _signal, _onUpdate, ctx) {
-			await finalizeTask(ctx.cwd, params.status, params.summary);
+			await finalizeTask(ctx, params.status, params.summary);
 			return { content: [{ type: "text" as const, text: `Marked ${ticketId} as ${params.status}` }], details: undefined };
 		},
 	});

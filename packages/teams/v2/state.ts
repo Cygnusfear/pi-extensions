@@ -1,7 +1,177 @@
-import type { AttemptId, LeaderEpoch, TeamId, WorkerId, WorkerSessionMode } from "./protocol.ts";
+import type { WorkerSessionMode } from "./protocol.ts";
 
-export type WorkerDesiredState = "running" | "stopped";
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export interface AttemptIdentity {
+	coordinatorSessionId: string;
+	teamId: string;
+	workerId: string;
+	attemptId: string;
+}
+
+export interface ProcessBirth {
+	/** Millisecond process start observation used with pid to detect pid reuse. */
+	startedAt: number;
+}
+
+export type LifecycleFactKind =
+	| "team_created"
+	| "spawn_requested"
+	| "process_started"
+	| "process_exited"
+	| "stuck"
+	| "declaration_done"
+	| "declaration_quit"
+	| "assessment_missing_finish"
+	| "assessment_startup_failure"
+	| "assessment_crash"
+	| "assessment_killed"
+	| "protocol_violation"
+	| "cleanup_requested"
+	| "cleanup_completed"
+	| "cleanup_failed"
+	| "effect_requested"
+	| "effect_completed"
+	| "effect_failed"
+	| "outcome_corrected";
+
+export interface LifecycleFact<TPayload extends JsonValue = JsonValue> extends AttemptIdentity {
+	schemaVersion: 4;
+	eventId: string;
+	kind: LifecycleFactKind;
+	sourceLeaderEpoch?: string;
+	occurredAt: number;
+	payload: TPayload;
+	diagnostics?: JsonValue;
+}
+
+export interface LifecycleAck {
+	schemaVersion: 1;
+	coordinatorSessionId: string;
+	eventId: string;
+	runId: string;
+	acknowledgedAt: number;
+}
+
+export interface LifecycleMigrationMarker {
+	schemaVersion: 1;
+	coordinatorSessionId: string;
+	sourceSchemaVersions: number[];
+	importedAttemptIds: string[];
+	importedEventIds: string[];
+	completedAt: number;
+}
+
+export interface TeamCreatedPayload {
+	root: "coordinator_session";
+}
+
+export interface SpawnRequestedPayload {
+	name: string;
+	ticketId: string;
+	persistent: boolean;
+	sessionMode: WorkerSessionMode;
+	sessionDir: string;
+	workerSessionFile: string;
+	worktreePath: string | null;
+	model?: string;
+	hasTools?: boolean;
+}
+
+export interface ProcessStartedPayload {
+	pid: number;
+	processBirth: ProcessBirth;
+	sessionMode: WorkerSessionMode;
+	workerSessionFile: string;
+	sessionDir: string;
+}
+
+export interface ProcessExitedPayload {
+	pid: number;
+	processBirth: ProcessBirth;
+	code: number | null;
+	signal?: string;
+}
+
+export interface StuckPayload {
+	cooldownIndex: number;
+	idleSeconds: number;
+}
+
+export interface DeclarationPayload {
+	summary: string;
+}
+
+export interface AssessmentPayload {
+	reason: string;
+	provisional: boolean;
+	legacyAmbiguous?: boolean;
+}
+
+export type CleanupPhase = "not_ready" | "pending" | "running" | "completed" | "failed";
+export type WorkerRoute = "pending" | "linked" | "resumable" | "dead";
+export type ProcessPhase = "created" | "spawning" | "running" | "exited";
+export type AssessmentKind =
+	| "startup_failure"
+	| "crash"
+	| "missing_finish"
+	| "killed"
+	| "legacy_ambiguous"
+	| "protocol_violation";
+
+export interface AttemptState extends AttemptIdentity {
+	name: string;
+	ticketId: string;
+	persistent: boolean;
+	worktreePath: string | null;
+	model?: string;
+	hasTools?: boolean;
+	sessionMode: WorkerSessionMode;
+	process: {
+		phase: ProcessPhase;
+		pid?: number;
+		birth?: ProcessBirth;
+		workerSessionFile?: string;
+		sessionDir?: string;
+		exit?: { code: number | null; signal?: string; observedAt: number; eventId: string };
+	};
+	declaration: null | {
+		kind: "done" | "quit";
+		summary: string;
+		eventId: string;
+		at: number;
+	};
+	assessment: null | {
+		kind: AssessmentKind;
+		reason: string;
+		diagnostics?: JsonValue;
+		eventId: string;
+		at: number;
+		provisional: boolean;
+	};
+	cleanup: {
+		phase: CleanupPhase;
+		effectId?: string;
+		error?: string;
+	};
+	protocolViolation: boolean;
+	stuckCount: number;
+	factEventIds: string[];
+}
+
+export interface WorkerState {
+	workerId: string;
+	name: string;
+	persistent: boolean;
+	currentAttemptId: string | null;
+	route: WorkerRoute;
+	attemptIds: string[];
+}
+
+export type ActionableEventType = "completed" | "warning" | "failed" | "stuck" | "outcome_corrected";
+
+/** Public presentation state retained for existing widget/tool adapters. */
 export type WorkerLifecycleState =
 	| "created"
 	| "spawning"
@@ -14,49 +184,55 @@ export type WorkerLifecycleState =
 	| "orphaned"
 	| "resumable";
 
-export type WorkerFact =
-	| { type: "spawn_requested"; at: number }
-	| { type: "spawn_started"; at: number; pid?: number }
-	| { type: "session_detected"; at: number; sessionFile: string }
-	| { type: "worker_hello"; at: number }
-	| { type: "phase_event"; at: number; stage: string }
-	| { type: "comment_posted"; at: number; text: string }
-	| { type: "finish_done"; at: number; summary: string }
-	| { type: "finish_quit"; at: number; summary: string }
-	| { type: "process_exit"; at: number; exitCode: number | null }
-	| { type: "exit_assessed"; at: number; outcome: "success" | "warning" | "failed" | "turn_finished"; reason?: string }
-	| { type: "worker_killed"; at: number }
-	| { type: "lease_stale"; at: number }
-	| { type: "leader_shutdown"; at: number }
-	| { type: "resume_attached"; at: number };
-
-export interface WorkerAttemptRecord {
-	attemptId: AttemptId;
-	workerId: WorkerId;
-	leaderEpoch: LeaderEpoch;
-	sessionMode: WorkerSessionMode;
-	sessionDir: string;
-	sessionFile?: string;
-	pid?: number;
-	startedAt: number;
-	endedAt?: number;
-	exitCode?: number | null;
-	spawnError?: string;
-	facts: WorkerFact[];
-}
-
-export interface WorkerRecord {
-	workerId: WorkerId;
+export interface ActionableLifecycleEvent extends AttemptIdentity {
+	eventId: string;
+	type: ActionableEventType;
 	name: string;
-	desiredState: WorkerDesiredState;
-	currentAttemptId?: AttemptId;
-	lifecycle: WorkerLifecycleState;
-	attempts: WorkerAttemptRecord[];
+	summary: string;
+	occurredAt: number;
 }
 
-export interface TeamRecord {
-	teamId: TeamId;
-	leaderEpoch: LeaderEpoch;
-	createdAt: number;
-	workers: Record<WorkerId, WorkerRecord>;
+export interface EffectState {
+	effectId: string;
+	attemptId: string;
+	kind: string;
+	phase: "requested" | "completed" | "failed";
+	normalizedInputs: JsonValue;
+	error?: string;
+	requestEventId: string;
+	completionEventId?: string;
+}
+
+export interface LifecycleProjection {
+	coordinatorSessionId: string;
+	teamId: string | null;
+	workers: Map<string, WorkerState>;
+	attempts: Map<string, AttemptState>;
+	actionableEvents: Map<string, ActionableLifecycleEvent>;
+	effects: Map<string, EffectState>;
+	acceptedEventIds: string[];
+	protocolViolations: string[];
+}
+
+export function createEmptyProjection(coordinatorSessionId: string): LifecycleProjection {
+	return {
+		coordinatorSessionId,
+		teamId: null,
+		workers: new Map(),
+		attempts: new Map(),
+		actionableEvents: new Map(),
+		effects: new Map(),
+		acceptedEventIds: [],
+		protocolViolations: [],
+	};
+}
+
+export function attemptStatus(attempt: AttemptState): "running" | "completed" | "warning" | "failed" | "killed" | "unknown" {
+	if (attempt.protocolViolation) return "failed";
+	if (attempt.declaration?.kind === "done") return "completed";
+	if (attempt.declaration?.kind === "quit") return "warning";
+	if (attempt.assessment?.kind === "killed") return "killed";
+	if (attempt.assessment) return attempt.assessment.kind === "missing_finish" || attempt.assessment.kind === "legacy_ambiguous" ? "warning" : "failed";
+	if (attempt.process.phase === "running" || attempt.process.phase === "spawning") return "running";
+	return "unknown";
 }

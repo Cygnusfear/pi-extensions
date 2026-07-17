@@ -115,6 +115,8 @@ export function wrapPollEvent(event: PollEvent): TeamsEvent {
 export interface EventFilter {
 	/** Match a specific worker by name. */
 	name?: string;
+	/** Bind to one exact process attempt. */
+	attemptId?: string;
 	/** Match a specific PollEvent type. */
 	type?: PollEventFilterType;
 	/** Match against event.comment (only meaningful when type omitted or "comment").
@@ -164,6 +166,7 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 	private autoStopPropagation = false;
 	/** A host-owned wake is dispatched synchronously, unlike a .then continuation. */
 	private wakeMessage: string | ((event: TeamsEvent) => string) | undefined;
+	private boundAttemptId?: string;
 
 	constructor(
 		private readonly leader: TeamLeader,
@@ -171,6 +174,7 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		private readonly predicate: (event: PollEvent) => boolean,
 		abortSignal?: AbortSignal,
 	) {
+		this.boundAttemptId = filter.attemptId ?? (filter.name ? leader.getCurrentAttemptId(filter.name) : undefined);
 		// Leader hands us pre-wrapped TeamsEvents so preventDefault/stopPropagation
 		// calls from any listener affect the single shared wrapper.
 		this.unsub = leader.subscribeToEvents((event) => this.handle(event as TeamsEvent));
@@ -199,11 +203,17 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 		// Defaults on. Opt out with { matchCurrent: false }.
 		if (filter.matchCurrent !== false && filter.name && filter.type) {
 			this.checkCurrent(filter.name, filter.type);
+		} else if (filter.matchCurrent !== false && filter.attemptId && filter.type) {
+			const attempt = leader.getAttemptHistory({ attemptId: filter.attemptId })[0];
+			if (attempt) this.checkCurrent(attempt.name, filter.type);
 		}
 	}
 
 	private checkCurrent(name: string, type: PollEventFilterType): void {
-		const retained = this.leader.getCurrentTerminalEvent?.(name, type);
+		// A name with no current attempt is a future binding. Do not replay an
+		// older same-name attempt; bind atomically to the first matching event.
+		if (this.filter.name && !this.boundAttemptId) return;
+		const retained = this.leader.getCurrentTerminalEvent?.(name, type, this.boundAttemptId);
 		if (retained) {
 			queueMicrotask(() => this.handle(wrapPollEvent(retained)));
 			return;
@@ -225,6 +235,10 @@ export class TeamsSubscription implements PromiseLike<TeamsEvent> {
 
 	private handle(event: TeamsEvent): void {
 		if (this.disposed) return;
+		if (!this.boundAttemptId && this.filter.name && event.worker.name === this.filter.name) {
+			this.boundAttemptId = event.attemptId ?? event.worker.workerInstanceId;
+		}
+		if (this.boundAttemptId && (event.attemptId ?? event.worker.workerInstanceId) !== this.boundAttemptId) return;
 		if (!this.predicate(event)) return;
 
 		// Pre-registered DOM-style suppressions fire first so .each() callbacks
@@ -430,6 +444,7 @@ export function buildPredicate(
 
 	const predicate = (event: PollEvent): boolean => {
 		if (filter.name !== undefined && event.worker.name !== filter.name) return false;
+		if (filter.attemptId !== undefined && (event.attemptId ?? event.worker.workerInstanceId) !== filter.attemptId) return false;
 		if (filter.type !== undefined) {
 			if (filter.type === "terminal") {
 				if (!TERMINAL_EVENT_TYPES.has(event.type)) return false;

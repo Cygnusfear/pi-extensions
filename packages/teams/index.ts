@@ -24,6 +24,19 @@ export default function (pi: ExtensionAPI) {
 	const leader = new TeamLeader(pi);
 	registerTeamsTool(pi, leader);
 
+	// Durable lifecycle delivery is correlated to the provider request that
+	// actually reaches a successful terminal assistant response.
+	pi.on("before_agent_start", () => {
+		const message = leader.prepareDeliveryForAgentRun();
+		return message ? { message } : undefined;
+	});
+	pi.on("context", (event) => { leader.observeProviderContext(event.messages); });
+	pi.on("before_provider_request", (event) => { leader.observeProviderRequest(event.payload); });
+	pi.on("after_provider_response", (event) => { leader.observeProviderResponse(event.status); });
+	pi.on("message_end", (event) => { leader.observeMessageEnd(event.message); });
+	pi.on("agent_end", () => { leader.completeAgentRun(false); });
+	pi.on("session_tree", () => { leader.branchChanged(); });
+
 	// Sandbox function for execute_code — shares same leader instance
 	let sessionCtx: ExtensionContext | null = null;
 
@@ -43,8 +56,12 @@ export default function (pi: ExtensionAPI) {
 	(teamsFn as any).killAll = async () => run({ action: "kill_all" });
 	(teamsFn as any).tell = async (name: string, message: string) => run({ action: "tell", name, message });
 	(teamsFn as any).tellAll = async (message: string) => run({ action: "tell_all", message });
-	(teamsFn as any).view = async (name: string, opts?: { start?: number; end?: number }) =>
-		run({ action: "view", name, ...opts });
+	(teamsFn as any).view = async (target: string | { name?: string; attemptId?: string; start?: number; end?: number }, opts?: { start?: number; end?: number }) =>
+		typeof target === "string"
+			? run({ action: "view", name: target, ...opts })
+			: run({ action: "view", ...target });
+	(teamsFn as any).history = async (opts?: { name?: string; attemptId?: string; status?: string; start?: number; end?: number }) =>
+		run({ action: "history", ...opts });
 	(teamsFn as any).runtime = async () => run({ action: "runtime" });
 
 	// teams.on — subscribe to the leader's PollEvent stream with a predicate.
@@ -96,14 +113,13 @@ export default function (pi: ExtensionAPI) {
 	if (IS_WORKER) {
 		pi.on("session_start", (_event, ctx) => {
 			leader.setContext(ctx);
+			leader.restoreState(ctx);
 		});
 		pi.on("agent_end", async () => {
 			await leader.waitForAllWorkersToFinish();
 		});
 		pi.on("session_shutdown", async () => {
 			leader.stopPolling();
-			// Kill all workers and persist clean state so reload doesn't restore orphans (RC-B5)
-			await leader.killAll();
 		});
 		return;
 	}

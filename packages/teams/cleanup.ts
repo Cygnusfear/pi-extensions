@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import type { WorkerHandle } from "./types.js";
 import { autoCommitWorktreeChanges, branchHasNewCommits, renameBranch, removeWorktree, worktreeBranchName } from "./worktree.js";
 
@@ -15,6 +16,8 @@ export interface CleanupOptions {
   preserveBranch?: boolean;
   /** Keep the worktree on disk for post-mortem inspection instead of removing it. */
   preserveWorktree?: boolean;
+  /** Deterministic lifecycle effect identifier used to reconcile auto-commits. */
+  effectId?: string;
 }
 
 /**
@@ -40,33 +43,34 @@ export async function cleanupWorker(
   //   killWorker(worker.pid);
   // }
 
-  const { preserveBranch = true, preserveWorktree = false } = options;
+  const { preserveBranch = true, preserveWorktree = false, effectId } = options;
 
   let branchHasMergeableWork = false;
   let worktreePreserved = false;
 
   if (worker.worktreePath) {
     const branch = worktreeBranchName(worker.name, worker.ticketId);
+    const worktreeExists = fs.existsSync(worker.worktreePath);
 
     if (preserveBranch) {
-      await autoCommitWorktreeChanges(worker.worktreePath);
+      if (worktreeExists && !preserveWorktree) await autoCommitWorktreeChanges(worker.worktreePath, effectId);
       // The deliverable branch ALWAYS persists through teardown — a finished worker's
-      // branch must survive worktree removal (the coordinator owns branch retention).
-      // The retired code passed keepBranch=hasWork to removeWorktree, so when hasWork was
-      // false it `git branch -D`'d the branch — that orphaned v1a's de44852+18def80,
-      // recovered only via `git cat-file` from the finish wake. hasWork now decides ONLY
-      // whether there is mergeable work to surface, never whether the branch survives.
+      // branch must survive worktree removal. The effect is idempotent after a crash:
+      // an absent worktree plus an already-renamed .done branch is completion.
       branchHasMergeableWork = await branchHasNewCommits(repoDir, branch);
-      if (preserveWorktree) {
+      if (preserveWorktree && worktreeExists) {
         worktreePreserved = true;
       } else {
-        await removeWorktree(repoDir, worker.worktreePath, branch, /* keepBranch */ true);
-        await renameBranch(repoDir, branch, `${branch}.done`);
+        const removed = await removeWorktree(repoDir, worker.worktreePath, branch, /* keepBranch */ true);
+        if (!removed.success) throw new Error(removed.error ?? `Failed to remove worktree ${worker.worktreePath}`);
+        const renamed = await renameBranch(repoDir, branch, `${branch}.done`);
+        if (!renamed) throw new Error(`Failed to preserve worker branch ${branch} as ${branch}.done`);
       }
-    } else if (preserveWorktree) {
+    } else if (preserveWorktree && worktreeExists) {
       worktreePreserved = true;
     } else {
-      await removeWorktree(repoDir, worker.worktreePath, branch);
+      const removed = await removeWorktree(repoDir, worker.worktreePath, branch, /* keepBranch */ false);
+      if (!removed.success) throw new Error(removed.error ?? `Failed to remove worktree ${worker.worktreePath}`);
     }
   }
 

@@ -19,6 +19,7 @@ function deliver(leader: TeamLeader, raw: Parameters<typeof unwrapInboundTell>[0
 function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 	const now = Date.now();
 	return {
+		workerId: "worker-1",
 		workerInstanceId: "w-1",
 		name: "worker-1",
 		pid: 12345,
@@ -46,159 +47,34 @@ function makeWorker(overrides: Partial<WorkerHandle> = {}): WorkerHandle {
 function makeHarness(branch: any[] = []) {
 	const appended: Array<{ customType: string; data: unknown }> = [];
 	const sent: Array<{ message: unknown; options: unknown }> = [];
+	const entries: any[] = [{ type: "message", id: "assistant", message: { role: "assistant", content: [] } }, ...branch];
 	const fakePi = {
 		appendEntry: (customType: string, data: unknown) => {
 			appended.push({ customType, data });
+			entries.push({ type: "custom", customType, data });
 		},
 		sendMessage: (message: unknown, options: unknown) => sent.push({ message, options }),
 	};
 	const leader = new TeamLeader(fakePi as any);
 	const leaderAny = leader as any;
-	leaderAny.ctx = {
+	const ctx = {
+		cwd: "/tmp/test-repo",
 		ui: { setWidget: () => {} },
 		sessionManager: {
-			getBranch: () => branch,
+			getSessionFile: () => "/tmp/leader-runtime-test.jsonl",
+			getSessionId: () => "leader-runtime-session",
+			getEntries: () => entries,
+			getBranch: () => entries,
+			getHeader: () => null,
 		},
 	};
-	leaderAny.stateHydrated = true;
+	leader.restoreState(ctx as any);
+	leaderAny.teamId = "team-1";
+	leaderAny.ctx = ctx;
 	return { leader: leaderAny, appended, sent };
 }
 
-describe("TeamLeader state persistence", () => {
-	test("renderWidget no longer persists state and dedupe ignores volatile fields", () => {
-		const { leader, appended } = makeHarness();
-		leader.workers.set("worker-1", makeWorker());
-
-		leader.renderWidget();
-		expect(appended).toHaveLength(0);
-
-		leader.persistStateIfHydrated();
-		expect(appended).toHaveLength(1);
-
-		const worker = leader.workers.get("worker-1");
-		worker.lastActivityAt += 5000;
-		worker.lastOutputAt += 5000;
-		worker.lastNote = "new note";
-		worker.ticketStatus = "in_progress";
-		worker.lastSeenCommentCount = 99;
-
-		leader.renderWidget();
-		leader.persistStateIfHydrated();
-		expect(appended).toHaveLength(1);
-
-		worker.status = "done";
-		leader.persistStateIfHydrated();
-		expect(appended).toHaveLength(2);
-	});
-
-	test("restoreState seeds dedupe signature so immediate render does not append duplicate snapshot", () => {
-		const now = Date.now();
-		const snapshot = {
-			version: 3,
-			v2TeamId: "team-1",
-			v2TeamRecord: {
-				teamId: "team-1",
-				leaderEpoch: "epoch-old",
-				createdAt: now,
-				workers: {
-					"worker-1": {
-						workerId: "worker-1",
-						name: "worker-1",
-						desiredState: "running",
-						currentAttemptId: "w-1",
-						lifecycle: "done",
-						attempts: [{
-							attemptId: "w-1",
-							workerId: "worker-1",
-							leaderEpoch: "epoch-old",
-							sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
-							sessionDir: "/tmp/session-dir",
-							sessionFile: "/tmp/session-dir/session.jsonl",
-							startedAt: now,
-							pid: 999999,
-							facts: [{ type: "spawn_started", at: now, pid: 999999 }, { type: "worker_hello", at: now }, { type: "finish_done", at: now, summary: "done" }],
-						}],
-					},
-				},
-			},
-			workers: {
-				"worker-1": {
-					workerInstanceId: "w-1",
-					attempts: [{
-						workerInstanceId: "w-1",
-						pid: 999999,
-						sessionDir: "/tmp/session-dir",
-						sessionFile: "/tmp/session-dir/session.jsonl",
-						spawnedAt: now,
-						sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
-					}],
-					name: "worker-1",
-					pid: 999999,
-					ticketId: "tk-1",
-					sessionDir: "/tmp/session-dir",
-					sessionFile: "/tmp/session-dir/session.jsonl",
-					worktreePath: null,
-					status: "done",
-					spawnedAt: now,
-					sessionMode: { kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" },
-					freeform: true,
-					routeState: "resumable",
-					doneAt: now,
-					graceAt: now - 1000,
-					resumableUntilAt: now + 60_000,
-				},
-			},
-			savedAt: now,
-		};
-		const branch = [
-			{
-				type: "custom",
-				customType: "teams-leader-state",
-				data: snapshot,
-			},
-		];
-		const { leader, appended } = makeHarness(branch);
-		leader.restoreState(leader.ctx);
-		expect(appended).toHaveLength(0);
-		expect(leader.getWorker("worker-1")?.status).toBe("done");
-		expect(leader.getWorker("worker-1")?.ticketStatus).toBe("closed");
-		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("done");
-		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({ kind: "resume", sessionFile: "/tmp/session-dir/session.jsonl" });
-		expect(leader.getWorker("worker-1")?.attempts).toHaveLength(1);
-	});
-
-	test("terminal event ledger survives terminal widget cleanup and state restore", () => {
-		const { leader, appended } = makeHarness();
-		const worker = makeWorker({ name: "finished", workerInstanceId: "attempt-finished", status: "done", lastNote: "ship it" });
-		leader.workers.set(worker.name, worker);
-		// Keep this focused on persistence/replay, not the normal host notify queue.
-		leader.subscribeToEvents((event: any) => event.preventDefault());
-		leader.notifyLLM({ type: "completed", worker: { ...worker }, result: "ship it" });
-		leader.workers.clear();
-		leader.persistStateIfHydrated({ cleared: true });
-
-		const snapshot = appended.at(-1)?.data as any;
-		expect(snapshot.workers).toEqual({});
-		expect(snapshot.terminalEvents).toHaveLength(1);
-		expect(snapshot.terminalEvents[0].event).toMatchObject({ type: "completed", worker: { name: "finished" }, result: "ship it" });
-
-		const restored = makeHarness([{ type: "custom", customType: "teams-leader-state", data: snapshot }]);
-		restored.leader.restoreState(restored.leader.ctx);
-		expect(restored.leader.getWorker("finished")).toBeUndefined();
-		expect(restored.leader.getCurrentTerminalEvent("finished", "completed")).toMatchObject({ type: "completed", result: "ship it" });
-		expect(restored.leader.getCurrentTerminalEvent("finished", "terminal")).toMatchObject({ type: "completed", result: "ship it" });
-	});
-
-	test("terminal event ledger normalization keeps the latest duplicate record", () => {
-		const { leader } = makeHarness();
-		const worker = makeWorker({ name: "duplicate", workerInstanceId: "attempt-duplicate", status: "done" });
-		const old = { recordedAt: 100, event: { type: "completed", worker: { ...worker }, result: "old" } };
-		const latest = { recordedAt: 200, event: { type: "completed", worker: { ...worker }, result: "latest" } };
-		const normalized = leader.normalizeTerminalEventLedger([old, latest], 200) as any[];
-		expect(normalized).toHaveLength(1);
-		expect(normalized[0]).toMatchObject({ recordedAt: 200, event: { result: "latest" } });
-	});
-
+describe("TeamLeader runtime and transport integration", () => {
 	test("subscription wake sends exactly one host follow-up in the terminal dispatch pass", () => {
 		const { leader, sent } = makeHarness();
 		const worker = makeWorker({ name: "wake-worker", status: "done" });
@@ -378,7 +254,6 @@ describe("TeamLeader state persistence", () => {
 		const observed: any[] = [];
 		leader.notifyLLM = (event: any) => observed.push(event);
 		leader.renderWidget = () => {};
-		leader.v2TeamId = "team-1";
 		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
 		const mesh = {
 			on: () => {},
@@ -459,7 +334,6 @@ describe("TeamLeader state persistence", () => {
 		const observed: any[] = [];
 		leader.notifyLLM = (event: any) => observed.push(event);
 		leader.renderWidget = () => {};
-		leader.v2TeamId = "team-1";
 		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
 		const mesh = {
 			on: () => {}, off: () => {}, stop: () => {},
@@ -528,61 +402,7 @@ describe("TeamLeader state persistence", () => {
 		expect(leader.buildSpawnSessionMode()).toEqual({ kind: "fresh" });
 	});
 
-	test("v2 getters expose reduced lifecycle and current session mode", () => {
-		const { leader } = makeHarness();
-		leader.ctx.sessionManager.getSessionFile = () => "/tmp/leader.jsonl";
-		leader.ctx.sessionManager.getLeafId = () => "leaf-1";
-		leader.ctx.sessionManager.createBranchedSession = () => "/tmp/forked.jsonl";
-		const worker = makeWorker({ workerInstanceId: "attempt-1" });
-		leader.workers.set("worker-1", worker);
-		leader.upsertV2WorkerFromHandle(worker);
-		leader.appendV2Fact("worker-1", { type: "spawn_started", at: 1, pid: worker.pid });
-		leader.appendV2Fact("worker-1", { type: "worker_hello", at: 2 });
 
-		expect(leader.getV2WorkerLifecycle("worker-1")).toBe("running");
-		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({
-			kind: "fresh",
-		});
-	});
-
-	test("upsertV2WorkerFromHandle preserves explicit attempt session mode", () => {
-		const { leader } = makeHarness();
-		const worker = makeWorker({
-			attempts: [{
-				workerInstanceId: "attempt-1",
-				pid: 12345,
-				sessionDir: "/tmp/session-dir",
-				sessionFile: "/tmp/session-dir/session.jsonl",
-				spawnedAt: Date.now(),
-				sessionMode: { kind: "fork", parentSessionFile: "/tmp/leader.jsonl", parentLeafId: "leaf-1", sessionFile: "/tmp/forked.jsonl" },
-			}],
-		});
-		leader.workers.set("worker-1", worker);
-		leader.upsertV2WorkerFromHandle(worker);
-		expect(leader.getV2CurrentSessionMode("worker-1")).toEqual({
-			kind: "fork",
-			parentSessionFile: "/tmp/leader.jsonl",
-			parentLeafId: "leaf-1",
-			sessionFile: "/tmp/forked.jsonl",
-		});
-	});
-
-	test("getWorkers prunes stale recovered spawning workers with dead pids and empty sessions", () => {
-		const { leader } = makeHarness();
-		leader.workers.set("ghost", makeWorker({
-			name: "ghost",
-			pid: 999999,
-			status: "spawning",
-			spawnedAt: Date.now() - 120_000,
-			sessionDir: "/tmp/no-such-session-dir",
-			sessionFile: "/tmp/no-such-session-dir/session.jsonl",
-			routeState: "pending",
-		}));
-
-		const workers = leader.getWorkers();
-		expect(workers[0]?.status).toBe("failed");
-		expect(workers[0]?.routeState).toBe("dead");
-	});
 });
 
 describe("tellWorker honest delivery receipt (v1d — Cecilia bug 1)", () => {

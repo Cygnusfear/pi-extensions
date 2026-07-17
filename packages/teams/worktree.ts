@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -82,35 +83,52 @@ export async function branchHasNewCommits(repoDir: string, branch: string): Prom
  * Commit any uncommitted changes in a worktree so nothing is lost on cleanup.
  * Returns true if a commit was made.
  */
-export async function autoCommitWorktreeChanges(worktreePath: string): Promise<boolean> {
+export async function hasCommitWithEffectId(repoPath: string, effectId: string): Promise<boolean> {
   try {
-    const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: worktreePath });
-    if (!stdout.trim()) return false;
+    const { stdout } = await exec("git", ["log", "--all", "--format=%H", "--fixed-strings", `--grep=Teams-Effect-Id: ${effectId}`, "-n", "1"], { cwd: repoPath });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
 
-    await exec("git", ["add", "-A"], { cwd: worktreePath });
-    await exec("git", ["commit", "-m", "auto-commit: uncommitted work preserved on worker close"], {
-      cwd: worktreePath,
-    });
+export async function autoCommitWorktreeChanges(worktreePath: string, effectId?: string): Promise<boolean> {
+  if (effectId && await hasCommitWithEffectId(worktreePath, effectId)) return false;
+  const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: worktreePath });
+  if (!stdout.trim()) return false;
+
+  await exec("git", ["add", "-A"], { cwd: worktreePath });
+  const message = effectId
+    ? `auto-commit: uncommitted work preserved on worker close\n\nTeams-Effect-Id: ${effectId}`
+    : "auto-commit: uncommitted work preserved on worker close";
+  await exec("git", ["commit", "-m", message], { cwd: worktreePath });
+  return true;
+}
+
+/**
+ * Rename a git branch. Used to mark finished worker branches as `.done`.
+ */
+async function branchExists(repoDir: string, branch: string): Promise<boolean> {
+  try {
+    await exec("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repoDir });
     return true;
   } catch {
     return false;
   }
 }
 
-/**
- * Rename a git branch. Used to mark finished worker branches as `.done`.
- */
 export async function renameBranch(
   repoDir: string,
   oldName: string,
   newName: string,
 ): Promise<boolean> {
+  if (!await branchExists(repoDir, oldName)) return branchExists(repoDir, newName);
   try {
     await exec("git", ["branch", "-m", oldName, newName], { cwd: repoDir });
-    return true;
   } catch {
-    return false;
+    return !await branchExists(repoDir, oldName) && await branchExists(repoDir, newName);
   }
+  return !await branchExists(repoDir, oldName) && await branchExists(repoDir, newName);
 }
 
 export async function removeWorktree(
@@ -121,15 +139,17 @@ export async function removeWorktree(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await exec("git", ["worktree", "remove", worktreePath, "--force"], { cwd: repoDir });
-  } catch {
-    // worktree may already be gone
+  } catch (error) {
+    if (fs.existsSync(worktreePath)) return { success: false, error: String(error) };
   }
-  if (!keepBranch) {
+  if (!keepBranch && await branchExists(repoDir, branch)) {
     try {
       await exec("git", ["branch", "-D", branch], { cwd: repoDir });
-    } catch {
-      // branch may already be gone
+    } catch (error) {
+      if (await branchExists(repoDir, branch)) return { success: false, error: String(error) };
     }
   }
+  if (fs.existsSync(worktreePath)) return { success: false, error: `Worktree still exists after removal: ${worktreePath}` };
+  if (!keepBranch && await branchExists(repoDir, branch)) return { success: false, error: `Branch still exists after deletion: ${branch}` };
   return { success: true };
 }

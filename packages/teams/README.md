@@ -18,7 +18,8 @@ The coordinator (your main pi session) creates tickets, spawns workers as separa
 - **Ticket integration** — automatic ticket creation with task descriptions, progress tracking via `team_comment`
 - **Session strategy** — fork (default), fresh, or resume modes for worker sessions
 - **Runtime widget** — real-time worker status display in the TUI
-- **V2 protocol** — typed fact model with canonical state reduction (see [TEAMS_V2_ARCHITECTURE.md](./TEAMS_V2_ARCHITECTURE.md))
+- **Session-native lifecycle kernel** — typed facts in the coordinator Pi session are the sole canonical state (see [TEAMS_V2_ARCHITECTURE.md](./TEAMS_V2_ARCHITECTURE.md))
+- **Durable history and delivery** — every attempt survives roster cleanup; provider-confirmed, branch-local acknowledgements make failed turns and rewinds replay correctly
 
 ## How Delegation Works
 
@@ -80,6 +81,8 @@ See [WORKER_LIFECYCLE.md](./WORKER_LIFECYCLE.md) for full details.
 - **Startup failure** = `failed`
 - Workers **never** close tickets themselves — the coordinator owns ticket lifecycle
 - Workers **never** guess the coordinator's identity — it's injected at spawn time
+- Process exit and ticket state never imply success; exit code zero without `team_finish` is a missing-finish warning
+- Finish is persisted in the worker session before transport and acknowledged only after the coordinator fact append
 
 ### Review handoff links for completed work
 
@@ -107,8 +110,8 @@ The link is short because the full payload lives in `~/.maitake/review-handoffs/
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| `fork` | Copy of coordinator's session history | Default for delegated work — preserves context |
-| `fresh` | Clean session with only the task prompt | Isolated utility tasks |
+| `fork` | Copy of coordinator's session history | Explicit opt-in with `PI_TEAMS_PREFER_FORK=1` when a branchable coordinator session is available |
+| `fresh` | Clean session with only the task prompt | Default for delegated work |
 | `resume` | Reattach to an existing session file | Retry/recovery after crash |
 
 ## Templates
@@ -186,7 +189,7 @@ When working from a worktree yourself, pass `baseRef` with your branch name so w
 
 | Tool | Description |
 |------|-------------|
-| `teams` | Main orchestration tool (delegate, list, kill, tell, view) |
+| `teams` | Main orchestration tool (delegate, list, kill, tell, view, history) |
 | `team_comment` | Post progress updates to the ticket (worker-side) |
 | `team_finish` | Declare terminal state: `done` or `quit` (worker-side) |
 
@@ -201,6 +204,7 @@ When working from a worktree yourself, pass `baseRef` with your branch name so w
 | `tell` | Send a message to a specific worker |
 | `tell_all` | Broadcast a message to all workers |
 | `view` | Read recent session entries from a worker |
+| `history` | Query canonical attempt history by name, exact attempt ID, status, and range |
 
 ## Event Subscriptions — `teams.on(...)`
 
@@ -237,7 +241,7 @@ const first = await Promise.race([
 |------|---------|
 | `teams.on("fixer")` | Any event from worker `"fixer"` |
 | `teams.on("fixer", "completed")` | Only `completed` events from `"fixer"` |
-| `teams.on("fixer", "terminal")` | Any terminal outcome: `completed`, `warning`, `failed`, or `turn_finished` |
+| `teams.on("fixer", "terminal")` | Any terminal outcome: `completed`, `warning`, or `failed` |
 | `teams.on({ name: "oracle", type: "comment" })` | Every comment from `"oracle"` |
 | `teams.on({ name: "oracle", comment: /DONE:/ })` | Comment events whose body matches the regex |
 | `teams.on({ name: "oracle", comment: "DONE:" })` | Comment events whose body contains the substring |
@@ -344,12 +348,15 @@ The V2 protocol adds typed envelopes with `teamId`, `leaderEpoch`, and `workerId
 
 ## V2 Architecture
 
-The V2 rewrite introduces:
+The session-native kernel provides:
 
 - **Protocol-driven design** — mesh is transport, not the user-facing API
-- **Fact-based state reduction** — lifecycle derived from typed facts, not snapshots
-- **Explicit epochs** — leader, worker, and attempt identities with version tracking
-- **Receipt states** — sent → delivered → visible → handled
+- **One canonical store** — coordinator Pi session JSONL; no lifecycle snapshots, sidecars, or alternate database
+- **Pure fact reduction** — every physical session leaf contributes canonical facts; branch selection affects delivery acknowledgements only
+- **Separated identities** — coordinator session, team, logical worker, attempt, and runtime epoch cannot collapse into a display name
+- **Application acknowledgements** — worker finish returns only after the coordinator append is durable
+- **Provider-correlated delivery** — only markers in the final successful provider request are acknowledged
+- **Deterministic effects** — request-before-execution with restart reconciliation
 - **First-class attempts** — crash/retry history preserved per worker
 
 See [TEAMS_V2_ARCHITECTURE.md](./TEAMS_V2_ARCHITECTURE.md) for the full design document.

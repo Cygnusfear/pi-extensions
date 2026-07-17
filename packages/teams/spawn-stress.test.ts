@@ -50,13 +50,16 @@ async function waitForSessionFile(sessionDir: string, timeoutMs: number): Promis
 }
 
 function spawnTestWorker(baseDir: string, name: string): ReturnType<typeof spawnWorker> {
+	const workerInstanceId = `stress-${name}-${Date.now()}`;
 	const config: SpawnConfig = {
-		workerInstanceId: `stress-${name}-${Date.now()}`,
+		workerId: `stress-worker-${name}`,
+		workerInstanceId,
 		ticketId: `stress-tk-${name}`,
 		workerName: name,
 		useWorktree: false,
 		cwd: REPO_ROOT,
 		repoRoot: baseDir,
+		sessionDir: path.join(baseDir, ".pi", "sessions", "teams-workers", workerInstanceId),
 		leaderSessionFile: path.join(baseDir, "leader.jsonl"),
 		model: undefined,
 		hasTools: false,

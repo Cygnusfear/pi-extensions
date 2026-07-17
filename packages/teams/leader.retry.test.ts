@@ -4,6 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableStreamAbort, getRecoverableToolRetry } from "./leader.ts";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
+import {
+	LIFECYCLE_FACT_ENTRY_TYPE,
+	WORKER_FINISH_PENDING_ENTRY_TYPE,
+	createDeclarationEventId,
+	createLeaderEventId,
+	createRootEventId,
+} from "./v2/session-facts.ts";
+import type { LifecycleFact } from "./v2/state.ts";
 
 const cleanupDirs: string[] = [];
 const cleanupPids: number[] = [];
@@ -46,10 +54,12 @@ function makeFakePiBinary(binDir: string, invocationLog: string) {
 	return scriptPath;
 }
 
-function makeLeaderHarness(baseDir: string) {
+function makeLeaderHarness(baseDir: string, initialEntries: any[] = []) {
 	const maiNoteLog = path.join(baseDir, "mai-notes.log");
 	const sendMessageLog = path.join(baseDir, "send-message.log");
+	const sessionEntries: any[] = [{ type: "message", id: "assistant", message: { role: "assistant", content: [] } }, ...initialEntries];
 	const fakePi = {
+		appendEntry: (customType: string, data: unknown) => { sessionEntries.push({ type: "custom", customType, data }); },
 		exec: async (cmd: string, args: string[]) => {
 			if (path.basename(cmd) !== "mai") throw new Error(`unexpected command: ${cmd}`);
 			if (args[0] === "--json" && args[1] === "show") {
@@ -80,14 +90,21 @@ function makeLeaderHarness(baseDir: string) {
 	leaderAny.scheduleWorkerCleanup = () => {};
 	leaderAny.rearmPersistentLifecycle = () => {};
 	leaderAny.notifyLLM = () => {};
-	leaderAny.notifiedTerminal = new Set();
-	leaderAny.ctx = {
+	const ctx = {
 		cwd: "/tmp/test-repo",
-		sessionManager: { getSessionFile: () => path.join(baseDir, "leader-session.jsonl") },
+		sessionManager: {
+			getSessionFile: () => path.join(baseDir, "leader-session.jsonl"),
+			getSessionId: () => "leader-test-session",
+			getEntries: () => sessionEntries,
+			getBranch: () => sessionEntries,
+			getHeader: () => null,
+		},
 		ui: { setWidget: () => {} },
 	};
+	leaderAny.ctx = ctx;
+	leader.restoreState(ctx as any);
 
-	return { leader: leaderAny, maiNoteLog, sendMessageLog };
+	return { leader: leaderAny, maiNoteLog, sendMessageLog, sessionEntries };
 }
 
 async function waitForFile(pathname: string, timeoutMs = 5000): Promise<string> {
@@ -143,7 +160,7 @@ describe("getRecoverableToolRetry", () => {
 });
 
 describe("assessWorkerExit", () => {
-	test("closed ticket + useful output counts as success without heartbeat facts", () => {
+	test("closed ticket + useful output remains warning without team_finish", () => {
 		const baseDir = makeTempDir("teams-assess-success-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -159,7 +176,7 @@ describe("assessWorkerExit", () => {
 			].join("\n") + "\n",
 		);
 		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "DONE: summary");
-		expect(result.classification).toBe("success");
+		expect(result.classification).toBe("warning");
 		expect(result.forcedExit).toBe(false);
 	});
 
@@ -195,7 +212,7 @@ describe("assessWorkerExit", () => {
 		expect(result.reason).toBe("blocked on missing data");
 	});
 
-	test("late assistant error does not erase meaningful prior work", () => {
+	test("late assistant error does not turn meaningful prior work into declared success", () => {
 		const baseDir = makeTempDir("teams-assess-late-error-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -215,7 +232,7 @@ describe("assessWorkerExit", () => {
 		);
 		const result = assessWorkerExit({ freeform: false, hasTools: false, sessionDir } as any, 0, true, "DONE: summary");
 		expect(result.outputMeaningful).toBe(true);
-		expect(result.classification).toBe("success");
+		expect(result.classification).toBe("warning");
 	});
 
 	test("an EXITED:/FAILED: note forces failure (defensive net, no heartbeat)", () => {
@@ -234,7 +251,7 @@ describe("assessWorkerExit", () => {
 		expect(result.classification).toBe("failure");
 	});
 
-	test("freeform worker clean exit (0) without team_finish → turn_finished (resumable)", () => {
+	test("freeform worker clean exit (0) without team_finish remains warning", () => {
 		const baseDir = makeTempDir("teams-assess-turn-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -247,7 +264,7 @@ describe("assessWorkerExit", () => {
 		);
 		const result = assessWorkerExit({ freeform: true, hasTools: true, sessionDir } as any, 0, false, "note");
 		expect(result.cleanExit).toBe(true);
-		expect(result.classification).toBe("turn_finished");
+		expect(result.classification).toBe("warning");
 	});
 
 	test("non-zero exit + no meaningful output → failure", () => {
@@ -308,6 +325,7 @@ describe("TeamLeader malformed tool JSON recovery", () => {
 		try {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
 			const worker: WorkerHandle = {
+				workerId: "worker-1",
 				workerInstanceId: "worker-1",
 				name: "retry-worker",
 				pid: 999992, // fake pid — process.pid is alive and triggers handleWorkerExit's early-return guard
@@ -334,7 +352,7 @@ describe("TeamLeader malformed tool JSON recovery", () => {
 			expect(worker.recoveryAttempts).toBe(1);
 			// Status is "spawning" post-respawn pre-worker_hello — v2 reducer
 			// classifies from spawn_started fact only at this point.
-			expect(worker.status).toBe("spawning");
+			expect(worker.status).toBe("running");
 			expect(worker.routeState).toBe("pending");
 			expect(worker.lastNote).toContain("AUTO-RETRY");
 
@@ -397,6 +415,7 @@ describe("TeamLeader auto-resume after mid-turn compaction", () => {
 		try {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
 			const worker: WorkerHandle = {
+				workerId: "comp-worker-1",
 				workerInstanceId: "comp-worker-1",
 				name: "comp-recover-worker",
 				pid: 999990,
@@ -424,7 +443,7 @@ describe("TeamLeader auto-resume after mid-turn compaction", () => {
 			// is "spawning" post-respawn pre-worker_hello (v2 reducer classifies
 			// from spawn_started fact only at this point).
 			expect(worker.recoveryAttempts).toBe(1);
-			expect(worker.status).toBe("spawning");
+			expect(worker.status).toBe("running");
 			expect(worker.routeState).toBe("pending");
 			expect(worker.lastNote).toContain("AUTO-RESUME");
 
@@ -485,6 +504,7 @@ describe("TeamLeader auto-resume after mid-turn compaction", () => {
 			leader.notifyLLM = (event: any) => { events.push(event); };
 
 			const worker: WorkerHandle = {
+				workerId: "no-trigger-1",
 				workerInstanceId: "no-trigger-1",
 				name: "no-trigger-worker",
 				pid: 999991,
@@ -540,6 +560,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
 
 			const spawnConfig: SpawnConfig = {
+				workerId: "w-orig",
 				workerInstanceId: "w-orig",
 				ticketId: "tk-startup",
 				workerName: "startup-worker",
@@ -555,6 +576,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			};
 
 			const worker: WorkerHandle = {
+				workerId: "w-orig",
 				workerInstanceId: "w-orig",
 				name: "startup-worker",
 				pid: process.pid,
@@ -580,7 +602,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			await leader.handleWorkerExit("startup-worker", worker, 0);
 
 			expect(worker.recoveryAttempts).toBe(1);
-			expect(worker.status).toBe("spawning");
+			expect(worker.status).toBe("running");
 			expect(worker.routeState).toBe("pending");
 			expect(worker.lastNote).toContain("AUTO-RESPAWN");
 
@@ -621,6 +643,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 
 		const { leader } = makeLeaderHarness(baseDir);
 		const worker: WorkerHandle = {
+			workerId: "w-late",
 			workerInstanceId: "w-late",
 			name: "late-session",
 			pid: 999999,
@@ -640,6 +663,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			lastSeenCommentCount: 0,
 			routeState: "linked",
 			spawnConfig: {
+				workerId: "w-late",
 				workerInstanceId: "w-late",
 				ticketId: "tk-late",
 				workerName: "late-session",
@@ -680,6 +704,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
 
 			const spawnConfig: SpawnConfig = {
+				workerId: "w-gone",
 				workerInstanceId: "w-gone",
 				ticketId: "tk-gone",
 				workerName: "gone-worker",
@@ -691,6 +716,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			};
 
 			const worker: WorkerHandle = {
+				workerId: "w-gone",
 				workerInstanceId: "w-gone",
 				name: "gone-worker",
 				pid: 999999,
@@ -716,7 +742,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			await leader.handleWorkerExit("gone-worker", worker, 0);
 
 			expect(worker.recoveryAttempts).toBe(1);
-			expect(worker.status).toBe("spawning");
+			expect(worker.status).toBe("running");
 			expect(worker.lastNote).toContain("AUTO-RESPAWN");
 			expect(worker.lastNote).toContain("destroyed externally");
 
@@ -749,6 +775,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 		const { leader } = makeLeaderHarness(baseDir);
 
 		const spawnConfig: SpawnConfig = {
+			workerId: "w2",
 			workerInstanceId: "w2",
 			ticketId: "tk-normal",
 			workerName: "normal-fail",
@@ -760,6 +787,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "w2",
 			workerInstanceId: "w2",
 			name: "normal-fail",
 			pid: 999999,
@@ -799,6 +827,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 		const { leader } = makeLeaderHarness(baseDir);
 
 		const spawnConfig: SpawnConfig = {
+			workerId: "w3",
 			workerInstanceId: "w3",
 			ticketId: "tk-slow",
 			workerName: "slow-fail",
@@ -809,6 +838,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "w3",
 			workerInstanceId: "w3",
 			name: "slow-fail",
 			pid: 999999,
@@ -838,7 +868,146 @@ describe.skip("TeamLeader startup-death respawn", () => {
 });
 
 describe("TeamLeader lifecycle regression", () => {
-	test("freeform worker success emits turn_finished instead of completed", async () => {
+	test("restore promotes an exact worker-session pending finish before deriving missing_finish", async () => {
+		const baseDir = makeTempDir("teams-pending-finish-restore-");
+		const sessionDir = path.join(baseDir, "worker-session");
+		const workerSessionFile = path.join(sessionDir, "session.jsonl");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const identity = {
+			coordinatorSessionId: "leader-test-session",
+			teamId: "team-pending-finish",
+			workerId: "worker-pending-finish",
+			attemptId: "attempt-pending-finish",
+		};
+		const summary = "durable declaration survived coordinator loss";
+		const declarationEventId = createDeclarationEventId(identity, "done", summary);
+		fs.writeFileSync(workerSessionFile, [
+			JSON.stringify({ type: "session", version: 3, id: "worker-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+			JSON.stringify({
+				type: "custom",
+				customType: WORKER_FINISH_PENDING_ENTRY_TYPE,
+				data: {
+					schemaVersion: 1,
+					...identity,
+					status: "done",
+					summary,
+					eventId: declarationEventId,
+					createdAt: 3,
+				},
+			}),
+		].join("\n") + "\n");
+
+		const spawnRequested: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: createRootEventId("spawn_requested", identity),
+			kind: "spawn_requested",
+			occurredAt: 1,
+			payload: {
+				name: "pending-finish",
+				ticketId: "tk-pending-finish",
+				persistent: false,
+				sessionMode: { kind: "fresh" },
+				sessionDir,
+				workerSessionFile,
+				worktreePath: null,
+			},
+		};
+		const processStarted: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: "process-started-pending-finish",
+			kind: "process_started",
+			occurredAt: 2,
+			payload: {
+				pid: 999999,
+				processBirth: { startedAt: 2 },
+				sessionMode: { kind: "fresh" },
+				sessionDir,
+				workerSessionFile,
+			},
+		};
+		const processExited: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: "process-exited-pending-finish",
+			kind: "process_exited",
+			occurredAt: 4,
+			payload: { pid: 999999, processBirth: { startedAt: 2 }, code: 0 },
+		};
+		const provisionalAssessment: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: createLeaderEventId(identity, "assessment_missing_finish", processExited.eventId),
+			kind: "assessment_missing_finish",
+			occurredAt: 5,
+			payload: { reason: "Worker exited without an explicit team_finish declaration", provisional: true },
+		};
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir, [spawnRequested, processStarted, processExited, provisionalAssessment].map((data) => ({
+			type: "custom",
+			customType: LIFECYCLE_FACT_ENTRY_TYPE,
+			data,
+		})));
+
+		for (let attempt = 0; attempt < 100; attempt++) {
+			if (leader.getAttemptHistory({ attemptId: identity.attemptId })[0]?.declaration) break;
+			await Bun.sleep(10);
+		}
+		const restored = leader.getAttemptHistory({ attemptId: identity.attemptId })[0];
+		expect(restored?.declaration).toMatchObject({ kind: "done", summary, eventId: declarationEventId });
+		expect(restored?.assessment?.kind).toBe("missing_finish");
+		const coordinatorFacts = sessionEntries
+			.filter((entry) => entry.type === "custom" && entry.customType === LIFECYCLE_FACT_ENTRY_TYPE)
+			.map((entry) => entry.data as LifecycleFact);
+		expect(coordinatorFacts.filter((fact) => fact.eventId === declarationEventId)).toHaveLength(1);
+		expect(coordinatorFacts.filter((fact) => fact.kind === "assessment_missing_finish")).toHaveLength(1);
+		expect(coordinatorFacts.filter((fact) => fact.kind === "outcome_corrected")).toHaveLength(1);
+		expect(leader.getCurrentTerminalEvent("pending-finish", "warning", identity.attemptId)).toBeNull();
+		expect(leader.getCurrentTerminalEvent("pending-finish", "completed", identity.attemptId)?.type).toBe("completed");
+	});
+
+	test("restore settles a spawn intent that never durably recorded process start", async () => {
+		const baseDir = makeTempDir("teams-unstarted-restore-");
+		const identity = {
+			coordinatorSessionId: "leader-test-session",
+			teamId: "team-unstarted",
+			workerId: "worker-unstarted",
+			attemptId: "attempt-unstarted",
+		};
+		const spawnRequested: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: createRootEventId("spawn_requested", identity),
+			kind: "spawn_requested",
+			occurredAt: 1,
+			payload: {
+				name: "unstarted",
+				ticketId: "tk-unstarted",
+				persistent: false,
+				sessionMode: { kind: "fresh" },
+				sessionDir: path.join(baseDir, "worker-session"),
+				workerSessionFile: path.join(baseDir, "worker-session", "session.jsonl"),
+				worktreePath: null,
+			},
+		};
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir, [
+			{ type: "custom", customType: LIFECYCLE_FACT_ENTRY_TYPE, data: spawnRequested },
+		]);
+		for (let attempt = 0; attempt < 100; attempt++) {
+			if (leader.getAttemptHistory({ attemptId: identity.attemptId })[0]?.assessment) break;
+			await Bun.sleep(10);
+		}
+		const restored = leader.getAttemptHistory({ attemptId: identity.attemptId })[0];
+		expect(restored?.assessment?.kind).toBe("startup_failure");
+		expect(restored?.assessment?.reason).toContain("before the worker process start");
+		const facts = sessionEntries
+			.filter((entry) => entry.type === "custom" && entry.customType === LIFECYCLE_FACT_ENTRY_TYPE)
+			.map((entry) => entry.data as LifecycleFact);
+		expect(facts.filter((fact) => fact.kind === "assessment_startup_failure")).toHaveLength(1);
+		expect(facts.filter((fact) => fact.kind === "effect_requested").map((fact) => (fact.payload as { effectKind?: string }).effectKind).sort()).toEqual(["cleanup", "ticket_close"]);
+	});
+
+	test("freeform worker without team_finish emits warning instead of completion", async () => {
 		const baseDir = makeTempDir("teams-freeform-turn-finished-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -888,6 +1057,7 @@ describe("TeamLeader lifecycle regression", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "wf-1",
 			workerInstanceId: "wf-1",
 			name: "freeform-worker",
 			pid: 999999,
@@ -912,11 +1082,12 @@ describe("TeamLeader lifecycle regression", () => {
 		await leader.handleWorkerExit("freeform-worker", worker, 0);
 
 		expect(worker.routeState).toBe("resumable");
+		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
-		expect(events[0].type).toBe("turn_finished");
+		expect(events[0].type).toBe("warning");
 	});
 
-	test("closed ticket with useful output and exit code 0 is success even without heartbeat facts", async () => {
+	test("closed ticket with useful output and exit code 0 remains warning without team_finish", async () => {
 		const baseDir = makeTempDir("teams-closed-ticket-success-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -958,6 +1129,7 @@ describe("TeamLeader lifecycle regression", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "wc-1",
 			workerInstanceId: "wc-1",
 			name: "closed-ticket-worker",
 			pid: 999999,
@@ -980,9 +1152,9 @@ describe("TeamLeader lifecycle regression", () => {
 
 		await leader.handleWorkerExit("closed-ticket-worker", worker, 0);
 
-		expect(worker.status).toBe("done");
+		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
-		expect(events[0].type).toBe("completed");
+		expect(events[0].type).toBe("warning");
 	});
 
 	test("plain exit code 0 without explicit terminal signal is warning", async () => {
@@ -1022,6 +1194,7 @@ describe("TeamLeader lifecycle regression", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "wx-0",
 			workerInstanceId: "wx-0",
 			name: "exit0-no-agent-end",
 			pid: 999999,
@@ -1140,6 +1313,7 @@ describe("TeamLeader lifecycle regression", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "wx-1",
 			workerInstanceId: "wx-1",
 			name: "ambig-warning-diag",
 			pid: 999998,
@@ -1187,6 +1361,7 @@ describe("TeamLeader lifecycle regression", () => {
 		fs.writeFileSync(path.join(secondDir, "stdout.log"), "", "utf-8");
 
 		const worker: WorkerHandle = {
+			workerId: "w-best-2",
 			workerInstanceId: "w-best-2",
 			name: "best-attempt",
 			pid: 999999,
@@ -1217,7 +1392,7 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(fs.readFileSync(path.join(firstDir, 'stderr.log'), 'utf-8')).toContain('quota');
 	});
 
-	test("EXITED note forces failure even with exit code 0", async () => {
+	test("EXITED diagnostics remain missing-finish without an authoritative declaration", async () => {
 		const baseDir = makeTempDir("teams-forced-exit-fails-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
@@ -1260,6 +1435,7 @@ describe("TeamLeader lifecycle regression", () => {
 		};
 
 		const worker: WorkerHandle = {
+			workerId: "wx-1",
 			workerInstanceId: "wx-1",
 			name: "forced-exit-worker",
 			pid: 999999,
@@ -1282,9 +1458,9 @@ describe("TeamLeader lifecycle regression", () => {
 
 		await leader.handleWorkerExit("forced-exit-worker", worker, 0);
 
-		expect(worker.status).toBe("failed");
+		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
-		expect(events[0].type).toBe("failed");
+		expect(events[0].type).toBe("warning");
 	});
 });
 
@@ -1355,6 +1531,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 		try {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
 			const worker: WorkerHandle = {
+				workerId: "ea-1",
 				workerInstanceId: "ea-1",
 				name: "empty-abort-worker",
 				pid: 999980,
@@ -1379,7 +1556,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 			// First death → bounded recovery fires exactly once.
 			await leader.handleWorkerExit("empty-abort-worker", worker, 1);
 			expect(worker.recoveryAttempts).toBe(1);
-			expect(worker.status).toBe("spawning");
+			expect(worker.status).toBe("running");
 			expect(worker.lastNote).toContain("AUTO-RETRY");
 
 			const firstInvocation = await waitForFile(invocationLog);
@@ -1404,7 +1581,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 			// (recoveryAttempts < 1 IS the cascade guard) must NOT fire again.
 			await leader.handleWorkerExit("empty-abort-worker", worker, 1);
 			expect(worker.recoveryAttempts).toBe(1); // unchanged — no second retry
-			expect(worker.status).toBe("failed");
+			expect(worker.status).toBe("warning");
 
 			// fake pi invoked exactly once total (count --session occurrences — the
 			// prompt contains newlines, so raw line count is unreliable).
@@ -1452,6 +1629,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 		try {
 			const { leader } = makeLeaderHarness(baseDir);
 			const worker: WorkerHandle = {
+				workerId: "dir-1",
 				workerInstanceId: "dir-1",
 				name: "directed-abort-worker",
 				pid: 999979,
@@ -1517,6 +1695,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 		try {
 			const { leader, sendMessageLog } = makeLeaderHarness(baseDir);
 			const worker: WorkerHandle = {
+				workerId: "comp-1",
 				workerInstanceId: "comp-1",
 				name: "comp-action-worker",
 				pid: 999978,
