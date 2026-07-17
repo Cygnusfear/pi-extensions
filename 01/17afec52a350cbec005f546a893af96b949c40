@@ -1,0 +1,23 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  s_c80280c75e1308::t_68b006ec794db9 1309,1325
+skills/environment/SKILL.md
+  s_c80280c75e1308::t_7ff379dc78ba86 217
+packages/teams/leader.ts
+  s_c80280c75e1308::t_f69f6d1574597f 1404-1405
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "0117afec52a350cbec005f546a893af96b949c40",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    }
+  }
+}

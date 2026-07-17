@@ -1,0 +1,34 @@
+packages/teams/test/finish-emit.test.ts
+  s_f8b2f4ac76acd7::t_d851460989c258 167-176
+  s_f8b2f4ac76acd7::t_778b0521c34cdb 142-143,145,153-156,158-161,164
+packages/teams/leader.ts
+  s_c80280c75e1308::t_7ce61a993d443c 3174-3180,3184
+packages/teams/v2/lifecycle-kernel.test.ts
+  s_f8b2f4ac76acd7::t_edb9025418651b 325-332
+packages/teams/v2/state.ts
+  s_f8b2f4ac76acd7::t_47ee53992c4dca 251-255,257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "01e9247f5504f3630d3c7e719f403fbe70e9f1be",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    },
+    "s_f8b2f4ac76acd7": {
+      "agent_id": {
+        "tool": "Henrietta Europa Sasselov",
+        "id": "019f6de7-75c8-7367-8d67-5ad0ff9715c3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    }
+  }
+}
