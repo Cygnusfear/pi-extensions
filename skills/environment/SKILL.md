@@ -214,7 +214,7 @@ await teams.on({ name: "oracle", comment: /DONE:|FINAL:/ })
 - Use `console.wake()` for generic background sources such as file watchers, timers, and mesh peer polling.
 - Chain `.timeout(ms)` on every subscription. Silent hangs are worse than a loud timeout.
 - `supervise(false)` is only needed for pattern B (background wake). Pattern A (in-turn await) doesn't need it.
-- Event types: `completed | turn_finished | warning | failed | stuck | comment | alive`; use the `terminal` filter for any worker stop.
+- Event types: `completed | warning | failed | stuck | comment | alive`; use the `terminal` filter for any worker stop.
 - Filter shapes: `teams.on("name")` · `teams.on("name", "type")` · `teams.on({ name, type, comment: /regex/ })` · `teams.on({ predicate: e => ... })`.
 - For the full orchestration loop (implement → review → gate → next), see the 90-building-with-teams playbook.
 

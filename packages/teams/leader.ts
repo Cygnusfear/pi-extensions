@@ -1401,7 +1401,8 @@ export class TeamLeader {
   }
 
   /** Send a turn-triggering message to a specific worker by name.
-   *  If the worker is in done/grace (persistent, between turns), resumes it via session continuation. */
+   *  If its persistent logical route is resumable between attempts (after done or
+   *  missing_finish), resume it through a new session-continuation attempt. */
   async tellWorker(name: string, message: unknown): Promise<boolean> {
     const worker = this.workers.get(name);
     if (!worker) return false;

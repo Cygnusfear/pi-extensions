@@ -1306,7 +1306,7 @@ declare const teams: {
    * thenable (so `await teams.on(...)` resolves on the next match) and chainable
    * via .each(), .timeout(), .unsubscribe().
    *
-   * Event types: "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive"
+   * Event types: "completed" | "warning" | "failed" | "stuck" | "comment" | "alive"
    *
    * - One-shot form: awaiting the subscription resolves on the first matching event
    *   and auto-unsubscribes.
@@ -1322,7 +1322,7 @@ declare const teams: {
   on(filter: TeamsEventFilter, callback: (event: TeamsPollEvent) => void): TeamsSubscription;
 };
 
-type TeamsEventType = "completed" | "turn_finished" | "warning" | "failed" | "stuck" | "comment" | "alive" | "terminal";
+type TeamsEventType = "completed" | "warning" | "failed" | "stuck" | "comment" | "alive" | "terminal";
 
 interface TeamsEventFilter {
   name?: string;
@@ -1348,7 +1348,6 @@ interface TeamsWorkerHandle {
 
 type TeamsPollEventBase =
   | { type: "completed"; worker: TeamsWorkerHandle; result: string }
-  | { type: "turn_finished"; worker: TeamsWorkerHandle; result: string }
   | { type: "warning"; worker: TeamsWorkerHandle; reason: string }
   | { type: "failed"; worker: TeamsWorkerHandle; reason: string }
   | { type: "stuck"; worker: TeamsWorkerHandle; idleSeconds: number }
