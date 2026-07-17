@@ -34,6 +34,7 @@ export class SubscriptionFakeLeader {
 	}
 
 	getWorker(name: string): WorkerHandle | undefined { return this.workers.get(name); }
+	getAttemptHistory(_input: { attemptId?: string; name?: string; status?: string; start?: number; end?: number }): [] { return []; }
 	getCurrentAttemptId(name: string): string | undefined { return this.workers.get(name)?.workerInstanceId; }
 	setWorker(worker: WorkerHandle): void { this.workers.set(worker.name, worker); }
 
@@ -60,7 +61,7 @@ export class SubscriptionFakeLeader {
 			}
 			if (wrapped.propagationStopped) break;
 		}
-		if (!wrapped.defaultPrevented) this.defaultActionRanFor = event;
+		if (event.type !== "comment" && !wrapped.defaultPrevented) this.defaultActionRanFor = event;
 		return wrapped;
 	}
 }
@@ -90,7 +91,10 @@ export function newTestSubscription(leader: SubscriptionFakeLeader, target: Para
 
 export interface HarnessCounts { passed: number; failed: number; failures: string[] }
 
-/** Top-level-await-compatible watchdog: stalled or partial scripts reject loudly. */
+/**
+ * Top-level-await-compatible watchdog: stalled or partial scripts reject loudly.
+ * Keep internal test timeouts below the 10-second default, or pass a larger budget.
+ */
 export async function runSubscriptionHarness(
 	name: string,
 	expectedAssertions: number,
