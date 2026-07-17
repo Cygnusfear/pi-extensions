@@ -1,4 +1,4 @@
-import type { AttemptState, LifecycleFact, LifecycleProjection, WorkerState } from "./state.ts";
+import { attemptStatus, type AttemptState, type LifecycleFact, type LifecycleProjection, type WorkerState } from "./state.ts";
 import { LifecycleAccumulator } from "./reducer.ts";
 import { factsForSession, type SessionEntryLike } from "./session-facts.ts";
 
@@ -54,13 +54,12 @@ export class LifecycleRuntimeStore {
 		if (input.attemptId) attempts = attempts.filter((attempt) => attempt.attemptId === input.attemptId);
 		if (input.name) attempts = attempts.filter((attempt) => attempt.name === input.name);
 		if (input.status) {
-			attempts = attempts.filter((attempt) => {
-				if (input.status === "done" || input.status === "completed") return attempt.declaration?.kind === "done";
-				if (input.status === "quit" || input.status === "warning") return attempt.declaration?.kind === "quit" || attempt.assessment?.kind === "missing_finish" || attempt.assessment?.kind === "legacy_ambiguous";
-				if (input.status === "failed") return !!attempt.assessment && !["missing_finish", "legacy_ambiguous"].includes(attempt.assessment.kind);
-				if (input.status === "running") return attempt.process.phase === "running" || attempt.process.phase === "spawning";
-				return true;
-			});
+			const canonicalStatus = input.status === "done"
+				? "completed"
+				: input.status === "quit"
+					? "warning"
+					: input.status;
+			attempts = attempts.filter((attempt) => attemptStatus(attempt) === canonicalStatus);
 		}
 		const start = input.start ?? 0;
 		const end = input.end ?? attempts.length;

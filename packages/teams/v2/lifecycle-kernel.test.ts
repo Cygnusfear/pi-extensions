@@ -338,6 +338,27 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 			.toEqual({ preserveBranch: true, preserveWorktree: true });
 	});
 
+	test("15c history status filters use the canonical attempt status", () => {
+		const facts = [
+			...terminalFacts("done-attempt", "done-worker", "done-worker"),
+			...spawnFacts({ attemptId: "killed-attempt", workerId: "killed-worker", name: "killed-worker", at: 10 }),
+			fact("assessment_killed", { reason: "killed", provisional: false }, { attemptId: "killed-attempt", workerId: "killed-worker", at: 12 }),
+			...spawnFacts({ attemptId: "crash-attempt", workerId: "crash-worker", name: "crash-worker", at: 20 }),
+			fact("assessment_crash", { reason: "crash", provisional: false }, { attemptId: "crash-attempt", workerId: "crash-worker", at: 22 }),
+			...spawnFacts({ attemptId: "protocol-attempt", workerId: "protocol-worker", name: "protocol-worker", at: 30 }),
+			fact("declaration_done", { summary: "first" }, { attemptId: "protocol-attempt", workerId: "protocol-worker", at: 32 }),
+			fact("declaration_quit", { summary: "conflict" }, { attemptId: "protocol-attempt", workerId: "protocol-worker", at: 33 }),
+		];
+		const store = new LifecycleRuntimeStore(SESSION, facts.map((item) => entry(item)));
+		const ids = (status: string) => store.history({ status }).map((attempt) => attempt.attemptId);
+
+		expect(ids("killed")).toEqual(["killed-attempt"]);
+		expect(ids("completed")).toEqual(["done-attempt"]);
+		expect(ids("done")).toEqual(["done-attempt"]);
+		expect(ids("failed")).toEqual(["crash-attempt", "protocol-attempt"]);
+		expect(ids("not-a-status")).toEqual([]);
+	});
+
 	test("16 deterministic cleanup commit trailer reconciles without a duplicate commit", async () => {
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "teams-effect-test-"));
 		try {
