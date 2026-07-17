@@ -5,8 +5,8 @@ import {
 	buildPredicate,
 	wrapPollEvent,
 	type TeamsEvent,
-} from "/Users/alexander/Projects/pi-extensions/packages/teams/subscription.ts";
-import type { PollEvent, WorkerHandle } from "/Users/alexander/Projects/pi-extensions/packages/teams/types.ts";
+} from "../subscription.ts";
+import type { PollEvent, WorkerHandle } from "../types.ts";
 
 let passed = 0, failed = 0;
 const failures: string[] = [];
@@ -38,6 +38,7 @@ class FakeLeader {
 		if (cbs) { for (const cb of cbs) cb(); this.disposalCallbacks.delete(workerName); }
 	}
 	getWorker(name: string): WorkerHandle | undefined { return this.workers.get(name); }
+	getCurrentAttemptId(name: string): string | undefined { return this.workers.get(name)?.workerInstanceId; }
 	setWorker(w: WorkerHandle) { this.workers.set(w.name, w); }
 
 	// MUST match leader.ts semantics exactly — snapshot + still-registered check for DOM parity.
