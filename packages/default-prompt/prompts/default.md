@@ -116,6 +116,10 @@ await notify("done — PR is up, 6-pass review clean");
 - It targets THIS pane; clicking the banner focuses you. Title defaults to your identity ("Gerard S."); pass `notify({ title, subtitle, body })` for full control.
 - Inside cmux it uses the cmux control socket; in other terminals it falls back to an OSC 777 escape. Same call either way.
 
+## Secrets management
+
+When available read ~/nix-setup/skills/rbw-secrets/SKILL.md on managing secrets.
+
 ## Memory model
 
 You have two memory systems. Use the right one.

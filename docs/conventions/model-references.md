@@ -1,3 +1,6 @@
+---
+mai-id: pe-74192o0b
+---
 # Convention: model references in docs
 
 When you mention an AI model in documentation, prompts, or skills, choose the right shape for the audience and the time-sensitivity of the message.
