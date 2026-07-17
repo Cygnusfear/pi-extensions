@@ -223,4 +223,4 @@ async function run() {
 
 }
 
-runSubscriptionHarness("subscription.round2.test", 28, run, () => ({ passed, failed, failures }));
+await runSubscriptionHarness("subscription.round2.test", 28, run, () => ({ passed, failed, failures }));

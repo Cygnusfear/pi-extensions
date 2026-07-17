@@ -90,37 +90,35 @@ export function newTestSubscription(leader: SubscriptionFakeLeader, target: Para
 
 export interface HarnessCounts { passed: number; failed: number; failures: string[] }
 
-/** Keep an OS handle alive and fail loudly if a standalone async harness stalls. */
-export function runSubscriptionHarness(
+/** Top-level-await-compatible watchdog: stalled or partial scripts reject loudly. */
+export async function runSubscriptionHarness(
 	name: string,
 	expectedAssertions: number,
 	run: () => Promise<void>,
 	counts: () => HarnessCounts,
 	timeoutMs = 10_000,
-): void {
-	const watchdog = setTimeout(() => {
-		console.error(`HARNESS TIMEOUT: ${name} did not finish within ${timeoutMs}ms`);
-		process.exit(2);
-	}, timeoutMs);
+): Promise<void> {
+	let watchdog: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			run(),
+			new Promise<never>((_resolve, reject) => {
+				watchdog = setTimeout(() => reject(new Error(`HARNESS TIMEOUT: ${name} did not finish within ${timeoutMs}ms`)), timeoutMs);
+			}),
+		]);
+	} finally {
+		if (watchdog) clearTimeout(watchdog);
+	}
 
-	void run().then(() => {
-		clearTimeout(watchdog);
-		const result = counts();
-		const total = result.passed + result.failed;
-		console.log("\n" + "━".repeat(60));
-		console.log(`RESULT: ${result.passed} passed, ${result.failed} failed`);
-		if (total !== expectedAssertions) {
-			console.error(`HARNESS INCOMPLETE: expected ${expectedAssertions} assertions, observed ${total}`);
-			process.exit(2);
-		}
-		if (result.failed > 0) {
-			console.log("\nFailures:");
-			for (const failure of result.failures) console.log("  •", failure);
-			process.exit(1);
-		}
-	}).catch((error) => {
-		clearTimeout(watchdog);
-		console.error("runner threw:", error);
-		process.exit(2);
-	});
+	const result = counts();
+	const total = result.passed + result.failed;
+	console.log("\n" + "━".repeat(60));
+	console.log(`RESULT: ${result.passed} passed, ${result.failed} failed`);
+	if (total !== expectedAssertions) {
+		throw new Error(`HARNESS INCOMPLETE: expected ${expectedAssertions} assertions, observed ${total}`);
+	}
+	if (result.failed > 0) {
+		for (const failure of result.failures) console.error("  •", failure);
+		throw new Error(`HARNESS FAILED: ${result.failed} assertion(s) failed`);
+	}
 }
