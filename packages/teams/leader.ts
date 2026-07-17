@@ -3171,13 +3171,17 @@ export class TeamLeader {
 
   prepareDeliveryForAgentRun(): { customType: string; content: string; display: boolean; details: { eventIds: string[] } } | undefined {
     this.deliveryTracker.beginRun();
+    // A host wake or scheduled delivery already queued this run's message. Track
+    // only that actual batch; lifecycle events that became pending afterward
+    // remain pending and are scheduled after this run settles.
+    if (this.activeDelivery) {
+      this.deliveryTracker.setDeliveredBatch(this.activeDelivery.eventIds);
+      return undefined;
+    }
     const batch = this.pendingDelivery();
-	const alreadyQueued = Boolean(batch && this.activeDelivery
-	  && batch.eventIds.length === this.activeDelivery.eventIds.length
-	  && batch.eventIds.every((eventId, index) => this.activeDelivery?.eventIds[index] === eventId));
     this.activeDelivery = batch;
     this.deliveryTracker.setDeliveredBatch(batch?.eventIds ?? []);
-    if (!batch || alreadyQueued) return undefined;
+    if (!batch) return undefined;
     return { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } };
   }
 

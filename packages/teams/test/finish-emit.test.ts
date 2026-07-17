@@ -139,8 +139,10 @@ describe("authoritative mesh finish emits the terminal notification", () => {
 
 	test("worker.finish(done) dispatches armed terminal subscriptions (.wake path)", async () => {
 		const { leader, sent } = makeLeader();
-		const worker = makeWorker("rev-2");
+		const wakeWorker = makeWorker("rev-2");
+		const alsoPendingWorker = makeWorker("rev-2-pending");
 		const seen: string[] = [];
+		let wakeSent = false;
 		(
 			leader as never as {
 				subscribeToEvents: (fn: (e: { type: string; preventDefault(): void }) => void) => void;
@@ -148,16 +150,30 @@ describe("authoritative mesh finish emits the terminal notification", () => {
 		).subscribeToEvents((e) => {
 			seen.push(e.type);
 			e.preventDefault();
-			(leader as any).wakeFromSubscription(e, `host wake: ${worker.name}`);
+			if (!wakeSent) {
+				wakeSent = true;
+				(leader as any).wakeFromSubscription(e, `host wake: ${wakeWorker.name}`);
+			}
 		});
-		dispatchFinish(leader, worker, "done", "done summary");
-		// The wake message already carries the lifecycle marker. before_agent_start
-		// must not inject the same pending batch a second time.
+		dispatchFinish(leader, wakeWorker, "done", "done summary");
+		dispatchFinish(leader, alsoPendingWorker, "done", "another pending summary");
+		// The wake message already carries its lifecycle marker. before_agent_start
+		// must not inject it again even when the canonical pending batch grew.
 		expect((leader as any).prepareDeliveryForAgentRun()).toBeUndefined();
 		await settle();
-		expect(seen).toContain("completed");
+		expect(seen).toEqual(["completed", "completed"]);
 		expect(sent.length).toBe(1);
 		expect(sent[0].content.match(/\[teams-event:/g)).toHaveLength(1);
+
+		leader.observeProviderContext([{ content: sent[0].content }]);
+		leader.observeProviderRequest({ messages: [{ content: sent[0].content }] });
+		leader.observeProviderResponse(200);
+		leader.observeMessageEnd({ role: "assistant", stopReason: "stop" });
+		leader.completeAgentRun();
+		await settle();
+		expect(sent.length).toBe(2);
+		expect(sent[1].content).toContain("another pending summary");
+		expect(sent[1].content).not.toContain("host wake");
 	});
 
 	test("later process-exit re-emit is deduped (no double batch)", async () => {

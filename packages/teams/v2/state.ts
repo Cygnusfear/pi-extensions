@@ -248,10 +248,13 @@ export function attemptPreservePolicy(attempt: AttemptState): AttemptPreservePol
 	if (attempt.protocolViolation) return { preserveBranch: true, preserveWorktree: true };
 	const ambiguous = attempt.assessment?.kind === "missing_finish"
 		|| attempt.assessment?.kind === "legacy_ambiguous";
-	const resumable = attempt.persistent
-		&& (attempt.declaration?.kind === "done" || attempt.assessment?.kind === "missing_finish");
+	const resumable = attempt.persistent && (
+		attempt.declaration?.kind === "done"
+		|| attempt.assessment?.kind === "missing_finish"
+		|| (attempt.assessment?.kind === "startup_failure" && attempt.sessionMode.kind === "resume")
+	);
 	return {
-		preserveBranch: Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed",
+		preserveBranch: Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed" || resumable,
 		preserveWorktree: ambiguous || resumable,
 	};
 }

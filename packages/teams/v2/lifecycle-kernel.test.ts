@@ -322,6 +322,14 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(policyFor("missing")).toEqual({ preserveBranch: true, preserveWorktree: true });
 		expect(policyFor("crash")).toEqual({ preserveBranch: false, preserveWorktree: false });
 		expect(policyFor("killed")).toEqual({ preserveBranch: true, preserveWorktree: false });
+
+		const resumableFailure = [spawnFacts({ persistent: true })[0]!];
+		(resumableFailure[0]!.payload as Record<string, unknown>).worktreePath = "/tmp/resumable-worktree";
+		(resumableFailure[0]!.payload as Record<string, unknown>).sessionMode = { kind: "resume", sessionFile: "/tmp/resumable/session.jsonl" };
+		resumableFailure.push(fact("assessment_startup_failure", { reason: "resume activation failed", provisional: false }, { at: 3 }));
+		expect(attemptPreservePolicy(reduceLifecycleFacts(SESSION, resumableFailure).attempts.get("attempt-1")!))
+			.toEqual({ preserveBranch: true, preserveWorktree: true });
+
 		const conflicting = spawnFacts();
 		(conflicting[0]!.payload as Record<string, unknown>).worktreePath = "/tmp/worker-worktree";
 		conflicting.push(fact("declaration_done", { summary: "done" }, { at: 3 }));
