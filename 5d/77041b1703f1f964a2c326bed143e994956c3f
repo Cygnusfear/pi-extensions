@@ -1,0 +1,23 @@
+packages/teams/test/subscription.test.ts
+  s_c80280c75e1308::t_ef8f530f248c49 267
+packages/teams/test/subscription.round2.test.ts
+  s_c80280c75e1308::t_f70ef5b58bc115 226
+packages/teams/test/subscription-harness.ts
+  s_c80280c75e1308::t_cab570bb8e19d4 93-94,100-111,113-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "5d77041b1703f1f964a2c326bed143e994956c3f",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    }
+  }
+}
