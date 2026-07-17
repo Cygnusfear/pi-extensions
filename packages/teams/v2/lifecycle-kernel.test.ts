@@ -34,7 +34,7 @@ import {
 	workerFinishPendingForAttempt,
 	type SessionEntryLike,
 } from "./session-facts.ts";
-import { attemptStatus, type AttemptIdentity, type JsonValue, type LifecycleAck, type LifecycleFact } from "./state.ts";
+import { attemptPreservePolicy, attemptStatus, type AttemptIdentity, type JsonValue, type LifecycleAck, type LifecycleFact } from "./state.ts";
 
 const SESSION = "session-1";
 const TEAM = "team-1";
@@ -281,7 +281,7 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 			type: "custom", customType: "teams-leader-state", data: {
 				version: 3, savedAt: 10, workers: {
 					done: { name: "done", workerInstanceId: "done-a", ticketId: "t1", pid: 201, spawnedAt: 1, terminalStatus: "done", terminalSummary: "explicit", status: "done" },
-					persistent: { name: "persistent", workerId: "logical-stable", workerInstanceId: "persistent-a", ticketId: "tp", spawnedAt: 3, attempts: [{ workerInstanceId: "persistent-a", spawnedAt: 3 }] },
+					persistent: { name: "persistent", workerId: "logical:teams:attempt:legacy:stable", workerInstanceId: "persistent-a", ticketId: "tp", spawnedAt: 3, attempts: [{ workerInstanceId: "persistent-a", spawnedAt: 3 }] },
 				},
 			},
 		};
@@ -289,7 +289,7 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 			type: "custom", customType: "teams-leader-state", data: {
 				version: 3, savedAt: 20, workers: {
 					ambiguous: { name: "ambiguous", workerInstanceId: "amb-a", ticketId: "t2", pid: 202, spawnedAt: 2, status: "warning" },
-					persistent: { name: "persistent", workerId: "logical-stable", workerInstanceId: "persistent-b", ticketId: "tp", spawnedAt: 4, attempts: [{ workerInstanceId: "persistent-b", spawnedAt: 4 }] },
+					persistent: { name: "persistent", workerId: "logical:teams:attempt:legacy:stable", workerInstanceId: "persistent-b", ticketId: "tp", spawnedAt: 4, attempts: [{ workerInstanceId: "persistent-b", spawnedAt: 4 }] },
 				},
 			},
 		};
@@ -300,7 +300,34 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		const ambiguous = [...projection.attempts.values()].find((attempt) => attempt.name === "ambiguous")!;
 		expect(ambiguous.assessment?.kind).toBe("legacy_ambiguous");
 		expect(ambiguous.declaration).toBeNull();
-		expect(projection.workers.get("logical-stable")?.attemptIds).toHaveLength(2);
+		expect(projection.workers.get("logical:teams:attempt:legacy:stable")?.attemptIds).toHaveLength(2);
+	});
+
+	test("15b one reduced-state cleanup policy covers every terminal assessment", () => {
+		const policyFor = (kind: "done" | "quit" | "missing" | "crash" | "killed", persistent = false) => {
+			const facts = spawnFacts({ persistent });
+			(facts[0]!.payload as Record<string, unknown>).worktreePath = "/tmp/worker-worktree";
+			if (kind === "done" || kind === "quit") {
+				facts.push(fact(kind === "done" ? "declaration_done" : "declaration_quit", { summary: kind }, { at: 3 }));
+			} else {
+				const assessmentKind = kind === "missing" ? "assessment_missing_finish" : kind === "crash" ? "assessment_crash" : "assessment_killed";
+				facts.push(fact(assessmentKind, { reason: kind, provisional: kind === "missing" }, { at: 3 }));
+			}
+			return attemptPreservePolicy(reduceLifecycleFacts(SESSION, facts).attempts.get("attempt-1")!);
+		};
+
+		expect(policyFor("done")).toEqual({ preserveBranch: true, preserveWorktree: false });
+		expect(policyFor("done", true)).toEqual({ preserveBranch: true, preserveWorktree: true });
+		expect(policyFor("quit")).toEqual({ preserveBranch: true, preserveWorktree: false });
+		expect(policyFor("missing")).toEqual({ preserveBranch: true, preserveWorktree: true });
+		expect(policyFor("crash")).toEqual({ preserveBranch: false, preserveWorktree: false });
+		expect(policyFor("killed")).toEqual({ preserveBranch: true, preserveWorktree: false });
+		const conflicting = spawnFacts();
+		(conflicting[0]!.payload as Record<string, unknown>).worktreePath = "/tmp/worker-worktree";
+		conflicting.push(fact("declaration_done", { summary: "done" }, { at: 3 }));
+		conflicting.push(fact("declaration_quit", { summary: "quit" }, { at: 4 }));
+		expect(attemptPreservePolicy(reduceLifecycleFacts(SESSION, conflicting).attempts.get("attempt-1")!))
+			.toEqual({ preserveBranch: true, preserveWorktree: true });
 	});
 
 	test("16 deterministic cleanup commit trailer reconciles without a duplicate commit", async () => {
@@ -565,7 +592,7 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(providerPayloadExposesConversation({ messages: [] })).toBeTrue();
 		expect(run((tracker) => { tracker.observeContext(`[teams-event:${marker}]`); tracker.beforeProviderRequest({ messages: [] }); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([]);
 		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "toolUse" }); tracker.beforeProviderRequest({ messages: [] }); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "aborted" }); tracker.markAborted(); })).toEqual([]);
+		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "aborted" }); })).toEqual([]);
 	});
 
 	test("31 coordinator and worker persistence guards reject pre-first-assistant buffering", () => {

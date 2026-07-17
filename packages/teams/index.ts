@@ -34,7 +34,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_provider_request", (event) => { leader.observeProviderRequest(event.payload); });
 	pi.on("after_provider_response", (event) => { leader.observeProviderResponse(event.status); });
 	pi.on("message_end", (event) => { leader.observeMessageEnd(event.message); });
-	pi.on("agent_end", () => { leader.completeAgentRun(false); });
+	pi.on("agent_end", () => { leader.completeAgentRun(); });
 	pi.on("session_tree", () => { leader.branchChanged(); });
 
 	// Sandbox function for execute_code — shares same leader instance

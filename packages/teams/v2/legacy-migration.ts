@@ -246,7 +246,15 @@ export function planLegacyMigration(
 		}
 	}
 
-	interface MergedAttempt { worker: LegacyWorker; attempt: LegacyAttempt; name: string; snapshotAt: number; isLatest: boolean }
+	interface MergedAttempt {
+		workerId: string;
+		attemptId: string;
+		worker: LegacyWorker;
+		attempt: LegacyAttempt;
+		name: string;
+		snapshotAt: number;
+		isLatest: boolean;
+	}
 	const merged = new Map<string, MergedAttempt>();
 	for (const snapshot of snapshots) {
 		for (const [nameKey, worker] of Object.entries(snapshot.workers ?? {})) {
@@ -267,19 +275,24 @@ export function planLegacyMigration(
 				const attempt = attempts[index]!;
 				if (attempt.workerInstanceId && v2AttemptIds.has(attempt.workerInstanceId)) continue;
 				const attemptId = attemptKey(coordinatorSessionId, teamId, workerId, attempt, worker);
-				const key = `${workerId}:${attemptId}`;
-				const previous = merged.get(key);
+				const previous = merged.get(attemptId);
 				if (!previous || (snapshot.savedAt ?? 0) >= previous.snapshotAt) {
-					merged.set(key, { worker, attempt, name, snapshotAt: snapshot.savedAt ?? 0, isLatest: index === attempts.length - 1 });
+					merged.set(attemptId, {
+						workerId,
+						attemptId,
+						worker,
+						attempt,
+						name,
+						snapshotAt: snapshot.savedAt ?? 0,
+						isLatest: index === attempts.length - 1,
+					});
 				}
 			}
 		}
 	}
 
-	for (const [key, item] of merged) {
-		const separator = key.indexOf(":teams:attempt:legacy:");
-		const workerId = key.slice(0, separator);
-		const attemptId = key.slice(separator + 1);
+	for (const item of merged.values()) {
+		const { workerId, attemptId } = item;
 		importedAttemptIds.add(attemptId);
 		const identity = { coordinatorSessionId, teamId, workerId, attemptId };
 		const mode = legacyMode(item.attempt, item.worker);

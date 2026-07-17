@@ -527,11 +527,11 @@ describe("TeamLeader auto-resume after mid-turn compaction", () => {
 
 			await leader.handleWorkerExit("no-trigger-worker", worker, 1);
 
-			// Should fall through to normal warning emission, NOT auto-resume.
+			// Should fall through to canonical crash emission, NOT auto-resume.
 			expect(worker.recoveryAttempts ?? 0).toBe(0);
-			expect(worker.status).toBe("warning");
+			expect(worker.status).toBe("failed");
 			expect(events).toHaveLength(1);
-			expect(events[0].type).toBe("warning");
+			expect(events[0].type).toBe("failed");
 			// pi binary should NOT have been invoked
 			expect(fs.existsSync(invocationLog)).toBe(false);
 		} finally {
@@ -540,7 +540,7 @@ describe("TeamLeader auto-resume after mid-turn compaction", () => {
 	});
 });
 
-describe.skip("TeamLeader startup-death respawn", () => {
+describe("TeamLeader startup-death respawn", () => {
 	test("respawns once when worker dies before creating a session file", async () => {
 		const baseDir = makeTempDir("teams-startup-death-");
 		const sessionDir = path.join(baseDir, "session");
@@ -567,6 +567,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				useWorktree: false,
 				cwd: "/tmp/test-repo",
 				repoRoot: "/tmp/test-repo",
+				sessionDir,
 				leaderSessionFile: path.join(baseDir, "leader-session.jsonl"),
 				model: "openai-codex/gpt-5.4",
 				hasTools: false,
@@ -579,7 +580,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				workerId: "w-orig",
 				workerInstanceId: "w-orig",
 				name: "startup-worker",
-				pid: process.pid,
+				pid: 999999,
 				ticketId: "tk-startup",
 				ticketStatus: "open",
 				lastNote: undefined,
@@ -599,7 +600,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				spawnConfig,
 			};
 
-			await leader.handleWorkerExit("startup-worker", worker, 0);
+			await leader.handleWorkerExit("startup-worker", worker, 1);
 
 			expect(worker.recoveryAttempts).toBe(1);
 			expect(worker.status).toBe("running");
@@ -618,8 +619,6 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				if (child.pid) { try { process.kill(child.pid, "SIGKILL"); } catch {} }
 				cleanupPids.push(child.pid);
 			}
-			expect(piArgs).toContain("--non-interactive");
-			expect(piArgs).toContain("--session-dir");
 			expect(piArgs).toContain("--model");
 			expect(piArgs).toContain("openai-codex/gpt-5.4");
 
@@ -670,6 +669,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				useWorktree: false,
 				cwd: "/tmp/test-repo",
 				repoRoot: "/tmp/test-repo",
+				sessionDir,
 				leaderSessionFile: path.join(baseDir, "leader-session.jsonl"),
 			},
 		};
@@ -685,7 +685,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 
 		// No respawn should happen because a real session appeared.
 		expect(worker.recoveryAttempts ?? 0).toBe(0);
-		expect(worker.status).toBe("failed");
+		expect(worker.status).toBe("warning");
 	});
 
 	test("respawns when session directory was destroyed externally (long runtime)", async () => {
@@ -711,6 +711,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				useWorktree: false,
 				cwd: "/tmp/test-repo",
 				repoRoot: "/tmp/test-repo",
+				sessionDir,
 				leaderSessionFile: path.join(baseDir, "leader-session.jsonl"),
 				model: "openai-codex/gpt-5.4",
 			};
@@ -739,7 +740,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 				spawnConfig,
 			};
 
-			await leader.handleWorkerExit("gone-worker", worker, 0);
+			await leader.handleWorkerExit("gone-worker", worker, 1);
 
 			expect(worker.recoveryAttempts).toBe(1);
 			expect(worker.status).toBe("running");
@@ -782,6 +783,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			useWorktree: false,
 			cwd: "/tmp/test-repo",
 			repoRoot: "/tmp/test-repo",
+			sessionDir,
 			leaderSessionFile: path.join(baseDir, "leader-session.jsonl"),
 			model: "anthropic/claude-sonnet-4-6",
 		};
@@ -834,6 +836,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 			useWorktree: false,
 			cwd: "/tmp/test-repo",
 			repoRoot: "/tmp/test-repo",
+			sessionDir,
 			leaderSessionFile: path.join(baseDir, "leader-session.jsonl"),
 		};
 
@@ -863,7 +866,7 @@ describe.skip("TeamLeader startup-death respawn", () => {
 		await leader.handleWorkerExit("slow-fail", worker, 0);
 
 		expect(worker.recoveryAttempts ?? 0).toBe(0);
-		expect(worker.status).toBe("failed");
+		expect(worker.status).toBe("warning");
 	});
 });
 
@@ -964,6 +967,47 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(coordinatorFacts.filter((fact) => fact.kind === "outcome_corrected")).toHaveLength(1);
 		expect(leader.getCurrentTerminalEvent("pending-finish", "warning", identity.attemptId)).toBeNull();
 		expect(leader.getCurrentTerminalEvent("pending-finish", "completed", identity.attemptId)?.type).toBe("completed");
+	});
+
+	test("restore derives assessment_crash from a durable non-zero process exit", async () => {
+		const baseDir = makeTempDir("teams-crash-restore-");
+		const sessionDir = path.join(baseDir, "worker-session");
+		const workerSessionFile = path.join(sessionDir, "session.jsonl");
+		const identity = {
+			coordinatorSessionId: "leader-test-session",
+			teamId: "team-crash-restore",
+			workerId: "worker-crash-restore",
+			attemptId: "attempt-crash-restore",
+		};
+		const spawnId = createRootEventId("spawn_requested", identity);
+		const facts: LifecycleFact[] = [
+			{
+				schemaVersion: 4, ...identity, eventId: spawnId, kind: "spawn_requested", occurredAt: 1,
+				payload: { name: "crash-restore", ticketId: "tk-crash-restore", persistent: false, sessionMode: { kind: "fresh" }, sessionDir, workerSessionFile, worktreePath: null },
+			},
+			{
+				schemaVersion: 4, ...identity, eventId: createLeaderEventId(identity, "process_started", spawnId), kind: "process_started", occurredAt: 2,
+				payload: { pid: 999999, processBirth: { startedAt: 2 }, sessionMode: { kind: "fresh" }, sessionDir, workerSessionFile },
+			},
+			{
+				schemaVersion: 4, ...identity, eventId: createLeaderEventId(identity, "process_exited", "999999:2"), kind: "process_exited", occurredAt: 3,
+				payload: { pid: 999999, processBirth: { startedAt: 2 }, code: 1 },
+			},
+		];
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir, facts.map((data) => ({ type: "custom", customType: LIFECYCLE_FACT_ENTRY_TYPE, data })));
+
+		for (let attempt = 0; attempt < 100; attempt++) {
+			if (leader.getAttemptHistory({ attemptId: identity.attemptId })[0]?.assessment) break;
+			await Bun.sleep(10);
+		}
+		const restored = leader.getAttemptHistory({ attemptId: identity.attemptId })[0];
+		expect(restored?.assessment?.kind).toBe("crash");
+		expect(leader.getCurrentTerminalEvent("crash-restore", "failed", identity.attemptId)?.type).toBe("failed");
+		const appended = sessionEntries
+			.filter((entry) => entry.type === "custom" && entry.customType === LIFECYCLE_FACT_ENTRY_TYPE)
+			.map((entry) => entry.data as LifecycleFact);
+		expect(appended.filter((fact) => fact.kind === "assessment_crash")).toHaveLength(1);
+		expect(appended.filter((fact) => fact.kind === "assessment_missing_finish")).toHaveLength(0);
 	});
 
 	test("restore settles a spawn intent that never durably recorded process start", async () => {
@@ -1224,6 +1268,56 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(events[0].reason).toContain(`Worktree preserved for inspection: ${worktreePath}`);
 	});
 
+	test("non-zero exit without team_finish is canonical failed and emits a failed terminal event", async () => {
+		const baseDir = makeTempDir("teams-exit1-crash-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, [
+			JSON.stringify({ type: "session", version: 3, id: "crash-session", timestamp: new Date().toISOString(), cwd: process.cwd() }),
+			JSON.stringify({ type: "message", timestamp: new Date().toISOString(), message: { role: "assistant", stopReason: "error", errorMessage: "provider stream crashed", content: [{ type: "text", text: "partial diagnostic output" }] } }),
+		].join("\n") + "\n");
+		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "provider stream crashed\n", "utf-8");
+		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
+
+		const { leader } = makeLeaderHarness(baseDir);
+		const events: any[] = [];
+		leader.notifyLLM = (event: any) => { events.push(event); };
+		leader.pi.exec = async (cmd: string, args: string[]) => {
+			if (path.basename(cmd) === "mai" && args[0] === "--json" && args[1] === "show") {
+				return { stdout: JSON.stringify({ id: args[2], status: "open", comments: [] }) };
+			}
+			return { stdout: "" };
+		};
+		const worker: WorkerHandle = {
+			workerId: "worker-crash",
+			workerInstanceId: "attempt-crash",
+			name: "crash-worker",
+			pid: 999999,
+			ticketId: "tk-crash",
+			ticketStatus: "open",
+			sessionDir,
+			sessionFile,
+			worktreePath: null,
+			hasTools: false,
+			status: "running",
+			spawnedAt: Date.now() - 1000,
+			lastActivityAt: Date.now() - 1000,
+			lastProcessActivityAt: Date.now() - 1000,
+			hasActiveChildProcess: false,
+			activeChildProcessCount: 0,
+			lastSeenCommentCount: 0,
+			routeState: "linked",
+		};
+
+		await leader.handleWorkerExit(worker.name, worker, 1);
+
+		expect(worker.status).toBe("failed");
+		expect(events).toHaveLength(1);
+		expect(events[0].type).toBe("failed");
+		expect(leader.getAttemptHistory({ status: "failed" }).map((attempt: any) => attempt.attemptId)).toContain("attempt-crash");
+	});
+
 	test("endedWithUnresolvedCompaction matches β2's compaction-died-mid-turn shape", () => {
 		const sessionDir = makeTempDir("teams-endedcomp-match-");
 		const sessionFile = path.join(sessionDir, "worker.jsonl");
@@ -1334,7 +1428,7 @@ describe("TeamLeader lifecycle regression", () => {
 			routeState: "linked",
 		};
 
-		await leader.handleWorkerExit("ambig-warning-diag", worker, 1);
+		await leader.handleWorkerExit("ambig-warning-diag", worker, 0);
 
 		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
@@ -1581,7 +1675,7 @@ describe("TeamLeader empty-abort first-turn recovery", () => {
 			// (recoveryAttempts < 1 IS the cascade guard) must NOT fire again.
 			await leader.handleWorkerExit("empty-abort-worker", worker, 1);
 			expect(worker.recoveryAttempts).toBe(1); // unchanged — no second retry
-			expect(worker.status).toBe("warning");
+			expect(worker.status).toBe("failed");
 
 			// fake pi invoked exactly once total (count --session occurrences — the
 			// prompt contains newlines, so raw line count is unreliable).

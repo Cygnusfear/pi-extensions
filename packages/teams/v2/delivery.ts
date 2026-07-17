@@ -144,7 +144,6 @@ export class ProviderDeliveryTracker {
 		if (assistant.stopReason === "aborted") this.aborted = true;
 	}
 
-	markAborted(): void { this.aborted = true; }
 
 	acknowledgeSuccessfulDelivery(writer: SessionFactWriter, acknowledgedAt = Date.now()): string[] {
 		if (this.aborted) return [];

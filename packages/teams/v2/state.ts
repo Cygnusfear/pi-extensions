@@ -236,3 +236,22 @@ export function attemptStatus(attempt: AttemptState): "running" | "completed" | 
 	if (attempt.process.phase === "running" || attempt.process.phase === "spawning") return "running";
 	return "unknown";
 }
+
+export interface AttemptPreservePolicy {
+	preserveBranch: boolean;
+	preserveWorktree: boolean;
+}
+
+/** One canonical cleanup policy derived only from reduced lifecycle state. */
+export function attemptPreservePolicy(attempt: AttemptState): AttemptPreservePolicy {
+	if (attempt.worktreePath === null) return { preserveBranch: false, preserveWorktree: false };
+	if (attempt.protocolViolation) return { preserveBranch: true, preserveWorktree: true };
+	const ambiguous = attempt.assessment?.kind === "missing_finish"
+		|| attempt.assessment?.kind === "legacy_ambiguous";
+	const resumable = attempt.persistent
+		&& (attempt.declaration?.kind === "done" || attempt.assessment?.kind === "missing_finish");
+	return {
+		preserveBranch: Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed",
+		preserveWorktree: ambiguous || resumable,
+	};
+}

@@ -143,13 +143,21 @@ describe("authoritative mesh finish emits the terminal notification", () => {
 		const seen: string[] = [];
 		(
 			leader as never as {
-				subscribeToEvents: (fn: (e: { type: string }) => void) => void;
+				subscribeToEvents: (fn: (e: { type: string; preventDefault(): void }) => void) => void;
 			}
-		).subscribeToEvents((e) => seen.push(e.type));
+		).subscribeToEvents((e) => {
+			seen.push(e.type);
+			e.preventDefault();
+			(leader as any).wakeFromSubscription(e, `host wake: ${worker.name}`);
+		});
 		dispatchFinish(leader, worker, "done", "done summary");
+		// The wake message already carries the lifecycle marker. before_agent_start
+		// must not inject the same pending batch a second time.
+		expect((leader as any).prepareDeliveryForAgentRun()).toBeUndefined();
 		await settle();
 		expect(seen).toContain("completed");
 		expect(sent.length).toBe(1);
+		expect(sent[0].content.match(/\[teams-event:/g)).toHaveLength(1);
 	});
 
 	test("later process-exit re-emit is deduped (no double batch)", async () => {

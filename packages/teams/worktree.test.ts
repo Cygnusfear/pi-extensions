@@ -195,6 +195,17 @@ describe("createWorktree — default HEAD", () => {
     expect(result.branch).toBe("teams/impl-auth/mai-xyz1");
     expect(currentBranch(wtPath)).toBe("teams/impl-auth/mai-xyz1");
   });
+
+  test("reconciles the exact already-created worktree as idempotent success", async () => {
+    const wtPath = path.join(repoDir, ".worktrees", "teams", "reconcile");
+    const first = await createWorktree(repoDir, "reconcile", "ticket-reconcile", wtPath);
+    const second = await createWorktree(repoDir, "reconcile", "ticket-reconcile", wtPath);
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(second.path).toBe(wtPath);
+    expect(currentBranch(wtPath)).toBe("teams/reconcile/ticket-reconcile");
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════

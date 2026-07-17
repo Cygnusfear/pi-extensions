@@ -43,7 +43,7 @@ import {
 import { createTeamsWidget } from "./widget.js";
 import type { LeaderAckPayload, TeamEnvelope, WorkerCommentPayload, WorkerFinishPayload } from "./v2/protocol.ts";
 import type { AttemptIdentity, AttemptState, JsonValue, LifecycleFact, WorkerLifecycleState } from "./v2/state.ts";
-import { attemptStatus } from "./v2/state.ts";
+import { attemptPreservePolicy, attemptStatus } from "./v2/state.ts";
 import { LifecycleRuntimeStore } from "./v2/runtime-store.ts";
 import { SessionFactWriter, createDeclarationEventId, createEffectId, createLeaderEventId, createRootEventId, sha256Id, workerFinishPendingForAttempt } from "./v2/session-facts.ts";
 import { buildPendingDelivery, ProviderDeliveryTracker, type DeliveryBatch } from "./v2/delivery.ts";
@@ -1011,17 +1011,11 @@ export class TeamLeader {
         this.recoverPendingWorkerFinish(recoveryHandle);
         current = this.lifecycleStore?.attempt(attempt.attemptId);
         if (!current || current.declaration || current.assessment || !current.process.exit) continue;
-        const eventId = createLeaderEventId(current, "assessment_missing_finish", current.process.exit.eventId);
-        this.appendLifecycleFact({
-          schemaVersion: 4,
-          ...current,
-          eventId,
-          kind: "assessment_missing_finish",
-          sourceLeaderEpoch: this.leaderEpoch,
-          occurredAt: Date.now(),
-          payload: { reason: "Worker exited without an explicit team_finish declaration", provisional: true },
-          ...(recoveryHandle.lastNote ? { diagnostics: { detail: recoveryHandle.lastNote } } : {}),
-        });
+        this.recordExitAssessment(
+          recoveryHandle,
+          Date.now(),
+          recoveryHandle.lastNote ? { detail: recoveryHandle.lastNote } : undefined,
+        );
         this.schedulePendingDelivery(true);
       }
       for (const workerState of this.lifecycleStore?.projection().workers.values() ?? []) {
@@ -1128,11 +1122,7 @@ export class TeamLeader {
     void this.closeTicketWithEffect(worker).catch(() => {});
     const cleanupEligible = attempt.process.phase === "exited" || attempt.assessment?.kind === "startup_failure";
     if (!cleanupEligible) return;
-    const ambiguous = attempt.assessment?.kind === "missing_finish" || attempt.assessment?.kind === "legacy_ambiguous";
-    const preserveBranch = Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed";
-	const resumable = attempt.persistent && (attempt.declaration?.kind === "done" || attempt.assessment?.kind === "missing_finish");
-    const preserveWorktree = ambiguous || resumable;
-    void this.cleanupWithEffect(worker, { preserveBranch, preserveWorktree });
+    void this.cleanupWithEffect(worker, attemptPreservePolicy(attempt));
   }
 
 
@@ -1266,17 +1256,21 @@ export class TeamLeader {
 	this.projectV2WorkerRuntime(worker.name);
   }
 
-  private recordMissingFinishAssessment(worker: WorkerHandle, occurredAt: number, diagnostics?: JsonValue): void {
+  private recordExitAssessment(worker: WorkerHandle, occurredAt: number, diagnostics?: JsonValue): void {
 	const identity = this.identityFor(worker);
 	const attempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
-	if (!attempt || attempt.declaration) return;
-	const exitEventId = attempt.process.exit?.eventId
-	  ?? createLeaderEventId(identity, "process_exited", `${worker.pid}:${worker.spawnedAt}`);
-	const eventId = createLeaderEventId(identity, "assessment_missing_finish", exitEventId);
+	if (!attempt || attempt.declaration || !attempt.process.exit) return;
+	const exit = attempt.process.exit;
+	const crashed = exit.code !== 0 || Boolean(exit.signal);
+	const kind = crashed ? "assessment_crash" : "assessment_missing_finish";
+	const reason = crashed
+	  ? "Worker process exited abnormally without an explicit team_finish declaration"
+	  : "Worker exited without an explicit team_finish declaration";
+	const eventId = createLeaderEventId(identity, kind, exit.eventId);
 	this.appendLifecycleFact({
-	  schemaVersion: 4, ...identity, eventId, kind: "assessment_missing_finish", sourceLeaderEpoch: this.leaderEpoch,
+	  schemaVersion: 4, ...identity, eventId, kind, sourceLeaderEpoch: this.leaderEpoch,
 	  occurredAt,
-	  payload: { reason: "Worker exited without an explicit team_finish declaration", provisional: true },
+	  payload: { reason, provisional: !crashed },
 	  ...(diagnostics === undefined ? {} : { diagnostics }),
 	});
 	this.projectV2WorkerRuntime(worker.name);
@@ -1296,13 +1290,13 @@ export class TeamLeader {
 	this.projectV2WorkerRuntime(worker.name);
   }
 
-  private recordProcessExit(worker: WorkerHandle, exitCode: number | null, occurredAt = Date.now()): void {
+  private recordProcessExit(worker: WorkerHandle, exitCode: number | null, occurredAt = Date.now(), signal?: string): void {
     const identity = this.identityFor(worker);
     const eventId = createLeaderEventId(identity, "process_exited", `${worker.pid}:${worker.spawnedAt}`);
     this.appendLifecycleFact({
       schemaVersion: 4, ...identity, eventId, kind: "process_exited", sourceLeaderEpoch: this.leaderEpoch,
       occurredAt,
-      payload: { pid: worker.pid, processBirth: { startedAt: worker.spawnedAt }, code: exitCode },
+      payload: { pid: worker.pid, processBirth: { startedAt: worker.spawnedAt }, code: exitCode, ...(signal ? { signal } : {}) },
     });
   }
 
@@ -1426,11 +1420,11 @@ export class TeamLeader {
       this.upsertV2WorkerFromHandle(worker);
       this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
       this.childProcesses.set(name, child);
-      child.on("exit", (code) => {
+      child.on("exit", (code, signal) => {
         worker.exitCode = code;
         const attempt = getCurrentAttempt(worker);
         if (attempt) attempt.exitCode = code;
-        void this.handleWorkerExit(name, worker, code);
+        void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
       });
       child.on("error", (err) => {
         worker.exitCode = null;
@@ -1895,7 +1889,11 @@ export class TeamLeader {
 		  this.factWriter!,
 		  this.lifecycleStore!.projection(),
 		  { identity, effectKind: "worktree_create", normalizedInputs: { toplevel, workerName, ticketId, cwd, baseRef: baseRef ?? "HEAD" }, sourceLeaderEpoch: this.leaderEpoch },
-		  () => createWorktree(toplevel, workerName, ticketId, cwd, baseRef),
+		  async () => {
+			const result = await createWorktree(toplevel, workerName, ticketId, cwd, baseRef);
+			if (!result.success) throw new Error(result.error ?? `Failed to create worktree ${cwd}`);
+			return result;
+		  },
 		  (fact) => { this.lifecycleStore?.append(fact); },
 		);
 	  } catch (error) {
@@ -1934,11 +1932,11 @@ export class TeamLeader {
       throw error;
     }
 
-    child.on("exit", (code) => {
+    child.on("exit", (code, signal) => {
       handle.exitCode = code;
       const attempt = getCurrentAttempt(handle);
       if (attempt) attempt.exitCode = code;
-      void this.handleWorkerExit(workerName, handle, code);
+      void this.handleWorkerExit(workerName, handle, code, false, signal ?? undefined);
     });
     child.on("error", (error) => {
       handle.exitCode = null;
@@ -2069,7 +2067,11 @@ export class TeamLeader {
           this.factWriter,
           this.lifecycleStore.projection(),
           { identity, effectKind: "worktree_create", normalizedInputs: effect.normalizedInputs, sourceLeaderEpoch: this.leaderEpoch },
-          () => createWorktree(String(inputs.toplevel), String(inputs.workerName), String(inputs.ticketId), String(inputs.cwd), String(inputs.baseRef)),
+          async () => {
+            const result = await createWorktree(String(inputs.toplevel), String(inputs.workerName), String(inputs.ticketId), String(inputs.cwd), String(inputs.baseRef));
+            if (!result.success) throw new Error(result.error ?? `Failed to reconcile worktree ${String(inputs.cwd)}`);
+            return result;
+          },
           (fact) => { this.lifecycleStore?.append(fact); },
         ));
       }
@@ -2151,6 +2153,7 @@ export class TeamLeader {
     worker: WorkerHandle,
     exitCode: number | null,
     observedDead = false,
+    signal?: string,
   ) {
     if (!this.ctx) return;
 	const handlingSessionId = this.factWriter?.coordinatorSessionId;
@@ -2175,7 +2178,7 @@ export class TeamLeader {
       const attempts = (worker.exitRecheckAttempts ?? 0) + 1;
       worker.exitRecheckAttempts = attempts;
       if (attempts <= 30) {
-        setTimeout(() => void this.handleWorkerExit(name, worker, exitCode), 2000);
+        setTimeout(() => void this.handleWorkerExit(name, worker, exitCode, false, signal), 2000);
       }
       return;
     }
@@ -2191,7 +2194,7 @@ export class TeamLeader {
     // Stop watching FIRST — before any async work — to prevent race with handleTicketChange
     this.unwatchWorker(name);
 
-    this.recordProcessExit(worker, exitCode, Date.now());
+    this.recordProcessExit(worker, exitCode, Date.now(), signal);
 
     // A worker can persist its declaration immediately before the process exit
     // while the mesh envelope or application ack is still in flight.
@@ -2241,7 +2244,7 @@ export class TeamLeader {
 
     // Settle the exited attempt before any retry creates the next attempt. The
     // retry is a new process attempt, never a rewrite of the failed history.
-    this.recordMissingFinishAssessment(worker, Date.now(), { detail: lastNote });
+    this.recordExitAssessment(worker, Date.now(), { detail: lastNote });
 
     if (classification === "failure" && (worker.recoveryAttempts ?? 0) < 1) {
       // Try the malformed-tool-JSON classifier first; if it doesn't match, try the
@@ -2288,11 +2291,11 @@ export class TeamLeader {
           ).catch(() => {});
 
           this.childProcesses.set(name, child);
-          child.on("exit", (code) => {
+          child.on("exit", (code, signal) => {
             worker.exitCode = code;
             const attempt = getCurrentAttempt(worker);
             if (attempt) attempt.exitCode = code;
-            void this.handleWorkerExit(name, worker, code);
+            void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
           });
           child.on("error", (err) => {
             worker.exitCode = null;
@@ -2375,11 +2378,11 @@ export class TeamLeader {
         ).catch(() => {});
 
         this.childProcesses.set(name, child);
-        child.on("exit", (code) => {
+        child.on("exit", (code, signal) => {
           worker.exitCode = code;
           const attempt = getCurrentAttempt(worker);
           if (attempt) attempt.exitCode = code;
-          void this.handleWorkerExit(name, worker, code);
+          void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
         });
         child.on("error", (err) => {
           worker.exitCode = null;
@@ -2442,7 +2445,22 @@ export class TeamLeader {
       if (noSessionFile && worker.spawnConfig && (runtimeMs < STARTUP_WINDOW_MS || sessionDirGone)) {
         // A fresh retry is a new canonical attempt. Persist its intent before
         // session-file creation, revive-descriptor writes, or process spawn.
-        const config = { ...worker.spawnConfig, workerId: worker.workerId, workerInstanceId: crypto.randomUUID() };
+        const workerInstanceId = crypto.randomUUID();
+        const config = {
+          ...worker.spawnConfig,
+          workerId: worker.workerId,
+          workerInstanceId,
+          // A respawn is a new attempt and must not reuse the failed attempt's
+          // session directory. Reuse would mix diagnostics and pending-finish
+          // evidence across attempt identities.
+          sessionDir: path.join(
+            worker.spawnConfig.repoRoot,
+            ".pi",
+            "sessions",
+            "teams-workers",
+            `team-${worker.name}-${worker.ticketId}-${workerInstanceId}`,
+          ),
+        };
         const workerSessionFile = config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
           ? config.sessionMode.sessionFile
           : path.join(config.sessionDir, "session.jsonl");
@@ -2490,11 +2508,11 @@ export class TeamLeader {
         ).catch(() => {});
 
         this.childProcesses.set(name, child);
-        child.on("exit", (code) => {
+        child.on("exit", (code, signal) => {
           worker.exitCode = code;
           const attempt = getCurrentAttempt(worker);
           if (attempt) attempt.exitCode = code;
-          void this.handleWorkerExit(name, worker, code);
+          void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
         });
         child.on("error", (err) => {
           worker.exitCode = null;
@@ -2542,26 +2560,23 @@ export class TeamLeader {
       return;
     }
 
-    // Build crash report BEFORE cleanup — cleanup may remove the worker worktree
-    const crashReport = classification === "failure" ? buildWorkerCrashReport(worker, exitCode) : "";
     this.projectV2WorkerRuntime(name);
 	const canonicalAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
 	const canonicalStatus = canonicalAttempt ? attemptStatus(canonicalAttempt) : "unknown";
 	const logicalRoute = this.lifecycleStore?.projection().workers.get(worker.workerId)?.route;
 	worker.routeState = logicalRoute ?? "dead";
     worker.durableMeshId = undefined;
+	// Build crash diagnostics before cleanup can remove the worker worktree.
+	const crashReport = canonicalStatus === "failed" ? buildWorkerCrashReport(worker, exitCode) : "";
 
     // Cleanup: auto-commit dirty files, preserve success/warning branches, and
     // keep ambiguous warning worktrees on disk so failed terminal signaling does
     // not destroy post-mortem evidence.
-    const explicitTerminal = assessment.explicitTerminal;
-	const preserveBranch = (canonicalStatus === "completed" || canonicalStatus === "warning") && worker.worktreePath !== null;
-    const preserveWorktree = (
-	  (classification === "warning" && !explicitTerminal)
-	  || (Boolean(worker.freeform) && logicalRoute === "resumable")
-	) && worker.worktreePath !== null;
     await this.closeTicketWithEffect(worker).catch(() => {});
-    const cleanupResult = await this.cleanupWithEffect(worker, { preserveBranch, preserveWorktree });
+    const cleanupResult = await this.cleanupWithEffect(
+      worker,
+      canonicalAttempt ? attemptPreservePolicy(canonicalAttempt) : { preserveBranch: false, preserveWorktree: false },
+    );
 
 	if (canonicalStatus === "completed") {
       const branch = `teams/${worker.name}/${worker.ticketId}`;
@@ -3157,9 +3172,12 @@ export class TeamLeader {
   prepareDeliveryForAgentRun(): { customType: string; content: string; display: boolean; details: { eventIds: string[] } } | undefined {
     this.deliveryTracker.beginRun();
     const batch = this.pendingDelivery();
+	const alreadyQueued = Boolean(batch && this.activeDelivery
+	  && batch.eventIds.length === this.activeDelivery.eventIds.length
+	  && batch.eventIds.every((eventId, index) => this.activeDelivery?.eventIds[index] === eventId));
     this.activeDelivery = batch;
     this.deliveryTracker.setDeliveredBatch(batch?.eventIds ?? []);
-    if (!batch) return undefined;
+    if (!batch || alreadyQueued) return undefined;
     return { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } };
   }
 
@@ -3175,8 +3193,7 @@ export class TeamLeader {
     this.noteAssistantMessage();
     this.deliveryTracker.messageEnd(message);
   }
-  completeAgentRun(aborted = false): void {
-    if (aborted) this.deliveryTracker.markAborted();
+  completeAgentRun(): void {
     if (!this.factWriter) return;
     try {
       this.deliveryTracker.acknowledgeSuccessfulDelivery(this.factWriter);

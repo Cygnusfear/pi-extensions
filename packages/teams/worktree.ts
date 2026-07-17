@@ -35,6 +35,27 @@ export function workerWorktreePath(repoToplevel: string, workerName: string, tim
   return path.join(repoToplevel, ".worktrees", "teams", `${timestamp}-${workerName}`);
 }
 
+async function existingWorktreeMatches(
+  repoDir: string,
+  worktreePath: string,
+  branch: string,
+): Promise<boolean> {
+  if (!fs.existsSync(worktreePath)) return false;
+  try {
+    const [top, actualBranch, worktreeCommon, repoCommon] = await Promise.all([
+      exec("git", ["rev-parse", "--show-toplevel"], { cwd: worktreePath }),
+      exec("git", ["branch", "--show-current"], { cwd: worktreePath }),
+      exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: worktreePath }),
+      exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: repoDir }),
+    ]);
+    return fs.realpathSync(top.stdout.trim()) === fs.realpathSync(worktreePath)
+      && actualBranch.stdout.trim() === branch
+      && fs.realpathSync(worktreeCommon.stdout.trim()) === fs.realpathSync(repoCommon.stdout.trim());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Create a git worktree for a worker, branching from `baseRef`.
  *
@@ -58,6 +79,12 @@ export async function createWorktree(
     await exec("git", ["worktree", "add", worktreePath, "-b", branch, baseRef], { cwd: repoDir });
     return { success: true, path: worktreePath, branch };
   } catch (err) {
+    // Reconciliation can rerun after git created the worktree but before the
+    // lifecycle effect_completed fact became durable. Only the exact registered
+    // path, branch, and shared repository count as idempotent success.
+    if (await existingWorktreeMatches(repoDir, worktreePath, branch)) {
+      return { success: true, path: worktreePath, branch };
+    }
     return { success: false, path: worktreePath, branch, error: String(err) };
   }
 }

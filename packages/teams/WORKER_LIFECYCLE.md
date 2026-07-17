@@ -60,11 +60,12 @@ Process exit is always recorded independently from declaration:
 
 - declaration before exit: the declaration is already actionable; exit later unlocks cleanup;
 - exit before declaration: the leader waits a bounded settle window and checks the worker's persisted pending finish;
-- exit without finish: the attempt becomes `missing_finish` warning, regardless of exit code zero;
-- startup failure or crash without finish: the attempt receives the corresponding failure assessment;
+- clean exit (code zero, no signal) without finish: the attempt becomes a provisional `missing_finish` warning;
+- non-zero or signaled exit without finish: the attempt receives `assessment_crash` and is failed;
+- startup failure before a process start is durable: the attempt receives `assessment_startup_failure`;
 - coordinator kill: `assessment_killed` and process termination are recorded separately.
 
-Ticket state, notes, output, and exit code may help diagnostics or crash classification. They do not manufacture `done` or `quit`.
+The durable `process_exited` code or signal determines crash classification. Ticket state, notes, and output enrich diagnostics only; they never manufacture `done` or `quit`.
 
 If a valid declaration is recovered after a provisional assessment, its outcome wins and one deterministic `outcome_corrected` event explains the correction.
 
