@@ -101,7 +101,6 @@ describe("TeamLeader runtime and transport integration", () => {
 			{ type: "completed", worker: makeWorker({ name: "done", status: "done" }), result: "done" },
 			{ type: "warning", worker: makeWorker({ name: "quit", status: "warning" }), reason: "quit" },
 			{ type: "failed", worker: makeWorker({ name: "crash", status: "failed" }), reason: "crash" },
-			{ type: "turn_finished", worker: makeWorker({ name: "freeform", status: "done", freeform: true }), result: "finished" },
 		] as any[];
 		for (const event of events) leader.notifyLLM(event);
 		expect(sent).toHaveLength(events.length);
@@ -110,7 +109,6 @@ describe("TeamLeader runtime and transport integration", () => {
 			"completed: done",
 			"warning: quit",
 			"failed: crash",
-			"turn_finished: freeform",
 		]);
 		subscription.unsubscribe();
 	});

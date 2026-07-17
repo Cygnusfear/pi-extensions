@@ -253,7 +253,6 @@ const first = await Promise.race([
 ```ts
 type PollEvent =
   | { type: "completed"; worker: WorkerHandle; result: string }
-  | { type: "turn_finished"; worker: WorkerHandle; result: string }
   | { type: "warning"; worker: WorkerHandle; reason: string }
   | { type: "failed"; worker: WorkerHandle; reason: string }
   | { type: "stuck"; worker: WorkerHandle; idleSeconds: number }
@@ -327,7 +326,7 @@ console.log("Workers spawned, subscriptions armed. Going idle.");
 
 - **Always chain `.timeout(ms)`**. Silent hangs are worse than loud failures.
 - **Prefer `.wake(...)`** for every background Teams wake. It sends from the host during event dispatch, suppresses the duplicate default batch automatically, and does not rely on a sandbox Promise continuation. Never pair `.preventDefault()` with `.then(...)` or `.each(...)` plus `console.wake()` for a worker terminal event.
-- **Use `"terminal"`** when you need to know that a worker stopped; `completed` only means explicit success. A clean un-finished worker can emit `warning`, and a freeform turn can emit `turn_finished`.
+- **Use `"terminal"`** when you need to know that a worker stopped; `completed` only means explicit success. Any clean exit without `team_finish`, including a persistent/freeform turn, emits `warning`; persistent workers remain separately resumable.
 - **Terminal state replay**: retained terminal events survive widget cleanup and session reload for 24 hours by default (`PI_TEAMS_TERMINAL_EVENT_TTL_MS`, bounded to 100 records by `PI_TEAMS_TERMINAL_EVENT_MAX`). Re-arm subscriptions after runtime reload; arbitrary JavaScript callbacks themselves are intentionally not serialized.
 - **Listener errors are isolated** — one throwing `.each()` callback cannot break the event pipeline for other subscribers.
 - **Auto-unsubscribe** on first match (one-shot), timeout, or abort. Adding `.each()` switches to streaming mode, which keeps the subscription alive until `.unsubscribe()`.

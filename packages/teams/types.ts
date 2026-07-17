@@ -111,7 +111,6 @@ export interface SpawnConfig {
 
 export type PollEvent = (
 	| { type: "completed"; worker: WorkerHandle; result: string }
-	| { type: "turn_finished"; worker: WorkerHandle; result: string }
 	| { type: "warning"; worker: WorkerHandle; reason: string }
 	| { type: "failed"; worker: WorkerHandle; reason: string }
 	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number; first?: boolean }

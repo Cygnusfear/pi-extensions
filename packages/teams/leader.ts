@@ -78,7 +78,7 @@ interface WorkerExitAssessment {
   cleanExit: boolean;
   ticketClosed: boolean;
   outputMeaningful: boolean;
-  classification: "success" | "warning" | "failure" | "turn_finished";
+  classification: "success" | "warning" | "failure";
   reason?: string;
 }
 
@@ -982,9 +982,11 @@ export class TeamLeader {
         handle.routeState = "pending";
         this.startActivityMonitor(handle.name, handle);
       } else if (resumable) {
-        handle.status = "grace";
+        // Outcome status and logical resumability are orthogonal. Preserve the
+        // canonical warning/failed projection; only an explicit persistent done
+        // declaration projects as grace in projectedHandle().
         handle.routeState = "resumable";
-        this.rearmPersistentLifecycle(handle.name, handle, now);
+        if (attempt.declaration?.kind === "done") this.rearmPersistentLifecycle(handle.name, handle, now);
       } else {
         handle.status = "running";
         handle.routeState = "pending";
@@ -2220,7 +2222,6 @@ export class TeamLeader {
 
     const assessment = assessWorkerExit(worker, exitCode, ticketClosed, lastNote);
     const classification = assessment.classification;
-    const isSuccess = classification === "success" || classification === "turn_finished";
     if (assessment.reason) {
       lastNote = assessment.reason;
     }
@@ -2539,26 +2540,6 @@ export class TeamLeader {
     worker.ticketStatus = ticketClosed ? "closed" : worker.ticketStatus;
     worker.lastNote = lastNote;
     worker.lastActivityAt = Date.now();
-
-    // Persistent/freeform workers: a plain turn end becomes resumable idle.
-    // Explicit team_finish still counts as terminal success/warning/failure.
-    if (worker.freeform && classification === "turn_finished") {
-      const now = Date.now();
-      worker.doneAt = now;
-      worker.graceAt = now + DONE_GRACE_MS;
-      worker.resumableUntilAt = worker.graceAt + RESUMABLE_WINDOW_MS;
-      this.projectV2WorkerRuntime(name);
-	  // A normal persistent print-mode turn is not a fabricated task success.
-	  // The attempt remains a missing-finish warning while the logical route is
-	  // explicitly reusable for the next, distinct attempt.
-	  worker.status = "grace";
-	  worker.routeState = "resumable";
-      this.childProcesses.delete(name);
-      this.notifyLLM({ type: "turn_finished", worker: { ...worker }, result: lastNote });
-      this.renderWidget();
-      this.rearmPersistentLifecycle(name, worker, now);
-      return;
-    }
 
     this.projectV2WorkerRuntime(name);
 	const canonicalAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
@@ -3262,7 +3243,7 @@ export class TeamLeader {
       return;
     }
     // Phase/alive events are live telemetry rather than lifecycle outcomes.
-    if (event.type === "phase" || event.type === "alive" || event.type === "turn_finished") {
+    if (event.type === "phase" || event.type === "alive") {
       this.pi.sendMessage(
         { customType: "team-event", content: formatPollEvent(event), display: true },
         { deliverAs: "followUp", triggerTurn: true },
@@ -3298,8 +3279,6 @@ function formatPollEvent(event: PollEvent): string {
   switch (event.type) {
     case "completed":
       return `${ICONS.done} ${tag}:\n${event.result}`;
-    case "turn_finished":
-      return `${ICONS.alive} ${tag}:\nturn finished (still resumable) · ${event.result}`;
     case "warning":
       return `${ICONS.warn} ${tag}:\n${event.reason}`;
     case "failed":

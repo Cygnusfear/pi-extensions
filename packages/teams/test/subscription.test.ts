@@ -233,7 +233,6 @@ async function run() {
 		assert("terminal matches completed", predicate(completedEvent("terminal-worker")));
 		assert("terminal matches warning", predicate({ type: "warning", worker: makeWorker("terminal-worker", "warning"), reason: "warn" }));
 		assert("terminal matches failed", predicate({ type: "failed", worker: makeWorker("terminal-worker", "failed"), reason: "fail" }));
-		assert("terminal matches turn_finished", predicate({ type: "turn_finished", worker: makeWorker("terminal-worker", "done"), result: "later" }));
 		assert("terminal rejects comments", !predicate(commentEvent("terminal-worker", "still running")));
 	}
 

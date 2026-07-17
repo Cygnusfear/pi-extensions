@@ -48,7 +48,7 @@ function routeRejectionToTui(err: unknown): void {
 export type PollEventType = PollEvent["type"];
 /** "terminal" is a filter alias, not an emitted PollEvent type. */
 export type PollEventFilterType = PollEventType | "terminal";
-const TERMINAL_EVENT_TYPES = new Set<PollEventType>(["completed", "turn_finished", "warning", "failed"]);
+const TERMINAL_EVENT_TYPES = new Set<PollEventType>(["completed", "warning", "failed"]);
 
 /**
  * DOM-style event wrapper dispatched to subscription listeners.
@@ -507,9 +507,6 @@ function synthesizeAnyTerminalFromWorker(worker: WorkerHandle): PollEvent | null
 		return { type: "failed", worker: { ...worker }, reason: worker.spawnError ?? (worker.status === "killed" ? "worker killed" : "failed") };
 	}
 	if (worker.status === "done" || worker.status === "grace") {
-		if (worker.freeform && worker.terminalStatus !== "done") {
-			return { type: "turn_finished", worker: { ...worker }, result: worker.lastNote ?? "" };
-		}
 		return { type: "completed", worker: { ...worker }, result: worker.lastNote ?? "" };
 	}
 	return null;

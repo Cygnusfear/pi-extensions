@@ -44,7 +44,7 @@ Important kinds are:
 - integrity: `protocol_violation`, `outcome_corrected`
 - cleanup/effects: `cleanup_requested`, `cleanup_completed`, `cleanup_failed`, `effect_requested`, `effect_completed`, `effect_failed`
 
-`team_finish(done|quit)` is the only declared task outcome. Process exit is an independent liveness fact. Exit code zero, ticket state, a note, or ordinary session shutdown cannot fabricate a successful declaration. A clean exit without a declaration is `missing_finish`; a non-zero or signaled exit without a declaration is `assessment_crash`.
+`team_finish(done|quit)` is the only declared task outcome. Process exit is an independent liveness fact. Exit code zero, ticket state, a note, or ordinary session shutdown cannot fabricate a successful declaration. A clean exit without a declaration is `missing_finish`; a non-zero or signaled exit without a declaration is `assessment_crash`. Attempt outcome and logical route are orthogonal: a persistent `missing_finish` attempt stays a warning even when its logical worker route is resumable.
 
 The first valid declaration for an attempt is immutable. An exact retry is idempotent. A different declaration, or a reused event ID with a different authoritative identity, produces a protocol violation and cannot overwrite the first declaration.
 

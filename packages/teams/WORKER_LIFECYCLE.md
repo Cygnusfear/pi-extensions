@@ -71,7 +71,7 @@ If a valid declaration is recovered after a provisional assessment, its outcome 
 
 ## Persistent workers
 
-A persistent worker that declares done and whose process exits becomes `resumable`. Sending it a new message:
+A persistent worker that declares done and whose process exits becomes `resumable`. A persistent clean exit without `team_finish` remains a `missing_finish` warning for that attempt while the logical worker route remains separately resumable; resumability never changes the attempt outcome to success or a benign terminal event. Sending it a new message:
 
 1. preserves the stable logical `workerId`;
 2. creates a new `attemptId` and `spawn_requested` fact;

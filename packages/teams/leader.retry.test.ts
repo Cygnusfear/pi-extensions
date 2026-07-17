@@ -1051,8 +1051,8 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(facts.filter((fact) => fact.kind === "effect_requested").map((fact) => (fact.payload as { effectKind?: string }).effectKind).sort()).toEqual(["cleanup", "ticket_close"]);
 	});
 
-	test("freeform worker without team_finish emits warning instead of completion", async () => {
-		const baseDir = makeTempDir("teams-freeform-turn-finished-");
+	test("freeform worker without team_finish emits the same warning live and after restore", async () => {
+		const baseDir = makeTempDir("teams-freeform-warning-");
 		const sessionDir = path.join(baseDir, "session");
 		fs.mkdirSync(sessionDir, { recursive: true });
 		const sessionFile = path.join(sessionDir, "worker.jsonl");
@@ -1090,7 +1090,7 @@ describe("TeamLeader lifecycle regression", () => {
 		fs.writeFileSync(path.join(sessionDir, "stderr.log"), "", "utf-8");
 		fs.writeFileSync(path.join(sessionDir, "stdout.log"), "", "utf-8");
 
-		const { leader } = makeLeaderHarness(baseDir);
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir);
 		const events: any[] = [];
 		leader.notifyLLM = (event: any) => { events.push(event); };
 		leader.pi.exec = async (cmd: string, args: string[]) => {
@@ -1129,6 +1129,13 @@ describe("TeamLeader lifecycle regression", () => {
 		expect(worker.status).toBe("warning");
 		expect(events).toHaveLength(1);
 		expect(events[0].type).toBe("warning");
+
+		const restoredBase = makeTempDir("teams-freeform-warning-restored-");
+		const { leader: restoredLeader } = makeLeaderHarness(restoredBase, sessionEntries);
+		const restoredWorker = restoredLeader.workers.get("freeform-worker");
+		expect(restoredWorker?.status).toBe("warning");
+		expect(restoredWorker?.routeState).toBe("resumable");
+		expect(restoredLeader.getCurrentTerminalEvent("freeform-worker", "terminal", "wf-1")?.type).toBe("warning");
 	});
 
 	test("closed ticket with useful output and exit code 0 remains warning without team_finish", async () => {
