@@ -24,16 +24,14 @@ export default function (pi: ExtensionAPI) {
 	const leader = new TeamLeader(pi);
 	registerTeamsTool(pi, leader);
 
-	// Durable lifecycle delivery is correlated to the provider request that
-	// actually reaches a successful terminal assistant response.
+	// Lifecycle delivery is session-native: the injected team-event custom
+	// message is persisted into the coordinator session by the host, and that
+	// persisted entry is the delivery record. No provider hooks are involved —
+	// provider transports (SSE, WebSocket, future ones) cannot break delivery.
 	pi.on("before_agent_start", () => {
 		const message = leader.prepareDeliveryForAgentRun();
 		return message ? { message } : undefined;
 	});
-	pi.on("context", (event) => { leader.observeProviderContext(event.messages); });
-	pi.on("before_provider_request", (event) => { leader.observeProviderRequest(event.payload); });
-	pi.on("after_provider_response", (event) => { leader.observeProviderResponse(event.status); });
-	pi.on("message_end", (event) => { leader.observeMessageEnd(event.message); });
 	pi.on("agent_end", () => { leader.completeAgentRun(); });
 	pi.on("session_tree", () => { leader.branchChanged(); });
 

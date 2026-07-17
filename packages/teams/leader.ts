@@ -46,7 +46,7 @@ import type { AttemptIdentity, AttemptState, JsonValue, LifecycleFact, WorkerLif
 import { attemptPreservePolicy, attemptStatus } from "./v2/state.ts";
 import { LifecycleRuntimeStore } from "./v2/runtime-store.ts";
 import { SessionFactWriter, createDeclarationEventId, createEffectId, createLeaderEventId, createRootEventId, sha256Id, workerFinishPendingForAttempt } from "./v2/session-facts.ts";
-import { buildPendingDelivery, ProviderDeliveryTracker, type DeliveryBatch } from "./v2/delivery.ts";
+import { buildPendingDelivery, type DeliveryBatch } from "./v2/delivery.ts";
 import { runLegacyMigration } from "./v2/legacy-migration.ts";
 import { executeDurableEffect, pendingEffects } from "./v2/effects.ts";
 import { createLeaderPersistedAckEnvelope } from "./v2/mesh-adapter.ts";
@@ -768,7 +768,6 @@ export class TeamLeader {
   );
   private lifecycleStore: LifecycleRuntimeStore | null = null;
   private factWriter: SessionFactWriter | null = null;
-  private readonly deliveryTracker = new ProviderDeliveryTracker();
   private activeDelivery: DeliveryBatch | null = null;
   private teamId: string | null = null;
   private leaderAckSeq = 0;
@@ -1029,10 +1028,6 @@ export class TeamLeader {
     }).catch((error) => {
       console.error(`[teams] lifecycle reconciliation failed closed: ${error instanceof Error ? error.message : String(error)}`);
     });
-  }
-
-  noteAssistantMessage(): void {
-    this.factWriter?.noteAssistantMessage();
   }
 
   isStorageDegraded(): boolean {
@@ -1614,7 +1609,6 @@ export class TeamLeader {
 	  this.pendingAmbientTimers.clear();
 	  this.pendingAmbientChat.clear();
 	  this.activeDelivery = null;
-	  this.deliveryTracker.beginRun();
 	}
 
   /** Bind a worker handle to its DURABLE mesh id (v1a). The id is DECLARED by the
@@ -3128,23 +3122,22 @@ export class TeamLeader {
     const eventId = this.eventIdForPollEvent(event);
     const marked = eventId ? `[teams-event:${eventId}] ${content}` : content;
     this.activeDelivery = eventId ? { eventIds: [eventId], content: marked } : null;
-    if (eventId) this.deliveryTracker.setDeliveredBatch([eventId]);
     this.pi.sendMessage(
-      { customType: "team-event", content: marked, display: true },
+      { customType: "team-event", content: marked, display: true, ...(eventId ? { details: { eventIds: [eventId] } } : {}) },
       { deliverAs: "followUp", triggerTurn: true },
     );
   }
 
   private pendingDelivery(): DeliveryBatch | null {
     if (!this.ctx || !this.lifecycleStore) return null;
-    return buildPendingDelivery(this.lifecycleStore.projection(), this.ctx.sessionManager.getBranch());
+    // All-tree scan: delivered once anywhere in this coordinator session = delivered.
+    return buildPendingDelivery(this.lifecycleStore.projection(), this.ctx.sessionManager.getEntries());
   }
 
   private schedulePendingDelivery(triggerTurn: boolean): void {
     const batch = this.pendingDelivery();
     if (!batch) return;
     this.activeDelivery = batch;
-    this.deliveryTracker.setDeliveredBatch(batch.eventIds);
     this.pi.sendMessage(
       { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } },
       { deliverAs: "followUp", triggerTurn },
@@ -3152,41 +3145,20 @@ export class TeamLeader {
   }
 
   prepareDeliveryForAgentRun(): { customType: string; content: string; display: boolean; details: { eventIds: string[] } } | undefined {
-    this.deliveryTracker.beginRun();
-    // A host wake or scheduled delivery already queued this run's message. Track
-    // only that actual batch; lifecycle events that became pending afterward
-    // remain pending and are scheduled after this run settles.
-    if (this.activeDelivery) {
-      this.deliveryTracker.setDeliveredBatch(this.activeDelivery.eventIds);
-      return undefined;
-    }
+    // A host wake or scheduled delivery already queued this run's message.
+    // Don't inject a second copy; events that became pending afterward are
+    // scheduled after this run settles (completeAgentRun).
+    if (this.activeDelivery) return undefined;
     const batch = this.pendingDelivery();
     this.activeDelivery = batch;
-    this.deliveryTracker.setDeliveredBatch(batch?.eventIds ?? []);
     if (!batch) return undefined;
+    // The returned custom message is persisted into the session with these
+    // details by the host. That persisted entry IS the delivery record —
+    // deliveredTeamEventIds() folds it back on every pendingDelivery() scan.
     return { customType: "team-event", content: batch.content, display: true, details: { eventIds: batch.eventIds } };
   }
 
-  observeProviderContext(messages: unknown): void { this.deliveryTracker.observeContext(messages); }
-  observeProviderRequest(payload: unknown): void {
-    // Pi adapters that cannot expose the serialized request provide undefined;
-    // in that case the immediately preceding context hook is the last honest
-    // marker observation. An exposed empty payload must remain empty.
-    this.deliveryTracker.beforeProviderRequest(payload);
-  }
-  observeProviderResponse(status: number): void { this.deliveryTracker.afterProviderResponse(status); }
-  observeMessageEnd(message: unknown): void {
-    this.noteAssistantMessage();
-    this.deliveryTracker.messageEnd(message);
-  }
   completeAgentRun(): void {
-    if (!this.factWriter) return;
-    try {
-      this.deliveryTracker.acknowledgeSuccessfulDelivery(this.factWriter);
-    } catch (error) {
-      console.error(`[teams] lifecycle delivery acknowledgement failed closed: ${error instanceof Error ? error.message : String(error)}`);
-      return;
-    }
     this.activeDelivery = null;
     if (this.pendingDelivery()) queueMicrotask(() => this.schedulePendingDelivery(true));
   }

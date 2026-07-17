@@ -8,10 +8,7 @@ import { TeamsSubscription } from "../subscription.ts";
 import {
 	MAX_DELIVERY_BODY_CHARS,
 	MAX_EVENTS_PER_DELIVERY,
-	ProviderDeliveryTracker,
 	buildPendingDelivery,
-	extractEventMarkers,
-	providerPayloadExposesConversation,
 } from "./delivery.ts";
 import { executeDurableEffect, pendingEffects } from "./effects.ts";
 import { planLegacyMigration } from "./legacy-migration.ts";
@@ -20,9 +17,11 @@ import { LifecycleRuntimeStore } from "./runtime-store.ts";
 import {
 	LIFECYCLE_ACK_ENTRY_TYPE,
 	LIFECYCLE_FACT_ENTRY_TYPE,
+	TEAM_EVENT_MESSAGE_TYPE,
 	WORKER_FINISH_PENDING_ENTRY_TYPE,
 	SessionFactWriter,
 	branchAcknowledgedEventIds,
+	deliveredTeamEventIds,
 	canonicalFactIdentity,
 	createDeclarationEventId,
 	createEffectId,
@@ -92,6 +91,10 @@ function ackEntry(eventId: string, parentId = "assistant", sessionId = SESSION):
 	return { type: "custom", id: `ack-${eventId}`, parentId, customType: LIFECYCLE_ACK_ENTRY_TYPE, data };
 }
 
+function deliveredEntry(eventIds: string[], idSuffix = eventIds[0] ?? "batch", parentId = "assistant"): SessionEntryLike {
+	return { type: "custom_message", id: `delivered-${idSuffix}`, parentId, customType: TEAM_EVENT_MESSAGE_TYPE, details: { eventIds } };
+}
+
 function makeWriter(options: { sessionId?: string; sessionFile?: string; assistant?: boolean; throwAppend?: boolean } = {}) {
 	const sessionId = options.sessionId ?? SESSION;
 	const entries: SessionEntryLike[] = options.assistant === false ? [] : [{ type: "message", id: "assistant", message: { role: "assistant" } }];
@@ -141,24 +144,18 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		]);
 	});
 
-	test("02 Hakeem: all-leaf truth survives 429s and branch rewind replays until ack", () => {
+	test("02 Hakeem: all-leaf truth survives failed turns and replays until the batch message persists", () => {
 		const facts = terminalFacts();
 		const projection = projectionWith(facts);
 		const terminalId = facts.at(-1)!.eventId;
 		const abandoned = facts.map((item) => entry(item, "abandoned-leaf"));
 		expect(factsForSession(abandoned, SESSION)).toHaveLength(facts.length);
-		const tracker = new ProviderDeliveryTracker();
-		const harness = makeWriter();
-		tracker.beginRun("429-run");
-		tracker.setDeliveredBatch([terminalId]);
-		tracker.observeContext([{ content: `[teams-event:${terminalId}]` }]);
-		tracker.beforeProviderRequest({ messages: [{ content: `[teams-event:${terminalId}]` }] });
-		tracker.afterProviderResponse(429);
-		tracker.messageEnd({ role: "assistant", stopReason: "error" });
-		expect(tracker.acknowledgeSuccessfulDelivery(harness.writer)).toEqual([]);
+		// A 429/aborted turn never persists the team-event message → pending.
 		expect(buildPendingDelivery(projection, [])?.eventIds).toContain(terminalId);
+		// The persisted team-event custom message IS the delivery record.
+		expect(buildPendingDelivery(projection, [deliveredEntry([terminalId])])).toBeNull();
+		// Legacy ack entries from the retired provider-correlation design still count.
 		expect(buildPendingDelivery(projection, [ackEntry(terminalId)])).toBeNull();
-		expect(buildPendingDelivery(projection, [])?.eventIds).toContain(terminalId);
 	});
 
 	test("03 finish-first and exit-first reduce to the same declared outcome", () => {
@@ -180,20 +177,19 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(attempt.declaration).toBeNull();
 	});
 
-	test("05 declaration persistence precedes application acknowledgement", () => {
+	test("05 declaration persists as a fact; delivery is recorded by the persisted message entry", () => {
 		const harness = makeWriter();
 		const declaration = terminalFacts().at(-1)!;
 		harness.writer.appendFact(declaration);
-		harness.writer.appendAck({ schemaVersion: 1, coordinatorSessionId: SESSION, eventId: declaration.eventId, runId: "after-persist", acknowledgedAt: 2 });
-		expect(harness.appended.map((item) => item.customType)).toEqual([LIFECYCLE_FACT_ENTRY_TYPE, LIFECYCLE_ACK_ENTRY_TYPE]);
+		expect(harness.appended.map((item) => item.customType)).toEqual([LIFECYCLE_FACT_ENTRY_TYPE]);
+		expect(deliveredTeamEventIds([deliveredEntry([declaration.eventId])]).has(declaration.eventId)).toBeTrue();
 	});
 
-	test("06 lost finish acknowledgement retries exactly and can be re-acknowledged", () => {
+	test("06 duplicate declaration facts append exactly once", () => {
 		const harness = makeWriter();
 		const declaration = terminalFacts().at(-1)!;
 		expect(harness.writer.appendFact(declaration).status).toBe("appended");
 		expect(harness.writer.appendFact({ ...declaration, occurredAt: 999, diagnostics: { retry: true } }).status).toBe("duplicate");
-		harness.writer.appendAck({ schemaVersion: 1, coordinatorSessionId: SESSION, eventId: declaration.eventId, runId: "retry", acknowledgedAt: 3 });
 		expect(harness.appended.filter((item) => item.customType === LIFECYCLE_FACT_ENTRY_TYPE)).toHaveLength(1);
 	});
 
@@ -218,28 +214,27 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		}
 	});
 
-	test("09 branch switch changes ack visibility but not canonical state", () => {
+	test("09 delivery is session-wide: a team-event entry on any leaf suppresses redelivery", () => {
 		const facts = terminalFacts();
 		const projection = projectionWith(facts);
 		const terminalId = facts.at(-1)!.eventId;
-		expect(buildPendingDelivery(projection, [ackEntry(terminalId)])).toBeNull();
+		// Delivered on an abandoned leaf still counts — the scan is all-tree,
+		// matching the all-tree fact reduction. Branch churn cannot re-spam.
+		expect(buildPendingDelivery(projection, [deliveredEntry([terminalId], terminalId, "abandoned-leaf")])).toBeNull();
 		expect(buildPendingDelivery(projection, [])?.eventIds).toEqual([terminalId]);
 		expect(projection.attempts.get("attempt-1")?.declaration?.kind).toBe("done");
 	});
 
-	test("10 compaction preserves facts and only final successful-context markers are acked", () => {
+	test("10 compaction preserves facts and delivery records; partial delivery stays pending", () => {
 		const facts = [...terminalFacts("a1", "w1"), ...terminalFacts("a2", "w2")];
 		const [event1, event2] = facts.filter((item) => item.kind === "declaration_done").map((item) => item.eventId);
 		const entries: SessionEntryLike[] = [...facts.map((item) => entry(item)), { type: "compaction", id: "compact" }];
 		expect(factsForSession(entries, SESSION)).toHaveLength(facts.length);
-		const harness = makeWriter();
-		const tracker = new ProviderDeliveryTracker();
-		tracker.beginRun("compact-run");
-		tracker.setDeliveredBatch([event1!, event2!]);
-		tracker.beforeProviderRequest({ messages: [{ content: `[teams-event:${event2}]` }] });
-		tracker.afterProviderResponse(200);
-		tracker.messageEnd({ role: "assistant", stopReason: "stop" });
-		expect(tracker.acknowledgeSuccessfulDelivery(harness.writer)).toEqual([event2]);
+		// Delivery records are append-only entries too: compaction cannot erase
+		// them. A partially delivered pair keeps the undelivered event pending.
+		const projection = projectionWith(facts);
+		expect(buildPendingDelivery(projection, [...entries, deliveredEntry([event2!], "e2")])?.eventIds).toEqual([event1!]);
+		expect(buildPendingDelivery(projection, [...entries, deliveredEntry([event1!, event2!], "both")])).toBeNull();
 	});
 
 	test("11 ordinary, branched, and cross-directory forks ignore copied parent lifecycle and legacy entries", () => {
@@ -600,28 +595,22 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(parseLifecycleFact({ ...fact("spawn_requested", {}), payload: {} })).toBeNull();
 	});
 
-	test("30 provider request matrix acknowledges only terminal successful-request markers", () => {
-		const marker = "event-1";
-		const run = (steps: (tracker: ProviderDeliveryTracker) => void) => {
-			const harness = makeWriter();
-			const tracker = new ProviderDeliveryTracker();
-			tracker.beginRun("matrix");
-			tracker.setDeliveredBatch([marker]);
-			steps(tracker);
-			return tracker.acknowledgeSuccessfulDelivery(harness.writer);
-		};
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(429); tracker.messageEnd({ role: "assistant", stopReason: "error" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.messageEnd({ role: "assistant", stopReason: "error" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "error" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(429); tracker.messageEnd({ role: "assistant", stopReason: "error" }); tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([marker]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "toolUse" }); tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(429); tracker.messageEnd({ role: "assistant", stopReason: "error" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.observeContext(`[teams-event:${marker}]`); tracker.beforeProviderRequest(undefined, false); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([marker]);
-		expect(providerPayloadExposesConversation({ model: "opaque-adapter-metadata" })).toBeFalse();
-		expect(run((tracker) => { tracker.observeContext(`[teams-event:${marker}]`); tracker.beforeProviderRequest({ model: "opaque-adapter-metadata" }); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([marker]);
-		expect(providerPayloadExposesConversation({ messages: [] })).toBeTrue();
-		expect(run((tracker) => { tracker.observeContext(`[teams-event:${marker}]`); tracker.beforeProviderRequest({ messages: [] }); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "toolUse" }); tracker.beforeProviderRequest({ messages: [] }); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "stop" }); })).toEqual([]);
-		expect(run((tracker) => { tracker.beforeProviderRequest(`[teams-event:${marker}]`); tracker.afterProviderResponse(200); tracker.messageEnd({ role: "assistant", stopReason: "aborted" }); })).toEqual([]);
+	test("30 delivery matrix: only a persisted team-event entry carrying the exact eventId suppresses", () => {
+		const facts = terminalFacts();
+		const projection = projectionWith(facts);
+		const terminalId = facts.at(-1)!.eventId;
+		// Nothing persisted (failed/aborted turn) → pending.
+		expect(buildPendingDelivery(projection, [])?.eventIds).toEqual([terminalId]);
+		// An entry for a different event → still pending.
+		expect(buildPendingDelivery(projection, [deliveredEntry(["event-other"], "other")])?.eventIds).toEqual([terminalId]);
+		// Malformed or foreign entries never count as delivered.
+		expect(deliveredTeamEventIds([{ type: "custom_message", id: "bad1", customType: TEAM_EVENT_MESSAGE_TYPE, details: { eventIds: "not-an-array" } }]).size).toBe(0);
+		expect(deliveredTeamEventIds([{ type: "custom_message", id: "bad2", customType: TEAM_EVENT_MESSAGE_TYPE }]).size).toBe(0);
+		expect(deliveredTeamEventIds([{ type: "custom_message", id: "bad3", customType: "other-extension", details: { eventIds: [terminalId] } }]).size).toBe(0);
+		expect(deliveredTeamEventIds([{ type: "custom", id: "bad4", customType: TEAM_EVENT_MESSAGE_TYPE, data: { eventIds: [terminalId] } }]).size).toBe(0);
+		expect(deliveredTeamEventIds([{ type: "custom_message", id: "bad5", customType: TEAM_EVENT_MESSAGE_TYPE, details: { eventIds: [42, ""] } }]).size).toBe(0);
+		// The exact persisted record suppresses.
+		expect(buildPendingDelivery(projection, [deliveredEntry([terminalId])])).toBeNull();
 	});
 
 	test("31 coordinator and worker persistence guards reject pre-first-assistant buffering", () => {
@@ -629,11 +618,11 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(hasAssistantMessage(buffered.entries)).toBeFalse();
 		expect(() => buffered.writer.assertWritable()).toThrow("first assistant message");
 		expect(buffered.appended).toHaveLength(0);
+		// The writer re-checks the session lazily — the first assistant message
+		// of a fresh session unlocks persistence without any host hook.
 		buffered.entries.push({ type: "message", message: { role: "assistant" } });
-		buffered.writer.noteAssistantMessage();
 		expect(() => buffered.writer.assertWritable()).not.toThrow();
 		const noSession = makeWriter({ sessionFile: "", assistant: true });
 		expect(() => noSession.writer.assertWritable()).toThrow("persisted Pi session");
-		expect(extractEventMarkers({ content: "worker finish has no lifecycle marker" }).size).toBe(0);
 	});
 });

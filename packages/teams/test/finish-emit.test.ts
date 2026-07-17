@@ -24,8 +24,11 @@ function makeLeader() {
 	const fakePi = {
 		appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }),
 		exec: async () => ({ stdout: "" }),
-		sendMessage: (msg: { content: string }, options?: { triggerTurn?: boolean }) => {
+		sendMessage: (msg: { content: string; details?: unknown }, options?: { triggerTurn?: boolean }) => {
 			sent.push({ content: msg.content, triggerTurn: options?.triggerTurn === true });
+			// Mirror the host: sendCustomMessage persists a custom_message entry
+			// (details included) into the session — that entry is the delivery record.
+			entries.push({ type: "custom_message", customType: "team-event", content: msg.content, details: msg.details });
 		},
 	};
 	const leader = new TeamLeader(fakePi as never) as any;
@@ -165,10 +168,8 @@ describe("authoritative mesh finish emits the terminal notification", () => {
 		expect(sent.length).toBe(1);
 		expect(sent[0].content.match(/\[teams-event:/g)).toHaveLength(1);
 
-		leader.observeProviderContext([{ content: sent[0].content }]);
-		leader.observeProviderRequest({ messages: [{ content: sent[0].content }] });
-		leader.observeProviderResponse(200);
-		leader.observeMessageEnd({ role: "assistant", stopReason: "stop" });
+		// The wake message was persisted by the host (fakePi.sendMessage above),
+		// so completing the run schedules only the still-undelivered event.
 		leader.completeAgentRun();
 		await settle();
 		expect(sent.length).toBe(2);

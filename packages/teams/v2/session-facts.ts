@@ -10,7 +10,10 @@ import type {
 } from "./state.ts";
 
 export const LIFECYCLE_FACT_ENTRY_TYPE = "teams-lifecycle-fact-v4";
+/** Legacy (read-only): acknowledgment entries written by the retired provider-correlation design. */
 export const LIFECYCLE_ACK_ENTRY_TYPE = "teams-lifecycle-ack-v1";
+/** customType of the injected lifecycle batch message. Its persisted custom_message entry IS the delivery record. */
+export const TEAM_EVENT_MESSAGE_TYPE = "team-event";
 export const LIFECYCLE_MIGRATION_ENTRY_TYPE = "teams-lifecycle-migration-v1";
 export const WORKER_FINISH_PENDING_ENTRY_TYPE = "teams-worker-finish-pending-v1";
 
@@ -20,6 +23,7 @@ export interface SessionEntryLike {
 	parentId?: string | null;
 	customType?: string;
 	data?: unknown;
+	details?: unknown;
 	message?: unknown;
 }
 
@@ -321,6 +325,25 @@ export function factsForSession(entries: readonly SessionEntryLike[], coordinato
 	return facts;
 }
 
+/**
+ * Delivery record scan: every eventId carried by a persisted team-event
+ * custom message. The custom_message entry participates in LLM context, so
+ * its presence in the session tree is proof the model has (or will have) the
+ * event in context — the entry is append-only and survives compaction.
+ */
+export function deliveredTeamEventIds(entries: readonly SessionEntryLike[]): Set<string> {
+	const delivered = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type !== "custom_message" || entry.customType !== TEAM_EVENT_MESSAGE_TYPE) continue;
+		const details = entry.details;
+		if (!details || typeof details !== "object") continue;
+		const eventIds = (details as { eventIds?: unknown }).eventIds;
+		if (!Array.isArray(eventIds)) continue;
+		for (const eventId of eventIds) if (typeof eventId === "string" && eventId) delivered.add(eventId);
+	}
+	return delivered;
+}
+
 export function branchAcknowledgedEventIds(branch: readonly SessionEntryLike[], coordinatorSessionId: string): Set<string> {
 	const acknowledged = new Set<string>();
 	for (const entry of branch) {
@@ -360,10 +383,6 @@ export class SessionFactWriter {
 	get storageDegraded(): boolean { return this.degradedError !== null; }
 	get storageError(): LifecycleStorageError | null { return this.degradedError; }
 
-	noteAssistantMessage(): void {
-		this.assistantMaterialized = true;
-	}
-
 	assertWritable(): void {
 		if (this.degradedError) throw this.degradedError;
 		if (this.session.getSessionId() !== this.coordinatorSessionId) {
@@ -371,6 +390,12 @@ export class SessionFactWriter {
 		}
 		if (!this.session.getSessionFile()) {
 			throw new LifecycleStorageError("Teams requires a persisted Pi session; --no-session cannot delegate workers");
+		}
+		if (!this.assistantMaterialized) {
+			// Re-check live: the first assistant message of a fresh session lands
+			// after this writer was constructed. The session is the only truth —
+			// no host hook is needed to observe it.
+			this.assistantMaterialized = hasAssistantMessage(this.session.getEntries());
 		}
 		if (!this.assistantMaterialized) {
 			throw new LifecycleStorageError("Teams lifecycle persistence is unavailable before the first assistant message is materialized");
@@ -398,18 +423,6 @@ export class SessionFactWriter {
 		}
 		this.identities.set(parsed.eventId, canonical);
 		return { status: "appended", fact: parsed };
-	}
-
-	appendAck(ack: LifecycleAck): void {
-		this.assertWritable();
-		const parsed = parseLifecycleAck(ack);
-		if (!parsed || parsed.coordinatorSessionId !== this.coordinatorSessionId) throw new LifecycleStorageError("Invalid Teams lifecycle acknowledgement");
-		try {
-			this.pi.appendEntry(LIFECYCLE_ACK_ENTRY_TYPE, parsed);
-		} catch (error) {
-			this.degradedError = new LifecycleStorageError("Teams lifecycle acknowledgement append failed; runtime entered storage_degraded", error);
-			throw this.degradedError;
-		}
 	}
 
 	appendMigrationMarker(marker: LifecycleMigrationMarker): void {
