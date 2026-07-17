@@ -1,0 +1,31 @@
+packages/teams/leader.ts
+  s_c80280c75e1308::t_5b1efef9365b3a 81,985-987,989,3246
+packages/teams/WORKER_LIFECYCLE.md
+  s_c80280c75e1308::t_e0f6d51d1da424 74
+packages/teams/leader.retry.test.ts
+  s_c80280c75e1308::t_416fafb38753ea 1093,1132-1138
+  s_c80280c75e1308::t_b77402e4d27db2 1054
+  s_c80280c75e1308::t_6feae6464d45f9 1055
+packages/teams/TEAMS_V2_ARCHITECTURE.md
+  s_c80280c75e1308::t_f46ef69b2cb4f1 47
+packages/teams/subscription.ts
+  s_c80280c75e1308::t_91cd02d1f3bf9d 51
+packages/teams/README.md
+  s_c80280c75e1308::t_96c3b84b759e48 329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "43ba15dd58f239f3227969d81c268edbc4b03493",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Carolyn Void Haynes <Carolyn-Void-Haynes@manada.dev>"
+    }
+  }
+}
