@@ -1,0 +1,87 @@
+packages/teams/v2/reducer.ts
+  s_c80280c75e1308::t_bf71cdcdb18e76 43
+  s_c80280c75e1308::t_e526bc54b8768f 235-236
+packages/teams/session-adoption.ts
+  s_c80280c75e1308::t_a27059c23f254f 88-99
+  s_c80280c75e1308::t_2a4d09d772d43a 72-73,75-81,83
+  s_c80280c75e1308::t_17832f24e91c0d 150-152
+  s_c80280c75e1308::t_ff7eea3b5820b3 180-182
+  s_c80280c75e1308::t_cac5b2cde20b72 46
+  s_c80280c75e1308::t_59af082b014fce 1-45,47-71,74,82,84-87,100-149,153-179,183-216
+packages/teams/leader.adoption.test.ts
+  s_c80280c75e1308::t_d1f6e938479b18 1-13,15-78,80-101,110-138,140-152,155-174,176-183,185-221
+  s_c80280c75e1308::t_2855bf412af004 102-109
+  s_c80280c75e1308::t_4512d4efdf5981 184
+  s_c80280c75e1308::t_cd4ecc807d68df 79
+  s_c80280c75e1308::t_5bcb99e5c92524 139
+  s_c80280c75e1308::t_6998e2bb305040 14
+  s_c80280c75e1308::t_6db3572fced478 153-154
+  s_c80280c75e1308::t_09e4edd0bece3c 175
+packages/teams/index.ts
+  s_c80280c75e1308::t_1ea85b690c9690 4-9,46,48,54-58,60-63
+packages/teams/v2/state.ts
+  s_c80280c75e1308::t_bf71cdcdb18e76 74,128
+  s_c80280c75e1308::t_e526bc54b8768f 256-257
+packages/teams/leader.ts
+  s_c80280c75e1308::t_bf71cdcdb18e76 1173
+  s_c80280c75e1308::t_e526bc54b8768f 1119-1121
+  s_c80280c75e1308::t_5fcfd89865ecf9 892-910
+  s_c80280c75e1308::t_840a9390fb4edc 31-32,1827-1926,1938-1974,1976-1983,1987-1999,2112
+  s_c80280c75e1308::t_103f9c1b130a44 227,229-230,232-234,239,241-245,341-343,540,581-582,584-586,588-589,620,2397,2399,2420,2507
+  s_c80280c75e1308::t_34f618ac76f00b 1927-1937
+  s_c80280c75e1308::t_4cd679e6528fb5 1975
+  s_c80280c75e1308::t_e2b4e3f00220f5 1984-1986
+packages/teams/v2/lifecycle-kernel.test.ts
+  s_c80280c75e1308::t_f9a4fac785fd4a 662
+  s_c80280c75e1308::t_b15e3cac03e323 629-661,663-685
+packages/teams/tool.runtime.test.ts
+  s_c80280c75e1308::t_f954d7024d031f 90-187
+packages/teams/tool.ts
+  s_c80280c75e1308::t_061e560e0d95ec 324-329
+  s_c80280c75e1308::t_9c6d2496aaf99e 12,32-42,47,92-101,123-133,135,164-210,320-323,330-366,419-431,433,448,481-483
+packages/teams/session-adoption.test.ts
+  s_c80280c75e1308::t_c6dbb1713c38e7 1-20,22-27,29-96,105-119,146,148-187,189-190
+  s_c80280c75e1308::t_7c8760eac35e0c 97-104
+  s_c80280c75e1308::t_6e2ea7e3e298a7 120-145
+  s_c80280c75e1308::t_f5bd1ae7d3fe90 21,28,147,188
+packages/code-mode/extensions/code-mode-declarations.md
+  s_c80280c75e1308::t_45619545d22130 1226-1233,1266-1284,1288-1289,1311-1316
+  s_c80280c75e1308::t_7f2ecdb8e39971 1317
+packages/teams/v2/protocol.ts
+  s_c80280c75e1308::t_e526bc54b8768f 12-13
+packages/teams/spawner.ts
+  s_c80280c75e1308::t_ada9d1e03d8dab 14-19
+  s_c80280c75e1308::t_e526bc54b8768f 273,277,298,326-334
+  s_c80280c75e1308::t_a79bf491062cac 25,46,276
+  s_c80280c75e1308::t_e65654dcd96c50 114-116
+packages/teams/WORKER_LIFECYCLE.md
+  s_c80280c75e1308::t_d1743ab0dfa466 34-49,99-100,127-128,137-139
+skills/environment/SKILL.md
+  s_c80280c75e1308::t_1c37cbdf3954bb 108-125,365
+packages/teams/spawner.activation.test.ts
+  s_c80280c75e1308::t_61b35c6e5e17de 12,133-151
+  s_c80280c75e1308::t_64780b59c86a7d 152-153
+packages/teams/README.md
+  s_c80280c75e1308::t_9e96d5bc2160d4 14,60-87,145,214,222,231
+packages/teams/v2/session-facts.ts
+  s_c80280c75e1308::t_bf71cdcdb18e76 199
+  s_c80280c75e1308::t_e526bc54b8768f 180-182
+packages/teams/TEAMS_V2_ARCHITECTURE.md
+  s_c80280c75e1308::t_3ed9b9f63be41a 13-14,28,41,64-75,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "4994ae6434366896eab566aaa5401b7b838d1eff",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
