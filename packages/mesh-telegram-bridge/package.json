@@ -5,10 +5,14 @@
   "type": "module",
   "description": "Standalone bridge: the hooman as a durable mesh peer reachable from a Telegram group",
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "grammy": "^1.30.0",
     "@pi-extensions/pi-mesh": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
   }
 }

@@ -2,6 +2,13 @@ import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
 import { markdownToTelegramHtml } from "./format.ts";
 import { type Config, persistChatId } from "./config.ts";
+import {
+	BridgeStateStore,
+	recordSentMessageRoute,
+	type BridgeStateSnapshot,
+	type SentMessageRoute,
+} from "./bridge-state.ts";
+import { blobBytes, telegramReactionEmoji } from "./telegram-values.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -43,43 +50,48 @@ export class Bridge {
 	private readonly creating = new Set<string>();
 	private readonly replyTargets = new Map<number, ReplyTarget & { nickname: string }>();
 	/** outbound msg_id → agent (so a hooman emoji reaction on it can be relayed back to the sender). */
-	private readonly msgToAgent = new Map<number, { meshId?: string; clientId: string; nickname: string; preview: string }>();
+	private readonly msgToAgent = new Map<number, SentMessageRoute>();
 	/** per topic, the hooman's most recent inbound message_id (so an agent emoji reaction lands on it). */
 	private readonly lastHoomanInTopic = new Map<number, number>();
 	/** Telegram contact reminder state, persisted under the legacy `afk` key for compatibility. */
 	private afk: { on: boolean; message: string; since: number } = { on: false, message: "", since: 0 };
 	/** Agents already reminded during the current activation (avoid spam). Cleared on toggle. */
 	private readonly afkNotified = new Set<string>();
+	private readonly stateStore: BridgeStateStore;
 
 	constructor(private readonly cfg: Config) {
 		this.chatId = cfg.chatId;
 		this.bot = new Bot(cfg.botToken);
 		this.mesh = new MeshClient({ meshId: cfg.hoomanMeshId, nickname: cfg.hoomanNickname, channel: cfg.channel });
+		this.stateStore = new BridgeStateStore(STATE_PATH, () => this.stateSnapshot(), {
+			onError: (operation, error) => console.warn(`[bridge] state ${operation} failed:`, error.message),
+		});
 		this.loadState();
 	}
-	/** Persist topic↔agent + broadcast-topic ids across restarts (the in-memory maps are wiped otherwise). */
+	/** Hydrate all restart-sensitive routing state from the single bridge state file. */
 	private loadState(): void {
-		try {
-			if (!existsSync(STATE_PATH)) return;
-			const s = JSON.parse(readFileSync(STATE_PATH, "utf8")) as {
-				broadcastTopicId?: number; agentTopic?: Record<string, number>;
-				topicAgent?: Record<string, { clientId?: string; meshId?: string; nickname: string }>;
-				afk?: { on?: boolean; message?: string; since?: number }; };
-			if (typeof s.broadcastTopicId === "number") this.broadcastTopicId = s.broadcastTopicId;
-			if (s.agentTopic) for (const [k, v] of Object.entries(s.agentTopic)) this.agentTopic.set(k, v);
-			if (s.topicAgent) for (const [k, v] of Object.entries(s.topicAgent)) this.topicAgent.set(Number(k), { clientId: v.clientId ?? "", meshId: v.meshId, nickname: v.nickname });
-			if (s.afk?.on) { this.afk = { on: true, message: s.afk.message ?? "Telegram contact reminder", since: s.afk.since ?? Date.now() }; console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")"); }
-			console.log(`[bridge] loaded state: ${this.agentTopic.size} agent topics, broadcast=${this.broadcastTopicId}`);
-		} catch (e) { console.warn("[bridge] state load failed:", (e as Error).message); }
+		const state = this.stateStore.load();
+		this.broadcastTopicId = state.broadcastTopicId;
+		for (const [agentId, topicId] of state.agentTopics) this.agentTopic.set(agentId, topicId);
+		for (const [topicId, route] of state.topicAgents) this.topicAgent.set(topicId, route);
+		for (const [messageId, route] of state.sentMessages) this.msgToAgent.set(messageId, route);
+		this.afk = state.telegramContact;
+		if (this.afk.on) console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")");
+		console.log(`[bridge] loaded state: ${this.agentTopic.size} agent topics, ${this.msgToAgent.size} reaction routes, broadcast=${this.broadcastTopicId}`);
 	}
+
+	private stateSnapshot(): BridgeStateSnapshot {
+		return {
+			broadcastTopicId: this.broadcastTopicId,
+			agentTopics: [...this.agentTopic.entries()],
+			topicAgents: [...this.topicAgent.entries()],
+			telegramContact: this.afk,
+			sentMessages: [...this.msgToAgent.entries()],
+		};
+	}
+
 	private saveState(): void {
-		try {
-			mkdirSync(join(homedir(), ".config", "mesh-telegram-bridge"), { recursive: true });
-			const obj: Record<string, unknown> = { agentTopic: Object.fromEntries(this.agentTopic), topicAgent: Object.fromEntries(this.topicAgent) };
-			if (this.broadcastTopicId != null) obj.broadcastTopicId = this.broadcastTopicId;
-			if (this.afk.on) obj.afk = this.afk;
-			writeFileSync(STATE_PATH, JSON.stringify(obj, null, 2));
-		} catch (e) { console.warn("[bridge] state save failed:", (e as Error).message); }
+		this.stateStore.saveNow();
 	}
 
 	/** /afk [on|off|status] [note] — legacy command name for the Telegram contact reminder. */
@@ -123,6 +135,13 @@ export class Bridge {
 			allowed_updates: ["message", "message_reaction", "callback_query", "inline_query"],
 			onStart: (bi) => console.log(`[tg] @${bi.username} polling; chat=${this.chatId ?? "(awaiting)"} forum=${this.forumMode}`),
 		});
+	}
+
+	/** Flush restart-sensitive state before disconnecting either transport. */
+	async stop(): Promise<void> {
+		this.stateStore.flush();
+		this.mesh.stop();
+		await this.bot.stop();
 	}
 
 	private async detectForum(): Promise<void> {
@@ -192,17 +211,19 @@ export class Bridge {
 	private async onMeshTell(t: InboundTell): Promise<void> {
 		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${(t.text ?? "").slice(0, 60)}`); return; }
 		const topic = this.forumMode ? await this.ensureAgentTopic(t) : null;
+		const chatId = this.chatId;
+		if (chatId == null) return;
 		if (t.reaction) await this.setHoomanReaction(t.reaction, topic);
 		const thread = topic != null ? { message_thread_id: topic } : {};
 		try {
 			if (t.text && t.text.trim()) {
 				for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
-					const sent = await this.sendText(chunk, thread);
-					if (this.forumMode) this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
-					else { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
+					const sent = await this.sendText(chatId, chunk, thread);
+					this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
+					if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
 				}
 			}
-			await this.uploadAttachment(t, topic);
+			await this.uploadAttachment(chatId, t, topic);
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
 		// Send the same routing guidance once per agent during each activation.
 		if (this.afk.on && t.fromClientId && !this.afkNotified.has(t.fromClientId)) {
@@ -212,13 +233,14 @@ export class Bridge {
 	}
 
 	private async onMeshChannel(c: InboundChannel): Promise<void> {
-		if (this.chatId == null) return;
+		const chatId = this.chatId;
+		if (chatId == null) return;
 		const thread = this.forumMode && this.broadcastTopicId != null ? { message_thread_id: this.broadcastTopicId } : {};
 		try {
 			for (const chunk of this.chunkText(`📢 ${c.nickname} · #${c.channel}`, c.text)) {
-				const sent = await this.sendText(chunk, thread);
-				if (this.forumMode) this.trackSent(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
-				else { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
+				const sent = await this.sendText(chatId, chunk, thread);
+				this.trackSent(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
+				if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
 			}
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
 	}
@@ -415,20 +437,27 @@ export class Bridge {
 
 	/** Record an outbound message so a hooman emoji reaction on it can be relayed back. */
 	private trackSent(msgId: number, target: { meshId?: string; clientId: string; nickname: string }, preview: string): void {
-		this.msgToAgent.set(msgId, { meshId: target.meshId, clientId: target.clientId, nickname: target.nickname, preview: (preview ?? "").slice(0, 40) });
-		if (this.msgToAgent.size > 2000) {
-			let i = 0; const excess = this.msgToAgent.size - 2000;
-			for (const k of this.msgToAgent.keys()) { if (i++ >= excess) break; this.msgToAgent.delete(k); }
-		}
+		recordSentMessageRoute(this.msgToAgent, msgId, {
+			meshId: target.meshId,
+			clientId: target.clientId,
+			nickname: target.nickname,
+			preview: (preview ?? "").slice(0, 40),
+		});
+		this.stateStore.requestSave();
 	}
 
 	/** Agent → Hooman: set an emoji reaction on the hooman's last message in the topic. */
 	private async setHoomanReaction(emoji: string, topic: number | null): Promise<void> {
 		if (this.chatId == null || topic == null) return;
+		const reaction = telegramReactionEmoji(emoji);
+		if (reaction === null) {
+			console.warn(`[bridge] unsupported Telegram reaction ignored: ${emoji}`);
+			return;
+		}
 		const target = this.lastHoomanInTopic.get(topic);
 		if (target == null) { console.warn(`[bridge] agent reaction ${emoji} but no inbound msg to react to (topic ${topic})`); return; }
 		try {
-			await this.bot.api.setMessageReaction(this.chatId, target, [{ type: "emoji", emoji }]);
+			await this.bot.api.setMessageReaction(this.chatId, target, [{ type: "emoji", emoji: reaction }]);
 			console.log(`[bridge] set reaction ${emoji} on msg ${target} (topic ${topic})`);
 		} catch (e) { console.warn(`[bridge] setMessageReaction failed (${emoji}):`, (e as Error).message); }
 	}
@@ -437,17 +466,8 @@ export class Bridge {
 	private async onReaction(ctx: Context): Promise<void> {
 		const ur = ctx.update.message_reaction as { chat?: { id?: number }; message_id: number; user?: { first_name?: string; username?: string }; old_reaction?: Array<{ type: string; emoji?: string }>; new_reaction?: Array<{ type: string; emoji?: string }> } | undefined;
 		if (!ur || ur.chat?.id !== this.chatId) return;
-		let target = this.msgToAgent.get(ur.message_id);
+		const target = this.msgToAgent.get(ur.message_id);
 		console.log("[bridge] reaction EVENT msg=" + ur.message_id + " new=" + JSON.stringify(ur.new_reaction ?? []) + " old=" + JSON.stringify(ur.old_reaction ?? []) + " tracked=" + (target ? target.nickname : "NO"));
-		if (!target) {
-			// Fallback: derive the agent from the reacted message's topic (persists across restarts).
-			try {
-				const m = await this.bot.api.getMessage(this.chatId, ur.message_id) as { message_thread_id?: number };
-				const topicId = m.message_thread_id;
-				const a = topicId != null ? this.topicAgent.get(topicId) : undefined;
-				if (a) { target = { meshId: a.meshId, clientId: a.clientId, nickname: a.nickname, preview: "" }; console.log("[bridge] reaction fallback: derived " + a.nickname + " from topic " + topicId); }
-			} catch (e) { console.warn("[bridge] reaction getMessage fallback failed: " + (e as Error).message); }
-		}
 		if (!target) return;
 		const oldE = new Set((ur.old_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!));
 		const added = (ur.new_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!).filter((e) => !oldE.has(e));
@@ -472,7 +492,7 @@ export class Bridge {
 		const key = process.env.OPENROUTER_API_KEY;
 		if (!key) return "(voice note — OPENROUTER_API_KEY not set, can't transcribe)";
 		const form = new FormData();
-		form.append("file", new Blob([buf]), "voice.ogg");
+		form.append("file", new Blob([blobBytes(buf)]), "voice.ogg");
 		form.append("model", "whisper-1");
 		const r = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
 		if (!r.ok) return `(voice transcription failed: ${r.status})`;
@@ -491,7 +511,7 @@ export class Bridge {
 	}
 
 	/** Upload an agent's file/image attachment (if any) into its topic. */
-	private async uploadAttachment(t: InboundTell, topic: number | null): Promise<void> {
+	private async uploadAttachment(chatId: number, t: InboundTell, topic: number | null): Promise<void> {
 		if (!t.attachment) return;
 		if (!existsSync(t.attachment)) { console.warn(`[bridge] attachment not found: ${t.attachment} (from ${t.nickname})`); return; }
 		const thread = topic != null ? { message_thread_id: topic } : {};
@@ -504,14 +524,15 @@ export class Bridge {
 				const buf = await this.readStableImage(t.attachment);
 				if (!buf) {
 					console.warn(`[bridge] image never finished writing — skipped: ${t.attachment}`);
-					await this.bot.api.sendMessage(this.chatId, `⚠️ ${t.nickname} sent an image that hadn't finished rendering — skipped. Ask them to resend once it's done.`, thread).catch(() => {});
+					await this.bot.api.sendMessage(chatId, `⚠️ ${t.nickname} sent an image that hadn't finished rendering — skipped. Ask them to resend once it's done.`, thread).catch(() => {});
 					return;
 				}
-				const sent = await this.bot.api.sendPhoto(this.chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+				const sent = await this.bot.api.sendPhoto(chatId, new InputFile(buf, fname), { ...thread, caption: cap });
 				this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
 				console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
 			} else {
-				await this.bot.api.sendDocument(this.chatId, new InputFile(t.attachment), { ...thread, caption: cap });
+				const sent = await this.bot.api.sendDocument(chatId, new InputFile(t.attachment), { ...thread, caption: cap });
+				this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? fname);
 				console.log(`[bridge] sent document: ${t.attachment} → topic ${topic ?? "(main)"}`);
 			}
 		} catch (e) { console.error(`[bridge] attachment upload failed (${t.attachment}):`, (e as Error).message); }
@@ -552,16 +573,16 @@ export class Bridge {
 	}
 
 	/** Send agent/channel text as Telegram HTML, falling back to plain text if parsing fails. */
-	private async sendText(text: string, thread: Record<string, unknown>): Promise<{ message_id: number }> {
+	private async sendText(chatId: number, text: string, thread: Record<string, unknown>): Promise<{ message_id: number }> {
 		const html = markdownToTelegramHtml(text);
 		if (html.length <= TG_MAX) {
 			try {
-				return await this.bot.api.sendMessage(this.chatId, html, { ...thread, parse_mode: "HTML" });
+				return await this.bot.api.sendMessage(chatId, html, { ...thread, parse_mode: "HTML" });
 			} catch (e) {
 				console.warn("[bridge] Telegram HTML formatting failed; sending plain text:", (e as Error).message);
 			}
 		}
-		return this.bot.api.sendMessage(this.chatId, text, thread);
+		return this.bot.api.sendMessage(chatId, text, thread);
 	}
 
 	/** Split a header+body into Telegram-sized chunks (char-based; rare for short tells). */

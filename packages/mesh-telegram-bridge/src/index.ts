@@ -9,16 +9,25 @@ async function main(): Promise<void> {
 	const bridge = new Bridge(cfg);
 	await bridge.start();
 	console.log("[bridge] running — mesh ↔ telegram wired");
+
+	let shuttingDown = false;
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		process.once(signal, () => {
+			if (shuttingDown) return;
+			shuttingDown = true;
+			console.log(`\n[bridge] ${signal} — shutting down`);
+			void bridge.stop().then(
+				() => process.exit(0),
+				(error: unknown) => {
+					console.error("[bridge] shutdown failed:", error);
+					process.exit(1);
+				},
+			);
+		});
+	}
 }
 
-for (const sig of ["SIGINT", "SIGTERM"] as const) {
-	process.on(sig, () => {
-		console.log(`\n[bridge] ${sig} — shutting down`);
-		process.exit(0);
-	});
-}
-
-main().catch((e) => {
-	console.error("[bridge] fatal:", e);
+main().catch((error: unknown) => {
+	console.error("[bridge] fatal:", error);
 	process.exit(1);
 });
