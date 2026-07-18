@@ -265,6 +265,16 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/mesh-model-control": {
+      "name": "@pi-extensions/mesh-model-control",
+      "version": "0.0.1",
+      "dependencies": {
+        "@pi-extensions/shared": "*",
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.74.0",
+      },
+    },
     "packages/mesh-telegram-bridge": {
       "name": "@pi-extensions/mesh-telegram-bridge",
       "version": "0.1.0",
@@ -755,6 +765,8 @@
     "@pi-extensions/lipgloss-theme": ["@pi-extensions/lipgloss-theme@workspace:packages/lipgloss-theme"],
 
     "@pi-extensions/lock-mode": ["@pi-extensions/lock-mode@workspace:packages/lock-mode"],
+
+    "@pi-extensions/mesh-model-control": ["@pi-extensions/mesh-model-control@workspace:packages/mesh-model-control"],
 
     "@pi-extensions/mesh-telegram-bridge": ["@pi-extensions/mesh-telegram-bridge@workspace:packages/mesh-telegram-bridge"],
 
