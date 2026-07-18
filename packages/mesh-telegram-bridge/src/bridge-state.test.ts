@@ -90,6 +90,22 @@ describe("BridgeStateStore", () => {
 		await Bun.sleep(30);
 		expect(existsSync(path)).toBeTrue();
 	});
+
+	test("bounds an oversized persisted route list during hydration", () => {
+		const path = temporaryStatePath();
+		const sentMessages = Array.from({ length: MAX_SENT_MESSAGE_ROUTES + 5 }, (_, index) => ({
+			messageId: index + 1,
+			clientId: "client",
+			nickname: "Agent",
+			preview: String(index + 1),
+		}));
+		writeFileSync(path, JSON.stringify({ agentTopic: {}, topicAgent: {}, sentMessages }));
+
+		const loaded = new BridgeStateStore(path, () => snapshot()).load();
+		expect(loaded.sentMessages).toHaveLength(MAX_SENT_MESSAGE_ROUTES);
+		expect(loaded.sentMessages[0]?.[0]).toBe(6);
+		expect(loaded.sentMessages.at(-1)?.[0]).toBe(MAX_SENT_MESSAGE_ROUTES + 5);
+	});
 });
 
 describe("recordSentMessageRoute", () => {

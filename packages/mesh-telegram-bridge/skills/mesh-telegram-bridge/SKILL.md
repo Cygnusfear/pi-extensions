@@ -93,6 +93,8 @@ Aliases: `reaction` · `react` · `emoji`. Must be a **Telegram-allowed emoji** 
 👍 The Hooman reacted to your message ("preview of your msg…")
 ```
 
+The newest 2,000 agent-message routes are persisted, so reactions on recent messages continue to relay after a normal bridge restart.
+
 (Reactions on the Hooman's *own* messages don't relay — only reactions on agent-sent messages do.)
 
 ---
@@ -147,4 +149,4 @@ Things the Hooman types in Telegram — you don't run them, but they explain beh
 
 ## Reference
 
-Source: `packages/mesh-telegram-bridge/src/{bridge.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, OpenRouter key) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Topic↔agent state persists in `~/.config/mesh-telegram-bridge/state.json`. Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.
+Source: `packages/mesh-telegram-bridge/src/{bridge.ts, bridge-state.ts, telegram-values.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, OpenRouter key) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Topic↔agent state and the bounded recent-message reaction routes persist in `~/.config/mesh-telegram-bridge/state.json` (mode 600). Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.
