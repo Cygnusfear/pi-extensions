@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
 	BridgeStateStore,
 	MAX_SENT_MESSAGE_ROUTES,
 	recordSentMessageRoute,
+	stateTemporaryPath,
 	type BridgeStateSnapshot,
 	type SentMessageRoute,
 } from "./bridge-state.ts";
@@ -66,7 +67,34 @@ describe("BridgeStateStore", () => {
 		const loaded = new BridgeStateStore(path, () => snapshot()).load();
 		expect(loaded).toEqual(expected);
 		expect(statSync(path).mode & 0o777).toBe(0o600);
-		expect(existsSync(path + "." + process.pid + ".tmp")).toBeFalse();
+		expect(readdirSync(dirname(path)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+	});
+
+	test("builds unique temporary paths beside the destination", () => {
+		const path = temporaryStatePath();
+		const first = stateTemporaryPath(path);
+		const second = stateTemporaryPath(path);
+
+		expect(dirname(first)).toBe(dirname(path));
+		expect(basename(first).startsWith(`.state.json.${process.pid}.`)).toBeTrue();
+		expect(first.endsWith(".tmp")).toBeTrue();
+		expect(second).not.toBe(first);
+	});
+
+	test("removes the adjacent temporary file when atomic replacement fails", () => {
+		const path = temporaryStatePath();
+		mkdirSync(path);
+		const errors: Array<{ operation: string; error: Error }> = [];
+		const store = new BridgeStateStore(path, () => snapshot(), {
+			onError: (operation, error) => errors.push({ operation, error }),
+		});
+
+		store.saveNow();
+
+		expect(errors).toHaveLength(1);
+		expect(errors[0]?.operation).toBe("save");
+		expect(statSync(path).isDirectory()).toBeTrue();
+		expect(readdirSync(dirname(path)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
 
 	test("coalesces hot-path requests and flushes only the latest live snapshot", () => {

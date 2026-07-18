@@ -6,7 +6,8 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 
 export const MAX_SENT_MESSAGE_ROUTES = 2_000;
 
@@ -147,6 +148,14 @@ export interface BridgeStateStoreOptions {
 	onError?: (operation: "load" | "save", error: Error) => void;
 }
 
+/** Build a unique temp path beside its destination so rename remains atomic. */
+export function stateTemporaryPath(destination: string): string {
+	return join(
+		dirname(destination),
+		`.${basename(destination)}.${process.pid}.${randomUUID()}.tmp`,
+	);
+}
+
 /**
  * Owns the bridge's state-file I/O. Hot-path saves are dirty-bit coalesced and
  * snapshot the live maps only when a write actually occurs.
@@ -205,7 +214,7 @@ export class BridgeStateStore {
 
 	private commit(): void {
 		if (!this.dirty) return;
-		const temporaryPath = `/tmp/teams-lifecycle-correctness-design.md.${process.pid}.tmp`;
+		const temporaryPath = stateTemporaryPath(this.path);
 		try {
 			mkdirSync(dirname(this.path), { recursive: true });
 			writeFileSync(temporaryPath, JSON.stringify(serializeState(this.snapshot()), null, 2), {
