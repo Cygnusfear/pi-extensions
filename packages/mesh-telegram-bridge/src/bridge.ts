@@ -20,6 +20,8 @@ const AGENTS_PER_PAGE = 8;
 const IMG_RE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 /** How long to wait for an image to finish being written before giving up. */
 const IMG_STABLE_MS = 8000;
+/** Agent-facing routing guidance while the Telegram contact reminder is active. */
+const TELEGRAM_CONTACT_NOTICE = "please contact The Hooman over mesh.tell for now, this way they receive your message on Telegram where they are available now";
 
 /**
  * Wires the mesh ↔ Telegram in both directions. Supports two modes:
@@ -44,9 +46,9 @@ export class Bridge {
 	private readonly msgToAgent = new Map<number, { meshId?: string; clientId: string; nickname: string; preview: string }>();
 	/** per topic, the hooman's most recent inbound message_id (so an agent emoji reaction lands on it). */
 	private readonly lastHoomanInTopic = new Map<number, number>();
-	/** AFK mode: hooman is away from pi-chat, on Telegram only. Agents get a reminder. */
+	/** Telegram contact reminder state, persisted under the legacy `afk` key for compatibility. */
 	private afk: { on: boolean; message: string; since: number } = { on: false, message: "", since: 0 };
-	/** agents already auto-acked during the current AFK stint (avoid spam). Cleared on toggle. */
+	/** Agents already reminded during the current activation (avoid spam). Cleared on toggle. */
 	private readonly afkNotified = new Set<string>();
 
 	constructor(private readonly cfg: Config) {
@@ -66,7 +68,7 @@ export class Bridge {
 			if (typeof s.broadcastTopicId === "number") this.broadcastTopicId = s.broadcastTopicId;
 			if (s.agentTopic) for (const [k, v] of Object.entries(s.agentTopic)) this.agentTopic.set(k, v);
 			if (s.topicAgent) for (const [k, v] of Object.entries(s.topicAgent)) this.topicAgent.set(Number(k), { clientId: v.clientId ?? "", meshId: v.meshId, nickname: v.nickname });
-			if (s.afk?.on) { this.afk = { on: true, message: s.afk.message ?? "away from pi-chat", since: s.afk.since ?? Date.now() }; console.log("[bridge] loaded AFK: on (" + this.afk.message + ")"); }
+			if (s.afk?.on) { this.afk = { on: true, message: s.afk.message ?? "Telegram contact reminder", since: s.afk.since ?? Date.now() }; console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")"); }
 			console.log(`[bridge] loaded state: ${this.agentTopic.size} agent topics, broadcast=${this.broadcastTopicId}`);
 		} catch (e) { console.warn("[bridge] state load failed:", (e as Error).message); }
 	}
@@ -80,32 +82,31 @@ export class Bridge {
 		} catch (e) { console.warn("[bridge] state save failed:", (e as Error).message); }
 	}
 
-	/** /afk [on|off|status] [msg] — toggle AFK mode. While on, agents are reminded to use Telegram. */
+	/** /afk [on|off|status] [note] — legacy command name for the Telegram contact reminder. */
 	private async handleAfkCommand(text: string, ctx: Context): Promise<void> {
 		const parts = text.replace(/@ramdock_bot\b/gi, "").split(/\s+/).filter(Boolean);
 		const sub = (parts[1] ?? "").toLowerCase();
 		if (sub === "status") {
-			void ctx.reply(this.afk.on ? ("AFK: on (" + this.afk.message + "), since " + new Date(this.afk.since).toLocaleString()) : "AFK: off").catch(() => {});
+			void ctx.reply(this.afk.on ? ("Telegram contact reminder: on (" + this.afk.message + "), since " + new Date(this.afk.since).toLocaleString()) : "Telegram contact reminder: off").catch(() => {});
 			return;
 		}
 		if (sub === "off") {
 			this.afk = { on: false, message: "", since: 0 };
 			this.afkNotified.clear();
 			this.saveState();
-			this.mesh.broadcast("📢 The Hooman is back.");
-			void ctx.reply("✅ AFK off — agents notified you're back.").catch(() => {});
-			console.log("[bridge] afk off");
+			void ctx.reply("✅ Telegram contact reminder off.").catch(() => {});
+			console.log("[bridge] Telegram contact reminder off");
 			return;
 		}
-		// on (default). Message = words after "on", or after "/afk" if bare.
+		// Enable by default. A custom note follows "on", or follows "/afk" when bare.
 		const msgParts = sub === "on" ? parts.slice(2) : parts.slice(1);
-		const message = msgParts.join(" ").trim() || "away from pi-chat";
+		const message = msgParts.join(" ").trim() || "Telegram contact reminder";
 		this.afk = { on: true, message, since: Date.now() };
 		this.afkNotified.clear();
 		this.saveState();
-		this.mesh.broadcast("📢 The Hooman is not at the terminal (AFK: " + message + "). Reach them via mesh.tell or notify() — both land on their Telegram. Keep working; they'll respond from Telegram when they can.");
-		void ctx.reply("✅ AFK on (" + message + "). Agents reminded to use Telegram.").catch(() => {});
-		console.log("[bridge] afk on (" + message + ")");
+		this.mesh.broadcast(TELEGRAM_CONTACT_NOTICE);
+		void ctx.reply("✅ Telegram contact reminder on. Agents directed to mesh.tell.").catch(() => {});
+		console.log("[bridge] Telegram contact reminder on (" + message + ")");
 	}
 
 	async start(): Promise<void> {
@@ -203,11 +204,10 @@ export class Bridge {
 			}
 			await this.uploadAttachment(t, topic);
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
-		// AFK auto-ack: tell the agent (once per AFK stint) the hooman won't reply immediately.
+		// Send the same routing guidance once per agent during each activation.
 		if (this.afk.on && t.fromClientId && !this.afkNotified.has(t.fromClientId)) {
 			this.afkNotified.add(t.fromClientId);
-			this.mesh.tellAgent({ clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname },
-				"📢 The Hooman is not at the terminal (AFK: " + this.afk.message + "). Reach them with mesh.tell — it lands on their Telegram. Keep working; don't block waiting for a reply.");
+			this.mesh.tellAgent({ clientId: t.fromClientId, meshId: t.fromMeshId }, TELEGRAM_CONTACT_NOTICE);
 		}
 	}
 
@@ -276,7 +276,7 @@ export class Bridge {
 			return;
 		}
 
-		// /afk [on|off|status] [msg] — AFK mode: reminds agents to reach you on Telegram.
+		// /afk [on|off|status] [note] — legacy command for the Telegram contact reminder.
 		if (this.forumMode && text.startsWith("/afk") && (text.length === 4 || text[4] === " " || text[4] === "@")) {
 			await this.handleAfkCommand(text, ctx);
 			return;
@@ -300,7 +300,7 @@ export class Bridge {
 		}
 
 		if (text.startsWith("/") && text.trim().length > 1) {
-			void ctx.reply("Unknown command. Try:\n/agents — live agent roster\n/dm <agent> — open an agent's topic\n/afk [on|off] [msg] — AFK mode\n/model <name> — switch this agent's model (in its topic)").catch(() => {});
+			void ctx.reply("Unknown command. Try:\n/agents — live agent roster\n/dm <agent> — open an agent's topic\n/afk [on|off] [note] — Telegram contact reminder\n/model <name> — switch this agent's model (in its topic)").catch(() => {});
 			return;
 		}
 
