@@ -11,14 +11,18 @@ import {
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
 /**
- * Write the SPAWNER's PARTIAL revive descriptor next to the worker's session
- * file (ADD-1, contract pe-jimphzxj). The activator (pi-mesh) reads it on
- * identity resolution and materialises the canonical descriptor keyed by the
+ * Write the SPAWNER's PARTIAL revive descriptor in its worker-owned runtime
+ * directory (ADD-1, contract pe-jimphzxj). For ordinary workers that is beside
+ * the session file; adopted sources use the coordinator-owned log directory so
+ * Teams never writes orchestration files beside the external JSONL. The explicit
+ * PI_TEAMS_REVIVE_DESCRIPTOR path lets pi-mesh read it on identity resolution
+ * and materialise the canonical descriptor keyed by the
  * durable id. Only the spawner knows the semantic params (model, ticket,
  * worktree, PI_TEAMS_* env) that pi-mesh's process-view cannot see.
  */
 function writeWorkerReviveDescriptor(input: {
 	sessionFile: string;
+	descriptorDir?: string;
 	cwd: string;
 	model?: string;
 	ticketId?: string;
@@ -39,7 +43,7 @@ function writeWorkerReviveDescriptor(input: {
 		env: pickReviveDescriptorEnv(input.env),
 		supervisors: input.supervisors && input.supervisors.length > 0 ? input.supervisors : undefined,
 	});
-	const descriptorPath = path.join(path.dirname(input.sessionFile), SPAWNER_PARTIAL_DESCRIPTOR_FILE);
+	const descriptorPath = path.join(input.descriptorDir ?? path.dirname(input.sessionFile), SPAWNER_PARTIAL_DESCRIPTOR_FILE);
 	fs.mkdirSync(path.dirname(descriptorPath), { recursive: true });
 	const tmp = `${descriptorPath}.${process.pid}.${Date.now()}.tmp`;
 	fs.writeFileSync(tmp, JSON.stringify(descriptor, null, 2), "utf-8");
@@ -107,6 +111,9 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 }
 
 export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
+	if (config.sessionMode?.kind === "adopt") {
+		throw new Error("Adopted sessions must be activated through resumeWorker so the activation lease is acquired before spawn");
+	}
 	const leaseFile = buildLeaderLeasePath(config.leaderSessionFile);
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
@@ -263,9 +270,11 @@ export function resumeWorker(
 
 	// Refresh the revive descriptor with the CURRENT resume env so a future revive
 	// is reconstructable from the latest incarnation's params.
+	const executionCwd = handle.spawnConfig?.cwd ?? handle.worktreePath ?? process.cwd();
 	const descriptorPath = writeWorkerReviveDescriptor({
 		sessionFile,
-		cwd: handle.worktreePath ?? process.cwd(),
+		descriptorDir: handle.sessionDir,
+		cwd: executionCwd,
 		model: handle.model,
 		ticketId: handle.ticketId,
 		worktreePath: handle.worktreePath,
@@ -286,7 +295,7 @@ export function resumeWorker(
 	let child: ChildProcess;
 	try {
 		child = spawn("pi", args, {
-			cwd: handle.worktreePath ?? process.cwd(),
+			cwd: executionCwd,
 			env,
 			stdio: ["ignore", stdoutFd, stderrFd],
 			detached: true,
@@ -314,7 +323,15 @@ export function resumeWorker(
 	handle.lastActivityAt = now;
 	handle.lastProcessActivityAt = now;
 	handle.attempts = handle.attempts ?? [];
-	handle.attempts.push({ workerId: handle.workerId, workerInstanceId: handle.workerInstanceId, pid: child.pid!, sessionDir: handle.sessionDir, sessionFile, spawnedAt: now, sessionMode: { kind: "resume", sessionFile } });
+	handle.attempts.push({
+		workerId: handle.workerId,
+		workerInstanceId: handle.workerInstanceId,
+		pid: child.pid!,
+		sessionDir: handle.sessionDir,
+		sessionFile,
+		spawnedAt: now,
+		sessionMode: handle.spawnConfig?.sessionMode ?? { kind: "resume", sessionFile },
+	});
 
 	// Commit the reservation to the new incarnation's pid so single-activation
 	// liveness tracks the actual `pi` process; store the epoch for release on exit.

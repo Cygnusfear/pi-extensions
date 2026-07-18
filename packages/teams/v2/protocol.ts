@@ -9,7 +9,8 @@ export type MeshReceiptPhase = "sent" | "delivered" | "visible" | "handled";
 export type WorkerSessionMode =
 	| { kind: "fresh" }
 	| { kind: "fork"; parentSessionFile: string; parentLeafId: string; sessionFile: string }
-	| { kind: "resume"; sessionFile: string };
+	| { kind: "resume"; sessionFile: string }
+	| { kind: "adopt"; sessionFile: string; sessionId: string };
 
 export interface WorkerRuntimeEnvelope {
 	protocolVersion: 1;

@@ -40,6 +40,7 @@ function makeAttempt(fact: LifecycleFact, payload: SpawnRequestedPayload): Attem
 		name: payload.name,
 		ticketId: payload.ticketId,
 		persistent: payload.persistent,
+		...(payload.executionCwd ? { executionCwd: payload.executionCwd } : {}),
 		worktreePath: payload.worktreePath,
 		...(payload.model ? { model: payload.model } : {}),
 		...(payload.hasTools !== undefined ? { hasTools: payload.hasTools } : {}),
@@ -231,7 +232,8 @@ function applyAcceptedFact(state: LifecycleProjection, fact: LifecycleFact): voi
 			};
 			worker.route = attempt.persistent && (
 				kind === "missing_finish"
-				|| (kind === "startup_failure" && attempt.sessionMode.kind === "resume")
+				|| (kind === "startup_failure"
+					&& (attempt.sessionMode.kind === "resume" || attempt.sessionMode.kind === "adopt"))
 			)
 				? "resumable"
 				: "dead";

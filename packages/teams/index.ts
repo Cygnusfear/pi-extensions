@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { TeamLeader } from "./leader.js";
 import { buildPredicate, setTeamsNotifyFn, TeamsSubscription, type EventFilter, type PollEventFilterType } from "./subscription.js";
-import { registerTeamsTool, runTeamsAction } from "./tool.js";
+import {
+	registerTeamsTool,
+	runTeamsAction,
+	type TeamsActionParams,
+	type TeamsAdoptionParams,
+} from "./tool.js";
 import { runWorker } from "./worker.js";
 import { registerSandboxFn } from "@pi-extensions/shared/sandbox-registry";
 import { ensureTeamTemplatesFile } from "@pi-extensions/shared/team-templates";
@@ -38,17 +43,24 @@ export default function (pi: ExtensionAPI) {
 	// Sandbox function for execute_code — shares same leader instance
 	let sessionCtx: ExtensionContext | null = null;
 
-	const run = async (params: Record<string, unknown>) => {
+	const run = async (params: TeamsActionParams) => {
 		if (!sessionCtx) throw new Error("Teams not ready — session not started yet");
-		const result = await runTeamsAction(pi, leader, params as any, sessionCtx);
+		const result = await runTeamsAction(pi, leader, params, sessionCtx);
 		if (result.isError) throw new Error(result.content[0]?.text ?? "Teams action failed");
 		return result.details ?? result.content[0]?.text ?? "";
 	};
 
 	// Build namespaced callable: teams({...}) for raw dispatch, teams.delegate/list/kill/...
-	const teamsFn = async (params: Record<string, unknown>) => run(params);
-	(teamsFn as any).delegate = async (tasks: Array<Record<string, unknown>>, opts?: Record<string, unknown>) =>
+	const teamsFn = async (params: TeamsActionParams) => run(params);
+	(teamsFn as any).delegate = async (
+		tasks: NonNullable<TeamsActionParams["tasks"]>,
+		opts?: Omit<TeamsActionParams, "action" | "tasks">,
+	) =>
 		run({ action: "delegate", tasks, ...opts });
+	const adoptableTeamsFn = teamsFn as typeof teamsFn & {
+		adopt: (adoption: TeamsAdoptionParams) => Promise<unknown>;
+	};
+	adoptableTeamsFn.adopt = async (adoption) => run({ action: "adopt", adoption });
 	(teamsFn as any).list = async () => run({ action: "list" });
 	(teamsFn as any).kill = async (name: string) => run({ action: "kill", names: [name] });
 	(teamsFn as any).killAll = async () => run({ action: "kill_all" });

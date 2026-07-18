@@ -87,3 +87,101 @@ describe("teams tool runtime action", () => {
 		expect(result.content[0]?.text).toContain('Killed 2 workers');
 	});
 });
+
+
+describe("teams adopt action", () => {
+	test("creates an adopted-session instruction ticket and forwards the hard-typed selector without a model override", async () => {
+		const execCalls: Array<{ cmd: string; args: string[] }> = [];
+		const adopted: unknown[][] = [];
+		const leader = {
+			setContext: () => {},
+			adoptSession: async (...args: unknown[]) => {
+				adopted.push(args);
+				return { pid: 321 };
+			},
+			startPolling: () => {},
+			hasLifecycleAttempt: () => false,
+		} as any;
+		const pi = {
+			exec: async (cmd: string, args: string[]) => {
+				execCalls.push({ cmd, args });
+				if (path.basename(cmd) === "mai" && args[0] === "ticket") return { stdout: "pe-adopted\n", code: 0 };
+				return { stdout: "", code: 0 };
+			},
+		} as any;
+		const result = await runTeamsAction(pi, leader, {
+			action: "adopt",
+			adoption: {
+				session: { kind: "id", id: "source-session" },
+				as: "durable",
+				message: "continue exact context",
+				hasTools: true,
+			},
+		}, { cwd: "/tmp" } as any);
+
+		expect(result.isError).not.toBe(true);
+		expect(result.content[0]?.text).toContain("[session model]");
+		expect(adopted).toEqual([[
+			"pe-adopted",
+			"durable",
+			{ kind: "id", id: "source-session" },
+			"continue exact context",
+			undefined,
+			true,
+		]]);
+		const create = execCalls.find((call) => path.basename(call.cmd) === "mai" && call.args[0] === "ticket");
+		expect(create?.args).toEqual([
+			"ticket",
+			"continue exact context",
+			"task",
+			"-l",
+			"team,agent-instruction,adopted-session",
+			"-a",
+			"durable",
+		]);
+	});
+
+	test("rejects unsafe aliases before creating or starting a ticket", async () => {
+		const execCalls: string[][] = [];
+		const pi = {
+			exec: async (_cmd: string, args: string[]) => {
+				execCalls.push(args);
+				return { stdout: "", code: 0 };
+			},
+		} as any;
+		const result = await runTeamsAction(pi, { setContext: () => {} } as any, {
+			action: "adopt",
+			adoption: { session: { kind: "file", path: "/tmp/source.jsonl" }, as: "../escape", message: "go" },
+		}, { cwd: "/tmp" } as any);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain("path separators");
+		expect(execCalls.some((args) => args[0] === "ticket" || args[0] === "start")).toBe(false);
+	});
+
+	test("does not close a caller-owned ticket when adoption is rejected before lifecycle intent", async () => {
+		const execCalls: string[][] = [];
+		const leader = {
+			setContext: () => {},
+			adoptSession: async () => { throw new Error("live activation lease"); },
+			hasLifecycleAttempt: () => false,
+		} as any;
+		const pi = {
+			exec: async (_cmd: string, args: string[]) => {
+				execCalls.push(args);
+				return { stdout: "", code: 0 };
+			},
+		} as any;
+		const result = await runTeamsAction(pi, leader, {
+			action: "adopt",
+			adoption: {
+				session: { kind: "id", id: "source" },
+				as: "durable",
+				message: "continue",
+				ticketId: "pe-owned",
+			},
+		}, { cwd: "/tmp" } as any);
+		expect(result.isError).toBe(true);
+		expect(execCalls).toContainEqual(["start", "pe-owned"]);
+		expect(execCalls.some((args) => args[0] === "close")).toBe(false);
+	});
+});

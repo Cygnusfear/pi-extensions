@@ -71,6 +71,7 @@ export interface SpawnRequestedPayload {
 	name: string;
 	ticketId: string;
 	persistent: boolean;
+	executionCwd?: string;
 	sessionMode: WorkerSessionMode;
 	sessionDir: string;
 	workerSessionFile: string;
@@ -124,6 +125,7 @@ export interface AttemptState extends AttemptIdentity {
 	name: string;
 	ticketId: string;
 	persistent: boolean;
+	executionCwd?: string;
 	worktreePath: string | null;
 	model?: string;
 	hasTools?: boolean;
@@ -251,7 +253,8 @@ export function attemptPreservePolicy(attempt: AttemptState): AttemptPreservePol
 	const resumable = attempt.persistent && (
 		attempt.declaration?.kind === "done"
 		|| attempt.assessment?.kind === "missing_finish"
-		|| (attempt.assessment?.kind === "startup_failure" && attempt.sessionMode.kind === "resume")
+		|| (attempt.assessment?.kind === "startup_failure"
+			&& (attempt.sessionMode.kind === "resume" || attempt.sessionMode.kind === "adopt"))
 	);
 	return {
 		preserveBranch: Boolean(attempt.declaration) || ambiguous || attempt.assessment?.kind === "killed" || resumable,

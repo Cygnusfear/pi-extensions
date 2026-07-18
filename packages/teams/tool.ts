@@ -9,6 +9,7 @@ import type { TeamLeader } from "./leader.js";
 import { resolveTemplate, listTemplates } from "@pi-extensions/shared/team-templates";
 import { resolve as resolveModelRole, type ResolverContext } from "../model-router/src/router.js";
 import { projectWidgetStatus } from "./widget.js";
+import type { SessionSelector } from "./session-adoption.js";
 
 function formatActionError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -28,10 +29,22 @@ const TEMPLATE_INSTRUCTION_TAGS: Record<string, string[]> = {
   investigate: ["investigate"],
 };
 
+const SessionSelectorSchema = Type.Union([
+  Type.Object({
+    kind: Type.Literal("id"),
+    id: Type.String({ minLength: 1, description: "Exact Pi session ID" }),
+  }),
+  Type.Object({
+    kind: Type.Literal("file"),
+    path: Type.String({ minLength: 1, description: "Path to an existing Pi session JSONL" }),
+  }),
+]);
+
 const TeamsParams = Type.Object({
   action: Type.Optional(
     Type.Union([
       Type.Literal("delegate"),
+      Type.Literal("adopt"),
       Type.Literal("list"),
       Type.Literal("kill"),
       Type.Literal("kill_all"),
@@ -76,6 +89,16 @@ const TeamsParams = Type.Object({
       }),
     ),
   ),
+  adoption: Type.Optional(
+    Type.Object({
+      session: SessionSelectorSchema,
+      as: Type.String({ minLength: 1, description: "Stable team-member name" }),
+      message: Type.String({ minLength: 1, description: "First team assignment sent into the resumed session" }),
+      ticketId: Type.Optional(Type.String({ description: "Pre-created instruction ticket ID" })),
+      model: Type.Optional(Type.String({ description: "Optional model override; omit to preserve the session model" })),
+      hasTools: Type.Optional(Type.Boolean({ description: "Give the adopted member Teams delegation tools", default: false })),
+    }),
+  ),
   name: Type.Optional(Type.String({ description: "Worker name for kill/tell action" })),
   attemptId: Type.Optional(Type.String({ description: "Exact lifecycle attempt ID for view/history" })),
   status: Type.Optional(Type.String({ description: "Lifecycle status filter for history" })),
@@ -97,9 +120,19 @@ const TeamsParams = Type.Object({
   ),
 });
 
-type TeamsActionParams = {
-  action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime" | "history";
+export type TeamsAdoptionParams = {
+  session: SessionSelector;
+  as: string;
+  message: string;
+  ticketId?: string;
+  model?: string;
+  hasTools?: boolean;
+};
+
+export type TeamsActionParams = {
+  action?: "delegate" | "adopt" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime" | "history";
   tasks?: Array<{ text: string; ticketId?: string | { id: string; [k: string]: unknown }; assignee?: string; model?: string; template?: string; hasTools?: boolean; persistent?: boolean; cwd?: string }>;
+  adoption?: TeamsAdoptionParams;
   name?: string;
   attemptId?: string;
   status?: string;
@@ -127,6 +160,53 @@ type TeamsActionResult = {
 const ok = (text: string): TeamsActionResult => ({ content: [{ type: "text", text }], details: undefined });
 /** Same as `ok` but flagged as an error result. */
 const err = (text: string): TeamsActionResult => ({ content: [{ type: "text", text }], isError: true, details: undefined });
+
+type TicketReference = string | { id: string; [key: string]: unknown };
+
+interface PreparedInstructionTicket {
+  ticketId: string;
+  created: boolean;
+}
+
+async function prepareInstructionTicket(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  input: {
+    ticketId?: TicketReference;
+    text: string;
+    workerName: string;
+    tags: readonly string[];
+  },
+): Promise<PreparedInstructionTicket> {
+  if (input.ticketId) {
+    const ticketId = typeof input.ticketId === "string" ? input.ticketId : input.ticketId.id;
+    await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+    return { ticketId, created: false };
+  }
+
+  const title = input.text.split("\n")[0].slice(0, 120);
+  const createResult = await pi.exec(
+    getMaiBin(),
+    ["ticket", title, "task", "-l", input.tags.join(","), "-a", input.workerName],
+    { cwd: ctx.cwd, timeout: 5000 },
+  );
+  const ticketId = (createResult.stdout ?? "").trim().split(/\s+/)[0];
+  if (!ticketId || createResult.code !== 0) {
+    throw new Error(`Failed to create ticket for "${title}": ${createResult.stderr}`);
+  }
+
+  if (input.text.length > title.length) {
+    const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
+    try {
+      await writeFile(tmp, input.text, "utf8");
+      await pi.exec(getMaiBin(), ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
+  }
+  await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
+  return { ticketId, created: true };
+}
 
 async function runTeamsAction(
   pi: ExtensionAPI,
@@ -237,6 +317,53 @@ async function runTeamsAction(
     return ok(runtime ? JSON.stringify(runtime, null, 2) : "No v2 runtime state.");
   }
 
+  if (action === "adopt") {
+    if (!maiDep.ok) return err(`${maiDep.reason}. ${maiDep.install}`);
+    const adoption = params.adoption;
+    if (!adoption) return err("Provide adoption with session, as, and message.");
+    if (!adoption.as.trim() || adoption.as !== adoption.as.trim() || /[\/\\\0]/.test(adoption.as)) {
+      return err("Adoption 'as' must be a non-empty worker name without leading/trailing whitespace or path separators.");
+    }
+    if (!adoption.message.trim()) return err("Adoption message must be non-empty.");
+    if (adoption.ticketId !== undefined && !adoption.ticketId.trim()) return err("Adoption ticketId must be non-empty when provided.");
+    if (adoption.model !== undefined && !adoption.model.trim()) return err("Adoption model must be non-empty when provided.");
+
+    let prepared: PreparedInstructionTicket;
+    try {
+      prepared = await prepareInstructionTicket(pi, ctx, {
+        ticketId: adoption.ticketId,
+        text: adoption.message,
+        workerName: adoption.as,
+        tags: ["team", "agent-instruction", "adopted-session"],
+      });
+    } catch (error) {
+      return err(formatActionError(error));
+    }
+
+    try {
+      const handle = await leader.adoptSession(
+        prepared.ticketId,
+        adoption.as,
+        adoption.session,
+        adoption.message,
+        adoption.model,
+        adoption.hasTools,
+      );
+      leader.startPolling();
+      const modelInfo = adoption.model ? ` [${adoption.model}]` : " [session model]";
+      const toolsInfo = adoption.hasTools ? " [has-tools]" : "";
+      return ok(
+        `Adopted Pi session as "${adoption.as}" → ticket #${prepared.ticketId} (pid ${handle.pid})${modelInfo}${toolsInfo}\n` +
+        "The exact source JSONL is now a persistent Teams member; later idle resumptions use teams.tell().",
+      );
+    } catch (error) {
+      if (prepared.created && !leader.hasLifecycleAttempt(adoption.as, prepared.ticketId)) {
+        await pi.exec(getMaiBin(), ["close", prepared.ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
+      }
+      return err(`Failed to adopt "${adoption.as}": ${formatActionError(error)}`);
+    }
+  }
+
   if (action === "delegate") {
     if (!maiDep.ok) {
       return err(`${maiDep.reason}. ${maiDep.install}`);
@@ -289,49 +416,21 @@ async function runTeamsAction(
       }
       if (task.persistent) freeform = true;
 
-      let ticketId: string;
-
-      if (task.ticketId) {
-        // Pre-created ticket — skip creation, just ensure it's started
-        // Coerce: mai.ticket() returns { id, started, message } — extract .id if object
-        const raw = task.ticketId;
-        ticketId = typeof raw === 'string' ? raw
-          : (raw && typeof raw === 'object' && 'id' in raw ? String(raw.id) : String(raw));
-        await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
-      } else {
-        // Create ticket from task text
-        const templateName = task.template ?? "";
-        const templateTags = templateName ? (TEMPLATE_INSTRUCTION_TAGS[templateName] ?? [`template-${templateName}`]) : [];
-        const ticketType = "task";
-        const ticketTags = ["team", "agent-instruction", ...templateTags].join(",");
-
-        const taskTitle = task.text.split("\n")[0].slice(0, 120);
-        const needsBody = task.text.length > taskTitle.length;
-
-        const createResult = await pi.exec(
-          getMaiBin(),
-          ["ticket", taskTitle, ticketType, "-l", ticketTags, "-a", workerName],
-          { cwd: ctx.cwd, timeout: 5000 },
-        );
-
-        ticketId = (createResult.stdout ?? "").trim().split(/\s+/)[0];
-        if (!ticketId || createResult.code !== 0) {
-          results.push(`Failed to create ticket for "${taskTitle}": ${createResult.stderr}`);
-          continue;
-        }
-
-        if (needsBody) {
-          const tmp = join(tmpdir(), `mai-body-${ticketId}-${Date.now()}.md`);
-          try {
-            await writeFile(tmp, task.text, "utf8");
-            await pi.exec(getMaiBin(), ["add-note", ticketId, "--file", tmp], { cwd: ctx.cwd, timeout: 5000 });
-          } finally {
-            await unlink(tmp).catch(() => {});
-          }
-        }
-
-        await pi.exec(getMaiBin(), ["start", ticketId], { cwd: ctx.cwd, timeout: 5000 });
+      const templateName = task.template ?? "";
+      const templateTags = templateName ? (TEMPLATE_INSTRUCTION_TAGS[templateName] ?? [`template-${templateName}`]) : [];
+      let prepared: PreparedInstructionTicket;
+      try {
+        prepared = await prepareInstructionTicket(pi, ctx, {
+          ticketId: task.ticketId,
+          text: task.text,
+          workerName,
+          tags: ["team", "agent-instruction", ...templateTags],
+        });
+      } catch (error) {
+        results.push(formatActionError(error));
+        continue;
       }
+      const { ticketId } = prepared;
 
       try {
         const handle = await leader.delegate(ticketId, workerName, effectiveWorktree, effectiveModel, task.hasTools, additionalPrompt, freeform, params.baseRef, task.text, task.cwd);
@@ -346,7 +445,7 @@ async function runTeamsAction(
         // Once spawn intent exists, the leader owns ticket/worktree cleanup as
         // deterministic session-native effects. Only a pre-intent rejection
         // (for example duplicate active name) needs direct ticket rollback.
-        if (!leader.hasLifecycleAttempt(workerName, ticketId)) {
+        if (prepared.created && !leader.hasLifecycleAttempt(workerName, ticketId)) {
           await pi.exec(getMaiBin(), ["close", ticketId], { cwd: ctx.cwd, timeout: 5000 }).catch(() => {});
         }
         results.push(`Failed to spawn "${workerName}": ${err}`);
@@ -379,6 +478,9 @@ Actions:
   Use template to apply a preset from ~/.pi/agent/team-templates.json (e.g. "review", "oracle", "fix", "implementer").
   Templates set model, worktree, and additional prompt. Explicit params override template values.
   Set hasTools: true to give a worker the teams tool so it can delegate sub-workers.
+- adopt: Attach and activate one stopped persisted Pi session. Provide "adoption" with
+  { session: { kind: "id", id } | { kind: "file", path }, as, message, ticketId?, model?, hasTools? }.
+  The source JSONL, cwd, context, and durable mesh identity are preserved. Active sessions fail closed.
 - list: Show all active workers and their status.
 - kill: Kill a specific worker by name.
 - kill_all: Kill all workers.

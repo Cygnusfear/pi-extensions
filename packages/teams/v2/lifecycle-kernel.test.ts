@@ -626,3 +626,60 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		expect(() => noSession.writer.assertWritable()).toThrow("persisted Pi session");
 	});
 });
+
+
+describe("adopted session lifecycle facts", () => {
+	test("validates adopt mode, persists execution cwd, and keeps startup failure resumable", () => {
+		const identity = id("adopt-attempt", "adopt-worker");
+		const spawn: LifecycleFact = {
+			schemaVersion: 4,
+			...identity,
+			eventId: createRootEventId("spawn_requested", identity),
+			kind: "spawn_requested",
+			occurredAt: 1,
+			payload: {
+				name: "adopted",
+				ticketId: "pe-adopt",
+				persistent: true,
+				executionCwd: "/source/workspace",
+				sessionMode: { kind: "adopt", sessionFile: "/sessions/source.jsonl", sessionId: "source-session" },
+				sessionDir: "/coordinator/adopt-log",
+				workerSessionFile: "/sessions/source.jsonl",
+				worktreePath: null,
+			},
+		};
+		expect(parseLifecycleFact(spawn)).toEqual(spawn);
+		const failed = fact(
+			"assessment_startup_failure",
+			{ reason: "activation lost", provisional: false },
+			{ attemptId: identity.attemptId, workerId: identity.workerId, at: 2 },
+		);
+		const projection = reduceLifecycleFacts(SESSION, [spawn, failed]);
+		const attempt = projection.attempts.get(identity.attemptId)!;
+		expect(attempt.executionCwd).toBe("/source/workspace");
+		expect(attempt.sessionMode).toEqual({ kind: "adopt", sessionFile: "/sessions/source.jsonl", sessionId: "source-session" });
+		expect(projection.workers.get(identity.workerId)?.route).toBe("resumable");
+		expect(attemptPreservePolicy(attempt)).toEqual({ preserveBranch: false, preserveWorktree: false });
+	});
+
+	test("rejects adopt facts without exact source session identity", () => {
+		const identity = id("bad-adopt", "bad-worker");
+		const malformed = {
+			schemaVersion: 4,
+			...identity,
+			eventId: "bad-adopt-event",
+			kind: "spawn_requested",
+			occurredAt: 1,
+			payload: {
+				name: "bad",
+				ticketId: "pe-bad",
+				persistent: true,
+				sessionMode: { kind: "adopt", sessionFile: "/sessions/source.jsonl" },
+				sessionDir: "/logs",
+				workerSessionFile: "/sessions/source.jsonl",
+				worktreePath: null,
+			},
+		};
+		expect(parseLifecycleFact(malformed)).toBeNull();
+	});
+});

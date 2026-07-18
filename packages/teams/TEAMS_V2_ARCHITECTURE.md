@@ -10,7 +10,8 @@ The coordinator Pi session JSONL is the only lifecycle store.
 - `teams-lifecycle-ack-v1` entries record branch-local notification delivery.
 - `teams-lifecycle-migration-v1` records the one-time legacy import.
 - Runtime handles, widgets, mesh routes, ticket fields, and worker-session records are projections or transport evidence. They are never lifecycle authority.
-- Teams does not maintain a SQLite database, sidecar journal, snapshot checkpoint, or writer lock.
+- An adopted source JSONL remains Pi conversation state; the adopted relationship and attempts are facts in the coordinator session, not a second Teams lifecycle store.
+- Teams does not maintain a SQLite database, sidecar journal, snapshot checkpoint, or lifecycle writer lock. The activation lease is disposable single-process fencing only, never lifecycle truth.
 
 A session must be persisted and must already contain an assistant message before Teams can append lifecycle truth. Delegation in `--no-session` mode, or during Pi's pre-first-assistant buffering window, is refused before any process or worktree side effect.
 
@@ -24,7 +25,7 @@ An attempt is identified by the tuple:
 
 - `coordinatorSessionId` scopes facts to one Pi session.
 - `teamId` is deterministic for that coordinator session.
-- `workerId` is the stable logical worker identity.
+- `workerId` is the stable logical worker identity. For adoption it is derived from the coordinator session ID and exact source session ID, not the display name, ticket, message, model, or attempt.
 - `attemptId` identifies one process incarnation. Every spawn, retry, and persistent resume gets a new attempt.
 - A worker's display name is presentation only. It is never an idempotency key.
 - `leaderEpoch` identifies a runtime incarnation, not lifecycle truth. A new epoch adopts the session facts.
@@ -37,7 +38,7 @@ The authoritative entry type is `teams-lifecycle-fact-v4`. Facts include the ful
 
 Important kinds are:
 
-- team and spawn: `team_created`, `spawn_requested`, `process_started`
+- team and spawn: `team_created`, `spawn_requested`, `process_started` (`spawn_requested.sessionMode.kind = "adopt"` identifies initial existing-session adoption)
 - liveness: `process_exited`, `stuck`
 - declarations: `declaration_done`, `declaration_quit`
 - assessments: `assessment_missing_finish`, `assessment_startup_failure`, `assessment_crash`, `assessment_killed`
@@ -59,6 +60,18 @@ All fact conflicts and effect IDs use canonical JSON:
 - SHA-256 IDs use the `teams:event:v4:` or `teams:effect:v1:` namespace.
 
 Consequently, a retry with reordered keys, a different observation time, or different diagnostics remains an exact duplicate. Changing authoritative payload does not.
+
+## Existing-session adoption
+
+`teams.adopt` resolves an exact existing Pi JSONL by unique session ID or exact file path and attaches it as an always-persistent logical worker. Validation canonicalizes the path, parses every JSONL line and the Pi header, verifies the stored cwd, and reads the latest session name and `mesh_identity`. It fails closed for ambiguous IDs, malformed input, the current coordinator session, a matching live mesh peer, or a live activation lease.
+
+Initial adoption is represented by the ordinary `spawn_requested` fact with `sessionMode: { kind: "adopt", sessionFile, sessionId }`. Its payload also records the external `workerSessionFile` and `executionCwd`. There is no adoption sidecar or parallel lifecycle record: the coordinator session fact is the durable relationship and attempt intent. `workerId` is deterministically derived from the coordinator session ID plus source session ID, while every activation receives a fresh `attemptId`.
+
+After intent is durable, activation uses the existing resume path: it atomically acquires the lease keyed by the exact source JSONL before starting `pi --session`. A losing activation does not spawn a second writer. The lease is disposable exclusion evidence, not canonical lifecycle truth; process start, exit, assessment, and declaration remain coordinator facts.
+
+The process runs from the cwd stored in the source header. With no explicit `model`, Teams omits `--model`, allowing Pi to restore the source session's normal model behavior. Teams never copies, forks, moves, deletes, repairs, or directly rewrites the source JSONL; Pi appends its normal resumed conversation to that same file. No worktree is created, and only stdout/stderr logs are placed under the coordinator's `.pi/sessions/teams-workers/adopt-...` directory.
+
+A stopped adopted member remains a stable persistent relationship. `teams.tell(name, message)` appends a new `spawn_requested` fact in ordinary `resume` mode, reacquires the same lease before spawn, and resumes the exact JSONL under the same `workerId` and durable Pi mesh identity.
 
 ## Reducer and runtime projection
 
@@ -117,7 +130,7 @@ Cleanup eligibility begins at `process_exited`. The settled declaration or asses
 
 Lifecycle facts are session-global within one coordinator session tree. Delivery acknowledgements are branch-local.
 
-Forked, cloned/branched, and cross-directory child sessions have a new session ID and a header `parentSession`. Copied parent facts are ignored because their coordinator session identity differs. Legacy migration is also skipped in a child session, so a child cannot reinterpret copied parent snapshots as its own state.
+Forked, cloned/branched, and cross-directory child sessions have a new session ID and a header `parentSession`. Copied parent facts are ignored because their coordinator session identity differs. Legacy migration is also skipped in a child session, so a child cannot reinterpret copied parent snapshots as its own state. Copied adopted-session facts are likewise foreign: a child cannot resume, lease, or clean the parent coordinator's adopted source.
 
 `session_shutdown` releases timers, subscriptions, mesh listeners, and other runtime resources only. It does not kill workers or mutate task outcome.
 

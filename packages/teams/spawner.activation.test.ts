@@ -9,7 +9,7 @@ import {
 	releaseActivationLease,
 	tryAcquireActivationLease,
 } from "./lease.ts";
-import { resumeWorker } from "./spawner.ts";
+import { resumeWorker, spawnWorker } from "./spawner.ts";
 import type { WorkerHandle } from "./types.ts";
 
 const cleanupDirs: string[] = [];
@@ -128,5 +128,26 @@ describe("resumeWorker — per-worker activation lock (part C)", () => {
 		} finally {
 			process.env.PATH = originalPath;
 		}
+	});
+});
+
+
+describe("adopt activation path", () => {
+	test("spawnWorker refuses adopt mode before any session side effect", () => {
+		const { dir, file } = tmpSession();
+		const logDir = path.join(dir, "logs");
+		expect(() => spawnWorker({
+			workerId: "adopt-worker",
+			workerInstanceId: "adopt-attempt",
+			ticketId: "pe-adopt",
+			workerName: "adopted",
+			useWorktree: false,
+			cwd: dir,
+			repoRoot: dir,
+			sessionDir: logDir,
+			leaderSessionFile: path.join(dir, "leader.jsonl"),
+			sessionMode: { kind: "adopt", sessionFile: file, sessionId: "source-session" },
+		})).toThrow("must be activated through resumeWorker");
+		expect(fs.existsSync(logDir)).toBe(false);
 	});
 });

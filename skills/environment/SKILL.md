@@ -105,6 +105,24 @@ await teams({
 
 **Use `template` instead of `model`** — it resolves through `~/.pi/agent/team-templates.json` so model picks stay current. Only pass `model: "..."` directly when you need to pin a specific model for a specific reason (the router never overrides explicit pins).
 
+### Adopt an inactive existing session
+
+Use `teams.adopt` when work must continue in one exact persisted Pi session rather than a newly delegated session:
+
+```javascript
+await teams.adopt({
+  session: { kind: "id", id: "01J..." },
+  // Or: session: { kind: "file", path: "/absolute/path/to/session.jsonl" },
+  as: "researcher",
+  message: "Continue from the existing context and report back.",
+  // ticketId: "pe-...",
+  // model: "provider/model", // only for an intentional override
+  // hasTools: true,
+});
+```
+
+The source must be one well-formed, persisted, inactive session. Adoption rejects the current coordinator session, live or activation-leased sessions, ambiguous IDs, malformed JSONL, and missing stored working directories. Teams uses the exact source file and its header cwd: it does not copy, fork, move, delete, repair, or directly rewrite the JSONL; Pi appends normal resumed conversation entries itself. Omit `model` to preserve the source session's normal model behavior. Adopted members are persistent; after an attempt stops, continue it with `await teams.tell("researcher", "next message")`.
+
 ### Waiting for workers — `teams.on(...)`
 
 `teams.delegate(...)` returns after spawning, not after workers finish. Workers run in separate sessions. To wait for one, **do not sleep-poll** — subscribe to the worker's event stream with `teams.on()`.
@@ -344,6 +362,7 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Search prior context | `ouija({ action: "search", query })` |
 | Record a learning | `mai.note(ticketId, "...")`, then find it later with `ouija` |
 | Spawn a worker | `teams.delegate([{ text, assignee, model }])` |
+| Adopt an inactive exact Pi session | `teams.adopt({ session: { kind: "id", id }, as, message })` |
 | Wait for worker to finish | `teams.on(name, "terminal").wake(...)` for background waits; `await teams.on(...)` in-turn |
 | Check worker status | `teams.list()` or `teams.view(name)` |
 | Resume from background | `console.wake("message")` in execute_code — triggers a new turn |

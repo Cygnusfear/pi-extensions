@@ -11,6 +11,7 @@ The coordinator (your main pi session) creates tickets, spawns workers as separa
 - **Template system** — predefined worker profiles (review, oracle, fix, implementer) from `~/.pi/agent/team-templates.json`
 - **Per-worker model selection** — assign different LLMs to different workers
 - **Persistent workers** — keep workers alive for interactive sessions, tag-teaming, and monitoring
+- **Existing-session adoption** — attach an inactive exact Pi JSONL without copying or forking it
 - **Sub-delegation** — workers can spawn their own sub-workers when given `hasTools: true`
 - **Lifecycle management** — explicit terminal states via `team_finish` (done/quit)
 - **Mesh-based communication** — workers coordinate with the leader through ordinary durable mesh tells
@@ -55,6 +56,34 @@ Each task creates:
 4. A **durable mesh route** for leader↔worker communication
 
 Teams-created tickets are worker assignment records, not result artifacts. A review worker's assignment ticket is tagged `agent-instruction`; the review worker creates a separate `mai review` ticket tagged `review` for the actual review output. The same separation applies to oracle, research, and audit workers: the instruction ticket follows Teams lifecycle, while the produced artifact stays available for downstream use.
+
+## Adopting an Existing Session
+
+Use `teams.adopt(...)` to attach one inactive persisted Pi session as a persistent team member:
+
+```ts
+await teams.adopt({
+  session: { kind: "id", id: "01J..." },
+  as: "researcher",
+  message: "Continue the investigation and report the next concrete finding.",
+  // ticketId: "pe-...",               // optional existing instruction ticket
+  // model: "anthropic/claude-opus-4-8", // optional explicit override
+  // hasTools: true,
+});
+
+// Or select the exact session file:
+await teams.adopt({
+  session: { kind: "file", path: "/absolute/path/to/session.jsonl" },
+  as: "researcher",
+  message: "Pick up where this session stopped.",
+});
+```
+
+The selector must resolve to exactly one well-formed, persisted, inactive Pi JSONL. Adoption rejects the coordinator's current session, live mesh sessions, ambiguous IDs, malformed files, missing source working directories, and sessions with a live activation lease. Teams does not copy, fork, move, delete, or directly rewrite the source JSONL; the resumed Pi process appends to that same file normally and runs from the cwd in its header.
+
+`as` is a stable display name, not identity. Teams deterministically derives the logical `workerId` from the coordinator session ID and source session ID, records every attempt in the coordinator session, and acquires the source activation lease before spawning. Omit `model` to let Pi continue with the source session's normal model behavior; Teams passes `--model` only for an explicit override.
+
+Adopted members are always persistent and never own a Teams worktree. Process logs live under the coordinator's `.pi/sessions/teams-workers/adopt-...` directory, while the source JSONL stays at its canonical path. After an attempt stops, `teams.tell("researcher", "next message")` creates a new attempt against that same source session and stable durable mesh identity.
 
 ## Worker Lifecycle
 
@@ -113,6 +142,7 @@ The link is short because the full payload lives in `~/.maitake/review-handoffs/
 | `fork` | Copy of coordinator's session history | Explicit opt-in with `PI_TEAMS_PREFER_FORK=1` when a branchable coordinator session is available |
 | `fresh` | Clean session with only the task prompt | Default for delegated work |
 | `resume` | Reattach to an existing session file | Retry/recovery after crash |
+| `adopt` | Attach one exact external session file | Initial adoption of an inactive durable Pi session |
 
 ## Templates
 
@@ -181,7 +211,7 @@ repo/
 └── src/
 ```
 
-Session files are always stored under the **repo root** (`.pi/sessions/teams-workers/`), not inside worktrees, so worktree cleanup never destroys session data.
+Teams-created session files are always stored under the **repo root** (`.pi/sessions/teams-workers/`), not inside worktrees, so worktree cleanup never destroys session data. An adopted JSONL is the explicit exception: it remains at its original canonical path, is never treated as a worktree, and only its process logs live under the coordinator's `teams-workers/adopt-...` directory.
 
 When working from a worktree yourself, pass `baseRef` with your branch name so workers branch from the right commit.
 
@@ -189,7 +219,7 @@ When working from a worktree yourself, pass `baseRef` with your branch name so w
 
 | Tool | Description |
 |------|-------------|
-| `teams` | Main orchestration tool (delegate, list, kill, tell, view, history) |
+| `teams` | Main orchestration tool (delegate, adopt, list, kill, tell, view, history) |
 | `team_comment` | Post progress updates to the ticket (worker-side) |
 | `team_finish` | Declare terminal state: `done` or `quit` (worker-side) |
 
@@ -198,6 +228,7 @@ When working from a worktree yourself, pass `baseRef` with your branch name so w
 | Action | Description |
 |--------|-------------|
 | `delegate` | Spawn workers with tasks |
+| `adopt` | Attach one inactive exact Pi JSONL as a persistent member |
 | `list` | Show all active workers with status, model, ticket, and activity |
 | `kill` | Kill a specific worker by name |
 | `kill_all` | Kill all active workers |

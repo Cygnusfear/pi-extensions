@@ -177,6 +177,9 @@ function validSessionMode(value: unknown): boolean {
 	if (!mode || !nonEmptyString(mode.kind)) return false;
 	if (mode.kind === "fresh") return true;
 	if (mode.kind === "resume") return nonEmptyString(mode.sessionFile);
+	if (mode.kind === "adopt") {
+		return nonEmptyString(mode.sessionFile) && nonEmptyString(mode.sessionId);
+	}
 	return mode.kind === "fork"
 		&& nonEmptyString(mode.parentSessionFile)
 		&& nonEmptyString(mode.parentLeafId)
@@ -193,6 +196,7 @@ function validLifecyclePayload(kind: LifecycleFactKind, value: JsonValue): boole
 			return nonEmptyString(payload.name)
 				&& nonEmptyString(payload.ticketId)
 				&& typeof payload.persistent === "boolean"
+				&& (payload.executionCwd === undefined || nonEmptyString(payload.executionCwd))
 				&& validSessionMode(payload.sessionMode)
 				&& typeof payload.sessionDir === "string"
 				&& typeof payload.workerSessionFile === "string"

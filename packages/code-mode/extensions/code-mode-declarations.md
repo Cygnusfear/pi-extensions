@@ -1223,6 +1223,14 @@ declare function sessionTitle(title: string): Promise<string>;
  * // Raw action dispatch (backward compat)
  * await teams({ action: "delegate", tasks: [...] });
  *
+ * // Attach one inactive exact Pi JSONL as a persistent member.
+ * // Omit model to preserve the source session's normal model behavior.
+ * await teams.adopt({
+ *   session: { kind: "id", id: "01J..." },
+ *   as: "researcher",
+ *   message: "Continue from the existing context.",
+ * });
+ *
  * // Subscribe to worker events — no polling, no hard sleeps
  * // One-shot await: block until fixer completes (or errors)
  * const event = await teams.on("fixer", "completed").timeout(600_000);
@@ -1255,10 +1263,30 @@ declare function sessionTitle(title: string): Promise<string>;
  *   teams.on("oracle", "completed"),
  * ]);
  */
+type TeamsAdoptSession =
+  | { kind: "id"; id: string }
+  | { kind: "file"; path: string };
+
+interface TeamsAdoptOptions {
+  /** Exact persisted Pi session to attach. It must be inactive, well-formed, unambiguous, and unleased. */
+  session: TeamsAdoptSession;
+  /** Stable team-member display name; logical identity is derived independently. */
+  as: string;
+  /** Message sent on the first adopted activation. */
+  message: string;
+  /** Optional existing assignment ticket. Omit to create an adopted-session instruction ticket. */
+  ticketId?: string;
+  /** Explicit model override. Omit to preserve the source session's normal model behavior. */
+  model?: string;
+  /** Give the adopted member Teams delegation tools. */
+  hasTools?: boolean;
+}
+
 declare const teams: {
   /** Raw action dispatch — backward compat. Prefer specific methods below. */
   (params: {
-    action?: "delegate" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime";
+    action?: "delegate" | "adopt" | "list" | "kill" | "kill_all" | "tell" | "tell_all" | "view" | "runtime" | "history";
+    adoption?: TeamsAdoptOptions;
     tasks?: Array<{
       text: string;
       ticketId?: string;
@@ -1279,6 +1307,13 @@ declare const teams: {
 
   /** Spawn workers with tasks. Each task can have ticketId, assignee, model, etc. */
   delegate(tasks: Array<Record<string, unknown>>, opts?: Record<string, unknown>): Promise<string>;
+
+  /**
+   * Attach an inactive exact existing Pi JSONL as a persistent team member.
+   * Teams preserves the source path and header cwd, rejects current/live/ambiguous/
+   * malformed/leased sources, and later resumes it through teams.tell().
+   */
+  adopt(options: TeamsAdoptOptions): Promise<string>;
 
   /** Show all active workers and their status. */
   list(): Promise<string>;

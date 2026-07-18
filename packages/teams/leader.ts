@@ -28,7 +28,8 @@ import {
   writeLeaderLease,
 } from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
-import { isProcessAlive, killWorker, releaseWorkerActivation, resumeWorker, spawnWorker } from "./spawner.js";
+import { buildWorkerPrompt, isProcessAlive, killWorker, releaseWorkerActivation, resumeWorker, spawnWorker } from "./spawner.js";
+import { adoptedWorkerId, resolveAdoptableSession, type SessionSelector } from "./session-adoption.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
 import { wrapPollEvent, type TeamsEvent } from "./subscription.js";
 import type { PollEvent, SpawnConfig, WorkerAttempt, WorkerHandle } from "./types.js";
@@ -223,21 +224,25 @@ export function assessWorkerExit(
  * the last tool result (may show a failing tool), and any error messages.
  * Returns a short summary string.
  */
-function readSessionDiagnostics(sessionDir: string): string {
-  let sessionFile: string | undefined;
+function selectSessionFile(sessionLocation: string): string | undefined {
   try {
-    const files = fs.readdirSync(sessionDir)
+    if (fs.statSync(sessionLocation).isFile()) return sessionLocation;
+    const files = fs.readdirSync(sessionLocation)
       .filter(f => f.endsWith(".jsonl"))
-      .map(f => path.join(sessionDir, f));
-    if (files.length === 0) return "";
-    // Pick the most recently modified
-    sessionFile = files.length === 1
+      .map(f => path.join(sessionLocation, f));
+    if (files.length === 0) return undefined;
+    return files.length === 1
       ? files[0]
       : files.map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime)[0].f;
   } catch {
-    return "";
+    return undefined;
   }
+}
+
+function readSessionDiagnostics(sessionLocation: string): string {
+  const sessionFile = selectSessionFile(sessionLocation);
+  if (!sessionFile) return "";
 
   const TAIL_BYTES = 32768;
   let tail: string;
@@ -333,20 +338,9 @@ function readSessionDiagnostics(sessionDir: string): string {
  * Conservative — only matches the exact post-compaction-shutdown shape. Will
  * NOT trigger on a session that compacted earlier and then did more real work.
  */
-export function endedWithUnresolvedCompaction(sessionDir: string): boolean {
-  let sessionFile: string | undefined;
-  try {
-    const files = fs.readdirSync(sessionDir)
-      .filter(f => f.endsWith(".jsonl"))
-      .map(f => path.join(sessionDir, f));
-    if (files.length === 0) return false;
-    sessionFile = files.length === 1
-      ? files[0]
-      : files.map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime)[0].f;
-  } catch {
-    return false;
-  }
+export function endedWithUnresolvedCompaction(sessionLocation: string): boolean {
+  const sessionFile = selectSessionFile(sessionLocation);
+  if (!sessionFile) return false;
 
   // 32KB tail is enough — a CompactionEntry is small and we're looking at
   // the very end of the file. Same budget as readSessionDiagnostics.
@@ -543,10 +537,7 @@ function getCurrentAttempt(worker: WorkerHandle): WorkerAttempt | null {
 
 function scoreAttempt(attempt: WorkerAttempt): number {
   let score = 0;
-  try {
-    const files = fs.readdirSync(attempt.sessionDir).filter(f => f.endsWith(".jsonl"));
-    if (files.length > 0) score += 100;
-  } catch {}
+  if (selectSessionFile(attempt.sessionFile) ?? selectSessionFile(attempt.sessionDir)) score += 100;
   try {
     const stderr = fs.readFileSync(path.join(attempt.sessionDir, "stderr.log"), "utf-8").trim();
     if (stderr) score += 50;  } catch {}
@@ -587,20 +578,15 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
   if (attempt.spawnError || worker.spawnError) lines.push(`spawn error: ${attempt.spawnError ?? worker.spawnError}`);
 
   // Session file check
-  let hasSessionFile = false;
+  const sessionFile = selectSessionFile(attempt.sessionFile) ?? selectSessionFile(attempt.sessionDir);
+  const hasSessionFile = sessionFile !== undefined;
   let sessionEntryCount = 0;
-  try {
-    const files = fs.readdirSync(attempt.sessionDir).filter(f => f.endsWith(".jsonl"));
-    hasSessionFile = files.length > 0;
-    if (hasSessionFile) {
-      const sf = files.length === 1
-        ? path.join(attempt.sessionDir, files[0])
-        : files.map(f => ({ f: path.join(attempt.sessionDir, f), mtime: fs.statSync(path.join(attempt.sessionDir, f)).mtimeMs }))
-          .sort((a, b) => b.mtime - a.mtime)[0].f;
-      const content = fs.readFileSync(sf, "utf-8");
+  if (sessionFile) {
+    try {
+      const content = fs.readFileSync(sessionFile, "utf-8");
       sessionEntryCount = content.split("\n").filter(l => l.trim()).length;
-    }
-  } catch {}
+    } catch {}
+  }
 
   if (!hasSessionFile) {
     lines.push("session: NO FILE CREATED — process exited before pi initialized");
@@ -631,7 +617,7 @@ function buildWorkerCrashReport(worker: WorkerHandle, exitCode: number | null): 
 
   // Session-level diagnostics (last assistant error, last failing tool)
   if (hasSessionFile) {
-    const sessionDiag = readSessionDiagnostics(attempt.sessionDir).trim();
+    const sessionDiag = readSessionDiagnostics(sessionFile).trim();
     if (sessionDiag) lines.push(sessionDiag);
   }
 
@@ -903,6 +889,25 @@ export class TeamLeader {
       }],
       exitCode: attempt.process.exit?.code,
       doneAt: attempt.declaration?.at,
+      spawnConfig: {
+        workerId: attempt.workerId,
+        workerInstanceId: attempt.attemptId,
+        ticketId: attempt.ticketId,
+        workerName: attempt.name,
+        useWorktree: attempt.worktreePath !== null,
+        cwd: attempt.executionCwd ?? attempt.worktreePath ?? this.ctx?.cwd ?? process.cwd(),
+        repoRoot: this.ctx?.cwd ?? process.cwd(),
+        sessionDir: attempt.process.sessionDir ?? "",
+        leaderSessionFile: this.ctx?.sessionManager.getSessionFile() ?? "",
+        model: attempt.model,
+        hasTools: attempt.hasTools,
+        teamId: attempt.teamId,
+        leaderEpoch: this.leaderEpoch,
+        coordinatorSessionId: attempt.coordinatorSessionId,
+        ticketCwd: this.ctx?.cwd,
+        freeform: attempt.persistent,
+        sessionMode: attempt.sessionMode,
+      },
     };
   }
 
@@ -1111,7 +1116,9 @@ export class TeamLeader {
   private beginSettledAttemptEffects(attempt: AttemptState): void {
     if (attempt.protocolViolation) return;
     if (this.lifecycleStore?.worker(attempt.workerId)?.currentAttemptId !== attempt.attemptId) return;
-    if (attempt.persistent && attempt.sessionMode.kind === "resume" && attempt.assessment?.kind === "startup_failure") return;
+    if (attempt.persistent
+      && (attempt.sessionMode.kind === "resume" || attempt.sessionMode.kind === "adopt")
+      && attempt.assessment?.kind === "startup_failure") return;
     const worker = this.projectedHandle(attempt);
     // Ticket closure is eligible as soon as a declaration or terminal
     // assessment is canonical. Cleanup additionally requires process exit,
@@ -1163,6 +1170,7 @@ export class TeamLeader {
         name: config.workerName,
         ticketId: config.ticketId,
         persistent: Boolean(config.freeform),
+        executionCwd: config.cwd,
         sessionMode: config.sessionMode ?? { kind: "fresh" },
         sessionDir: config.sessionDir,
         workerSessionFile,
@@ -1816,6 +1824,179 @@ export class TeamLeader {
 		this.mesh.on("message", this.meshMessageHandler);
 	}
 
+  private attachWorkerProcess(name: string, worker: WorkerHandle, child: ChildProcess): void {
+    this.childProcesses.set(name, child);
+    child.on("exit", (code, signal) => {
+      worker.exitCode = code;
+      const attempt = getCurrentAttempt(worker);
+      if (attempt) attempt.exitCode = code;
+      void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
+    });
+    child.on("error", (error) => {
+      worker.exitCode = null;
+      worker.spawnError = error.message;
+      const attempt = getCurrentAttempt(worker);
+      if (attempt) attempt.spawnError = error.message;
+      void this.handleWorkerExit(name, worker, null);
+    });
+    this.startActivityMonitor(name, worker);
+    this.renderWidget();
+  }
+
+  /**
+   * Attach an existing stopped Pi session to this team and activate that exact
+   * JSONL. Resolution is read-only; the canonical spawn intent is persisted in
+   * the coordinator session before descriptor, lease, or process side effects.
+   */
+  async adoptSession(
+    ticketId: string,
+    workerName: string,
+    selector: SessionSelector,
+    message: string,
+    model?: string,
+    hasTools?: boolean,
+  ): Promise<WorkerHandle> {
+    if (!this.ctx) throw new Error("Leader context not set");
+    const { writer, teamId } = this.requireKernel();
+    const activeName = this.workers.get(workerName);
+    if (activeName && !["done", "warning", "failed", "killed", "grace"].includes(activeName.status)) {
+      throw new Error(`Worker name "${workerName}" is already active on ticket #${activeName.ticketId}`);
+    }
+
+    const leaderSessionFile = this.ctx.sessionManager.getSessionFile();
+    if (!leaderSessionFile) throw new Error("The coordinator session is not persisted");
+    const source = await resolveAdoptableSession(selector, {
+      currentSessionFile: leaderSessionFile,
+      peers: this.mesh?.peers() ?? [],
+    });
+    const workerId = adoptedWorkerId(writer.coordinatorSessionId, source.sessionId);
+    const priorRelationship = this.lifecycleStore?.projection().workers.get(workerId);
+    if (priorRelationship) {
+      const priorAttempt = priorRelationship.currentAttemptId
+        ? this.lifecycleStore?.attempt(priorRelationship.currentAttemptId)
+        : undefined;
+      if (priorAttempt?.name !== workerName) {
+        throw new Error(
+          `Session ${source.sessionId} is already a team member named "${priorAttempt?.name ?? "unknown"}"; keep the stable relationship name`,
+        );
+      }
+      if (priorRelationship.route !== "dead") {
+        throw new Error(
+          `Session ${source.sessionId} is already adopted as "${workerName}" with route ${priorRelationship.route}; use teams.tell() to resume it`,
+        );
+      }
+    }
+
+    const workerInstanceId = crypto.randomUUID();
+    const sessionDir = path.join(
+      this.ctx.cwd,
+      ".pi",
+      "sessions",
+      "teams-workers",
+      `adopt-${workerName}-${ticketId}-${workerInstanceId}`,
+    );
+    const effectiveModel = this.resolveWorkerModel(model);
+    const sessionMode = {
+      kind: "adopt" as const,
+      sessionFile: source.sessionFile,
+      sessionId: source.sessionId,
+    };
+    const config: SpawnConfig = {
+      workerId,
+      workerInstanceId,
+      ticketId,
+      workerName,
+      useWorktree: false,
+      cwd: source.cwd,
+      repoRoot: this.ctx.cwd,
+      sessionDir,
+      leaderSessionFile,
+      model: effectiveModel,
+      hasTools,
+      teamId,
+      leaderEpoch: this.leaderEpoch,
+      coordinatorSessionId: writer.coordinatorSessionId,
+      coordinatorMeshId: this.getDurableMeshId() || undefined,
+      ticketCwd: this.ctx.cwd,
+      ticketText: message,
+      freeform: true,
+      sessionMode,
+    };
+
+    this.recordSpawnRequested(config, source.sessionFile);
+    try {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    } catch (error) {
+      this.recordStartupFailure(
+        this.identityFor({ workerId, workerInstanceId }),
+        error instanceof Error ? error.message : String(error),
+      );
+      this.projectV2WorkerRuntime(workerName);
+      this.renderWidget();
+      throw error;
+    }
+    this.wireMeshMessageEvents();
+    const now = Date.now();
+    const handle: WorkerHandle = {
+      workerId,
+      workerInstanceId,
+      name: workerName,
+      pid: 0,
+      ticketId,
+      sessionDir,
+      sessionFile: source.sessionFile,
+      worktreePath: null,
+      model: effectiveModel,
+      hasTools,
+      status: "spawning",
+      spawnedAt: now,
+      lastActivityAt: now,
+      lastProcessActivityAt: now,
+      hasActiveChildProcess: false,
+      activeChildProcessCount: 0,
+      lastSeenCommentCount: 0,
+      attempts: [],
+      nickname: source.nickname,
+      routeState: "pending",
+      freeform: true,
+      spawnConfig: config,
+    };
+    this.workers.set(workerName, handle);
+
+    const prompt = buildWorkerPrompt(
+      ticketId,
+      workerName,
+      message,
+      undefined,
+      true,
+      config.coordinatorMeshId,
+      config.ticketCwd,
+    );
+    let child: ChildProcess | null = null;
+    try {
+      child = resumeWorker(handle, prompt, this.buildWorkerResumeEnv(handle));
+      if (!child) {
+        this.recordStartupFailure(this.identityFor(handle), "Adopted session activation was refused because another live activation won the lease");
+        throw new Error(`Session ${source.sessionId} could not be activated because it is already active`);
+      }
+      this.recordProcessStart(handle, handle.spawnedAt, handle.pid);
+    } catch (error) {
+      if (child) {
+        try { killWorker(handle.pid); } catch {}
+        releaseWorkerActivation(handle);
+      }
+      if (!this.lifecycleStore?.attempt(workerInstanceId)?.assessment) {
+        this.recordStartupFailure(this.identityFor(handle), error instanceof Error ? error.message : String(error));
+      }
+      this.projectV2WorkerRuntime(workerName);
+      this.renderWidget();
+      throw error;
+    }
+
+    this.attachWorkerProcess(workerName, handle, child);
+    return handle;
+  }
+
   async delegate(
     ticketId: string,
     workerName: string,
@@ -1919,7 +2100,6 @@ export class TeamLeader {
     if (freeform) handle.freeform = true;
     handle.spawnConfig = config;
     this.workers.set(workerName, handle);
-    this.childProcesses.set(workerName, child);
     try {
       this.recordProcessStart(handle, handle.spawnedAt, handle.pid);
     } catch (error) {
@@ -1929,21 +2109,7 @@ export class TeamLeader {
       throw error;
     }
 
-    child.on("exit", (code, signal) => {
-      handle.exitCode = code;
-      const attempt = getCurrentAttempt(handle);
-      if (attempt) attempt.exitCode = code;
-      void this.handleWorkerExit(workerName, handle, code, false, signal ?? undefined);
-    });
-    child.on("error", (error) => {
-      handle.exitCode = null;
-      handle.spawnError = error.message;
-      const attempt = getCurrentAttempt(handle);
-      if (attempt) attempt.spawnError = error.message;
-      void this.handleWorkerExit(workerName, handle, null);
-    });
-    this.startActivityMonitor(workerName, handle);
-    this.renderWidget();
+    this.attachWorkerProcess(workerName, handle, child);
     return handle;
   }
 
@@ -2228,8 +2394,9 @@ export class TeamLeader {
     // that are not actually what the leader observed). Done / quit (explicit) need nothing
     // because the worker chose its own summary via team_finish.
     const isAmbiguousWarning = classification === "warning" && !assessment.explicitTerminal;
+    const workerSessionLocation = this.resolveWorkerSessionFile(worker) ?? worker.sessionDir;
     const diagnostics = classification === "failure" || isAmbiguousWarning
-      ? readSessionDiagnostics(worker.sessionDir)
+      ? readSessionDiagnostics(workerSessionLocation)
       : "";
     if (isAmbiguousWarning && diagnostics) {
       // Fold diagnostics into the warning message so the team-event content carries the
@@ -2250,7 +2417,7 @@ export class TeamLeader {
       // session ended with an unresolved compaction (that has its own resume block
       // below) so the two recovery paths never overlap.
       const toolRetry = getRecoverableToolRetry(diagnostics);
-      const streamAbort = !toolRetry && !endedWithUnresolvedCompaction(worker.sessionDir)
+      const streamAbort = !toolRetry && !endedWithUnresolvedCompaction(workerSessionLocation)
         ? getRecoverableStreamAbort(diagnostics)
         : null;
       const recovery = toolRetry ?? streamAbort;
@@ -2337,7 +2504,7 @@ export class TeamLeader {
     if (
       isAmbiguousWarning
       && (worker.recoveryAttempts ?? 0) < 1
-      && endedWithUnresolvedCompaction(worker.sessionDir)
+      && endedWithUnresolvedCompaction(workerSessionLocation)
     ) {
       const resumePrompt = [
         "Your previous turn was auto-compacted mid-flight.",
@@ -2416,15 +2583,12 @@ export class TeamLeader {
       const STARTUP_WINDOW_MS = 5000;
 
       let sessionDirGone = false;
-      let noSessionFile = false;
       try {
-        const jsonls = fs.readdirSync(worker.sessionDir).filter(f => f.endsWith(".jsonl"));
-        noSessionFile = jsonls.length === 0;
+        sessionDirGone = !fs.statSync(worker.sessionDir).isDirectory();
       } catch {
-        // readdirSync threw — directory doesn't exist or isn't readable
         sessionDirGone = true;
-        noSessionFile = true;
       }
+      let noSessionFile = this.resolveWorkerSessionFile(worker) === null;
 
       // Session files can land slightly after the child exit/error is observed.
       // Re-check briefly before declaring startup death and overwriting the worker
@@ -2438,7 +2602,10 @@ export class TeamLeader {
       }
 
       // Respawn if: no session file AND (startup-window death OR session dir was destroyed)
-      if (noSessionFile && worker.spawnConfig && (runtimeMs < STARTUP_WINDOW_MS || sessionDirGone)) {
+      if (noSessionFile
+        && worker.spawnConfig
+        && worker.spawnConfig.sessionMode?.kind !== "adopt"
+        && (runtimeMs < STARTUP_WINDOW_MS || sessionDirGone)) {
         // A fresh retry is a new canonical attempt. Persist its intent before
         // session-file creation, revive-descriptor writes, or process spawn.
         const workerInstanceId = crypto.randomUUID();
@@ -2457,7 +2624,9 @@ export class TeamLeader {
             `team-${worker.name}-${worker.ticketId}-${workerInstanceId}`,
           ),
         };
-        const workerSessionFile = config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
+        const workerSessionFile = config.sessionMode?.kind === "fork"
+          || config.sessionMode?.kind === "resume"
+          || config.sessionMode?.kind === "adopt"
           ? config.sessionMode.sessionFile
           : path.join(config.sessionDir, "session.jsonl");
         this.recordSpawnRequested(config, workerSessionFile);
