@@ -1,0 +1,48 @@
+packages/code-mode/extensions/code-mode-prompt.md
+  s_c80280c75e1308::t_41425d20b23358 19-20
+packages/code-mode/extensions/code-mode.ts
+  s_c80280c75e1308::t_ca54c1dd020ed5 102-104
+  s_c80280c75e1308::t_41425d20b23358 699
+  s_c80280c75e1308::t_5a88e3484d17ac 51,106,846-849,982-985,1048-1050
+  s_c80280c75e1308::t_b4d2f04c07ca31 934
+packages/code-mode/src/progressive-output.test.ts
+  s_c80280c75e1308::t_485b3ee89738f5 82-84
+  s_c80280c75e1308::t_f9f0719c2e480c 112-128
+  s_c80280c75e1308::t_ff41a4768dc04d 1-39,44-53,55-60,63-76,80-81,85-111,129-161
+  s_c80280c75e1308::t_a3e2ca9e88a1bc 40-43,61-62
+  s_c80280c75e1308::t_cf4fc851e6c233 54
+  s_c80280c75e1308::t_25a78351579e99 77-79
+packages/code-mode/README.md
+  s_c80280c75e1308::t_41425d20b23358 24,26-27
+packages/code-mode/src/progressive-output.ts
+  s_c80280c75e1308::t_a3e2ca9e88a1bc 9
+  s_c80280c75e1308::t_485b3ee89738f5 8,113,116,118-120,125-131,133-137
+  s_c80280c75e1308::t_516c77a494a67a 41
+  s_c80280c75e1308::t_25a78351579e99 117,121
+  s_c80280c75e1308::t_ca54c1dd020ed5 140-144
+  s_c80280c75e1308::t_f9f0719c2e480c 18,53,56,58-67,70,74-78,96-111
+  s_c80280c75e1308::t_8ff257cd99b4c6 1-7,10-17,19-30,36-40,42-52,54-55,57,68-69,71-73,79-95,112,114-115,122-124,132,138-139,145-154
+  s_c80280c75e1308::t_fa1bc37c4afa69 31-35
+packages/code-mode/extensions/code-mode.async.test.ts
+  s_c80280c75e1308::t_a330bc426b55fb 15,17,199-231,531-567
+  s_c80280c75e1308::t_ca54c1dd020ed5 111-137
+  s_c80280c75e1308::t_aa1369c8448d53 568
+packages/code-mode/src/session-factory.ts
+  s_c80280c75e1308::t_f2ac1ba9f955c8 33,308-310,313,317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "e5f05913e2eeca1849678cd9280c4a1650a4736b",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
