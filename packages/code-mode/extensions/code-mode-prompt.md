@@ -16,6 +16,8 @@ You have an `execute_code` tool that runs JavaScript with typed async functions 
 All functions are async — use `await`. Use `console.log()` to return output.
 Only console output is returned to you. If you don't log anything, you get "(no output)".
 
+Model-visible `execute_code` results and `console.wake()` messages are hard-capped at 50KB or 2,000 lines. When output exceeds either limit, the complete output is saved to a unique `/tmp` file and the result includes an exact bounded `Read({ path, offset, limit })` call. Inspect successive ranges; never read the entire overflow file at once.
+
 ### Discovery offload
 
 When a task is mostly discovery, search, comparison, or evidence gathering across multiple files/tools, consider whether rlm() should do the exploration in a private code-mode context and return a structured object. This is usually the right shape when you would otherwise spend many sequential execute_code blocks gathering references, grep results, ticket context, or proof artifacts before summarizing. Store the result on $ and inspect it from the parent.

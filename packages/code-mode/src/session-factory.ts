@@ -30,6 +30,7 @@ import {
 	isContextGuardActive,
 	readContextUsage,
 } from "./context-usage";
+import { formatProgressiveOutput } from "./progressive-output";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Session shape
@@ -304,13 +305,16 @@ function injectConsoleWake(session: CodeModeSession, deps: ExecutionDeps): void 
 	(session.context as any).console.wake = (...args: unknown[]) => {
 		const message = args.map(formatArg).join(" ");
 		try {
+			const wakeContent = formatProgressiveOutput("[CONSOLE.WAKE] " + message, {
+				filePrefix: "pi-console-wake",
+			}).text;
 			if (sendMsg) {
 				sendMsg(
-					{ customType: "console-wake", content: "[CONSOLE.WAKE] " + message, display: true },
+					{ customType: "console-wake", content: wakeContent, display: true },
 					{ deliverAs: "followUp", triggerTurn: true },
 				);
 			} else if (sendUser) {
-				sendUser(message, { deliverAs: "followUp" });
+				sendUser(wakeContent, { deliverAs: "followUp" });
 			}
 		} catch (err) {
 			session.logs.push(

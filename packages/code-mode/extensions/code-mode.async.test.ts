@@ -12,7 +12,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
 import codeModeExt from "../extensions/code-mode";
+import { MODEL_VISIBLE_OUTPUT_MAX_BYTES } from "../src/progressive-output";
 
 interface FakeTool {
 	name: string;
@@ -106,6 +108,33 @@ async function flushBackground(ms = 50): Promise<void> {
 }
 
 describe("execute_code { async: true }", () => {
+	test("hard-caps an oversized synchronous result before returning it", async () => {
+		const pi = makePi();
+		codeModeExt(pi as any);
+		const executeCode = pi.tools.get("execute_code");
+
+		const result = await executeCode.execute(
+			"tc-sync-overflow",
+			{ code: `console.log("s".repeat(${MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000}));` },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		const text = result.content.find((part: any) => part.type === "text")?.text ?? "";
+		expect(Buffer.byteLength(text, "utf-8")).toBeLessThanOrEqual(
+			MODEL_VISIBLE_OUTPUT_MAX_BYTES,
+		);
+		const fullOutputPath = text.match(/Full output saved to: (.+)\n/)?.[1];
+		expect(fullOutputPath).toBeDefined();
+		try {
+			expect(fs.readFileSync(fullOutputPath!, "utf-8")).toBe(
+				"s".repeat(MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000),
+			);
+		} finally {
+			if (fullOutputPath) fs.rmSync(fullOutputPath, { force: true });
+		}
+	});
+
 	test("returns immediately with a jobId and 'started' text", async () => {
 		const pi = makePi();
 		codeModeExt(pi as any);
@@ -165,6 +194,39 @@ describe("execute_code { async: true }", () => {
 		expect(followUp).toBeDefined();
 		expect(followUp?.content).toContain("failed");
 		expect(followUp?.content).toContain("boom from bg");
+	});
+
+	test("hard-caps the persisted async follow-up and saves its complete output", async () => {
+		const pi = makePi();
+		codeModeExt(pi as any);
+		const executeCode = pi.tools.get("execute_code");
+
+		await executeCode.execute(
+			"tc-async-overflow",
+			{ code: `console.log("a".repeat(${MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000}));`, async: true },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		await flushBackground(150);
+
+		const followUp = pi.sentMessages.find(
+			(m) => m.customType === "async-execute-code-result",
+		);
+		expect(followUp?.content).toBeDefined();
+		expect(Buffer.byteLength(followUp!.content!, "utf-8")).toBeLessThanOrEqual(
+			MODEL_VISIBLE_OUTPUT_MAX_BYTES,
+		);
+		const pathMatch = followUp!.content!.match(/Full output saved to: (.+)\n/);
+		expect(pathMatch?.[1]).toBeDefined();
+		const fullOutputPath = pathMatch![1];
+		try {
+			const fullOutput = fs.readFileSync(fullOutputPath, "utf-8");
+			expect(fullOutput).toContain("[async execute_code");
+			expect(fullOutput).toContain("a".repeat(MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000));
+		} finally {
+			fs.rmSync(fullOutputPath, { force: true });
+		}
 	});
 
 	test("a SYNC execute_code after an in-flight ASYNC one waits for it (mutex)", async () => {
@@ -466,6 +528,44 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		}
 	});
 
+	test("hard-caps an auto-promoted follow-up before persistence", async () => {
+		process.env.PI_CODE_MODE_PROMOTE_MS = "25";
+		let fullOutputPath: string | undefined;
+		try {
+			const pi = makePi();
+			codeModeExt(pi as any);
+			const executeCode = pi.tools.get("execute_code");
+
+			const promoted = await executeCode.execute(
+				"tc-promote-overflow",
+				{
+					code: `await new Promise((r) => setTimeout(r, 80)); console.log("p".repeat(${MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000}));`,
+				},
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(promoted.details.asyncStatus).toBe("running");
+			await flushBackground(200);
+
+			const followUp = pi.sentMessages.find(
+				(m) => m.customType === "async-execute-code-result",
+			);
+			expect(followUp?.content).toContain("auto-promoted from sync");
+			expect(Buffer.byteLength(followUp!.content!, "utf-8")).toBeLessThanOrEqual(
+				MODEL_VISIBLE_OUTPUT_MAX_BYTES,
+			);
+			fullOutputPath = followUp!.content!.match(/Full output saved to: (.+)\n/)?.[1];
+			expect(fullOutputPath).toBeDefined();
+			expect(fs.readFileSync(fullOutputPath!, "utf-8")).toContain(
+				"p".repeat(MODEL_VISIBLE_OUTPUT_MAX_BYTES + 5_000),
+			);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+			if (fullOutputPath) fs.rmSync(fullOutputPath, { force: true });
+		}
+	});
+
 	test("execute_code_async_list shows auto-promoted jobs in-flight", async () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
 		try {
@@ -727,4 +827,3 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 	});
 
 });
-

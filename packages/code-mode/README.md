@@ -21,9 +21,10 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Persistent `$` store** — variables survive across calls for the whole session. No time limit, no eviction — nothing is silently dropped. JSON-serializable vars also survive `reload_runtime` / pi restart-with-resume via a session-scoped disk snapshot (promises/functions are recreated, not restored).
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
-- **Timeout control** — configurable per-call (default 120s, max 600s)
+- **Timeout control** — unbounded by default, with an optional per-call deadline and automatic promotion of slow interactive calls to background work
 - **Errors don't kill your state** — `$` survives crashes. Pick up where you left off with `$.var`.
-- **Context management** — two-phase squash with auto-continue, context usage warnings, output truncation at 200KB
+- **Context management** — two-phase squash with auto-continue, context usage warnings, and hard-capped model-visible output
+- **Progressive output disclosure** — `execute_code` results and `console.wake()` messages are capped at 50KB or 2,000 lines; complete overflow is saved to a unique `/tmp` file with bounded `Read({ offset, limit })` instructions
 - **Background self-wake** — `console.wake()` lets background promises trigger new agent turns (worker monitoring, file watching, etc.)
 - **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox

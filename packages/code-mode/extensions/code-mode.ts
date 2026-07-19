@@ -23,8 +23,6 @@ import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 // (lazy-loaded) uses the same rtkDep.resolved for Bash() compaction.
 import "../src/rtk-dep";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 // Eagerly start Shiki loading via relative path (must match require() in renderCall)
 require("../../shared/src/tui-diff-renderer.ts");
 import { registerSandboxFn } from "../../shared/src/sandbox-registry";
@@ -50,6 +48,7 @@ import {
 } from "../src/context-usage";
 import { installCodeModeProcessGuard } from "../src/process-guard";
 import { awaitDeferredSquash, type DeferredSquashContext } from "../src/deferred-squash";
+import { formatProgressiveOutput } from "../src/progressive-output";
 
 // =============================================================================
 // Constants
@@ -58,7 +57,6 @@ import { awaitDeferredSquash, type DeferredSquashContext } from "../src/deferred
 // execute_code is UNBOUNDED by default. Callers opt into a deadline via params.timeout.
 // session-factory only installs the timeout race when executionTimeoutMs is a positive number.
 const SYNC_TIMEOUT_MS = 5_000; // 5s for parsing/setup
-const MAX_OUTPUT_LENGTH = 200_000; // 200KB output cap
 
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) return error.stack ?? error.message;
@@ -100,10 +98,12 @@ function surfaceCodeModeInternalError(
     "",
     formatUnknownError(error),
   ].join("\n");
-
   try {
+    const boundedBody = formatProgressiveOutput(body, {
+      filePrefix: "pi-code-mode-crash",
+    }).text;
     sendMessage(
-      { customType: "code-mode-crash", content: body, display: true },
+      { customType: "code-mode-crash", content: boundedBody, display: true },
       { deliverAs: "followUp", triggerTurn: true },
     );
   } catch {
@@ -696,7 +696,7 @@ export default function (pi: ExtensionAPI) {
       "Team coordination: teams({ action, tasks?, name?, message?, ... }). " +
       "Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
       "Namespaced callables: mesh.tell/ask/peers/view/broadcast/chat, editorOpen, editorState, gitAi. " +
-      "Use console.log() to return results.",
+      "Use console.log() to return results. Model-visible output is hard-capped; overflow is saved to /tmp with bounded Read guidance.",
     parameters: Type.Object({
       code: Type.String({
         description:
@@ -819,13 +819,6 @@ export default function (pi: ExtensionAPI) {
         if (ctxFooter) {
           text += "\n\n" + ctxFooter;
         }
-        if (text.length > MAX_OUTPUT_LENGTH) {
-          const tempFile = path.join(os.tmpdir(), `pi-codemode-${Date.now()}.log`);
-          fs.writeFileSync(tempFile, text, "utf-8");
-          text =
-            text.slice(0, MAX_OUTPUT_LENGTH) +
-            `\n\n[output truncated. Full output saved to: ${tempFile}]`;
-        }
         return text;
       };
 
@@ -850,7 +843,10 @@ export default function (pi: ExtensionAPI) {
           const body = buildResultText(result.output, result.error);
           const status = result.error ? "failed" : "completed";
           const durStr = result.duration < 1000 ? `${result.duration}ms` : `${(result.duration / 1000).toFixed(1)}s`;
-          const followUp = `[async execute_code ${jobId} ${status} · ${durStr}]\n\n${body}`;
+          const followUp = formatProgressiveOutput(
+            `[async execute_code ${jobId} ${status} · ${durStr}]\n\n${body}`,
+            { filePrefix: "pi-codemode-async" },
+          ).text;
           try {
             (pi as any).sendMessage?.(
               { customType: "async-execute-code-result", content: followUp, display: true },
@@ -935,7 +931,7 @@ export default function (pi: ExtensionAPI) {
       // so preserve the synchronous turn (including normal RLM/Ouija use). An explicit
       // `async: true` request remains available when a worker intentionally wants one.
       const workerOwnedTurn = process.env.PI_TEAMS_WORKER === "1";
-      const promoteMs = workerOwnedTurn ? undefined : getSyncPromoteThresholdMs();
+      const promoteMs = getSyncPromoteThresholdMs();
       let promoteHandle: ReturnType<typeof setTimeout> | undefined;
       let pollHandle: ReturnType<typeof setInterval> | undefined;
       let promoteReason = "timeout" as "timeout" | "blocked-confirm";
@@ -983,8 +979,10 @@ export default function (pi: ExtensionAPI) {
             const status = result.error ? "failed" : "completed";
             const durStr =
               result.duration < 1000 ? `${result.duration}ms` : `${(result.duration / 1000).toFixed(1)}s`;
-            const followUp =
-              `[async execute_code ${jobId} ${status} · ${durStr} · auto-promoted from sync]\n\n${body}`;
+            const followUp = formatProgressiveOutput(
+              `[async execute_code ${jobId} ${status} · ${durStr} · auto-promoted from sync]\n\n${body}`,
+              { filePrefix: "pi-codemode-async" },
+            ).text;
             try {
               (pi as any).sendMessage?.(
                 { customType: "async-execute-code-result", content: followUp, display: true },
@@ -1047,7 +1045,9 @@ export default function (pi: ExtensionAPI) {
       // winner.kind === "result" — normal sync return path.
       if (pendingExecution === syncMutex) pendingExecution = null;
       const { output, error, duration } = winner.r;
-      const text = buildResultText(output, error);
+      const text = formatProgressiveOutput(buildResultText(output, error), {
+        filePrefix: "pi-codemode",
+      }).text;
       const lineCount = text.split("\n").length;
       // Include any images stashed by readImage()
       const imageContent = getSession().images.map((img) => ({
