@@ -324,7 +324,7 @@ All of these are available inside `execute_code` as typed async functions:
 | `sleep(ms)` | Pause execution |
 | `man(name)` | Get help for any sandbox function |
 | `readImage({ path })` | Read image files (png, jpg, gif, webp) |
-| `maiCall({ args? })` | Run mai CLI commands (raw passthrough) |
+| `maiCall({ argv? })` | Run mai CLI commands with an exact process argument vector |
 | `mai.ticket/start/close/show/note/ls` | Structured WORK operations (tickets, open→closed) |
 | `mai.constraint/artifact/rules/supersede` | KNOWLEDGE constraint (born active) · RECORD artifact (born closed) · rules query · retire rule |
 | `mai.ticketLink(ticketId)` | Create a short Maiboard ticket link |
@@ -353,6 +353,21 @@ All of these are available inside `execute_code` as typed async functions:
 | `tldrDead({ path })` | Find dead functions |
 | `tldrArch({ path })` | Detect architecture layers |
 | `tldrImpact({ func, path })` | Find all callers |
+
+## Exact mai CLI arguments
+
+Use `maiCall({ argv })` for raw mai commands. `argv` is an exact child-process argument vector: each array element reaches mai unchanged, including whitespace, newlines, backslashes, quotes, empty strings, and text that resembles shell syntax.
+
+```javascript
+const body = await Read({ path: "/tmp/epic-body.md" });
+const result = await maiCall({
+  argv: ["-C", "../gso-prod", "edit", "gp-umo8jj80", "-d", body],
+});
+```
+
+There is no shell between code-mode and mai. Do not use `$(cat ...)`, add shell quotes, or `JSON.stringify()` a dynamic value. Read or construct the value in JavaScript and place it directly in `argv`.
+
+The legacy `args` string remains accepted for existing static calls, but it is shell-tokenized and must not carry dynamic content.
 
 ## Maiboard ticket links
 

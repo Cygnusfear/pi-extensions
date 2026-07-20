@@ -39,6 +39,7 @@ import {
 import { formatManPage } from "./tool-reference";
 import type { SandboxContext } from "./types";
 import { rtkDep } from "./rtk-dep";
+import { createMaiCall, type MaiCallInput } from "./mai-call";
 
 // ─── rtk integration (Arch A: native rtk compaction, raw via failure-tee) ─────────
 // rtk (https://github.com/rtk-ai/rtk) is a CLI proxy that compacts noisy dev-command
@@ -167,7 +168,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     };
   }
 
-  type MaiFn = (input?: { args?: string; cwd?: string }) => Promise<{ stdout: string; exitCode: number }>;
+  type MaiFn = (input?: MaiCallInput) => Promise<{ stdout: string; exitCode: number }>;
   type MaiNs = MaiFn & {
     /** Create a structured ticket with optional Goal/AC/Verification body. */
     ticket: (input: {
@@ -210,12 +211,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     reclass: (id: string, kind: string, opts?: { cwd?: string }) => Promise<{ ok: boolean }>;
   };
 
-  const mai: MaiNs = (async ({ args = "ls", cwd: explicitCwd }: { args?: string; cwd?: string } = {}) => {
-    const dir = maiResolveDir(explicitCwd);
-    const result = await maiRun(splitShellArgs(args), dir);
-    const stdout = (result.stdout || "") + (result.stderr ? "\n" + result.stderr : "");
-    return { stdout: stdout.trim(), exitCode: result.status ?? 1 };
-  }) as MaiNs;
+  const mai = createMaiCall(maiRun, maiResolveDir, splitShellArgs) as MaiNs;
 
   mai.ticket = async ({
     title, description, tags,
@@ -1250,7 +1246,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // non-enumerable function internals (length, name), yielding the
     // non-callable namespace the declarations describe.
     mai: { ...mai },
-    maiCall: mai,  // raw callable passthrough: maiCall({ args: "ls" })
+    maiCall: mai,  // exact CLI argv: maiCall({ argv: ["ls"] })
     maiTicket: mai.ticket,  // backward compat
 
     // brave — spread methods off the callable so this namespace can't drift.

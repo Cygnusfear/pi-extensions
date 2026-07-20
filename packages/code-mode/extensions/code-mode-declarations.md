@@ -409,12 +409,37 @@ declare function WebFetch(input: {
 /** Pause execution for the given number of milliseconds. */
 declare function sleep(ms: number): Promise<void>;
 
-/** Run any mai command raw. */
-declare function maiCall(input?: { args?: string; cwd?: string }): Promise<{ stdout: string; exitCode: number }>;
+/**
+ * Run a mai CLI command.
+ *
+ * Use `argv` for every new call. Each element is passed to the mai process
+ * unchanged: whitespace, newlines, backslashes, quotes, and shell-shaped text
+ * remain part of that single argument. No shell expansion occurs.
+ *
+ * @example
+ * const body = await Read({ path: "/tmp/epic-body.md" });
+ * await maiCall({
+ *   argv: ["-C", "../gso-prod", "edit", "gp-umo8jj80", "-d", body],
+ * });
+ */
+declare function maiCall(input?:
+  | {
+      argv?: readonly string[];
+      /** @deprecated Use argv. String command text cannot safely carry dynamic values. */
+      args?: never;
+      cwd?: string;
+    }
+  | {
+      /** @deprecated Use argv. String command text cannot safely carry dynamic values. */
+      args: string;
+      argv?: never;
+      cwd?: string;
+    }
+): Promise<{ stdout: string; exitCode: number }>;
 
 /**
  * mai — maitake CLI integration. Methods for common operations.
- * For raw CLI passthrough, use maiCall({ args: "ls" }).
+ * For exact CLI argument transport, use maiCall({ argv: ["ls"] }).
  *
  * Notes carry an epistemic CLASS. Pick the right creator:
  *   WORK      mai.ticket()     open → closed   shows in mai.ls() (the work queue)
@@ -425,7 +450,7 @@ declare function maiCall(input?: { args?: string; cwd?: string }): Promise<{ std
  *
  * @example
  * // Raw passthrough
- * await maiCall({ args: "ls" });
+ * await maiCall({ argv: ["ls"] });
  *
  * // Create a structured ticket with Goal/AC/Verification
  * const t = await mai.ticket({
