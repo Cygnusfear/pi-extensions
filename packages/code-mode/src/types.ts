@@ -6,6 +6,10 @@
 export interface SandboxContext {
   cwd: string;
   images: Array<{ data: string; mimeType: string }>;
+  /** Current model — used by image-prepare to size attachments to the request budget */
+  model?: { provider: string; id: string };
+  /** Model registry — resolves model compat (e.g. maxRequestBodyBytes) for image budgeting */
+  modelRegistry?: unknown;
   /** Optional UI confirm dialog — when available, git-safety shows interactive prompt */
   confirmFn?: (title: string, body: string) => Promise<boolean>;
   /** Optional log function — writes to sandbox console output */

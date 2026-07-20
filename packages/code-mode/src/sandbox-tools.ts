@@ -37,6 +37,13 @@ import {
   splitShellArgs,
 } from "./shell-utils";
 import { formatManPage } from "./tool-reference";
+import {
+  formatImageLoadedNote,
+  formatImageScaledNote,
+  formatImageTooLargeError,
+  prepareImageForAttachment,
+  resolveImageBudgetBytes,
+} from "./image-prepare";
 import type { SandboxContext } from "./types";
 import { rtkDep } from "./rtk-dep";
 import { createMaiCall, type MaiCallInput } from "./mai-call";
@@ -85,7 +92,7 @@ export function rtkSplitTee(compacted: string): { compacted: string; raw: string
 // ──────────────────────────────────────────────────────────────────────────────────
 
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
-  const { cwd, images, signal, sessionManager } = ctx;
+  const { cwd, images, signal, sessionManager, model, modelRegistry } = ctx;
   const turndown = new TurndownService({
     headingStyle: "atx",
     hr: "---",
@@ -1018,11 +1025,19 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       const isBinary = isBinaryContent(buffer);
 
       if (isBinary) {
-        // Image files: base64 encode and attach like readImage does
+        // Image files: budget-check, auto-scale if needed, and attach like readImage does
         if (imageMime) {
-          const base64 = buffer.toString("base64");
-          images.push({ data: base64, mimeType: imageMime });
-          return "Read image file [" + imageMime + "] (" + path.basename(resolved) + ", " + Math.round(buffer.length / 1024) + "KB)";
+          const budgetBytes = resolveImageBudgetBytes(model, modelRegistry);
+          const prepared = await prepareImageForAttachment(buffer, imageMime, budgetBytes);
+          const fileName = path.basename(resolved);
+          if (!prepared) {
+            return formatImageTooLargeError(fileName, buffer.length, budgetBytes);
+          }
+          images.push({ data: prepared.data, mimeType: prepared.mimeType });
+          const note = prepared.wasResized
+            ? formatImageScaledNote(fileName, prepared, buffer.length, budgetBytes)
+            : formatImageLoadedNote(fileName, imageMime, buffer.length);
+          return "Read image file [" + prepared.mimeType + "] " + note;
         }
         // Other binary files: return a clear description instead of garbled bytes
         // Try to detect the actual type from magic bytes for a better message
@@ -1462,17 +1477,16 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         throw new Error("Unsupported image type: " + ext + ". Supported: png, jpg, gif, webp");
       }
       const buffer = fs.readFileSync(resolved);
-      const base64 = buffer.toString("base64");
-      images.push({ data: base64, mimeType });
-      return (
-        "Image loaded: " +
-        path.basename(resolved) +
-        " (" +
-        mimeType +
-        ", " +
-        Math.round(buffer.length / 1024) +
-        "KB)"
-      );
+      const budgetBytes = resolveImageBudgetBytes(model, modelRegistry);
+      const prepared = await prepareImageForAttachment(buffer, mimeType, budgetBytes);
+      const fileName = path.basename(resolved);
+      if (!prepared) {
+        return formatImageTooLargeError(fileName, buffer.length, budgetBytes);
+      }
+      images.push({ data: prepared.data, mimeType: prepared.mimeType });
+      return prepared.wasResized
+        ? formatImageScaledNote(fileName, prepared, buffer.length, budgetBytes)
+        : formatImageLoadedNote(fileName, mimeType, buffer.length);
     },
 
     // =====================================================================

@@ -868,6 +868,8 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 	const rawBindings = createToolBindings({
 		cwd: deps.cwd,
 		images: session.images,
+		model: deps.model,
+		modelRegistry: deps.modelRegistry,
 		confirmFn: deps.confirmFn,
 		logFn: (msg: string) => session.logs.push(msg),
 		signal: deps.signal,

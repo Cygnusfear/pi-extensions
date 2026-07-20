@@ -49,6 +49,7 @@
         "@pi-extensions/runbooks": "*",
         "@pi-extensions/shared": "*",
         "@pi-extensions/tldr-code": "*",
+        "@silvia-odwyer/photon-node": "0.3.4",
         "turndown": "*",
       },
       "peerDependencies": {
