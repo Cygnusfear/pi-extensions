@@ -1,0 +1,30 @@
+packages/code-mode/README.md
+  s_c80280c75e1308::t_d88e63fc55e79e 327,357-370
+  s_c80280c75e1308::t_3999852f516fde 371
+packages/code-mode/src/sandbox-tools.ts
+  s_c80280c75e1308::t_473e2fa1d05482 42,171,214,1249
+packages/code-mode/src/mai-call.test.ts
+  s_c80280c75e1308::t_764474d3ede400 22
+  s_c80280c75e1308::t_5013dd1fd53df7 8,90-99
+  s_c80280c75e1308::t_b49a828b206e82 1-7,9-21,23-89,100-110
+packages/code-mode/extensions/code-mode-declarations.md
+  s_c80280c75e1308::t_59f3b312712515 412-438,442,453
+packages/code-mode/src/mai-call.ts
+  s_c80280c75e1308::t_502a3832c7e092 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.14",
+  "base_commit_sha": "b454644a2290cf18076d90f5ab18e6d1f5abae28",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "kimi-coding/k3"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
