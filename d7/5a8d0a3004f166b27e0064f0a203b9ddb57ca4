@@ -1,0 +1,25 @@
+packages/continue-later/package.json
+  s_c80280c75e1308::t_c905d1aefbefe4 1-14
+packages/continue-later/src/continue-later.test.ts
+  s_c80280c75e1308::t_53f2955090761b 1-119
+packages/continue-later/extensions/continue-later.ts
+  s_c80280c75e1308::t_8068f078305a6d 1-77
+packages/continue-later/src/continue-later.ts
+  s_c80280c75e1308::t_64cce016b8e30c 1-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "d75a8d0a3004f166b27e0064f0a203b9ddb57ca4",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "kimi-coding/k3"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
