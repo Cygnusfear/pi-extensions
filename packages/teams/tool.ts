@@ -7,7 +7,7 @@ import { Type } from "@sinclair/typebox";
 import { formatRuntimeSummary } from "./activity.js";
 import type { TeamLeader } from "./leader.js";
 import { resolveTemplate, listTemplates } from "@pi-extensions/shared/team-templates";
-import { resolve as resolveModelRole, type ResolverContext } from "../model-router/src/router.js";
+import { resolve as resolveModelRole, checkModelHealth, livenessExpiry, type ResolverContext } from "../model-router/src/router.js";
 import { projectWidgetStatus } from "./widget.js";
 import type { SessionSelector } from "./session-adoption.js";
 
@@ -415,6 +415,22 @@ async function runTeamsAction(
         if (tmpl.freeform) freeform = true;
       }
       if (task.persistent) freeform = true;
+
+      // Rate-limit liveness gate: never spawn a worker on a flagged model.
+      // Applies to literal pins AND template-resolved models — a flagged model
+      // fails guaranteed and burns money.
+      if (effectiveModel) {
+        const health = checkModelHealth(effectiveModel);
+        if (!health.healthy) {
+          const expiry = health.entry ? (livenessExpiry(health.entry)?.toISOString() ?? "unknown") : "unknown";
+          results.push(
+            `✗ "${workerName}": model ${effectiveModel} is FLAGGED UNAVAILABLE (${health.entry?.reason ?? "unknown"}, expires ${expiry}). ` +
+              "Delegating it would fail guaranteed and burn money. Use a template role (the router skips flagged models) " +
+              "or another healthy model — check modelRouter.isAvailable first.",
+          );
+          continue;
+        }
+      }
 
       const templateName = task.template ?? "";
       const templateTags = templateName ? (TEMPLATE_INSTRUCTION_TAGS[templateName] ?? [`template-${templateName}`]) : [];

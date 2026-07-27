@@ -52,8 +52,12 @@ export interface LivenessEntry {
 	reason: string;
 	/** ISO timestamp when it was marked. */
 	markedAt: string;
-	/** Seconds until it auto-expires. Default 1800 (30 min). */
+	/** Seconds until it auto-expires. Default 1800 (30 min), escalates on repeat marks. */
 	ttlSeconds: number;
+	/** How many times this model was marked within the escalation window. */
+	markCount?: number;
+	/** ISO timestamp of the first mark in the current escalation window. */
+	firstMarkedAt?: string;
 }
 
 /** Model-like interface — what the registry provides. */

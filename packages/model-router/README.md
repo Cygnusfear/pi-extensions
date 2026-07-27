@@ -76,6 +76,23 @@ On `before_agent_start`, the extension resolves all roles and injects a table in
 
 Agents see role names and currently-resolved IDs — never stale hardcoded versions.
 
+## Rate-limit liveness (blocking)
+
+Once a model hits a rate limit it is flagged unavailable until it provably works again:
+
+- **Flag** — the extension's `message_end` hook flags any assistant error matching rate-limit/quota patterns (429, rate limit, insufficient_quota, usage/credit/plan limits). Repeat marks within 24h double the TTL (30 min base, 8h cap).
+- **Block** — `resolve()` skips flagged models, and teams delegation refuses to spawn on a flagged model even with a literal pin. The system prompt lists flagged models and the hard rules.
+- **Heal** — a successful assistant response for a flagged model clears the flag. The TTL is only a backstop.
+
+```javascript
+// Check a model before pinning it anywhere
+await modelRouter.isAvailable("anthropic/claude-opus-5");
+// → { id, available: false, reasons: ["unhealthy: rate_limited ... (expires ...)"] }
+
+// Flag a model that just rate-limited on you — you owe the swarm that signal
+await modelRouter.markUnhealthy({ id: "kimi-coding/k3", reason: "rate_limited" });
+```
+
 ## Files
 
 - `~/.pi/agent/team-templates.json` — role definitions (source of truth)

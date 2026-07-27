@@ -179,16 +179,75 @@ export interface MarkUnhealthyOptions {
 	ttlSeconds?: number;
 }
 
-/** Mark a model as unhealthy. Auto-expires after ttlSeconds. */
+// ── Rate-limit classification + escalating bans ─────────────────────────────
+//
+// Once a model EVER hits a rate limit it is flagged unavailable until it
+// provably works again (an observed success clears the flag via markHealthy).
+// Repeat marks within the escalation window double the TTL, capped, so a model
+// that keeps flapping backs off instead of churning paid retries.
+
+const BASE_UNHEALTHY_TTL_SECONDS = 1800; // 30 min
+const MAX_UNHEALTHY_TTL_SECONDS = 28800; // 8 h
+const ESCALATION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 h
+
+const RATE_LIMIT_PATTERNS = [
+	/\brate[-_ ]?limit(?:ed|ing)?\b/i,
+	/\brate[-_ ]?limit_/i,
+	/\b429\b/,
+	/too many requests/i,
+	/insufficient[_ ]quota/i,
+	/exceeded your current quota/i,
+	/usage (?:limit|cap)(?: reached)?/i,
+	/credit balance/i,
+	/insufficient credits/i,
+	/billing (?:limit|cycle)/i,
+	/plan limit/i,
+	/account limit/i,
+];
+
+/** True when an assistant error message indicates rate limiting or quota exhaustion. */
+export function classifyRateLimitError(message: string): boolean {
+	return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/** Health of one model from the liveness store. */
+export function checkModelHealth(fullId: string): { healthy: boolean; entry?: LivenessEntry } {
+	const store = loadLiveness();
+	const key = fullId.toLowerCase();
+	const entry = store[key];
+	if (!entry) return { healthy: true };
+	if (!isUnhealthy(store, key)) return { healthy: true };
+	return { healthy: false, entry };
+}
+
+/** Expiry instant of a liveness entry, or undefined if malformed. */
+export function livenessExpiry(entry: LivenessEntry): Date | undefined {
+	const marked = new Date(entry.markedAt).getTime();
+	if (!Number.isFinite(marked)) return undefined;
+	return new Date(marked + entry.ttlSeconds * 1000);
+}
+
+/** Mark a model as unhealthy. Auto-expires after ttlSeconds; repeat marks within
+ *  24h double the TTL (30m base, 8h cap) unless ttlSeconds is given explicitly. */
 export function markUnhealthy(opts: MarkUnhealthyOptions): LivenessEntry {
 	const store = loadLiveness();
+	const key = opts.id.toLowerCase();
+	const existing = store[key];
+	const firstMarkedAt = existing?.firstMarkedAt ?? existing?.markedAt;
+	const withinWindow =
+		firstMarkedAt !== undefined && Date.now() - new Date(firstMarkedAt).getTime() < ESCALATION_WINDOW_MS;
+	const markCount = withinWindow ? (existing?.markCount ?? 1) + 1 : 1;
 	const entry: LivenessEntry = {
 		id: opts.id,
 		reason: opts.reason,
 		markedAt: new Date().toISOString(),
-		ttlSeconds: opts.ttlSeconds ?? 1800,
+		ttlSeconds:
+			opts.ttlSeconds ??
+			Math.min(BASE_UNHEALTHY_TTL_SECONDS * 2 ** (markCount - 1), MAX_UNHEALTHY_TTL_SECONDS),
+		markCount,
+		firstMarkedAt: withinWindow ? firstMarkedAt : new Date().toISOString(),
 	};
-	store[opts.id.toLowerCase()] = entry;
+	store[key] = entry;
 	saveLiveness(store);
 	return entry;
 }

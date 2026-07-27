@@ -15,9 +15,12 @@ import {
 	getLiveness,
 	clearLiveness,
 	loadAllRoles,
+	checkModelHealth,
+	livenessExpiry,
 	type ResolverContext,
 	type MarkUnhealthyOptions,
 } from "../src/router.js";
+import { observeAssistantMessage } from "../src/observe.js";
 import type { ResolveResult, LivenessEntry } from "../src/types.js";
 
 function makeResolverContext(ctx: any): ResolverContext {
@@ -64,10 +67,36 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		lines.push("");
+
+		// ── Blocking availability rules (rate-limit liveness) ────────────────
+		const flagged = getLiveness();
+		lines.push("## Model availability (BLOCKING)");
+		if (flagged.length > 0) {
+			lines.push("These models are FLAGGED UNAVAILABLE — they rate-limited and will fail again if used:");
+			for (const entry of flagged) {
+				const expiry = livenessExpiry(entry)?.toISOString() ?? "unknown";
+				lines.push(`- ✗ ${entry.id} — ${entry.reason} (flagged ${entry.markedAt}, expires ${expiry})`);
+			}
+		} else {
+			lines.push("No models are currently flagged unavailable.");
+		}
+		lines.push("");
+		lines.push("HARD RULES — violating them burns money on guaranteed failures:");
+		lines.push("- NEVER delegate, pin, or switch to a flagged model. It WILL fail again.");
+		lines.push("- Before pinning ANY literal model, check it: `await modelRouter.isAvailable(\"provider/model\")`.");
+		lines.push("- If ANY model call fails on you with a rate-limit/quota error, flag it immediately: `await modelRouter.markUnhealthy({ id: \"provider/model\", reason: \"rate_limited\" })`. You owe the swarm that signal.");
+		lines.push("- Prefer template roles over literal model pins — the router skips flagged models automatically.");
+		lines.push("");
 		lines.push("In code-mode: `const result = await modelRouter.resolve({ role: 'review', count: 3 });`");
 		lines.push("In teams delegate: use `template: 'review'` — the leader resolves the model via the router.");
 
 		return { systemPrompt: event.systemPrompt + lines.join("\n") };
+	});
+
+	// ── Rate-limit liveness: flag on failure, heal on success ────────────────
+
+	pi.on("message_end", async (event) => {
+		observeAssistantMessage(event.message as Parameters<typeof observeAssistantMessage>[0]);
 	});
 
 	// ── Sandbox callable ─────────────────────────────────────────────────
@@ -88,6 +117,23 @@ export default function (pi: ExtensionAPI) {
 
 		(fn as any).markHealthy = async (id: string) => {
 			return markHealthy(id);
+		};
+
+		(fn as any).isAvailable = async (id: string) => {
+			const normalized = id.toLowerCase();
+			const availableModels = resolverCtx.getAvailable();
+			const bareId = normalized.includes("/") ? normalized.slice(normalized.indexOf("/") + 1) : normalized;
+			const hasKey = availableModels.some(
+				(m) => `${m.provider}/${m.id}`.toLowerCase() === normalized || m.id.toLowerCase() === bareId,
+			);
+			const health = checkModelHealth(normalized);
+			const reasons: string[] = [];
+			if (!hasKey) reasons.push("no_api_key");
+			if (!health.healthy) {
+				const expiry = health.entry ? (livenessExpiry(health.entry)?.toISOString() ?? "unknown") : "unknown";
+				reasons.push(`unhealthy: ${health.entry?.reason ?? "unknown"} (expires ${expiry})`);
+			}
+			return { id, available: hasKey && health.healthy, reasons };
 		};
 
 		(fn as any).liveness = async () => {
