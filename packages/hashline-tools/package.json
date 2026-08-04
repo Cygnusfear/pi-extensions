@@ -2,6 +2,10 @@
   "name": "@pi-extensions/hashline-tools",
   "version": "0.0.1",
   "type": "module",
+  "exports": {
+    "./core": "./src/hashline-core.ts",
+    "./hands": "./src/hashline-hands.ts"
+  },
   "keywords": [
     "pi-package"
   ],
@@ -19,6 +23,7 @@
     "@pi-extensions/shared": "*"
   },
   "files": [
-    "extensions"
+    "extensions",
+    "src"
   ]
 }

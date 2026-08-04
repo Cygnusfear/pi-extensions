@@ -1,8 +1,8 @@
 # @pi-extensions/hashline-tools
 
-File editing with cryptographic verification — every line gets a hash anchor, and edits are rejected if the file changed since you last read it.
+File editing with cryptographic anchors — every line gets a hash anchor, and adapters perform a version check within an explicitly declared consistency domain before writing.
 
-This solves the race condition that plagues naive LLM editing: the agent reads a file, generates edits, but by the time the edit is applied, something else (a formatter, a parallel agent, the human) has modified the file. Without verification, edits silently overwrite unrelated changes. Hashline tools catch this every time.
+This prevents stale anchors and catches changes visible when the adapter performs its version check. The local Node adapter serializes cooperating in-process hashline writes and declares `process-local-optimistic` consistency; it cannot fence an unrelated formatter, process, or human write that races after that check. Storage adapters may declare `storage-atomic` only when compare-and-swap is atomic inside their declared resource namespace.
 
 ## How it works
 
@@ -36,7 +36,7 @@ The hash is the first byte of SHA-1 of the **whitespace-normalized** line conten
 Error: set_line anchor mismatch at line 4: expected d2, got f8. Re-read the file and retry.
 ```
 
-This forces the agent to re-read the file and regenerate edits based on the current content — never blindly overwriting.
+This forces the agent to re-read and regenerate edits from the current content. The adapter consistency declaration still determines what concurrent writers are fenced.
 
 ## Usage
 
@@ -113,9 +113,8 @@ await hashEdit({
 
 ```typescript
 function computeLineHash(line: string): string {
-  const normalized = line.replace(/\s+/g, "");  // remove ALL whitespace
-  const digest = crypto.createHash('sha1').update(normalized).digest();
-  return digest.subarray(0, 1).toString('hex');  // first byte → 2 hex chars
+  const normalized = line.replace(/\s+/g, "");
+  return sha1Hex(normalized).slice(0, 2);
 }
 ```
 
@@ -133,7 +132,19 @@ If the original lines contain escaped backticks (\`) but the replacement text ha
 
 ### Diff output
 
-On successful edits, `hash_edit` generates a unified diff (via the system `diff` command) and includes it in the result. The TUI renders this diff with Shiki syntax highlighting.
+On successful local edits, `hash_edit` generates a unified diff via the system `diff` command and includes it in the result. Exit status 1 is the expected “files differ” result; missing binaries, timeouts, temporary-file failures, and other execution errors are rethrown instead of being misreported as an empty diff. The TUI renders the diff with Shiki syntax highlighting.
+
+### Adapter contract
+
+`HashlineHands` exposes two independent declarations:
+
+- **Authority:** `host-filesystem` preserves local Pi's existing path behavior, including absolute paths; `resource-namespace` names an adapter-owned logical scope that must reject traversal.
+- **Consistency:** `process-local-optimistic` serializes cooperating calls only; `storage-atomic` guarantees version compare-and-swap inside the declared resource namespace.
+
+`HashReadOutcome.version` is opaque. A host caller can pass it back as `HashEditInput.expectedVersion`; `runHashEdit` then forwards that exact version to the adapter so an intervening write is rejected before state changes.
+
+All adapters must honor cancellation and return explicit failures. Authority does not imply atomicity, and consistency does not silently widen path access.
+
 
 ## When to use hashline tools vs apply_patch
 
@@ -146,14 +157,16 @@ Both can coexist — use `hash_read`/ `hash_edit` for safety-critical edits on a
 
 | File | Purpose |
 |------|---------|
-| `extensions/hashline-tools.ts` | `hash_read` and `hash_edit` tool registration and implementation |
+| `src/hashline-core.ts` | Runtime-neutral hashing, anchors, validation, and edit semantics |
+| `src/hashline-hands.ts` | Typed authority/consistency/read/version/write port and shared tool orchestration |
+| `extensions/hashline-tools.ts` | Local Pi Node filesystem, diff, cancellation, and TUI adapter |
 
 ## Dependencies
 
 - `@earendil-works/pi-coding-agent` — core extension API, TUI rendering
 - `@pi-extensions/shared` — diff renderer, tool UI utils
 - `@sinclair/typebox` — parameter schema types
-- `crypto` (Node.js built-in) — SHA-1 hash computation
+- No Node dependency in the shared core; it contains a synchronous workerd-safe SHA-1 implementation. The local adapter uses Node filesystem/process APIs and never enters Worker bundles.
 
 ## Setup
 

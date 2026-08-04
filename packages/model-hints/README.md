@@ -30,6 +30,11 @@ When delegating to workers or switching models, prefer these (newest per family)
 
 This ensures that when an agent delegates to a worker or suggests a model switch, it uses current IDs instead of ones it was trained on.
 
+## Runtime sharing
+
+`src/model-hints-core.ts` owns the deterministic transformation and has no Node, Bun, process, filesystem, or TUI dependency. The local Pi entrypoint and the Durable Object portable host call that same function. The local registration harness asserts byte-exact output against the core, while the Worker bundle gate rejects local-adapter leakage.
+
+
 ## Setup
 
 No setup required. Works automatically with any configured models.

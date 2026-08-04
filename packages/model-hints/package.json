@@ -2,6 +2,9 @@
   "name": "@pi-extensions/model-hints",
   "version": "0.0.1",
   "type": "module",
+  "exports": {
+    "./core": "./src/model-hints-core.ts"
+  },
   "keywords": [
     "pi-package"
   ],
@@ -16,7 +19,8 @@
     "@sinclair/typebox": "*"
   },
   "files": [
-    "extensions"
+    "extensions",
+    "src"
   ],
   "dependencies": {
     "@pi-extensions/shared": "*"
