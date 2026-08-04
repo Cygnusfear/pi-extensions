@@ -1,0 +1,38 @@
+packages/hashline-tools/README.md
+  h_59730e3e3c55ed 3,5,39,116-117,135-147,160-162,169
+packages/hashline-tools/extensions/hashline-tools.test.ts
+  h_59730e3e3c55ed 1-134
+packages/hashline-tools/extensions/hashline-tools.ts
+  h_59730e3e3c55ed 2,4-8,15,29,31,35,37-39,42,47-48,51-58,61-71,73-78,82-110,120,133-138,141-142,144-147,151-153,156,169-174,176-186
+packages/hashline-tools/package.json
+  h_59730e3e3c55ed 5-8,26-27
+packages/hashline-tools/src/hashline-core.test.ts
+  h_59730e3e3c55ed 1-49
+packages/hashline-tools/src/hashline-core.ts
+  h_59730e3e3c55ed 1-185
+packages/hashline-tools/src/hashline-hands.test.ts
+  h_59730e3e3c55ed 1-77
+packages/hashline-tools/src/hashline-hands.ts
+  h_59730e3e3c55ed 1-139
+packages/model-hints/README.md
+  h_59730e3e3c55ed 33-37
+packages/model-hints/extensions/model-hints.ts
+  h_59730e3e3c55ed 2,5,8-10
+packages/model-hints/package.json
+  h_59730e3e3c55ed 5-7,22-23
+packages/model-hints/src/model-hints-core.test.ts
+  h_59730e3e3c55ed 1-62
+packages/model-hints/src/model-hints-core.ts
+  h_59730e3e3c55ed 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "aea6ec305f8cdbd8702d19053f11918e6048c000",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
