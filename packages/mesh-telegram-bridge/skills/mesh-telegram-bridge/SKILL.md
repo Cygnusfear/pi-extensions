@@ -32,7 +32,7 @@ await mesh.tell({ sessionId: "The Hooman", message: { text: "hi" } });
 
 ## 2. You have your own topic
 
-Ramdock is a **forum**. The bridge auto-creates a **topic per agent**, named `YourNickname · YourSessionName`.
+Ramdock is a **forum**. The bridge auto-creates a **topic per agent**, titled exactly **`<session name> <agent name>`** (e.g. `Build Lisa Nova`) — a single space, no middle dot. Existing topics are reconciled to this title automatically on first contact or when a peer announces.
 
 - **Your tells → your topic.** A `👤 YourNickname` header is prepended; long text is chunked at 4000 chars.
 - **The Hooman's reply in your topic → you** (arrives as an inbound tell).
@@ -60,7 +60,7 @@ await mesh.tell({ sessionId: ID, message: { message: "done" } });            // 
 Attach a **local file path**. The bridge reads the file from disk and uploads it into your topic.
 
 ```javascript
-// image + caption → sendPhoto (rendered inline)
+// image + accompanying text → normal text first, then sendPhoto (rendered inline)
 await mesh.tell({ sessionId: ID, message: { image: "/tmp/render.png", text: "here's the render:" } });
 
 // any file → sendDocument
@@ -71,9 +71,13 @@ await mesh.tell({ sessionId: ID, message: { file: "/tmp/report.pdf" } });
 
 **Photo vs document:** `.png .jpg .jpeg .gif .webp .bmp` → sent as a **photo**. Anything else → sent as a **document**.
 
+**Text is not the native media caption.** `text` is sent as an ordinary Telegram message **before** the attachment. The bridge creates the small media caption from your nickname.
+
 **One attachment per tell.** Two images = two tells.
 
 **⚠️ Finish writing the file before you send.** The bridge waits for the file size to stabilize (up to 8s) AND verifies the format's end marker (PNG `IEND`, JPG `FF D9`, GIF `3B`, WEBP `RIFF…WEBP`, BMP `BM`). A render still being written, or a truncated file, is **skipped** and a `⚠️ hadn't finished rendering — resend` notice is posted. Rule: **write the file to completion, then send the tell** — never `mesh.tell` from inside a mid-write.
+
+**Receipt boundary:** the `mesh.tell` delivery receipt confirms that the bridge received the Mesh tell. It does **not** confirm that Telegram accepted/uploaded the attachment or that the Hooman saw it; upload errors are logged by the bridge.
 
 ---
 
@@ -96,6 +100,8 @@ Aliases: `reaction` · `react` · `emoji`. Must be a **Telegram-allowed emoji** 
 The newest 2,000 agent-message routes are persisted, so reactions on recent messages continue to relay after a normal bridge restart.
 
 (Reactions on the Hooman's *own* messages don't relay — only reactions on agent-sent messages do.)
+
+**Retention.** The forum's auto-delete is set to **1 day** (86,400s). The bridge ALSO owns a 24h sweep that deletes its own outbound messages by their exact `(chatId, messageId)` once they age out, as a defence-in-depth backstop. Telegram auto-delete is forward-only and the Bot API cannot set the timer or safely enumerate historic traffic, so messages that predate the timer (or bridge-owned messages lacking a ledgered chat id/timestamp) must be cleared in the Telegram client — the bot will not blind-delete them.
 
 ---
 
@@ -149,4 +155,4 @@ Things the Hooman types in Telegram — you don't run them, but they explain beh
 
 ## Reference
 
-Source: `packages/mesh-telegram-bridge/src/{bridge.ts, bridge-state.ts, telegram-values.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, OpenRouter key) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Topic↔agent state and the bounded recent-message reaction routes persist in `~/.config/mesh-telegram-bridge/state.json` (mode 600). Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.
+Source: `packages/mesh-telegram-bridge/src/{bridge.ts, bridge-state.ts, topic-routes.ts, message-retention.ts, telegram-values.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, OpenRouter key) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Topic↔agent state and the bounded recent-message reaction routes persist in `~/.config/mesh-telegram-bridge/state.json` (mode 600). Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.

@@ -361,6 +361,41 @@ describe("episode state machine", () => {
 		};
 	}
 
+	test("emits exactly one structured Telegram relay across auto_retry_start -> turn_end(error) -> auto_retry_end(false)", () => {
+		const h = makeHarness();
+		const relays: Array<{ sessionId: string; text: string }> = [];
+		const priorMesh = (globalThis as { __piMesh?: unknown }).__piMesh;
+		process.env.HOOMAN_MESH_ID = "rate-limit-episode-test-hooman";
+		(globalThis as { __piMesh?: { tell: (sessionId: string, text: string) => void } }).__piMesh = {
+			tell: (sessionId, text) => relays.push({ sessionId, text }),
+		};
+		const ext = require("../extensions/rate-limit-recovery.ts");
+		h.start(ext);
+		h.installStubs();
+		try {
+			h.fire("auto_retry_start", {
+				type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2_000,
+				errorMessage: "429 rate_limit_error", providerError: { status: 429, headers: { "retry-after": "60" } },
+			});
+			h.fire("turn_end", {
+				type: "turn_end",
+				message: { stopReason: "error", errorMessage: "429 rate_limit_error", providerError: { status: 429, headers: { "retry-after": "60" } } },
+			});
+			h.fire("auto_retry_end", {
+				type: "auto_retry_end", success: false, attempt: 3,
+				finalError: "429 rate_limit_error", providerError: { status: 429, headers: { "retry-after": "60" } },
+			});
+			expect(relays).toHaveLength(1);
+			expect(relays[0]?.sessionId).toBe("rate-limit-episode-test-hooman");
+			expect(relays[0]?.text).toContain("rate-limited");
+			expect(h.scheduled).toEqual([62_000, 122_000, 182_000]);
+		} finally {
+			h.restore();
+			(globalThis as { __piMesh?: unknown }).__piMesh = priorMesh;
+		}
+	});
+
+
 	test("transient rate-limit exhaustion schedules header-derived continues", () => {
 		const h = makeHarness();
 		// eslint-disable-next-line @typescript-eslint/no-require-imports

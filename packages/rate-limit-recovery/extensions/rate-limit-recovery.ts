@@ -52,7 +52,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { requestStage, getActiveStage } from "../../shared/src/stage-control.ts";
 import { fireNotification } from "../../shared/src/desktop-notify.ts";
-import { relayToHooman } from "../../shared/src/relay-to-hooman.ts";
+import { relayProviderLimitNotice } from "../../shared/src/relay-to-hooman.ts";
+import { isRateLimitError as isRateLimit, isQuotaLimitError as isQuotaLimit } from "../../shared/src/provider-limits.ts";
+import { currentAlertSessionIdentity, teamsLauncherProvenance, type MeshIdentitySource, type ProviderLimitNoticeKind } from "../../shared/src/alert-provenance.ts";
+export { isRateLimit, isQuotaLimit };
 
 /**
  * Normalized provider error response metadata, mirrored from the host's
@@ -286,32 +289,6 @@ export function getRateLimitRecoveryDelaysMs(
 	);
 }
 
-/** Match a retryable provider rate-limit / throttle error message. Exported for tests. */
-export function isRateLimit(message: string | undefined): boolean {
-	if (!message) return false;
-	return /rate.?limit|\b429\b|too many requests|tpm|throttl|quota.*exceeded.*per/i.test(message);
-}
-
-/**
- * Match a NON-retryable provider quota / usage-window error — the patterns pi's
- * built-in retry deliberately skips (it would loop into the same broken state).
- * Mirrors the host's non-retryable limit classifier so this extension can spot
- * them on turn_end and (if a reset time is known) schedule a single delayed wake
- * instead of an immediate retry loop.
- *
- * Exported for tests.
- */
-export function isQuotaLimit(message: string | undefined): boolean {
-	if (!message) return false;
-	return (
-		/5[- ]hour usage limit|usage limit reached|credit balance|insufficient credits?|usage cap|plan limit|account limit/i.test(
-			message,
-		) ||
-		/GoUsageLimitError|FreeUsageLimitError|monthly usage limit|insufficient_quota|quota exceeded|out of budget|billing/i.test(
-			message,
-		)
-	);
-}
 
 /** Human-readable hint for a delay in ms ("in 62s", "in 4.0m", "in 3.5h"). */
 function describeDelay(ms: number): string {
@@ -332,6 +309,8 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	// Latest captured provider error metadata for the active episode.
 	let episodeProviderError: ProviderErrorMeta | undefined;
 	let timers: ReturnType<typeof setTimeout>[] = [];
+	// Cardinality guard: exactly one Telegram-bound structured notice per active episode.
+	let episodeNotified = false;
 
 	const clearTimers = (): void => {
 		for (const t of timers) clearTimeout(t);
@@ -340,6 +319,30 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 
 	/** Current model id for hooman-facing Telegram messages (best-effort). */
 	const modelName = (): string => ctx?.model?.id ?? "the model";
+
+	/** Build + relay a structured provider-limit notice with trusted provenance.
+	 *  Launcher (Teams coordinator) is resolved from spawn facts / live mesh only;
+	 *  the alert text is never parsed for ancestry. */
+	const notifyProviderLimit = (kind: ProviderLimitNoticeKind, detail?: string): void => {
+		const mesh = (globalThis as { __piMesh?: MeshIdentitySource }).__piMesh;
+		const failed = currentAlertSessionIdentity(ctx?.sessionManager, mesh, process.env);
+		const launcher = teamsLauncherProvenance(process.env, mesh);
+		relayProviderLimitNotice({
+			kind,
+			model: modelName(),
+			operation: "agent",
+			failed,
+			...(launcher ? { launcher } : {}),
+			...(detail ? { detail } : {}),
+		});
+	};
+
+	/** Preserve scheduling/desktop signals while emitting at most one structured relay per episode. */
+	const notifyEpisode = (kind: ProviderLimitNoticeKind, detail?: string): void => {
+		if (episodeNotified) return;
+		episodeNotified = true;
+		notifyProviderLimit(kind, detail);
+	};
 
 	/**
 	 * Enter (or stay in) the rate-limited state and flip the tab icon to 🚓.
@@ -352,7 +355,8 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 			active = true;
 			const cur = getActiveStage();
 			priorStage = cur && cur !== RATE_LIMITED_STAGE ? cur : FALLBACK_STAGE;
-			relayToHooman("🚓 rate-limited on " + modelName() + " — pi is retrying.");
+			episodeNotified = false;
+			notifyEpisode("rate_limited", "pi is retrying.");
 		}
 		requestStage(RATE_LIMITED_STAGE);
 	};
@@ -387,7 +391,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 				title: "🚓 Manual wake needed",
 				body: "Rate limit with no schedulable reset time (none known, or beyond the auto-wake horizon). Resume by hand.",
 			});
-			relayToHooman("🚓 " + modelName() + ": rate limit with no known reset time — needs a manual wake, or switch me to another model.");
+			notifyEpisode("manual_wake", "no known reset time — needs a manual wake or switch to another model.");
 			return;
 		}
 
@@ -400,7 +404,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 					: `Provider TPM storm — auto-resuming in ${describeDelay(first)}${delays.length > 1 ? ` then ${describeDelay(delays[delays.length - 1] - first)} later` : ""}.`,
 		});
 
-		relayToHooman((mode === "quota" ? "🚓 quota/usage window on " : "🚓 rate-limited on ") + modelName() + " — auto-resuming in " + describeDelay(first) + ".");
+		notifyEpisode(mode === "quota" ? "quota" : "rate_limited", "auto-resuming in " + describeDelay(first) + ".");
 		delays.forEach((delay, i) => {
 			const t = setTimeout(() => {
 				// Still throttled when this fires — nudge the agent to retry.
@@ -426,7 +430,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 							title: "🚓 Session may be dead",
 							body: `Still rate-limited after ${describeDelay(delay)} of auto-resumes. Needs attention.`,
 						});
-						relayToHooman("🚓 " + modelName() + ": still rate-limited after auto-resumes — may be stuck. Consider switching me to another model.");
+						notifyEpisode("stuck", "still rate-limited after auto-resumes — consider switching to another model.");
 					}, 5_000);
 					timers.push(t2);
 				}
@@ -439,7 +443,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	const recover = (): void => {
 		if (!active) return;
 		active = false;
-		relayToHooman("✅ recovered on " + modelName() + ".");
+		// The episode already emitted its one structured relay; recovery remains a local UI transition.
 		scheduled = false;
 		episodeProviderError = undefined;
 		clearTimers();

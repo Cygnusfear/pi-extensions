@@ -15,7 +15,7 @@ import type {
 	ChannelMessage,
 	PeerInfo,
 } from "@pi-extensions/pi-mesh/types";
-import { displayPayload } from "./format.ts";
+import { displayPayload, projectAgentPayload } from "./format.ts";
 
 const DEFAULT_SOCK = join(process.env.HOME ?? "/tmp", ".pi", "mesh.sock");
 
@@ -189,6 +189,7 @@ export class MeshClient extends EventEmitter {
 					lastSeen: Date.now(),
 					meshId: ann.meshId,
 				} as PeerInfo);
+				this.emit("peer", { meshId: ann.meshId, clientId: ann.clientId, nickname: ann.nickname, name: ann.name });
 			}
 			return;
 		}
@@ -226,13 +227,12 @@ export class MeshClient extends EventEmitter {
 				};
 				this.publish(`pi/mesh/session/${fromClientId}`, ackEnvelope);
 			}
+			const projectedPayload = projectAgentPayload(message.payload);
 			this.emit("tell", {
 				fromClientId,
 				fromMeshId: peer?.meshId,
 				nickname: peer?.nickname ?? fromClientId.slice(0, 8),
-				text: this.display(message.payload),
-				attachment: this.attachmentOf(message.payload),
-				reaction: this.reactionOf(message.payload),
+				...projectedPayload,
 				sessionName: peer?.name,
 				deliveryId,
 			} satisfies InboundTell);
@@ -297,25 +297,6 @@ export class MeshClient extends EventEmitter {
 
 	private nick(clientId: string): string {
 		return this.peers.get(clientId)?.nickname ?? clientId.slice(0, 8);
-	}
-
-	private attachmentOf(payload: unknown): string | undefined {
-		if (payload && typeof payload === "object") {
-			const p = payload as Record<string, unknown>;
-			const a = p.attachment ?? p.image ?? p.file ?? p.path;
-			if (typeof a === "string" && a.trim()) return a.trim();
-		}
-		return undefined;
-	}
-
-	/** An agent may attach an emoji reaction (reaction | react | emoji). */
-	private reactionOf(payload: unknown): string | undefined {
-		if (payload && typeof payload === "object") {
-			const p = payload as Record<string, unknown>;
-			const r = p.reaction ?? p.react ?? p.emoji;
-			if (typeof r === "string" && r.trim()) return r.trim();
-		}
-		return undefined;
 	}
 
 	private display(payload: unknown): string {

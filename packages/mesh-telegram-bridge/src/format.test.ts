@@ -1,5 +1,84 @@
 import { describe, expect, test } from "bun:test";
-import { displayPayload, markdownToTelegramHtml } from "./format.ts";
+import {
+	displayPayload,
+	markdownToTelegramHtml,
+	normalizeAgentPayload,
+	projectAgentPayload,
+} from "./format.ts";
+
+describe("normalizeAgentPayload", () => {
+	test("parses supported JSON object strings", () => {
+		expect(
+			normalizeAgentPayload(
+				'  {"image":" /tmp/frame.png ","text":"caption"}  ',
+			),
+		).toEqual({ image: " /tmp/frame.png ", text: "caption" });
+	});
+
+	test("preserves non-string payloads and unrelated or invalid JSON strings", () => {
+		const objectPayload = { image: "/tmp/frame.png" };
+		expect(normalizeAgentPayload(objectPayload)).toBe(objectPayload);
+		expect(normalizeAgentPayload('{"unrelated":"value"}')).toBe(
+			'{"unrelated":"value"}',
+		);
+		expect(normalizeAgentPayload('{"image":42}')).toBe('{"image":42}');
+		expect(normalizeAgentPayload("{not really json}")).toBe(
+			"{not really json}",
+		);
+		expect(normalizeAgentPayload('[{"image":"/tmp/frame.png"}]')).toBe(
+			'[{"image":"/tmp/frame.png"}]',
+		);
+	});
+});
+
+describe("projectAgentPayload", () => {
+	test("projects object and JSON-string media payloads identically", () => {
+		const objectPayload = {
+			image: " /tmp/frame.png ",
+			text: "caption",
+		};
+		const expected = {
+			text: "caption",
+			attachment: "/tmp/frame.png",
+			reaction: undefined,
+		};
+		expect(projectAgentPayload(objectPayload)).toEqual(expected);
+		expect(projectAgentPayload(JSON.stringify(objectPayload))).toEqual(expected);
+	});
+
+	test("projects JSON-string attachment-only and reaction payloads", () => {
+		expect(projectAgentPayload('{"file":" /tmp/frame.png "}')).toEqual({
+			text: "",
+			attachment: "/tmp/frame.png",
+			reaction: undefined,
+		});
+		expect(projectAgentPayload('{"emoji":" 👍 "}')).toEqual({
+			text: "",
+			attachment: undefined,
+			reaction: "👍",
+		});
+	});
+
+	test("does not project attachment semantics from unrelated JSON text", () => {
+		const raw = '{"unrelated":"value"}';
+		expect(projectAgentPayload(raw)).toEqual({
+			text: raw,
+			attachment: undefined,
+			reaction: undefined,
+		});
+	});
+
+	test("preserves object alias precedence", () => {
+		expect(
+			projectAgentPayload({ attachment: "", image: "/tmp/frame.png" }),
+		).toEqual({ text: "", attachment: undefined, reaction: undefined });
+		expect(projectAgentPayload({ reaction: 42, emoji: "👍" })).toEqual({
+			text: "",
+			attachment: undefined,
+			reaction: undefined,
+		});
+	});
+});
 
 describe("displayPayload", () => {
 	test("unwraps JSON-string subject/body payloads and decodes newlines", () => {
@@ -32,6 +111,7 @@ describe("displayPayload", () => {
 	test("returns empty string for reaction/attachment-only payloads", () => {
 		expect(displayPayload({ reaction: "👍", from: "x" })).toBe("");
 		expect(displayPayload({ attachment: "x.png", from: "x" })).toBe("");
+		expect(displayPayload('{"image":"x.png"}')).toBe("");
 	});
 });
 

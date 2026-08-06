@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 
 /** Config file lives OUTSIDE the repo (holds the bot token — never committed). */
 export const CONFIG_PATH = join(homedir(), ".config", "mesh-telegram-bridge", "config.env");
@@ -46,14 +47,27 @@ export function loadConfig(): Config {
 /** Persist the captured chat id back into the config file so it survives restarts. */
 export function persistChatId(chatId: number): void {
 	try {
-		mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-		const lines = existsSync(CONFIG_PATH)
-			? readFileSync(CONFIG_PATH, "utf8").split("\n").filter((l) => !/^\s*TELEGRAM_CHAT_ID\s*=/.test(l))
-			: [];
-		while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-		lines.push(`TELEGRAM_CHAT_ID=${chatId}`);
-		writeFileSync(CONFIG_PATH, lines.join("\n") + "\n", { mode: 0o600 });
-	} catch (e) {
-		console.warn("[config] could not persist chat id:", (e as Error).message);
+		persistChatIdOrThrow(chatId);
+	} catch (error) {
+		console.warn("[config] could not persist chat id:", (error as Error).message);
+	}
+}
+
+/** Observable atomic config commit used by authority-changing transactions. */
+export function persistChatIdOrThrow(chatId: number): void {
+	const directory = dirname(CONFIG_PATH);
+	mkdirSync(directory, { recursive: true });
+	const lines = existsSync(CONFIG_PATH)
+		? readFileSync(CONFIG_PATH, "utf8").split("\n").filter((line) => !/^\s*TELEGRAM_CHAT_ID\s*=/.test(line))
+		: [];
+	while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+	lines.push(`TELEGRAM_CHAT_ID=${chatId}`);
+	const temporaryPath = join(directory, `.config.env.${process.pid}.${randomUUID()}.tmp`);
+	try {
+		writeFileSync(temporaryPath, lines.join("\n") + "\n", { mode: 0o600 });
+		renameSync(temporaryPath, CONFIG_PATH);
+	} catch (error) {
+		try { rmSync(temporaryPath, { force: true }); } catch {}
+		throw error;
 	}
 }

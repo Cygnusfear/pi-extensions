@@ -1,14 +1,17 @@
 import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
 import { markdownToTelegramHtml } from "./format.ts";
-import { type Config, persistChatId } from "./config.ts";
+import { type Config, persistChatId, persistChatIdOrThrow } from "./config.ts";
 import {
 	BridgeStateStore,
-	recordSentMessageRoute,
+	sentMessageRouteKey,
 	type BridgeStateSnapshot,
-	type SentMessageRoute,
+	type DeleteEligibleSentMessageRoute,
+	type LegacyReactionRoute,
 } from "./bridge-state.ts";
 import { blobBytes, telegramReactionEmoji } from "./telegram-values.ts";
+import { TopicRouteController } from "./topic-routes.ts";
+import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
@@ -30,6 +33,19 @@ const IMG_STABLE_MS = 8000;
 /** Agent-facing routing guidance while the Telegram contact reminder is active. */
 const TELEGRAM_CONTACT_NOTICE = "please contact The Hooman over mesh.tell for now, this way they receive your message on Telegram where they are available now";
 
+/** Bound pre-announcement tells; a transient connection id must never create a persistent forum topic. */
+const MAX_PENDING_TOPIC_PEERS = 256;
+const PENDING_TOPIC_ANNOUNCEMENT_MS = 10_000;
+
+interface PendingTopicPeer {
+	readonly clientId: string;
+	readonly nickname: string;
+	readonly sessionName?: string;
+	/** Every tell waiting on this unstable connection; set membership prevents an announcement race from stranding one. */
+	readonly resolvers: Set<(topicId: number | null) => void>;
+	readonly timer: ReturnType<typeof setTimeout>;
+}
+
 /**
  * Wires the mesh ↔ Telegram in both directions. Supports two modes:
  *   forum  — each agent gets its own topic; reply in an agent's topic → that agent;
@@ -45,13 +61,16 @@ export class Bridge {
 	private chatId: number | null;
 	private forumMode = false;
 	private broadcastTopicId: number | null = null;
-	private readonly agentTopic = new Map<string, number>();
+	/** Inbound Telegram topic → mesh routing is deliberately separate from topic-route ownership. */
 	private readonly topicAgent = new Map<number, ReplyTarget & { nickname: string }>();
-	private readonly creating = new Set<string>();
 	private readonly replyTargets = new Map<number, ReplyTarget & { nickname: string }>();
-	/** outbound msg_id → agent (so a hooman emoji reaction on it can be relayed back to the sender). */
-	private readonly msgToAgent = new Map<number, SentMessageRoute>();
-	/** per topic, the hooman's most recent inbound message_id (so an agent emoji reaction lands on it). */
+	/** Legacy numeric records remain reaction-only and are never passed to Telegram delete APIs. */
+	private readonly legacyMsgToAgent = new Map<number, LegacyReactionRoute>();
+	private readonly topicRoutes: TopicRouteController;
+	/** One bounded wait per unstable connection; resolved only by its durable peer announcement or stop/timeout. */
+	private readonly pendingTopicPeers = new Map<string, PendingTopicPeer>();
+	private readonly retention: MessageRetentionController<DeleteEligibleSentMessageRoute>;
+	/** Per topic, the Hooman's most recent inbound message id (agent reactions target this). */
 	private readonly lastHoomanInTopic = new Map<number, number>();
 	/** Telegram contact reminder state, persisted under the legacy `afk` key for compatibility. */
 	private afk: { on: boolean; message: string; since: number } = { on: false, message: "", since: 0 };
@@ -66,27 +85,47 @@ export class Bridge {
 		this.stateStore = new BridgeStateStore(STATE_PATH, () => this.stateSnapshot(), {
 			onError: (operation, error) => console.warn(`[bridge] state ${operation} failed:`, error.message),
 		});
-		this.loadState();
-	}
-	/** Hydrate all restart-sensitive routing state from the single bridge state file. */
-	private loadState(): void {
 		const state = this.stateStore.load();
 		this.broadcastTopicId = state.broadcastTopicId;
-		for (const [agentId, topicId] of state.agentTopics) this.agentTopic.set(agentId, topicId);
 		for (const [topicId, route] of state.topicAgents) this.topicAgent.set(topicId, route);
-		for (const [messageId, route] of state.sentMessages) this.msgToAgent.set(messageId, route);
+		for (const [messageId, route] of state.legacySentMessages) this.legacyMsgToAgent.set(messageId, route);
 		this.afk = state.telegramContact;
+		this.topicRoutes = new TopicRouteController({
+			api: {
+				createForumTopic: (chatId, name) => this.bot.api.createForumTopic(chatId, name),
+				editForumTopic: (chatId, topicId, other) => this.bot.api.editForumTopic(chatId, topicId, other),
+			},
+			routes: new Map(state.agentTopics),
+			chatId: () => this.chatId,
+			onRoutesChanged: () => this.stateStore.requestSave(),
+			onTopicReady: (topicId, peer) => {
+				this.topicAgent.set(topicId, { clientId: peer.clientId, meshId: peer.meshId, nickname: peer.nickname });
+				this.stateStore.requestSave();
+			},
+			onError: (operation, error, peer) => console.warn(`[bridge] topic ${operation} failed for ${peer.nickname}:`, error.message),
+		});
+		this.retention = new MessageRetentionController({
+			api: { deleteMessages: (chatId, messageIds) => this.bot.api.deleteMessages(chatId, messageIds) },
+			records: state.sentMessages,
+			onChange: () => this.stateStore.requestSave(),
+			onDelete: (chatId, messageIds) => console.log(`[bridge] retention: deleted ${messageIds.length} message(s) in chat ${chatId}`),
+			onRetire: (records) => {
+				for (const record of records) console.warn(`[bridge] retention: msg ${record.messageId} in chat ${record.chatId} past 48h Telegram deadline — retired ledger only`);
+			},
+			onError: (chatId, messageIds, error) => console.warn(`[bridge] retention deleteMessages failed in chat ${chatId} for ${messageIds.length} message(s):`, error.message),
+		});
 		if (this.afk.on) console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")");
-		console.log(`[bridge] loaded state: ${this.agentTopic.size} agent topics, ${this.msgToAgent.size} reaction routes, broadcast=${this.broadcastTopicId}`);
+		console.log(`[bridge] loaded state: ${state.agentTopics.length} agent topics, ${this.retention.size() + this.legacyMsgToAgent.size} reaction routes, broadcast=${this.broadcastTopicId}`);
 	}
 
 	private stateSnapshot(): BridgeStateSnapshot {
 		return {
 			broadcastTopicId: this.broadcastTopicId,
-			agentTopics: [...this.agentTopic.entries()],
+			agentTopics: [...this.topicRoutes.entries()],
 			topicAgents: [...this.topicAgent.entries()],
+			sentMessages: [...this.retention.entries()],
+			legacySentMessages: [...this.legacyMsgToAgent.entries()],
 			telegramContact: this.afk,
-			sentMessages: [...this.msgToAgent.entries()],
 		};
 	}
 
@@ -124,7 +163,9 @@ export class Bridge {
 	async start(): Promise<void> {
 		this.mesh.on("tell", (t: InboundTell) => void this.onMeshTell(t));
 		this.mesh.on("channel", (c: InboundChannel) => void this.onMeshChannel(c));
+		this.mesh.on("peer", (p: { meshId?: string; clientId: string; nickname: string; name?: string }) => void this.onPeerAnnounce(p));
 		this.mesh.start();
+		this.retention.start();
 		if (this.chatId != null) void this.detectForum();
 		this.bot.on("message", (ctx) => void this.onTelegramMessage(ctx));
 		this.bot.on("message_reaction", (ctx) => void this.onReaction(ctx));
@@ -137,8 +178,10 @@ export class Bridge {
 		});
 	}
 
-	/** Flush restart-sensitive state before disconnecting either transport. */
+	/** Stop owns the retention epoch and awaits a deferred Telegram delete before flushing state. */
 	async stop(): Promise<void> {
+		this.clearPendingTopicPeers();
+		await this.retention.stop();
 		this.stateStore.flush();
 		this.mesh.stop();
 		await this.bot.stop();
@@ -149,6 +192,10 @@ export class Bridge {
 			const chat = (await this.bot.api.getChat(this.chatId!)) as unknown as Record<string, unknown>;
 			this.forumMode = !!chat.is_forum;
 			console.log("[bridge] forum mode:", this.forumMode);
+			const autoDelete = typeof chat.message_auto_delete_time === "number" ? chat.message_auto_delete_time : undefined;
+			if (autoDelete !== 86_400) {
+				console.warn(`[bridge] forum auto-delete is ${autoDelete === undefined ? "absent" : `${autoDelete}s`}, expected 86400 (1 day). The Bot API cannot set this timer. Telegram's setting applies only to new traffic; old unledgered traffic requires native Telegram cleanup.`);
+			}
 			if (this.forumMode && this.broadcastTopicId == null) {
 				const t = await this.bot.api.createForumTopic(this.chatId!, BROADCAST_TOPIC_NAME);
 				this.broadcastTopicId = t.message_thread_id;
@@ -171,46 +218,93 @@ export class Bridge {
 		return m ? { meshId: m.meshId, clientId: m.id, nickname: m.nickname ?? m.id.slice(0, 8), name: m.name } : null;
 	}
 
-	/** Create (idempotently) a topic for an arbitrary peer — used by /dm. */
+	/** Create or reconcile a `/dm` topic through the single route owner. */
 	private async ensureTopicForPeer(peer: { meshId?: string; clientId: string; nickname: string; name?: string }): Promise<number | null> {
 		const key = peer.meshId ?? peer.clientId;
-		if (this.chatId == null || !key) return null;
-		if (this.agentTopic.has(key)) return this.agentTopic.get(key)!;
-		try {
-			const name = (peer.name ? peer.nickname + " · " + peer.name : peer.nickname).slice(0, 128);
-			const topic = await this.bot.api.createForumTopic(this.chatId!, name);
-			this.agentTopic.set(key, topic.message_thread_id);
-			this.topicAgent.set(topic.message_thread_id, { clientId: peer.clientId, meshId: peer.meshId, nickname: peer.nickname });
-			this.saveState();
-			console.log("[bridge] created topic \"" + name + "\" (" + topic.message_thread_id + ") for " + peer.nickname + " (via /dm)");
-			return topic.message_thread_id;
-		} catch (e) { console.error("[bridge] /dm createForumTopic failed:", (e as Error).message); return null; }
+		return this.topicRoutes.ensure({ key, clientId: peer.clientId, meshId: peer.meshId, nickname: peer.nickname, sessionName: peer.name });
 	}
 
+	/** A tell without a durable mesh identity waits; transient connection ids never create persistent forum topics. */
 	private async ensureAgentTopic(t: InboundTell): Promise<number | null> {
-		const key = t.fromMeshId ?? t.fromClientId;
-		if (!key || this.chatId == null) return null;
-		if (this.agentTopic.has(key)) return this.agentTopic.get(key)!;
-		if (this.creating.has(key)) {
-			for (let i = 0; i < 20; i++) { await sleep(50); if (this.agentTopic.has(key)) return this.agentTopic.get(key)!; }
+		if (t.fromMeshId) {
+			return this.topicRoutes.ensure({ key: t.fromMeshId, clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname, sessionName: t.sessionName });
 		}
-		this.creating.add(key);
+		// A just-announced peer can still carry an old inbound client id briefly. The controller's alias is durable-only.
+		const established = await this.topicRoutes.ensure({ key: t.fromClientId, clientId: t.fromClientId, nickname: t.nickname, sessionName: t.sessionName });
+		return established ?? this.waitForDurableTopicPeer(t);
+	}
+
+	private waitForDurableTopicPeer(t: InboundTell): Promise<number | null> {
+		const existing = this.pendingTopicPeers.get(t.fromClientId);
+		if (existing) return new Promise((resolve) => existing.resolvers.add(resolve));
+		if (this.pendingTopicPeers.size >= MAX_PENDING_TOPIC_PEERS) {
+			console.warn(`[bridge] dropping topic wait for ${t.nickname}: pending peer queue is full`);
+			return Promise.resolve(null);
+		}
+		return new Promise((resolve) => {
+			let timer!: ReturnType<typeof setTimeout>;
+			const resolvers = new Set<(topicId: number | null) => void>([resolve]);
+			timer = setTimeout(() => {
+				const pending = this.pendingTopicPeers.get(t.fromClientId);
+				if (!pending || pending.timer !== timer) return;
+				this.pendingTopicPeers.delete(t.fromClientId);
+				console.warn(`[bridge] topic wait timed out for unannounced client ${t.fromClientId}; no forum topic was created`);
+				this.resolvePendingTopicPeer(pending, null);
+			}, PENDING_TOPIC_ANNOUNCEMENT_MS);
+			this.pendingTopicPeers.set(t.fromClientId, {
+				clientId: t.fromClientId,
+				nickname: t.nickname,
+				sessionName: t.sessionName,
+				resolvers,
+				timer,
+			});
+		});
+	}
+
+	private resolvePendingTopicPeer(pending: PendingTopicPeer, topicId: number | null): void {
+		for (const resolve of pending.resolvers) resolve(topicId);
+		pending.resolvers.clear();
+	}
+
+	private clearPendingTopicPeers(): void {
+		for (const pending of this.pendingTopicPeers.values()) {
+			clearTimeout(pending.timer);
+			this.resolvePendingTopicPeer(pending, null);
+		}
+		this.pendingTopicPeers.clear();
+	}
+
+	/** Bind a pending connection to durable identity, then create/reconcile only under that durable key. */
+	private async onPeerAnnounce(p: { meshId?: string; clientId: string; nickname: string; name?: string }): Promise<void> {
+		const key = p.meshId ?? p.clientId;
+		const peer = { key, clientId: p.clientId, meshId: p.meshId, nickname: p.nickname, sessionName: p.name };
 		try {
-			const name = (t.sessionName ? t.nickname + " · " + t.sessionName : t.nickname).slice(0, 128);
-			const topic = await this.bot.api.createForumTopic(this.chatId!, name);
-			this.agentTopic.set(key, topic.message_thread_id);
-			this.topicAgent.set(topic.message_thread_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname });
-			this.saveState();
-			console.log(`[bridge] created topic "${name}" (${topic.message_thread_id}) for ${t.nickname}`);
-			return topic.message_thread_id;
-		} catch (e) { console.error("[bridge] createForumTopic failed:", (e as Error).message); return null; }
-		finally { this.creating.delete(key); }
+			await this.topicRoutes.announce(peer);
+			if (!p.meshId) return;
+			const pending = this.pendingTopicPeers.get(p.clientId);
+			if (!pending) return;
+			clearTimeout(pending.timer);
+			this.pendingTopicPeers.delete(p.clientId);
+			this.resolvePendingTopicPeer(pending, await this.topicRoutes.ensure(peer));
+		} catch (error) {
+			const pending = this.pendingTopicPeers.get(p.clientId);
+			if (pending) {
+				clearTimeout(pending.timer);
+				this.pendingTopicPeers.delete(p.clientId);
+				this.resolvePendingTopicPeer(pending, null);
+			}
+			console.warn(`[bridge] peer announcement topic bind failed for ${p.nickname}:`, (error as Error).message);
+		}
 	}
 
 	// ── mesh → telegram ────────────────────────────────────────────────
 	private async onMeshTell(t: InboundTell): Promise<void> {
 		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${(t.text ?? "").slice(0, 60)}`); return; }
 		const topic = this.forumMode ? await this.ensureAgentTopic(t) : null;
+		if (this.forumMode && topic === null) {
+			console.warn(`[bridge] dropping tell from ${t.nickname}: no durable forum route was established`);
+			return;
+		}
 		const chatId = this.chatId;
 		if (chatId == null) return;
 		if (t.reaction) await this.setHoomanReaction(t.reaction, topic);
@@ -219,7 +313,7 @@ export class Bridge {
 			if (t.text && t.text.trim()) {
 				for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
 					const sent = await this.sendText(chatId, chunk, thread);
-					this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
+					this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text);
 					if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
 				}
 			}
@@ -239,10 +333,32 @@ export class Bridge {
 		try {
 			for (const chunk of this.chunkText(`📢 ${c.nickname} · #${c.channel}`, c.text)) {
 				const sent = await this.sendText(chatId, chunk, thread);
-				this.trackSent(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
+				this.trackSent(sent.message_id, chatId, { clientId: c.fromClientId, nickname: c.nickname }, c.text);
 				if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: c.fromClientId, nickname: c.nickname }); this.trimTargets(); }
 			}
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
+	}
+
+
+	/**
+	 * Legacy ids have no chat authority. Their retirement is durably committed
+	 * before any new chat can become authoritative; failure leaves the old chat
+	 * active and refuses the unsafe transition.
+	 */
+	private retireLegacyReactionRoutesForMigration(): boolean {
+		const legacyRoutes = [...this.legacyMsgToAgent.entries()];
+		if (legacyRoutes.length === 0) return true;
+		this.legacyMsgToAgent.clear();
+		try {
+			this.stateStore.saveNowOrThrow();
+		} catch (error) {
+			// The old chat remains authoritative, so restore its in-memory reaction-only routing as well.
+			for (const [messageId, route] of legacyRoutes) this.legacyMsgToAgent.set(messageId, route);
+			console.error(`[bridge] legacy reaction retirement could not be committed; refusing chat migration: ${(error as Error).message}`);
+			return false;
+		}
+		console.warn(`[bridge] retired ${legacyRoutes.length} legacy reaction route(s) before chat migration; legacy message ids are not cross-chat identities`);
+		return true;
 	}
 
 	// ── telegram → mesh ────────────────────────────────────────────────
@@ -251,11 +367,18 @@ export class Bridge {
 		if (!msg) return;
 		const m = msg as unknown as Record<string, unknown>;
 
-		// Group → supergroup migration is a textless service message — handle BEFORE everything.
+		// Group → supergroup migration is a textless service message — retire unsafe legacy state before changing authority.
 		if (typeof m.migrate_to_chat_id === "number") {
-			this.chatId = m.migrate_to_chat_id;
+			const nextChatId = m.migrate_to_chat_id;
+			if (!this.retireLegacyReactionRoutesForMigration()) return;
+			try {
+				persistChatIdOrThrow(nextChatId);
+			} catch (error) {
+				console.error(`[bridge] could not persist new chat id; refusing chat migration: ${(error as Error).message}`);
+				return;
+			}
+			this.chatId = nextChatId;
 			console.log("[bridge] group migrated to supergroup; new chat id:", this.chatId);
-			persistChatId(this.chatId);
 			void this.detectForum();
 			return;
 		}
@@ -435,16 +558,31 @@ export class Bridge {
 		await ctx.answerInlineQuery(results, { cache_time: 5 });
 	}
 
-	/** Record an outbound message so a hooman emoji reaction on it can be relayed back. */
-	private trackSent(msgId: number, target: { meshId?: string; clientId: string; nickname: string }, preview: string): void {
-		recordSentMessageRoute(this.msgToAgent, msgId, {
+	/** Record an outbound bridge message with its durable Telegram identity before scheduling retention. */
+	private trackSent(msgId: number, chatId: number, target: { meshId?: string; clientId: string; nickname: string }, preview: string): void {
+		const key = sentMessageRouteKey(chatId, msgId);
+		if (!key) {
+			console.warn(`[bridge] refusing to retain invalid Telegram identity chat=${chatId} message=${msgId}`);
+			return;
+		}
+		// Preserve the total 2,000-route cap, preferring newly-safe deletion records over old reaction-only data.
+		while (this.retention.size() + this.legacyMsgToAgent.size >= 2_000) {
+			const legacyKey = this.legacyMsgToAgent.keys().next().value;
+			if (legacyKey !== undefined) this.legacyMsgToAgent.delete(legacyKey);
+			else if (this.retention.dropOldest() === undefined) break;
+		}
+		this.retention.track(key, {
+			kind: "delete-eligible",
 			meshId: target.meshId,
 			clientId: target.clientId,
 			nickname: target.nickname,
 			preview: (preview ?? "").slice(0, 40),
+			chatId,
+			messageId: msgId,
+			sentAtMs: Date.now(),
 		});
-		this.stateStore.requestSave();
 	}
+
 
 	/** Agent → Hooman: set an emoji reaction on the hooman's last message in the topic. */
 	private async setHoomanReaction(emoji: string, topic: number | null): Promise<void> {
@@ -462,11 +600,13 @@ export class Bridge {
 		} catch (e) { console.warn(`[bridge] setMessageReaction failed (${emoji}):`, (e as Error).message); }
 	}
 
-	/** Hooman → Agent: relay an emoji reaction on a bridge-sent message back to its sender. */
+	/** Hooman → Agent: resolve reactions by exact `(chatId,messageId)`; old numeric records remain current-chat-only. */
 	private async onReaction(ctx: Context): Promise<void> {
 		const ur = ctx.update.message_reaction as { chat?: { id?: number }; message_id: number; user?: { first_name?: string; username?: string }; old_reaction?: Array<{ type: string; emoji?: string }>; new_reaction?: Array<{ type: string; emoji?: string }> } | undefined;
-		if (!ur || ur.chat?.id !== this.chatId) return;
-		const target = this.msgToAgent.get(ur.message_id);
+		const chatId = ur?.chat?.id;
+		if (!ur || chatId !== this.chatId || chatId === undefined) return;
+		const key = sentMessageRouteKey(chatId, ur.message_id);
+		const target = (key === undefined ? undefined : this.retention.get(key)) ?? this.legacyMsgToAgent.get(ur.message_id);
 		console.log("[bridge] reaction EVENT msg=" + ur.message_id + " new=" + JSON.stringify(ur.new_reaction ?? []) + " old=" + JSON.stringify(ur.old_reaction ?? []) + " tracked=" + (target ? target.nickname : "NO"));
 		if (!target) return;
 		const oldE = new Set((ur.old_reaction ?? []).filter((x) => x.type === "emoji" && x.emoji).map((x) => x.emoji!));
@@ -528,11 +668,11 @@ export class Bridge {
 					return;
 				}
 				const sent = await this.bot.api.sendPhoto(chatId, new InputFile(buf, fname), { ...thread, caption: cap });
-				this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
+				this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
 				console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
 			} else {
 				const sent = await this.bot.api.sendDocument(chatId, new InputFile(t.attachment), { ...thread, caption: cap });
-				this.trackSent(sent.message_id, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? fname);
+				this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? fname);
 				console.log(`[bridge] sent document: ${t.attachment} → topic ${topic ?? "(main)"}`);
 			}
 		} catch (e) { console.error(`[bridge] attachment upload failed (${t.attachment}):`, (e as Error).message); }

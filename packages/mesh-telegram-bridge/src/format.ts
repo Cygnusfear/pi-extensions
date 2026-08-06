@@ -15,27 +15,76 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+const STRUCTURED_PAYLOAD_KEYS = [
+	"subject",
+	"body",
+	"text",
+	"message",
+	"content",
+	"reaction",
+	"react",
+	"emoji",
+	"attachment",
+	"image",
+	"file",
+	"path",
+] as const;
+
+/** Parse structured JSON strings emitted by agents without changing ordinary text. */
+export function normalizeAgentPayload(payload: unknown): unknown {
+	if (typeof payload !== "string") return payload;
+
+	const trimmed = payload.trim();
+	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return payload;
+
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		if (
+			isRecord(parsed) &&
+			STRUCTURED_PAYLOAD_KEYS.some(
+				(key) => typeof parsed[key] === "string",
+			)
+		) {
+			return parsed;
+		}
+	} catch {
+		// Keep malformed JSON-looking agent text exactly as sent.
+	}
+
+	return payload;
+}
+
+export interface ProjectedAgentPayload {
+	text: string;
+	attachment?: string;
+	reaction?: string;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+	if (typeof value === "string" && value.trim()) return value.trim();
+	return undefined;
+}
+
+/** Derive all Telegram-facing fields from one consistently normalized payload. */
+export function projectAgentPayload(payload: unknown): ProjectedAgentPayload {
+	const normalized = normalizeAgentPayload(payload);
+	const record = isRecord(normalized) ? normalized : undefined;
+	const attachment =
+		record?.attachment ?? record?.image ?? record?.file ?? record?.path;
+	const reaction = record?.reaction ?? record?.react ?? record?.emoji;
+	return {
+		text: displayPayload(normalized),
+		attachment: nonEmptyString(attachment),
+		reaction: nonEmptyString(reaction),
+	};
+}
+
 /** Normalize agent payloads before they reach Telegram. Handles JSON strings emitted by agents. */
 export function displayPayload(payload: unknown): string {
-	if (typeof payload === "string") {
-		const trimmed = payload.trim();
-		if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-			try {
-				const parsed: unknown = JSON.parse(trimmed);
-				if (
-					isRecord(parsed) &&
-					["subject", "body", "text", "message", "content"].some(
-						(key) => key in parsed,
-					)
-				) {
-					return displayPayload(parsed);
-				}
-			} catch {
-				// Keep malformed JSON-looking agent text exactly as sent.
-			}
-		}
-		return payload;
-	}
+	const normalized = normalizeAgentPayload(payload);
+	if (normalized !== payload) return displayPayload(normalized);
+
+	if (typeof payload === "string") return payload;
 
 	if (isRecord(payload)) {
 		const subject =

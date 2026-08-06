@@ -12,6 +12,8 @@ import { buildRlmReturn } from "./return-injection";
 import { isRlmReturnSignal } from "./return-signal";
 import type { RlmDeps, RlmOptions, RlmResult, RlmState } from "./types";
 import { resolveModel, validateOptions } from "./validate";
+import { classifyProviderLimit } from "@pi-extensions/shared/provider-limits";
+import type { ProviderLimitNotice } from "@pi-extensions/shared/alert-provenance";
 
 class RlmResolvedSignal extends Error {
 	constructor() {
@@ -41,6 +43,18 @@ function errorFromUnknown(e: unknown): Error {
 function formatExecutionError(error: Error, stdout: string): string {
 	const formatted = error.name && error.name !== "Error" ? error.name + ": " + error.message : error.message;
 	return stdout ? "stdout: " + stdout + "\n\nExecution error: " + formatted : formatted;
+}
+
+function executeCodeFromToolParams(toolParams: unknown): string {
+	if (
+		typeof toolParams !== "object" ||
+		toolParams === null ||
+		!("code" in toolParams) ||
+		typeof toolParams.code !== "string"
+	) {
+		throw new Error("rlm: execute_code requires a string code argument");
+	}
+	return toolParams.code;
 }
 
 function completeFnStream(deps: RlmDeps, model: Model<any>, auth: { apiKey: string; headers?: Record<string, string> }) {
@@ -82,7 +96,7 @@ function buildExecuteCodeTool(params: {
 			const effectiveSignal = signal ?? params.combined;
 			const identity = params.monitor?.inspect().identity;
 			try {
-				await executeInSession(params.subSession, String(toolParams.code), {
+				await executeInSession(params.subSession, executeCodeFromToolParams(toolParams), {
 					signal: effectiveSignal,
 					cwd: params.deps.cwd,
 					model: params.modelRef,
@@ -187,7 +201,26 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 				state.usage.output += usageOutput(assistant.usage);
 				monitor?.update({ usage: { ...state.usage }, lastAssistantSummary: summarizeAssistantMessage(assistant) }, "step");
 				for (const toolCall of assistantToolCalls(assistant)) monitor?.recordTool(toolCall);
-				if (assistant.stopReason === "error") terminalError = new Error(assistant.errorMessage || "rlm: sub-agent error");
+				if (assistant.stopReason === "error") {
+					terminalError = new Error(assistant.errorMessage || "rlm: sub-agent error");
+					// Producer-side provider-limit alert — fired exactly once per handle.
+					const limitKind = classifyProviderLimit(assistant.errorMessage);
+					if (limitKind && !state.limitAlerted) {
+						state.limitAlerted = true;
+						const rlmIdentity = typeof opts.identity === "string" ? opts.identity : opts.identity?.name;
+						const notice: ProviderLimitNotice = {
+							kind: limitKind === "quota" ? "quota" : "rate_limited",
+							model: p + "/" + id,
+							operation: "rlm",
+							failed: {
+								sessionId: deps.parentSession?.id,
+								sessionName: deps.parentSession?.name,
+							},
+							rlmIdentity,
+						};
+						try { deps.notifyProviderLimit?.(notice); } catch { /* best-effort */ }
+					}
+				}
 				if (assistant.stopReason === "aborted") terminalError = new Error(assistant.errorMessage || "Aborted");
 			}
 			if (event.type === "turn_end") {

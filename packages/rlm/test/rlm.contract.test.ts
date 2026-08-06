@@ -143,6 +143,11 @@ describe("rlm contract", () => {
 		await expect(runRlm(deps(), { task: "parent", tools: [], maxDepth: 2 }, 0)).resolves.toMatchObject({ child: { err: "rlm: max depth reached" } });
 	});
 	test("10 iteration cap rejects without return", async () => { queue(js("console.log('no return');")); await expectReject(runRlm(deps(), { task: "cap", tools: [], maxIterations: 2 }, 0), "maxIterations (2)"); });
+	test("10b accepts the fivefold ceiling and rejects values above it", async () => {
+		queue(js("rlm.return({ok:true});"));
+		await expect(runRlm(deps(), { task: "ceiling", tools: [], maxIterations: 500 }, 0)).resolves.toMatchObject({ ok: true });
+		await expectReject(runRlm(deps(), { task: "above-ceiling", tools: [], maxIterations: 501 }, 0), "maxIterations must be in [1, 500]");
+	});
 	test("12 plain text without tool call rejects", async () => { queue("plain prose"); await expectReject(runRlm(deps(), { task: "nocode", tools: [] }, 0), "agent finished without rlm.return"); });
 	test("13 parent abort propagates into complete signal", async () => {
 		const ac = new AbortController(); let seen = false;
@@ -246,7 +251,7 @@ describe("rlm contract", () => {
 		expect(mid.status).toBe("running");
 		expect(mid.identity.name).toBe("slice-2-rlm");
 		expect(mid.model).toBe("test/test-model");
-		expect(mid.maxIterations).toBe(20);
+		expect(mid.maxIterations).toBe(300);
 
 		release(js("rlm.return({ok:true});"));
 		const result = await h;

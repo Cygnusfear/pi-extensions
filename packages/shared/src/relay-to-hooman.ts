@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { formatProviderLimitNotice, type ProviderLimitNotice } from "./alert-provenance.ts";
 
 const BRIDGE_CONFIG = join(homedir(), ".config", "mesh-telegram-bridge", "config.env");
 
@@ -69,4 +70,9 @@ export function relayToHooman(text: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/** Format structured producer-side provenance before relaying it to the Hooman. */
+export function relayProviderLimitNotice(notice: ProviderLimitNotice): boolean {
+	return relayToHooman(formatProviderLimitNotice(notice));
 }

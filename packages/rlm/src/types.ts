@@ -1,5 +1,7 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
+import type { ParentSessionIdentity } from "@pi-extensions/shared/sandbox-registry";
+import type { ProviderLimitNotice } from "@pi-extensions/shared/alert-provenance";
 
 export type RlmCompleteFn = (model: Model<any>, request: Context, auth?: ProviderStreamOptions) => Promise<AssistantMessage>;
 
@@ -73,6 +75,10 @@ export interface RlmDeps {
 	completeFn?: RlmCompleteFn;
 	sendMessage?: (msg: unknown, opts?: unknown) => void;
 	sendUserMessage?: (msg: string, opts?: { deliverAs?: "followUp" | "steer" }) => void;
+	/** Immutable parent-session identity, resolved once by code-mode. */
+	parentSession?: ParentSessionIdentity;
+	/** Optional notifier for provider rate-limit/quota failures so the parent owns the alert. */
+	notifyProviderLimit?: (notice: ProviderLimitNotice) => void;
 }
 
 export interface RlmState {
@@ -88,4 +94,6 @@ export interface RlmState {
 	 *  state (not exception propagation, which runAgentLoop swallows into a retryable
 	 *  tool-error) so the loop terminates and rejects instead of looping to maxIterations. */
 	fatalError?: Error;
+	/** True once a provider-limit alert has been emitted for this handle so it never duplicates. */
+	limitAlerted?: boolean;
 }

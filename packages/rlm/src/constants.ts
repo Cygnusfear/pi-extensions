@@ -1,3 +1,4 @@
-export const DEFAULT_MAX_ITERATIONS = 20;
+export const DEFAULT_MAX_ITERATIONS = 300;
+export const MAX_ALLOWED_ITERATIONS = 500;
 export const DEFAULT_MAX_DEPTH = 2;
 export const DEFAULT_TIMEOUT_MS = 600_000;

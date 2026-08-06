@@ -1,6 +1,7 @@
 import { createToolBindings } from "@pi-extensions/code-mode/sandbox-tools";
 import type { SandboxContext } from "@pi-extensions/code-mode/types";
 import { getSandboxFnNames } from "@pi-extensions/shared/sandbox-registry";
+import { MAX_ALLOWED_ITERATIONS } from "./constants";
 import type { RlmDeps, RlmOptions } from "./types";
 
 export function resolveModel(s: string): [provider: string, id: string] {
@@ -30,6 +31,6 @@ export function validateOptions(opts: RlmOptions, deps: RlmDeps): void {
 		const [p, id] = resolveModel(opts.model);
 		if (!deps.modelRegistry.find(p, id)) throw new Error("rlm: unknown model '" + opts.model + "'");
 	}
-	if (opts.maxIterations !== undefined && (!Number.isInteger(opts.maxIterations) || opts.maxIterations < 1 || opts.maxIterations > 100)) throw new Error("rlm: maxIterations must be in [1, 100]");
+	if (opts.maxIterations !== undefined && (!Number.isInteger(opts.maxIterations) || opts.maxIterations < 1 || opts.maxIterations > MAX_ALLOWED_ITERATIONS)) throw new Error("rlm: maxIterations must be in [1, " + MAX_ALLOWED_ITERATIONS + "]");
 	if (opts.maxDepth !== undefined && (!Number.isInteger(opts.maxDepth) || opts.maxDepth < 1 || opts.maxDepth > 5)) throw new Error("rlm: maxDepth must be in [1, 5]");
 }
