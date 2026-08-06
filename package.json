@@ -58,6 +58,7 @@
       "./packages/pi-mesh/extension/pi-mesh.ts",
       "./packages/git-ai/extensions/git-ai.ts",
       "./packages/zai-key-rotate/extensions/zai-key-rotate.ts",
+      "./packages/kimi-key-rotate/extensions/kimi-key-rotate.ts",
       "./packages/supervisor/src/index.ts",
       "./packages/runbooks/extensions/runbooks.ts",
       "./packages/reload/extensions/reload.ts",

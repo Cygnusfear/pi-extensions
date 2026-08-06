@@ -52,6 +52,29 @@ function redactKey(key: string | undefined): string {
   return key.substring(0, 8) + "..." + key.substring(key.length - 4);
 }
 
+/**
+ * A /login credential owns the provider in pi's auth resolution
+ * (stored > configured > env). While one is stored for a ZAI provider,
+ * rotating ZAI_API_KEY has NO effect on requests. Detect it so we can warn
+ * loudly instead of silently swapping nothing.
+ */
+function storedLoginActive(ctx: {
+  modelRegistry: { getProviderAuthStatus(provider: string): { configured: boolean; source?: string } };
+}): boolean {
+  try {
+    for (const provider of ZAI_PROVIDERS) {
+      const status = ctx.modelRegistry.getProviderAuthStatus(provider);
+      if (status.configured && status.source === "stored") return true;
+    }
+  } catch {
+    // status API unavailable — assume no stored login
+  }
+  return false;
+}
+
+const STORED_LOGIN_WARNING =
+  "⚠ a /login credential is stored for a ZAI provider and OVERRIDES key rotation — /logout from that provider for rotation to take effect";
+
 const ZAI_PROVIDERS = ["zai-coding", "zai"];
 
 export default function (pi: ExtensionAPI) {
@@ -83,11 +106,15 @@ export default function (pi: ExtensionAPI) {
   let swappedThisTurn = false;
   pi.on("agent_start", async () => { swappedThisTurn = false; });
 
-  // Re-apply after reload
-  pi.on("session_start", async (event) => {
+  // Re-apply after reload; also warn once per session when a stored /login
+  // credential silently defeats rotation (stored > env in pi's auth resolution).
+  pi.on("session_start", async (event, ctx) => {
     if (event.reason === "reload") {
       config = loadConfig();
       applyActiveKey();
+    }
+    if (config.keys.length >= 2 && storedLoginActive(ctx)) {
+      ctx.ui.notify(STORED_LOGIN_WARNING, "warning");
     }
   });
 
@@ -121,8 +148,9 @@ export default function (pi: ExtensionAPI) {
     const newIndex = swapToNext();
 
     swappedThisTurn = true;
+    const storedNote = storedLoginActive(ctx) ? `\n${STORED_LOGIN_WARNING}` : "";
     ctx.ui.notify(
-      `Rate limit hit — auto-swapped ZAI key: #${prevIndex + 1} → #${newIndex + 1} (${redactKey(getActiveKey())})`,
+      `Rate limit hit — auto-swapped ZAI key: #${prevIndex + 1} → #${newIndex + 1} (${redactKey(getActiveKey())})${storedNote}`,
       "warning",
     );
   });
@@ -136,9 +164,10 @@ export default function (pi: ExtensionAPI) {
       const prevKey = redactKey(getActiveKey());
       const newIndex = swapToNext();
       const newKey = redactKey(getActiveKey());
+      const storedNote = storedLoginActive(ctx) ? `\n${STORED_LOGIN_WARNING}` : "";
       ctx.ui.notify(
-        `Swapped ZAI key: #${prevIndex + 1} (${prevKey}) → #${newIndex + 1} (${newKey})`,
-        "success",
+        `Swapped ZAI key: #${prevIndex + 1} (${prevKey}) → #${newIndex + 1} (${newKey})${storedNote}`,
+        "info",
       );
     },
   });
@@ -162,9 +191,10 @@ export default function (pi: ExtensionAPI) {
           const prevKey = redactKey(getActiveKey());
           const newIndex = swapToNext();
           const newKey = redactKey(getActiveKey());
+          const storedNote = storedLoginActive(ctx) ? `\n${STORED_LOGIN_WARNING}` : "";
           ctx.ui.notify(
-            `Swapped ZAI key: #${prevIndex + 1} (${prevKey}) → #${newIndex + 1} (${newKey})`,
-            "success",
+            `Swapped ZAI key: #${prevIndex + 1} (${prevKey}) → #${newIndex + 1} (${newKey})${storedNote}`,
+            "info",
           );
           break;
         }
@@ -180,6 +210,7 @@ export default function (pi: ExtensionAPI) {
             }),
             "",
             `Auto-rotate: ${config.autoRotate ? "on" : "off"}`,
+            ...(storedLoginActive(ctx) ? ["", STORED_LOGIN_WARNING] : []),
           ];
           ctx.ui.notify(lines.join("\n"), "info");
           break;
@@ -188,14 +219,14 @@ export default function (pi: ExtensionAPI) {
         case "auto-on": {
           config.autoRotate = true;
           saveConfig(config);
-          ctx.ui.notify("ZAI auto-rotate: on", "success");
+          ctx.ui.notify("ZAI auto-rotate: on", "info");
           break;
         }
 
         case "auto-off": {
           config.autoRotate = false;
           saveConfig(config);
-          ctx.ui.notify("ZAI auto-rotate: off", "success");
+          ctx.ui.notify("ZAI auto-rotate: off", "info");
           break;
         }
 
@@ -213,7 +244,7 @@ export default function (pi: ExtensionAPI) {
           saveConfig(config);
           ctx.ui.notify(
             `Added key #${config.keys.length}: ${redactKey(newKey)}`,
-            "success",
+            "info",
           );
           break;
         }
@@ -239,7 +270,7 @@ export default function (pi: ExtensionAPI) {
           applyActiveKey();
           ctx.ui.notify(
             `Removed key #${idx}: ${redactKey(removed)}`,
-            "success",
+            "info",
           );
           break;
         }

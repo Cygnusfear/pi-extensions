@@ -25,6 +25,8 @@ Automatic API key rotation for ZAI providers. Swaps between multiple API keys on
 
 On startup, the extension overrides the `zai-coding` and `zai` providers with the currently active API key using `pi.registerProvider()`. This replaces the default `ZAI_API_KEY` env var lookup.
 
-When a rate-limit error is detected on a ZAI model, the extension automatically swaps to the next key and re-registers the provider — the next request uses the new key.
+When a rate-limit error is detected on a ZAI model, the extension automatically swaps to the next key — the next request uses the new key.
+
+**Important — /login overrides rotation:** pi's auth resolution is `stored /login credential > configured > env var`. If you have ever run `/login` for a ZAI provider, that stored key owns the provider and rotating `ZAI_API_KEY` has no effect. The extension warns when it detects this; `/logout` from the provider to let rotation drive the key.
 
 Works alongside `/zai` from model-shortcuts for model switching.
