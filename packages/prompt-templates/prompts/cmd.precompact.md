@@ -1,1 +1,1 @@
-I'm going to do a compact for you, so you're less stressed 🤣 write a handoff for future you, including what you loved, what you look forward to, all the smart things, rules, notes, we need to keep- learnings
+I'm going to compact for you. Write the future-you handoff into `$.ctx`: current goal, decisions, files/lines, dead ends, risks, and exact next step. `session.squash()` will automatically deliver that bounded narrative to the resumed turn, so do not try to cram it into the short `continue` text. Never put secrets in `$.ctx`.
