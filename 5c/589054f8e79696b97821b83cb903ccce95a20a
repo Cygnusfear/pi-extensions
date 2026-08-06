@@ -1,0 +1,23 @@
+packages/shared/src/team-templates.test.ts
+  s_c80280c75e1308::t_bdcc8619c7607a 44-47
+  s_c80280c75e1308::t_c7027d8519748b 50-66
+  s_c80280c75e1308::t_2b89f94cadd273 48-49
+packages/shared/src/team-templates.ts
+  s_c80280c75e1308::t_adf3e37c630c39 35-52,72,78,84,90,96,102,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "5c589054f8e79696b97821b83cb903ccce95a20a",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
