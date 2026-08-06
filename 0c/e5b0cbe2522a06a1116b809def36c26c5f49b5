@@ -1,0 +1,19 @@
+packages/shared/src/sandbox-registry-contextual.test.ts
+  s_c2120b56ac9c74::t_8f08e698c3db05 96-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "0ce5b0cbe2522a06a1116b809def36c26c5f49b5",
+  "prompts": {},
+  "sessions": {
+    "s_c2120b56ac9c74": {
+      "agent_id": {
+        "tool": "Lisa Void Rieke",
+        "id": "019fc7a2-4344-77e9-afad-735efb1fbb6c",
+        "model": "kimi-coding/k3"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
