@@ -1,0 +1,21 @@
+packages/shared/src/model-utils.ts
+  s_c29214a9b09ec8::t_89df1f20ed7e39 35
+  s_c29214a9b09ec8::t_312d8ba91e6754 65-67
+  s_c29214a9b09ec8::t_de2c97d371fa9a 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "652055fd1804efe165d0e27f643dea5514cbd366",
+  "prompts": {},
+  "sessions": {
+    "s_c29214a9b09ec8": {
+      "agent_id": {
+        "tool": "Cumrun Parallax Mayor",
+        "id": "019f9e18-722b-7bf1-82a5-14eef01b1524",
+        "model": "kimi-coding/k3-256k"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
