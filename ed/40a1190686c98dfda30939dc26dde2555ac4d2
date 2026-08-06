@@ -1,0 +1,52 @@
+packages/pi-mesh/README.md
+  s_c80280c75e1308::t_71029463c5cf3a 94
+  s_c80280c75e1308::t_2534222399180d 103
+  s_c80280c75e1308::t_05bd161f253125 75-82
+  s_c80280c75e1308::t_680ad19963c64d 62,66-73
+  s_c80280c75e1308::t_79191374163a5c 74
+packages/shared/src/session-nickname.ts
+  s_c80280c75e1308::t_680ad19963c64d 613-614
+packages/pi-mesh/extension/types.ts
+  s_c80280c75e1308::t_80472bacabe9cd 81-82
+  s_c80280c75e1308::t_680ad19963c64d 17,117
+  s_c80280c75e1308::t_01f37461727589 89-91
+packages/pi-mesh/extension/identity.test.ts
+  s_c80280c75e1308::t_a8c2b45078f8b7 197,207,211,214,219,222
+packages/pi-mesh/extension/pi-mesh.session-envelope.test.ts
+  s_c80280c75e1308::t_04595c6fabcb01 67
+packages/pi-mesh/extension/zmx-session.ts
+  s_c80280c75e1308::t_680ad19963c64d 1-43
+packages/pi-mesh/extension/zmx-session.test.ts
+  s_c80280c75e1308::t_9720b3dacc5c79 15-20,30
+  s_c80280c75e1308::t_bbde97d55e1a9c 214
+  s_c80280c75e1308::t_05bd161f253125 2,4-5,24-26,29,191-201,247-281,283,290-298,300-301,303-385
+  s_c80280c75e1308::t_5bcb30fea7f5ab 37-83,138-189
+  s_c80280c75e1308::t_bbbd3b839a197a 282,284-289,299,302
+  s_c80280c75e1308::t_a8c2b45078f8b7 1,3,6-14,21-23,27-28,31-36,84-137,190,202-213,215-246,386-387
+packages/pi-mesh/extension/pi-mesh.receipt-format.test.ts
+  s_c80280c75e1308::t_a1d9dc1ddbaf96 1-26
+packages/pi-mesh/extension/pi-mesh.ts
+  s_c80280c75e1308::t_fb7247202980be 45-48,959,969,972
+  s_c80280c75e1308::t_ecb2fdb7373e98 2514
+  s_c80280c75e1308::t_e2844f1bf9dddf 2691
+  s_c80280c75e1308::t_42e012d29735bc 2216
+  s_c80280c75e1308::t_aa39ca3e4ff8f1 1228
+  s_c80280c75e1308::t_680ad19963c64d 539,761,835,976,980-987,1007,1204
+  s_c80280c75e1308::t_96d4358e233484 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "ed40a1190686c98dfda30939dc26dde2555ac4d2",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
