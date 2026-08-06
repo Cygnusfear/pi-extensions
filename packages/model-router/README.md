@@ -14,9 +14,8 @@ Model IDs were hardcoded in ~10 playbook files, the default system prompt, and t
 {
   "review": {
     "model": [
-      "anthropic/claude-opus-4-7",
-      "openai-codex/gpt-5.5",
-      "zai-coding/glm-5.1"
+      "openai-codex/gpt-5.6-terra",
+      "kimi-coding/k3"
     ]
   }
 }
@@ -37,9 +36,9 @@ The router **never** reorders. It **never** upgrades to "latest per family". The
 
 ```javascript
 // Resolve N models for a role
-const result = await modelRouter.resolve({ role: "review", count: 3 });
-// result.resolved = [{ id: "anthropic/claude-opus-4-7", provider: "anthropic", ... }, ...]
-// result.skipped = [{ id: "openai-codex/gpt-5.4", skipReason: "no_api_key" }, ...]
+const result = await modelRouter.resolve({ role: "review", count: 2 });
+// result.resolved = [{ id: "openai-codex/gpt-5.6-terra", provider: "openai-codex", ... }, ...]
+// result.skipped = [{ id: "kimi-coding/k3", skipReason: "no_api_key" }, ...]
 
 // Mark a model unhealthy (e.g. after a 429)
 await modelRouter.markUnhealthy({ id: "zai-coding/glm-5.1", reason: "rate_limited", ttlSeconds: 600 });
@@ -129,9 +128,9 @@ From the pe-na057klm source research (pi-agent): `pi.setModel` mutates `Agent.st
 By default, `resolve()` deduplicates by provider so you get distinct providers for review/oracle dispatch. Set `dedupProviders: false` to allow same-provider duplicates.
 
 ```javascript
-// fix = ["zai-coding/glm-5.1", "openai-codex/gpt-5.4", "openai-codex/gpt-5.5", "anthropic/claude-opus-4-7"]
-await modelRouter.resolve({ role: "fix", count: 3 });
-// → glm-5.1, gpt-5.4, claude-opus-4-7  (5.5 skipped: same provider as 5.4)
+// implementer = ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"]
+await modelRouter.resolve({ role: "implementer", count: 2 });
+// → k3, gpt-5.6-terra
 ```
 
 ## System prompt injection
@@ -140,8 +139,8 @@ On `before_agent_start`, the extension resolves all roles and injects a table in
 
 ```
 ## Model roles
-- review → anthropic/claude-opus-4-7, openai-codex/gpt-5.5, zai-coding/glm-5.1
-- fix → zai-coding/glm-5.1, openai-codex/gpt-5.4, anthropic/claude-opus-4-7
+- review → openai-codex/gpt-5.6-terra, kimi-coding/k3
+- fix → openai-codex/gpt-5.6-luna
 ```
 
 Agents see role names and currently-resolved IDs — never stale hardcoded versions.
