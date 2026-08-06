@@ -18,7 +18,7 @@ Keep this in mind as you work. Your future self (a continuation, a rebirth, or a
 
 - **Now, ongoing**: `mai` notes greedily. `session.save(key, data)` for derived state. Update tickets as you go.
 - **Before `/rebirth`**: synthesize everything above into the TPV handoff string.
-- **Before squash**: same shape, into `$.ctx` or pinned messages.
+- **Before squash**: same shape into `$.ctx`; `session.squash()` automatically injects that bounded narrative into the resumed turn. Pinned messages remain preserved by reference, not auto-injected; never put secrets in `$.ctx`.
 - **End of session**: leave a clean trail in mai so the next agent can resume cold.
 
 DEFERRED AND NOT TICKETED IS LOST. The session is ephemeral; `mai` notes are your permanent record.
