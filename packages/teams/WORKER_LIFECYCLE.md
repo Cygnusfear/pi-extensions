@@ -17,6 +17,14 @@ PI_TEAMS_LEADER_EPOCH            runtime epoch
 PI_TEAMS_COORDINATOR_ID          mesh delivery route only
 ```
 
+## Launch environment contract
+
+Every worker launch projects **contract v1** from its immutable `SpawnConfig`. The launcher retains non-Teams ambient variables (for example `PATH`, locale, and credentials) but discards the entire inherited `PI_TEAMS_*` namespace before reconstructing this contract. A nested coordinator therefore cannot pass stale provenance, behavior flags, or future Teams fields to a child.
+
+Always emitted: `PI_TEAMS_LAUNCH_CONTRACT_VERSION=1`, `PI_TEAMS_WORKER=1`, worker ID, worker instance ID, ticket ID, leader session path, worker name, and lease path. Present `SpawnConfig` facts additionally emit team ID, leader epoch, coordinator session/mesh/display identity, ticket cwd, session mode, `HAS_TOOLS=1`, and `FREEFORM=1`. False or absent optional facts are absent from the environment; they never inherit a parent value. The dynamically generated `PI_TEAMS_REVIVE_DESCRIPTOR` path is attached only after its descriptor is written and is never copied from ambient state or recursively persisted.
+
+`PI_TEAMS_*` tuning variables that configure a coordinator runtime (polling, grace, fork preference, and similar) are intentionally not part of the worker-launch contract. A nested coordinator starts with its own defaults/configuration rather than inheriting parent Teams state.
+
 ## Spawn
 
 Delegation proceeds in this order:

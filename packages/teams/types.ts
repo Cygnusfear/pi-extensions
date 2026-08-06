@@ -103,6 +103,9 @@ export interface SpawnConfig {
 	/** Canonical coordinator Pi session identity; distinct from the mesh route. */
 	coordinatorSessionId?: string;
 	coordinatorMeshId?: string;
+	/** Coordinator display identity captured at spawn/resume for provenance. */
+	coordinatorSessionName?: string;
+	coordinatorNickname?: string;
 	ticketCwd?: string;
 	ticketText?: string;
 	freeform?: boolean;

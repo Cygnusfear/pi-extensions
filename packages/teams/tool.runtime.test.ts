@@ -67,7 +67,7 @@ describe("teams tool runtime action", () => {
 			// one. Provide one of review's models as available so resolveModelRole resolves
 			// and delegation proceeds — this asserts the real behavior (mai ticket args),
 			// independent of the user's configured ~/.pi/agent/team-templates.json.
-			{ cwd: '/tmp', modelRegistry: { getAvailable: () => [{ provider: 'anthropic', id: 'claude-opus-4-8' }] } } as any,
+			{ cwd: '/tmp', modelRegistry: { getAvailable: () => [{ provider: 'openai-codex', id: 'gpt-5.6-terra' }] } } as any,
 		);
 
 		const create = execCalls.find((c) => path.basename(c.cmd) === 'mai' && c.args[0] === 'ticket');

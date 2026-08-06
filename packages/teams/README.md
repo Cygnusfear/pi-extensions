@@ -16,6 +16,7 @@ The coordinator (your main pi session) creates tickets, spawns workers as separa
 - **Lifecycle management** — explicit terminal states via `team_finish` (done/quit)
 - **Mesh-based communication** — workers coordinate with the leader through ordinary durable mesh tells
 - **Lease-based liveness** — coordinator health is tracked; workers detect stale leaders
+- **Portable Pi launch capability** — fresh and resumed workers share one cached absolute Pi CLI resolver; an unavailable executable or child spawn error becomes a diagnosed startup failure rather than a coordinator crash
 - **Ticket integration** — automatic ticket creation with task descriptions, progress tracking via `team_comment`
 - **Session strategy** — fork (default), fresh, or resume modes for worker sessions
 - **Runtime widget** — real-time worker status display in the TUI
@@ -45,7 +46,7 @@ await teams({
 });
 
 // You can still pin a specific model to override the role's resolution:
-//   { ..., model: "anthropic/claude-sonnet-4-7" }
+//   { ..., model: "openai-codex/gpt-5.6-luna" }
 // The router never overrides explicit pins.
 ```
 
@@ -67,7 +68,7 @@ await teams.adopt({
   as: "researcher",
   message: "Continue the investigation and report the next concrete finding.",
   // ticketId: "pe-...",               // optional existing instruction ticket
-  // model: "anthropic/claude-opus-4-8", // optional explicit override
+  // model: "openai-codex/gpt-5.6-luna", // optional explicit override
   // hasTools: true,
 });
 
@@ -108,6 +109,7 @@ See [WORKER_LIFECYCLE.md](./WORKER_LIFECYCLE.md) for full details.
 - **Long markdown/code-heavy worker notes should be file-backed** (write a file, then use `team_comment { filePath }`)
 - **Committed worker results should include a Maiboard review handoff link**. Use `mai.reviewLink({ commits, ticket, branch, worktree })` with commits ordered oldest-to-newest, then include `review.vscodeLink` or `review.link` in the worker's final `team_finish` summary.
 - **Startup failure** = `failed`
+- **Pi launch failure** = a terminal, diagnosed startup failure; the requested attempt and pre-existing worker session history are retained
 - Workers **never** close tickets themselves — the coordinator owns ticket lifecycle
 - Workers **never** guess the coordinator's identity — it's injected at spawn time
 - Process exit and ticket state never imply success; exit code zero without `team_finish` is a missing-finish warning
@@ -152,27 +154,22 @@ Templates define reusable worker profiles stored in `~/.pi/agent/team-templates.
 {
   "review": {
     "model": [
-      "anthropic/claude-opus-4-7",
-      "openai-codex/gpt-5.5",
-      "zai-coding/glm-5.1"
+      "openai-codex/gpt-5.6-terra",
+      "kimi-coding/k3"
     ],
     "worktree": false,
     "prompt": "You are a code reviewer. Follow the 6-pass review skill.",
     "freeform": false
   },
   "oracle": {
-    "model": "anthropic/claude-opus-4-7",
+    "model": ["openai-codex/gpt-5.6-sol"],
     "worktree": false,
     "prompt": "You are a research oracle. Answer questions with deep analysis.",
     "freeform": false
   },
   "fix": {
-    "model": [
-      "zai-coding/glm-5.1",
-      "openai-codex/gpt-5.4",
-      "anthropic/claude-opus-4-7"
-    ],
-    "worktree": true,
+    "model": ["openai-codex/gpt-5.6-luna"],
+    "worktree": false,
     "prompt": "You are a fix agent. Fix all issues found in the code review.",
     "freeform": false
   }

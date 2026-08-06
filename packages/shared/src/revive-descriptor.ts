@@ -40,7 +40,7 @@ export interface ReviveDescriptor {
 	sessionFile: string;
 	/** Working directory the incarnation runs in. */
 	cwd: string;
-	/** The executable to relaunch (always "pi" today). */
+	/** The absolute Pi CLI executable to relaunch (never a bare PATH command). */
 	command: string;
 	/** Full argv for the relaunch, e.g. ["--session", file, "--model", model]. */
 	args: string[];
@@ -63,7 +63,9 @@ export interface ReviveDescriptor {
  *  descriptor is persisted user-level, so it must never leak secrets. Only the
  *  teams coordination vars a revive genuinely needs are allow-listed. */
 export const REVIVE_DESCRIPTOR_ENV_ALLOWLIST: readonly string[] = [
+	"PI_TEAMS_LAUNCH_CONTRACT_VERSION",
 	"PI_TEAMS_WORKER",
+	"PI_TEAMS_WORKER_ID",
 	"PI_TEAMS_WORKER_INSTANCE_ID",
 	"PI_TEAMS_TICKET_ID",
 	"PI_TEAMS_TICKET_CWD",
@@ -73,6 +75,9 @@ export const REVIVE_DESCRIPTOR_ENV_ALLOWLIST: readonly string[] = [
 	"PI_TEAMS_LEADER_SESSION",
 	"PI_TEAMS_LEASE_FILE",
 	"PI_TEAMS_COORDINATOR_ID",
+	"PI_TEAMS_COORDINATOR_SESSION_ID",
+	"PI_TEAMS_COORDINATOR_SESSION_NAME",
+	"PI_TEAMS_COORDINATOR_NICKNAME",
 	"PI_TEAMS_HAS_TOOLS",
 	"PI_TEAMS_FREEFORM",
 	"PI_TEAMS_SESSION_MODE",

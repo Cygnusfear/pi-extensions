@@ -6,6 +6,7 @@ import { TeamsSubscription, buildPredicate } from "./subscription.ts";
 import type { WorkerHandle } from "./types.js";
 import { createWorkerCommentEnvelope, createWorkerHelloEnvelope } from "./v2/mesh-adapter.ts";
 import { SESSION_PHASE_EVENT_KIND, SESSION_PHASE_EVENT_VERSION } from "@pi-extensions/shared/session-phase-event";
+import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import { unwrapInboundTell } from "@pi-extensions/pi-mesh/extension/tell-protocol.js";
 
 // The mesh "message" event now delivers an already-unwrapped InboundMeshMessage
@@ -63,6 +64,7 @@ function makeHarness(branch: any[] = []) {
 		sessionManager: {
 			getSessionFile: () => "/tmp/leader-runtime-test.jsonl",
 			getSessionId: () => "leader-runtime-session",
+				getSessionName: () => "Leader Runtime",
 			getEntries: () => entries,
 			getBranch: () => entries,
 			getHeader: () => null,
@@ -133,6 +135,21 @@ describe("TeamLeader runtime and transport integration", () => {
 		expect(listeners.message.size).toBe(1);
 		leader.stopPolling();
 		expect(listeners.message.size).toBe(0);
+	});
+
+
+	test("coordinator provenance uses the shared typed stable nickname source, not an untyped mesh self field", () => {
+		const { leader } = makeHarness();
+		leader.setMesh({
+			on: () => {}, off: () => {}, stop: () => {}, peers: () => [],
+			self: () => ({ id: "mesh-self" }), tell: () => {}, ask: async () => ({}),
+		} as any);
+		expect(leader.coordinatorProvenance()).toEqual({
+			coordinatorSessionId: "leader-runtime-session",
+			coordinatorMeshId: "mesh-self",
+			coordinatorSessionName: "Leader Runtime",
+			coordinatorNickname: getStableNickname("leader-runtime-session"),
+		});
 	});
 
 	test("mesh direct message handler accepts v2 worker comment envelopes", () => {

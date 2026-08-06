@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,20 +10,245 @@ import {
 } from "@pi-extensions/shared/revive-descriptor";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 
+/** A resolved, absolute Pi CLI capability. Never a Bun runtime or bare PATH command. */
+export interface PiExecutable {
+	readonly path: string;
+	readonly source: "PI_BIN" | "current-cli" | "bun-install" | "PATH";
+}
+
+export type PiExecutableResolution =
+	| { readonly kind: "resolved"; readonly executable: PiExecutable }
+	| { readonly kind: "unavailable"; readonly message: string };
+
+export interface PiExecutableResolver {
+	resolve(): PiExecutableResolution;
+}
+
+/**
+ * Resolve the Pi *CLI* once per coordinator runtime. `process.execPath` is
+ * deliberately absent: that identifies Bun/Node, not the CLI entrypoint that
+ * accepts `--session`. A successful or unsuccessful result is cached, keeping
+ * spawn coordination O(1) after the first request.
+ */
+export function createPiExecutableResolver(input: {
+	env?: NodeJS.ProcessEnv;
+	argv?: readonly string[];
+	homeDir?: string;
+} = {}): PiExecutableResolver {
+	const env = input.env ?? process.env;
+	const argv = input.argv ?? process.argv;
+	const homeDir = input.homeDir ?? os.homedir();
+	let cached: { key: string; resolution: PiExecutableResolution } | undefined;
+
+	const executable = (candidate: string | undefined, source: PiExecutable["source"]): PiExecutable | null => {
+		if (!candidate || !path.isAbsolute(candidate)) return null;
+		try {
+			const stat = fs.statSync(candidate);
+			fs.accessSync(candidate, fs.constants.X_OK);
+			return stat.isFile() ? { path: candidate, source } : null;
+		} catch {
+			return null;
+		}
+	};
+
+	const likelyPiCli = (candidate: string | undefined): boolean => {
+		if (!candidate) return false;
+		const base = path.basename(candidate).toLowerCase();
+		return base === "pi" || base === "pi.exe";
+	};
+
+	return {
+		resolve(): PiExecutableResolution {
+			// A coordinator's normal environment is stable, so this is an O(1) map
+			// lookup. Fingerprinting lets an explicit runtime environment change (and
+			// package-manager replacement) re-resolve rather than retain stale PATH data.
+			const key = [env.PI_BIN ?? "", env.PATH ?? "", env.BUN_INSTALL ?? "", ...argv].join("\0");
+			const remember = (resolution: PiExecutableResolution): PiExecutableResolution => {
+				cached = { key, resolution };
+				return resolution;
+			};
+			if (cached?.key === key) {
+				if (cached.resolution.kind === "unavailable") return cached.resolution;
+				// Hot path: one direct executable validation, never another PATH scan.
+				if (executable(cached.resolution.executable.path, cached.resolution.executable.source)) return cached.resolution;
+				// A package-manager upgrade/uninstall may replace the cached symlink.
+				cached = undefined;
+			}
+
+			const override = env.PI_BIN;
+			if (override !== undefined) {
+				const resolved = executable(override, "PI_BIN");
+				return remember(resolved
+					? { kind: "resolved", executable: resolved }
+					: { kind: "unavailable", message: "PI_BIN must name an absolute executable Pi CLI" });
+			}
+
+			for (const candidate of [argv[1], argv[0]]) {
+				if (!likelyPiCli(candidate)) continue;
+				const resolved = executable(candidate, "current-cli");
+				if (resolved) return remember({ kind: "resolved", executable: resolved });
+			}
+
+			for (const directory of (env.PATH ?? "").split(path.delimiter)) {
+				const resolved = executable(path.join(directory || ".", "pi"), "PATH");
+				if (resolved) return remember({ kind: "resolved", executable: resolved });
+			}
+
+			for (const candidate of [
+				env.BUN_INSTALL ? path.join(env.BUN_INSTALL, "bin", "pi") : undefined,
+				path.join(homeDir, ".bun", "bin", "pi"),
+			]) {
+				const resolved = executable(candidate, "bun-install");
+				if (resolved) return remember({ kind: "resolved", executable: resolved });
+			}
+
+			return remember({
+				kind: "unavailable",
+				message: "Pi CLI executable is unavailable (set PI_BIN to an absolute executable, or install pi on the coordinator PATH)",
+			});
+		},
+	};
+}
+
+export interface WorkerSpawnFailure {
+	readonly kind: "pi-unavailable" | "spawn-prepare-failed" | "spawn-threw" | "spawn-no-pid" | "spawn-error";
+	readonly message: string;
+	readonly executable?: string;
+}
+
+export interface WorkerProcessLaunch {
+	readonly kind: "started";
+	readonly process: ChildProcess;
+	readonly executable: string;
+	/** Receives a stored failure even when the child emitted before leader wiring. */
+	onFailure(listener: (failure: WorkerSpawnFailure) => void): () => void;
+}
+
+export type WorkerLaunchResult = WorkerProcessLaunch | { readonly kind: "failed"; readonly failure: WorkerSpawnFailure };
+export type SpawnWorkerResult =
+	| (WorkerProcessLaunch & { readonly handle: WorkerHandle })
+	| { readonly kind: "failed"; readonly failure: WorkerSpawnFailure };
+export type ResumeWorkerResult = WorkerProcessLaunch | { readonly kind: "refused" } | { readonly kind: "failed"; readonly failure: WorkerSpawnFailure };
+
+export interface WorkerSpawnDependencies {
+	readonly piExecutable: PiExecutableResolver;
+	readonly spawn: typeof spawn;
+}
+
+const coordinatorPiExecutable = createPiExecutableResolver();
+const defaultWorkerSpawnDependencies: WorkerSpawnDependencies = { piExecutable: coordinatorPiExecutable, spawn };
+
+/** Test seam for a concrete Pi capability or a launcher that sync-throws / emits error. */
+export function createWorkerSpawnDependencies(
+	piExecutable: PiExecutableResolver,
+	spawnProcess: typeof spawn = spawn,
+): WorkerSpawnDependencies {
+	return { piExecutable, spawn: spawnProcess };
+}
+
+interface PreparedPiInvocation {
+	readonly command: string;
+	readonly args: readonly string[];
+	readonly options: SpawnOptions;
+	cleanup?(): void;
+}
+
+interface PiLaunchRequest {
+	readonly args: readonly string[];
+	readonly cwd: string;
+	readonly env: Record<string, string>;
+	prepare(executable: PiExecutable): PreparedPiInvocation;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Single resolver + spawn boundary for fresh and resumed workers. It owns an
+ * immediate error listener, so the EventEmitter error path cannot escape the
+ * coordinator between `spawn()` and leader listener installation.
+ */
+function launchPiWorker(request: PiLaunchRequest, dependencies: WorkerSpawnDependencies): WorkerLaunchResult {
+	const resolution = dependencies.piExecutable.resolve();
+	if (resolution.kind === "unavailable") {
+		return { kind: "failed", failure: { kind: "pi-unavailable", message: resolution.message } };
+	}
+
+	let invocation: PreparedPiInvocation;
+	try {
+		invocation = request.prepare(resolution.executable);
+	} catch (error) {
+		return {
+			kind: "failed",
+			failure: { kind: "spawn-prepare-failed", message: errorMessage(error), executable: resolution.executable.path },
+		};
+	}
+
+	let child: ChildProcess;
+	try {
+		child = dependencies.spawn(invocation.command, [...invocation.args], invocation.options);
+	} catch (error) {
+		try { invocation.cleanup?.(); } catch {}
+		return {
+			kind: "failed",
+			failure: { kind: "spawn-threw", message: errorMessage(error), executable: resolution.executable.path },
+		};
+	}
+	try { invocation.cleanup?.(); } catch {}
+
+	let observedFailure: WorkerSpawnFailure | undefined;
+	const listeners = new Set<(failure: WorkerSpawnFailure) => void>();
+	child.once("error", (error) => {
+		observedFailure = {
+			kind: "spawn-error",
+			message: errorMessage(error),
+			executable: resolution.executable.path,
+		};
+		for (const listener of [...listeners]) listener(observedFailure);
+	});
+
+	if (!Number.isInteger(child.pid) || child.pid === undefined || child.pid <= 0) {
+		return {
+			kind: "failed",
+			failure: {
+				kind: "spawn-no-pid",
+				message: `Pi launcher returned no process PID for ${resolution.executable.path}`,
+				executable: resolution.executable.path,
+			},
+		};
+	}
+
+	return {
+		kind: "started",
+		process: child,
+		executable: resolution.executable.path,
+		onFailure(listener) {
+			if (observedFailure) {
+				listener(observedFailure);
+				return () => {};
+			}
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+}
+
+function quoteForPosixShell(arg: string): string {
+	return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * Write the SPAWNER's PARTIAL revive descriptor in its worker-owned runtime
- * directory (ADD-1, contract pe-jimphzxj). For ordinary workers that is beside
- * the session file; adopted sources use the coordinator-owned log directory so
- * Teams never writes orchestration files beside the external JSONL. The explicit
- * PI_TEAMS_REVIVE_DESCRIPTOR path lets pi-mesh read it on identity resolution
- * and materialise the canonical descriptor keyed by the
- * durable id. Only the spawner knows the semantic params (model, ticket,
- * worktree, PI_TEAMS_* env) that pi-mesh's process-view cannot see.
+ * directory (ADD-1, contract pe-jimphzxj). The descriptor stores the resolved
+ * absolute CLI capability, never a bare `pi` that a later revival must find in
+ * an unrelated shell PATH.
  */
 function writeWorkerReviveDescriptor(input: {
 	sessionFile: string;
 	descriptorDir?: string;
 	cwd: string;
+	command: string;
 	model?: string;
 	ticketId?: string;
 	worktreePath?: string | null;
@@ -35,7 +260,7 @@ function writeWorkerReviveDescriptor(input: {
 	const descriptor = buildReviveDescriptor({
 		sessionFile: input.sessionFile,
 		cwd: input.cwd,
-		command: "pi",
+		command: input.command,
 		args,
 		model: input.model,
 		ticketId: input.ticketId,
@@ -110,98 +335,123 @@ export function buildWorkerPrompt(ticketId: string, workerName: string, ticketTe
 	return lines.join("\n");
 }
 
-export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handle: WorkerHandle } {
-	if (config.sessionMode?.kind === "adopt") {
-		throw new Error("Adopted sessions must be activated through resumeWorker so the activation lease is acquired before spawn");
+/**
+ * Teams launch state is an attempt-owned, versioned contract, never ambient
+ * process state. A nested Teams coordinator is itself a worker, so copying any
+ * PI_TEAMS_* value can make its child inherit stale provenance or behavior.
+ */
+export const TEAMS_LAUNCH_ENV_PREFIX = "PI_TEAMS_";
+export const WORKER_LAUNCH_ENV_CONTRACT_VERSION = "1";
+
+/**
+ * Build the complete worker launch contract from SpawnConfig. Non-Teams ambient
+ * values (PATH, locale, credentials, etc.) remain available, while every
+ * inherited PI_TEAMS_* value is discarded before the typed contract is emitted.
+ * Optional false/absent facts intentionally have no environment representation.
+ */
+export function buildWorkerLaunchEnvironment(
+	config: SpawnConfig,
+	inheritedEnv: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(inheritedEnv)) {
+		if (typeof value === "string" && !key.startsWith(TEAMS_LAUNCH_ENV_PREFIX)) env[key] = value;
 	}
-	const leaseFile = buildLeaderLeasePath(config.leaderSessionFile);
-	const env: Record<string, string> = {
-		...(process.env as Record<string, string>),
+
+	const contract: Record<string, string> = {
+		PI_TEAMS_LAUNCH_CONTRACT_VERSION: WORKER_LAUNCH_ENV_CONTRACT_VERSION,
 		PI_TEAMS_WORKER: "1",
 		PI_TEAMS_WORKER_ID: config.workerId,
 		PI_TEAMS_WORKER_INSTANCE_ID: config.workerInstanceId,
 		PI_TEAMS_TICKET_ID: config.ticketId,
 		PI_TEAMS_LEADER_SESSION: config.leaderSessionFile,
 		PI_TEAMS_WORKER_NAME: config.workerName,
-		PI_TEAMS_LEASE_FILE: leaseFile,
+		PI_TEAMS_LEASE_FILE: buildLeaderLeasePath(config.leaderSessionFile),
 	};
+	if (config.teamId) contract.PI_TEAMS_TEAM_ID = config.teamId;
+	if (config.leaderEpoch) contract.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
+	if (config.coordinatorSessionId) contract.PI_TEAMS_COORDINATOR_SESSION_ID = config.coordinatorSessionId;
+	if (config.coordinatorMeshId) contract.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
+	if (config.coordinatorSessionName) contract.PI_TEAMS_COORDINATOR_SESSION_NAME = config.coordinatorSessionName;
+	if (config.coordinatorNickname) contract.PI_TEAMS_COORDINATOR_NICKNAME = config.coordinatorNickname;
+	if (config.ticketCwd) contract.PI_TEAMS_TICKET_CWD = config.ticketCwd;
+	if (config.freeform) contract.PI_TEAMS_FREEFORM = "1";
+	if (config.sessionMode) contract.PI_TEAMS_SESSION_MODE = JSON.stringify(config.sessionMode);
+	if (config.hasTools) contract.PI_TEAMS_HAS_TOOLS = "1";
+	return { ...env, ...contract };
+}
 
-	if (config.teamId) env.PI_TEAMS_TEAM_ID = config.teamId;
-	if (config.leaderEpoch) env.PI_TEAMS_LEADER_EPOCH = config.leaderEpoch;
-	if (config.coordinatorSessionId) env.PI_TEAMS_COORDINATOR_SESSION_ID = config.coordinatorSessionId;
-	if (config.coordinatorMeshId) env.PI_TEAMS_COORDINATOR_ID = config.coordinatorMeshId;
-	if (config.ticketCwd) env.PI_TEAMS_TICKET_CWD = config.ticketCwd;
-	if (config.freeform) env.PI_TEAMS_FREEFORM = "1";
-	if (config.sessionMode) env.PI_TEAMS_SESSION_MODE = JSON.stringify(config.sessionMode);
-
-	if (config.hasTools) {
-		env.PI_TEAMS_HAS_TOOLS = "1";
-	} else {
-		delete env.PI_TEAMS_HAS_TOOLS;
+export function spawnWorker(
+	config: SpawnConfig,
+	dependencies: WorkerSpawnDependencies = defaultWorkerSpawnDependencies,
+): SpawnWorkerResult {
+	if (config.sessionMode?.kind === "adopt") {
+		throw new Error("Adopted sessions must be activated through resumeWorker so the activation lease is acquired before spawn");
 	}
+	const env = buildWorkerLaunchEnvironment(config);
 
-	// Always keep worker sessions under the REPO ROOT, not the worktree cwd.
-	// Worktree cleanup (removeWorktree) nukes the entire worktree directory —
-	// if sessions lived there, a cleanup of one worker could destroy the session
-	// of another worker sharing the same worktree path, or even the same worker
-	// on a retry. Using repoRoot ensures sessions survive worktree lifecycle.
+	// Sessions live below the repo root, not a disposable worktree.
 	const sessionDir = config.sessionDir;
-
-	// Ensure session dir exists so we can write stdout/stderr logs
-	fs.mkdirSync(sessionDir, { recursive: true });
-	const stdoutLog = path.join(sessionDir, "stdout.log");
-	const stderrLog = path.join(sessionDir, "stderr.log");
-	// Don't open fd-based stdio — the shell wrapper handles redirection.
-	// This sidesteps a Bun race in the coordinator process where rapid
-	// back-to-back spawns with fd-based stdio leave the 2nd+ children with
-	// broken inherited fds (silent exit 0, zero output). Verified that
-	// routing through sh -c with file redirection fixes 5/5 workers.
-
 	const sessionFile = path.join(sessionDir, "session.jsonl");
-	if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "", "utf-8");
-
-	const activeSessionFile =
-		config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
-			? config.sessionMode.sessionFile
-			: sessionFile;
-
-	// v1c ADD-1: write the spawner's PARTIAL revive descriptor next to the session
-	// file so the activator (pi-mesh) materialises the canonical one keyed by the
-	// durable id. Point the worker at it explicitly (pi-mesh also has a session-dir
-	// fallback).
-	const descriptorPath = writeWorkerReviveDescriptor({
-		sessionFile: activeSessionFile,
-		cwd: config.cwd,
-		model: config.model,
-		ticketId: config.ticketId,
-		worktreePath: config.useWorktree ? config.cwd : null,
-		env,
-		supervisors: config.coordinatorMeshId ? [config.coordinatorMeshId] : undefined,
-	});
-	env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
-
+	const activeSessionFile = config.sessionMode?.kind === "fork" || config.sessionMode?.kind === "resume"
+		? config.sessionMode.sessionFile
+		: sessionFile;
 	const args: string[] = ["--session", activeSessionFile];
 	if (config.model) args.push("--model", config.model);
 	args.push("-p", buildWorkerPrompt(config.ticketId, config.workerName, config.ticketText, config.additionalPrompt, config.freeform, config.coordinatorMeshId, config.ticketCwd));
 
-	// Route through `sh -c "exec pi ..."` so the shell handles stdout/stderr
-	// redirection via its own open() calls, avoiding the coordinator's fd race.
-	// `exec` replaces sh with pi in the same pid so killWorker() targets pi.
-	const shellCmd = ["exec", "pi", ...args.map((a) => `'${a.replace(/'/g, "'\\''")}'`)].join(" ") +
-		` > ${JSON.stringify(stdoutLog)} 2> ${JSON.stringify(stderrLog)}`;
-	const child = spawn("sh", ["-c", shellCmd], {
+	const launch = launchPiWorker({
+		args,
 		cwd: config.cwd,
 		env,
-		stdio: ["ignore", "ignore", "ignore"],
-		detached: true,
-	});
+		prepare(executable) {
+			fs.mkdirSync(sessionDir, { recursive: true });
+			if (!fs.existsSync(sessionFile)) fs.writeFileSync(sessionFile, "", "utf-8");
+			const descriptorPath = writeWorkerReviveDescriptor({
+				sessionFile: activeSessionFile,
+				cwd: config.cwd,
+				command: executable.path,
+				model: config.model,
+				ticketId: config.ticketId,
+				worktreePath: config.useWorktree ? config.cwd : null,
+				env,
+				supervisors: config.coordinatorMeshId ? [config.coordinatorMeshId] : undefined,
+			});
+			env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
+
+			// Keep the existing shell-owned log redirection workaround for Bun's
+			// fd inheritance race, but execute the already-resolved absolute CLI.
+			if (process.platform !== "win32" && fs.existsSync("/bin/sh")) {
+				const shellCommand = ["exec", quoteForPosixShell(executable.path), ...args.map(quoteForPosixShell)].join(" ")
+					+ ` > ${JSON.stringify(path.join(sessionDir, "stdout.log"))} 2> ${JSON.stringify(path.join(sessionDir, "stderr.log"))}`;
+				return {
+					command: "/bin/sh",
+					args: ["-c", shellCommand],
+					options: { cwd: config.cwd, env, stdio: ["ignore", "ignore", "ignore"], detached: true },
+				};
+			}
+
+			const stdoutFd = fs.openSync(path.join(sessionDir, "stdout.log"), "a");
+			const stderrFd = fs.openSync(path.join(sessionDir, "stderr.log"), "a");
+			return {
+				command: executable.path,
+				args,
+				options: { cwd: config.cwd, env, stdio: ["ignore", stdoutFd, stderrFd], detached: true },
+				cleanup() {
+					try { fs.closeSync(stdoutFd); } catch {}
+					try { fs.closeSync(stderrFd); } catch {}
+				},
+			};
+		},
+	}, dependencies);
+	if (launch.kind === "failed") return launch;
 
 	const now = Date.now();
 	const handle: WorkerHandle = {
 		workerId: config.workerId,
 		workerInstanceId: config.workerInstanceId,
 		name: config.workerName,
-		pid: child.pid!,
+		pid: launch.process.pid!,
 		ticketId: config.ticketId,
 		ticketStatus: "open",
 		lastNote: undefined,
@@ -219,29 +469,27 @@ export function spawnWorker(config: SpawnConfig): { process: ChildProcess; handl
 		activeChildProcessCount: 0,
 		lastSeenCommentCount: 0,
 		routeState: "pending",
-		attempts: [{ workerId: config.workerId, workerInstanceId: config.workerInstanceId, pid: child.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
+		attempts: [{ workerId: config.workerId, workerInstanceId: config.workerInstanceId, pid: launch.process.pid!, sessionDir, sessionFile, spawnedAt: now, sessionMode: config.sessionMode }],
 	};
 
-	// v1c: this fresh incarnation holds the activation lease so a concurrent resume
-	// of the same session is refused while it is live (single-activation authority).
 	const activation = tryAcquireActivationLease(activeSessionFile);
 	if (activation.acquired && activation.epoch) {
-		commitActivationLease(activeSessionFile, activation.epoch, child.pid!);
+		commitActivationLease(activeSessionFile, activation.epoch, launch.process.pid!);
 		handle.activationEpoch = activation.epoch;
 		handle.activationSessionFile = activeSessionFile;
 	}
+	// The launch boundary owns the raw EventEmitter error; release this attempt's
+	// disposable lease even if a caller has not wired lifecycle handling yet.
+	launch.onFailure(() => releaseWorkerActivation(handle));
 
-	return { process: child, handle };
+	return { ...launch, handle };
 }
 
 /** Find the session JSONL file in a worker's session directory. */
-
 function findSessionFile(handle: Pick<WorkerHandle, "sessionDir" | "sessionFile">): string | null {
 	if (handle.sessionFile && fs.existsSync(handle.sessionFile)) return handle.sessionFile;
 	try {
 		const files = fs.readdirSync(handle.sessionDir).filter((f) => f.endsWith(".jsonl"));
-		// Without the durable path, exactly one candidate is recoverable. Choosing
-		// arbitrarily from multiple Pi sessions could continue the wrong worker.
 		return files.length === 1 ? path.join(handle.sessionDir, files[0]) : null;
 	} catch {
 		return null;
@@ -249,71 +497,66 @@ function findSessionFile(handle: Pick<WorkerHandle, "sessionDir" | "sessionFile"
 }
 
 /**
- * Resume a persistent worker by continuing its existing session with a new message.
- * Uses `pi -p --session <file> "message"` to continue where the worker left off.
+ * Resume a persistent worker with the same typed Pi capability/launch boundary
+ * used by fresh recruitment. Refusal, unavailable CLI, sync throw, and async
+ * child error are distinct lifecycle outcomes rather than coordinator errors.
  */
 export function resumeWorker(
 	handle: WorkerHandle,
 	message: string,
-	env: Record<string, string>,
-): ChildProcess | null {
+	config: SpawnConfig,
+	dependencies: WorkerSpawnDependencies = defaultWorkerSpawnDependencies,
+	inheritedEnv: Record<string, string | undefined> = process.env,
+): ResumeWorkerResult {
+	const env = buildWorkerLaunchEnvironment(config, inheritedEnv);
 	const sessionFile = findSessionFile(handle);
-	if (!sessionFile) return null;
+	if (!sessionFile) return { kind: "refused" };
 
-	// v1c per-worker activation LOCK (part C): refuse a concurrent resume of the
-	// SAME session — two `pi --session <file>` would corrupt one session.jsonl.
-	// tryAcquire is atomic (openSync "wx"), so two racing resumes → exactly one
-	// wins; the loser gets null and the caller skips it. A dead prior incarnation's
-	// stale lease is stolen (that IS the orphan = kill + standard-revive path).
 	const activation = tryAcquireActivationLease(sessionFile);
-	if (!activation.acquired || !activation.epoch) return null;
+	if (!activation.acquired || !activation.epoch) return { kind: "refused" };
 
-	// Refresh the revive descriptor with the CURRENT resume env so a future revive
-	// is reconstructable from the latest incarnation's params.
-	const executionCwd = handle.spawnConfig?.cwd ?? handle.worktreePath ?? process.cwd();
-	const descriptorPath = writeWorkerReviveDescriptor({
-		sessionFile,
-		descriptorDir: handle.sessionDir,
-		cwd: executionCwd,
-		model: handle.model,
-		ticketId: handle.ticketId,
-		worktreePath: handle.worktreePath,
-		env,
-		supervisors: env.PI_TEAMS_COORDINATOR_ID ? [env.PI_TEAMS_COORDINATOR_ID] : undefined,
-	});
-	env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
-
-	const stdoutLog = path.join(handle.sessionDir, "stdout.log");
-	const stderrLog = path.join(handle.sessionDir, "stderr.log");
-	const stdoutFd = fs.openSync(stdoutLog, "a"); // append
-	const stderrFd = fs.openSync(stderrLog, "a");
-
+	const executionCwd = config.cwd;
 	const args = ["--session", sessionFile];
 	if (handle.model) args.push("--model", handle.model);
 	args.push("-p", message);
 
-	let child: ChildProcess;
-	try {
-		child = spawn("pi", args, {
-			cwd: executionCwd,
-			env,
-			stdio: ["ignore", stdoutFd, stderrFd],
-			detached: true,
-		});
-	} catch (err) {
-		// Spawn failed (e.g. pi not found) — do NOT strand the activation lease.
-		// Release the reservation so a later revive can re-acquire immediately.
-		try { fs.closeSync(stdoutFd); } catch {}
-		try { fs.closeSync(stderrFd); } catch {}
+	const launch = launchPiWorker({
+		args,
+		cwd: executionCwd,
+		env,
+		prepare(executable) {
+			const descriptorPath = writeWorkerReviveDescriptor({
+				sessionFile,
+				descriptorDir: handle.sessionDir,
+				cwd: executionCwd,
+				command: executable.path,
+				model: handle.model,
+				ticketId: handle.ticketId,
+				worktreePath: handle.worktreePath,
+				env,
+				supervisors: env.PI_TEAMS_COORDINATOR_ID ? [env.PI_TEAMS_COORDINATOR_ID] : undefined,
+			});
+			env.PI_TEAMS_REVIVE_DESCRIPTOR = descriptorPath;
+			const stdoutFd = fs.openSync(path.join(handle.sessionDir, "stdout.log"), "a");
+			const stderrFd = fs.openSync(path.join(handle.sessionDir, "stderr.log"), "a");
+			return {
+				command: executable.path,
+				args,
+				options: { cwd: executionCwd, env, stdio: ["ignore", stdoutFd, stderrFd], detached: true },
+				cleanup() {
+					try { fs.closeSync(stdoutFd); } catch {}
+					try { fs.closeSync(stderrFd); } catch {}
+				},
+			};
+		},
+	}, dependencies);
+	if (launch.kind === "failed") {
 		releaseActivationLease(sessionFile, activation.epoch);
-		throw err;
+		return launch;
 	}
 
-	fs.closeSync(stdoutFd);
-	fs.closeSync(stderrFd);
-
 	const now = Date.now();
-	handle.pid = child.pid!;
+	handle.pid = launch.process.pid!;
 	handle.spawnedAt = now;
 	handle.status = "running";
 	handle.exitCode = undefined;
@@ -326,20 +569,18 @@ export function resumeWorker(
 	handle.attempts.push({
 		workerId: handle.workerId,
 		workerInstanceId: handle.workerInstanceId,
-		pid: child.pid!,
+		pid: launch.process.pid!,
 		sessionDir: handle.sessionDir,
 		sessionFile,
 		spawnedAt: now,
 		sessionMode: handle.spawnConfig?.sessionMode ?? { kind: "resume", sessionFile },
 	});
-
-	// Commit the reservation to the new incarnation's pid so single-activation
-	// liveness tracks the actual `pi` process; store the epoch for release on exit.
-	commitActivationLease(sessionFile, activation.epoch, child.pid!);
+	commitActivationLease(sessionFile, activation.epoch, launch.process.pid!);
 	handle.activationEpoch = activation.epoch;
 	handle.activationSessionFile = sessionFile;
-
-	return child;
+	// Never strand a lease when a Node-style child error arrives after spawn().
+	launch.onFailure(() => releaseWorkerActivation(handle));
+	return launch;
 }
 
 export function isProcessAlive(pid: number): boolean {

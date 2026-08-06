@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TeamLeader } from "./leader.ts";
+import { TEAMS_LAUNCH_ENV_PREFIX, createWorkerSpawnDependencies } from "./spawner.ts";
+import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import {
 	commitActivationLease,
 	readActivationLease,
@@ -11,7 +13,6 @@ import {
 } from "./lease.ts";
 import { LIFECYCLE_FACT_ENTRY_TYPE } from "./v2/session-facts.ts";
 import type { LifecycleFact } from "./v2/state.ts";
-import type { WorkerHandle } from "./types.ts";
 
 const cleanupDirs: string[] = [];
 const cleanupPids: number[] = [];
@@ -45,7 +46,7 @@ function makeFakePi(binDir: string, invocationLog: string): void {
 	);
 }
 
-function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>) {
+function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>, piExecutable?: string) {
 	const coordinatorFile = path.join(baseDir, "coordinator.jsonl");
 	if (!fs.existsSync(coordinatorFile)) {
 		fs.writeFileSync(coordinatorFile, `${JSON.stringify({ type: "session", version: 3, id: "coordinator", timestamp: new Date().toISOString(), cwd: baseDir })}\n`);
@@ -63,7 +64,10 @@ function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>) {
 		},
 		sendMessage: () => {},
 	};
-	const leader = new TeamLeader(fakePi as never);
+	const launchDependencies = piExecutable
+		? createWorkerSpawnDependencies({ resolve: () => ({ kind: "resolved" as const, executable: { path: piExecutable, source: "PATH" as const } }) })
+		: undefined;
+	const leader = new TeamLeader(fakePi as never, launchDependencies);
 	const runtime = leader as unknown as {
 		restoreState: (ctx: unknown) => void;
 		startActivityMonitor: () => void;
@@ -76,7 +80,6 @@ function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>) {
 		adoptSession: TeamLeader["adoptSession"];
 		tellWorker: TeamLeader["tellWorker"];
 		stopPolling: () => void;
-		buildWorkerResumeEnv: (worker: WorkerHandle) => Record<string, string>;
 	};
 	runtime.startActivityMonitor = () => {};
 	runtime.renderWidget = () => {};
@@ -90,6 +93,7 @@ function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>) {
 		sessionManager: {
 			getSessionFile: () => coordinatorFile,
 			getSessionId: () => "coordinator",
+			getSessionName: () => "Coordinator Session",
 			getEntries: () => entries,
 			getBranch: () => entries,
 			getHeader: () => ({ type: "session", version: 3, id: "coordinator", timestamp: new Date().toISOString(), cwd: baseDir }),
@@ -99,13 +103,6 @@ function makeLeader(baseDir: string, entries: Array<Record<string, unknown>>) {
 	return runtime;
 }
 
-function useFakePi(runtime: ReturnType<typeof makeLeader>, binDir: string): void {
-	const buildWorkerResumeEnv = runtime.buildWorkerResumeEnv.bind(runtime);
-	runtime.buildWorkerResumeEnv = (worker) => ({
-		...buildWorkerResumeEnv(worker),
-		PATH: `${binDir}:${process.env.PATH ?? ""}`,
-	});
-}
 
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 	const deadline = Date.now() + 5_000;
@@ -134,9 +131,19 @@ describe("TeamLeader durable-session adoption", () => {
 		const entries: Array<Record<string, unknown>> = [{ type: "message", id: "assistant", message: { role: "assistant", content: [] } }];
 		let first: ReturnType<typeof makeLeader> | undefined;
 		let restored: ReturnType<typeof makeLeader> | undefined;
+		const inheritedTeams = Object.fromEntries(
+			Object.entries(process.env).filter(([key]) => key.startsWith(TEAMS_LAUNCH_ENV_PREFIX)),
+		);
+		Object.assign(process.env, {
+			PI_TEAMS_COORDINATOR_SESSION_ID: "stale-session",
+			PI_TEAMS_COORDINATOR_ID: "stale-mesh",
+			PI_TEAMS_COORDINATOR_SESSION_NAME: "Stale Session",
+			PI_TEAMS_COORDINATOR_NICKNAME: "Stale Nick",
+			PI_TEAMS_COORDINATOR_FUTURE: "stale-future-provenance",
+			PI_TEAMS_FUTURE: "stale-future-behavior",
+		});
 		try {
-			first = makeLeader(baseDir, entries);
-			useFakePi(first, binDir);
+			first = makeLeader(baseDir, entries, path.join(binDir, "pi"));
 			const handle = await first.adoptSession(
 				"pe-adopt",
 				"durable",
@@ -150,8 +157,20 @@ describe("TeamLeader durable-session adoption", () => {
 			expect(handle.spawnConfig?.cwd).toBe(source.cwd);
 			expect(handle.spawnConfig?.model).toBeUndefined();
 			expect(handle.spawnConfig?.sessionMode).toEqual({ kind: "adopt", sessionFile: source.file, sessionId: "source-session" });
+			expect(handle.spawnConfig).toMatchObject({
+				coordinatorSessionName: "Coordinator Session",
+				coordinatorNickname: getStableNickname("coordinator"),
+			});
 			expect(fs.existsSync(path.join(path.dirname(source.file), "revive-descriptor.json"))).toBe(false);
 			expect(fs.existsSync(path.join(handle.sessionDir, "revive-descriptor.json"))).toBe(true);
+			const adoptedDescriptor = JSON.parse(fs.readFileSync(path.join(handle.sessionDir, "revive-descriptor.json"), "utf8"));
+			expect(adoptedDescriptor.env.PI_TEAMS_COORDINATOR_SESSION_NAME).toBe("Coordinator Session");
+			expect(adoptedDescriptor.env.PI_TEAMS_COORDINATOR_NICKNAME).toBe(getStableNickname("coordinator"));
+			expect(adoptedDescriptor.env.PI_TEAMS_COORDINATOR_SESSION_ID).toBe("coordinator");
+			expect(adoptedDescriptor.env.PI_TEAMS_COORDINATOR_ID).toBeUndefined();
+			expect(adoptedDescriptor.env.PI_TEAMS_COORDINATOR_FUTURE).toBeUndefined();
+			expect(adoptedDescriptor.env.PI_TEAMS_FUTURE).toBeUndefined();
+			expect(adoptedDescriptor.env.PI_TEAMS_LAUNCH_CONTRACT_VERSION).toBe("1");
 
 			await waitFor(() => first?.workers.get("durable")?.routeState === "resumable", "first adopted attempt to become resumable");
 			expect(fs.readFileSync(source.file, "utf8")).toBe(source.original);
@@ -171,14 +190,18 @@ describe("TeamLeader durable-session adoption", () => {
 			});
 
 			first.stopPolling();
-			restored = makeLeader(baseDir, entries);
-			useFakePi(restored, binDir);
+			restored = makeLeader(baseDir, entries, path.join(binDir, "pi"));
 			await waitFor(() => restored?.workers.has("durable") === true, "restored adopted relationship");
 			const projected = restored.workers.get("durable");
 			expect(projected?.routeState).toBe("resumable");
 			expect(projected?.spawnConfig?.cwd).toBe(source.cwd);
 			expect(await restored.tellWorker("durable", "another turn")).toBe(true);
 			const resumed = restored.workers.get("durable");
+			expect(resumed?.spawnConfig).toMatchObject({
+				coordinatorSessionName: "Coordinator Session",
+				coordinatorNickname: getStableNickname("coordinator"),
+				sessionMode: { kind: "resume", sessionFile: source.file },
+			});
 			if (resumed && resumed.pid > 0) cleanupPids.push(resumed.pid);
 			await waitFor(() => (fs.readFileSync(invocationLog, "utf8").match(/BEGIN/g) ?? []).length === 2, "second exact-session invocation");
 			await waitFor(() => restored?.workers.get("durable")?.routeState === "resumable", "second adopted attempt to become resumable");
@@ -193,9 +216,21 @@ describe("TeamLeader durable-session adoption", () => {
 			}
 			expect(invocations[0]).toContain('mode={"kind":"adopt"');
 			expect(invocations[1]).toContain('mode={"kind":"resume"');
+			const revivedDescriptor = JSON.parse(fs.readFileSync(path.join(resumed!.sessionDir, "revive-descriptor.json"), "utf8"));
+			expect(revivedDescriptor.env.PI_TEAMS_COORDINATOR_SESSION_NAME).toBe("Coordinator Session");
+			expect(revivedDescriptor.env.PI_TEAMS_COORDINATOR_NICKNAME).toBe(getStableNickname("coordinator"));
+			expect(revivedDescriptor.env.PI_TEAMS_COORDINATOR_SESSION_ID).toBe("coordinator");
+			expect(revivedDescriptor.env.PI_TEAMS_COORDINATOR_ID).toBeUndefined();
+			expect(revivedDescriptor.env.PI_TEAMS_COORDINATOR_FUTURE).toBeUndefined();
+			expect(revivedDescriptor.env.PI_TEAMS_FUTURE).toBeUndefined();
+			expect(revivedDescriptor.env.PI_TEAMS_LAUNCH_CONTRACT_VERSION).toBe("1");
 		} finally {
 			first?.stopPolling();
 			restored?.stopPolling();
+			for (const key of Object.keys(process.env)) {
+				if (key.startsWith(TEAMS_LAUNCH_ENV_PREFIX)) delete process.env[key];
+			}
+			Object.assign(process.env, inheritedTeams);
 		}
 	});
 

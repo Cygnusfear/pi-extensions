@@ -554,7 +554,16 @@ describe("TeamLeader startup-death respawn", () => {
 		makeFakePiBinary(binDir, invocationLog);
 
 		const originalPath = process.env.PATH ?? "";
+		const inheritedTeams = Object.fromEntries(
+			Object.entries(process.env).filter(([key]) => key.startsWith("PI_TEAMS_")),
+		);
 		process.env.PATH = `${binDir}:${originalPath}`;
+		Object.assign(process.env, {
+			PI_TEAMS_COORDINATOR_FUTURE: "stale-future-provenance",
+			PI_TEAMS_FUTURE: "stale-future-behavior",
+			PI_TEAMS_FREEFORM: "1",
+			PI_TEAMS_HAS_TOOLS: "1",
+		});
 
 		try {
 			const { leader, maiNoteLog, sendMessageLog } = makeLeaderHarness(baseDir);
@@ -572,7 +581,10 @@ describe("TeamLeader startup-death respawn", () => {
 				model: "openai-codex/gpt-5.4",
 				hasTools: false,
 				additionalPrompt: "do stuff",
-				coordinatorMeshId: undefined,
+				coordinatorSessionId: "leader-test-session",
+				coordinatorMeshId: "stale-mesh",
+				coordinatorSessionName: "Stale Coordinator",
+				coordinatorNickname: "Stale Nick",
 				freeform: false,
 			};
 
@@ -600,6 +612,15 @@ describe("TeamLeader startup-death respawn", () => {
 				spawnConfig,
 			};
 
+			// Recovery launches a new attempt. It must recapture current coordinator
+			// provenance instead of carrying the old attempt's display identity.
+			leader.coordinatorProvenance = () => ({
+				coordinatorSessionId: "leader-test-session",
+				coordinatorMeshId: "current-mesh",
+				coordinatorSessionName: "Current Coordinator",
+				coordinatorNickname: "Current Nick",
+			});
+
 			await leader.handleWorkerExit("startup-worker", worker, 1);
 
 			expect(worker.recoveryAttempts).toBe(1);
@@ -611,6 +632,23 @@ describe("TeamLeader startup-death respawn", () => {
 			expect(worker.sessionDir).not.toBe(sessionDir);
 
 			const piArgs = await waitForFile(invocationLog);
+			expect(worker.spawnConfig).toMatchObject({
+				coordinatorSessionId: "leader-test-session",
+				coordinatorMeshId: "current-mesh",
+				coordinatorSessionName: "Current Coordinator",
+				coordinatorNickname: "Current Nick",
+			});
+			const descriptor = JSON.parse(fs.readFileSync(path.join(worker.sessionDir, "revive-descriptor.json"), "utf8"));
+			expect(descriptor.env).toMatchObject({
+				PI_TEAMS_LAUNCH_CONTRACT_VERSION: "1",
+				PI_TEAMS_COORDINATOR_SESSION_ID: "leader-test-session",
+				PI_TEAMS_COORDINATOR_ID: "current-mesh",
+				PI_TEAMS_COORDINATOR_SESSION_NAME: "Current Coordinator",
+				PI_TEAMS_COORDINATOR_NICKNAME: "Current Nick",
+			});
+			for (const key of ["PI_TEAMS_COORDINATOR_FUTURE", "PI_TEAMS_FUTURE", "PI_TEAMS_FREEFORM", "PI_TEAMS_HAS_TOOLS"]) {
+				expect(descriptor.env[key]).toBeUndefined();
+			}
 
 			const child = leader.childProcesses.get("startup-worker");
 			expect(child).toBeDefined();
@@ -630,6 +668,10 @@ describe("TeamLeader startup-death respawn", () => {
 			expect(sent).toContain("auto-respawning once");
 		} finally {
 			process.env.PATH = originalPath;
+			for (const key of Object.keys(process.env)) {
+				if (key.startsWith("PI_TEAMS_")) delete process.env[key];
+			}
+			Object.assign(process.env, inheritedTeams);
 		}
 	});
 

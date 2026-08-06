@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { safeJsonParse } from "@pi-extensions/shared/safe-json";
+import { getStableNickname } from "@pi-extensions/shared/session-nickname";
 import { isSessionPhaseEvent, type SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
 import type { MeshTellReceiptPhase } from "@pi-extensions/pi-mesh/types";
 import type { InboundMeshMessage } from "@pi-extensions/pi-mesh/extension/tell-protocol.js";
@@ -28,7 +29,7 @@ import {
   writeLeaderLease,
 } from "./lease.js";
 import { cleanupWorker } from "./cleanup.js";
-import { buildWorkerPrompt, isProcessAlive, killWorker, releaseWorkerActivation, resumeWorker, spawnWorker } from "./spawner.js";
+import { buildWorkerPrompt, isProcessAlive, killWorker, releaseWorkerActivation, resumeWorker, spawnWorker, type WorkerProcessLaunch, type WorkerSpawnDependencies } from "./spawner.js";
 import { adoptedWorkerId, resolveAdoptableSession, type SessionSelector } from "./session-adoption.js";
 import { getNewNotes, parseMaiShow } from "./tickets.js";
 import { wrapPollEvent, type TeamsEvent } from "./subscription.js";
@@ -791,7 +792,7 @@ export class TeamLeader {
 
   private static readonly STALE_RESTORE_PRUNE_MS = 60_000;
 
-  constructor(pi: ExtensionAPI) {
+  constructor(pi: ExtensionAPI, private readonly workerSpawnDependencies?: WorkerSpawnDependencies) {
     this.pi = pi;
   }
 
@@ -1139,7 +1140,7 @@ export class TeamLeader {
       kind: "assessment_startup_failure",
       sourceLeaderEpoch: this.leaderEpoch,
       occurredAt: Date.now(),
-	  payload: { reason: "Worker failed before the worker process start was durably recorded", provisional: false },
+	  payload: { reason, provisional: false },
 	  diagnostics: { detail: reason },
     });
     const attempt = this.lifecycleStore?.attempt(identity.attemptId);
@@ -1336,6 +1337,37 @@ export class TeamLeader {
     return this.mesh?.self()?.id ?? "";
   }
 
+  /** Capture this coordinator's display identity once per spawn/resume for
+   *  producer-side provider-limit provenance. Session name and nickname are
+   *  best-effort; the durable session id is the authoritative fallback. */
+  private coordinatorProvenance(): {
+    coordinatorSessionId?: string;
+    coordinatorMeshId?: string;
+    coordinatorSessionName?: string;
+    coordinatorNickname?: string;
+  } {
+    const coordinatorSessionId = this.factWriter?.coordinatorSessionId;
+    const coordinatorMeshId = this.getDurableMeshId() || undefined;
+    let coordinatorSessionName: string | undefined;
+    let coordinatorNickname: string | undefined;
+    try {
+      const name = this.ctx?.sessionManager?.getSessionName?.();
+      if (typeof name === "string" && name.trim()) coordinatorSessionName = name.trim();
+    } catch { /* best-effort */ }
+    // Pi Mesh writes the stable durable id through the shared nickname source;
+    // that helper is typed and uses this coordinator session id as its explicit
+    // fallback. Do not infer a coordinator nickname from the worker mesh API.
+    const nick = getStableNickname(coordinatorSessionId);
+    if (nick) coordinatorNickname = nick;
+    const out: Record<string, string> = {};
+    if (coordinatorSessionId) out.coordinatorSessionId = coordinatorSessionId;
+    if (coordinatorMeshId) out.coordinatorMeshId = coordinatorMeshId;
+    if (coordinatorSessionName) out.coordinatorSessionName = coordinatorSessionName;
+    if (coordinatorNickname) out.coordinatorNickname = coordinatorNickname;
+    return out;
+  }
+
+
   private resolveWorkerSessionFile(worker: WorkerHandle): string | null {
     if (fs.existsSync(worker.sessionFile)) return worker.sessionFile;
     try {
@@ -1413,8 +1445,8 @@ export class TeamLeader {
     // Resumable persistent worker — continue the existing session with a new process.
     if (worker.routeState === "resumable" && worker.freeform) {
       const text = typeof message === "string" ? message : JSON.stringify(message);
-      const child = this.resumeAsNewAttempt(worker, text);
-      if (!child) return false;
+      const launch = this.resumeAsNewAttempt(worker, text);
+      if (!launch) return false;
 
       this.clearPendingAmbientChat(name);
       worker.routeState = "pending";
@@ -1424,23 +1456,8 @@ export class TeamLeader {
       worker.resumableUntilAt = undefined;
       worker.killedAt = undefined;
       this.upsertV2WorkerFromHandle(worker);
-      this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
-      this.childProcesses.set(name, child);
-      child.on("exit", (code, signal) => {
-        worker.exitCode = code;
-        const attempt = getCurrentAttempt(worker);
-        if (attempt) attempt.exitCode = code;
-        void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
-      });
-      child.on("error", (err) => {
-        worker.exitCode = null;
-        worker.spawnError = err.message;
-        const attempt = getCurrentAttempt(worker);
-        if (attempt) attempt.spawnError = err.message;
-        void this.handleWorkerExit(name, worker, null);
-      });
-      this.startActivityMonitor(name, worker);
-      this.renderWidget();
+      this.recordProcessStart(worker, Date.now(), launch.process.pid ?? worker.pid);
+      this.attachWorkerProcess(name, worker, launch);
       return true;
     }
 
@@ -1477,35 +1494,6 @@ export class TeamLeader {
     this.pendingAmbientTimers.delete(workerName);
   }
 
-  private buildWorkerResumeEnv(worker: WorkerHandle): Record<string, string> {
-	const resumeMode = worker.spawnConfig?.sessionMode ?? { kind: "resume" as const, sessionFile: worker.sessionFile };
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      PI_TEAMS_WORKER: "1",
-	  PI_TEAMS_WORKER_ID: worker.workerId,
-      PI_TEAMS_WORKER_INSTANCE_ID: worker.workerInstanceId,
-      PI_TEAMS_TICKET_ID: worker.ticketId,
-      PI_TEAMS_WORKER_NAME: worker.name,
-	  PI_TEAMS_TEAM_ID: this.teamId ?? worker.ticketId,
-	  PI_TEAMS_LEADER_EPOCH: this.leaderEpoch,
-	  PI_TEAMS_COORDINATOR_SESSION_ID: this.factWriter?.coordinatorSessionId ?? "",
-	  PI_TEAMS_SESSION_MODE: JSON.stringify(resumeMode),
-    };
-
-    if (worker.freeform) env.PI_TEAMS_FREEFORM = "1";
-    else delete env.PI_TEAMS_FREEFORM;
-
-    if (worker.hasTools) env.PI_TEAMS_HAS_TOOLS = "1";
-    else delete env.PI_TEAMS_HAS_TOOLS;
-    if (this.leaseFilePath) env.PI_TEAMS_LEASE_FILE = this.leaseFilePath;
-
-    const meshId = this.getDurableMeshId();
-    if (meshId) env.PI_TEAMS_COORDINATOR_ID = meshId;
-    if (this.ctx) env.PI_TEAMS_LEADER_SESSION = this.ctx.sessionManager.getSessionFile() ?? "";
-
-    return env;
-  }
-
 	private recordResumeRequested(worker: WorkerHandle): void {
 		const sessionFile = this.resolveWorkerSessionFile(worker);
 		if (!sessionFile) throw new Error(`Worker "${worker.name}" has no persisted session to resume`);
@@ -1523,7 +1511,7 @@ export class TeamLeader {
 			sessionDir: worker.sessionDir,
 			teamId: this.teamId ?? worker.ticketId,
 			leaderEpoch: this.leaderEpoch,
-			coordinatorSessionId: this.factWriter?.coordinatorSessionId,
+			...this.coordinatorProvenance(),
 			freeform: worker.freeform,
 			sessionMode: { kind: "resume", sessionFile },
 		};
@@ -1531,7 +1519,7 @@ export class TeamLeader {
 		this.recordSpawnRequested(config, sessionFile);
 	}
 
-  private resumeAsNewAttempt(worker: WorkerHandle, message: string): ChildProcess | null {
+  private resumeAsNewAttempt(worker: WorkerHandle, message: string): WorkerProcessLaunch | null {
     const previousAttemptId = worker.workerInstanceId;
     const previousConfig = worker.spawnConfig;
     worker.workerInstanceId = crypto.randomUUID();
@@ -1545,18 +1533,19 @@ export class TeamLeader {
     }
 
     const identity = this.identityFor(worker);
-    try {
-      const child = resumeWorker(worker, message, this.buildWorkerResumeEnv(worker));
-      if (child) return child;
-      this.recordStartupFailure(identity, "Worker session resume was refused because no persisted session or activation lease was available");
-    } catch (error) {
-      worker.spawnError = error instanceof Error ? error.message : String(error);
-      this.recordStartupFailure(identity, `Worker session resume failed: ${worker.spawnError}`);
-    }
+    const result = resumeWorker(worker, message, worker.spawnConfig!, this.workerSpawnDependencies);
+    if (result.kind === "started") return result;
+
+    const reason = result.kind === "refused"
+      ? "Worker session resume was refused because no persisted session or activation lease was available"
+      : `Worker session resume failed: ${result.failure.kind}: ${result.failure.message}`;
+    worker.spawnError = reason;
+    this.recordStartupFailure(identity, reason);
     this.projectV2WorkerRuntime(worker.name);
     this.renderWidget();
     return null;
   }
+
 
   private queueAmbientChatForResumableWorkers(fromWorkerName: string, message: string) {
     for (const [name, worker] of this.workers) {
@@ -1824,24 +1813,33 @@ export class TeamLeader {
 		this.mesh.on("message", this.meshMessageHandler);
 	}
 
-  private attachWorkerProcess(name: string, worker: WorkerHandle, child: ChildProcess): void {
+  private attachWorkerProcess(name: string, worker: WorkerHandle, launch: WorkerProcessLaunch): void {
+    const child = launch.process;
+    let terminalized = false;
     this.childProcesses.set(name, child);
     child.on("exit", (code, signal) => {
+      if (terminalized) return;
+      terminalized = true;
       worker.exitCode = code;
       const attempt = getCurrentAttempt(worker);
       if (attempt) attempt.exitCode = code;
       void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
     });
-    child.on("error", (error) => {
+    launch.onFailure((failure) => {
+      if (terminalized) return;
+      terminalized = true;
       worker.exitCode = null;
-      worker.spawnError = error.message;
+      worker.spawnError = `${failure.kind}: ${failure.message}`;
       const attempt = getCurrentAttempt(worker);
-      if (attempt) attempt.spawnError = error.message;
-      void this.handleWorkerExit(name, worker, null);
+      if (attempt) attempt.spawnError = worker.spawnError;
+      // A launch error is authoritative: do not let the Bun early-exit liveness
+      // workaround defer terminalization of an executable that never started.
+      void this.handleWorkerExit(name, worker, null, true);
     });
     this.startActivityMonitor(name, worker);
     this.renderWidget();
   }
+
 
   /**
    * Attach an existing stopped Pi session to this team and activate that exact
@@ -1915,8 +1913,7 @@ export class TeamLeader {
       hasTools,
       teamId,
       leaderEpoch: this.leaderEpoch,
-      coordinatorSessionId: writer.coordinatorSessionId,
-      coordinatorMeshId: this.getDurableMeshId() || undefined,
+      ...this.coordinatorProvenance(),
       ticketCwd: this.ctx.cwd,
       ticketText: message,
       freeform: true,
@@ -1972,16 +1969,20 @@ export class TeamLeader {
       config.coordinatorMeshId,
       config.ticketCwd,
     );
-    let child: ChildProcess | null = null;
+    let launch: WorkerProcessLaunch | undefined;
     try {
-      child = resumeWorker(handle, prompt, this.buildWorkerResumeEnv(handle));
-      if (!child) {
-        this.recordStartupFailure(this.identityFor(handle), "Adopted session activation was refused because another live activation won the lease");
-        throw new Error(`Session ${source.sessionId} could not be activated because it is already active`);
+      const result = resumeWorker(handle, prompt, config, this.workerSpawnDependencies);
+      if (result.kind !== "started") {
+        const reason = result.kind === "refused"
+          ? "Adopted session activation was refused because another live activation won the lease"
+          : `Adopted session activation failed: ${result.failure.kind}: ${result.failure.message}`;
+        this.recordStartupFailure(this.identityFor(handle), reason);
+        throw new Error(reason);
       }
+      launch = result;
       this.recordProcessStart(handle, handle.spawnedAt, handle.pid);
     } catch (error) {
-      if (child) {
+      if (launch) {
         try { killWorker(handle.pid); } catch {}
         releaseWorkerActivation(handle);
       }
@@ -1993,7 +1994,7 @@ export class TeamLeader {
       throw error;
     }
 
-    this.attachWorkerProcess(workerName, handle, child);
+    this.attachWorkerProcess(workerName, handle, launch!);
     return handle;
   }
 
@@ -2047,8 +2048,7 @@ export class TeamLeader {
       additionalPrompt,
       teamId: this.teamId!,
       leaderEpoch: this.leaderEpoch,
-      coordinatorSessionId: this.factWriter?.coordinatorSessionId,
-      coordinatorMeshId: this.getDurableMeshId() || undefined,
+      ...this.coordinatorProvenance(),
       ticketCwd: this.ctx.cwd,
       ticketText,
       freeform,
@@ -2090,11 +2090,16 @@ export class TeamLeader {
 
     let spawned: ReturnType<typeof spawnWorker>;
     try {
-      spawned = spawnWorker(config);
+      spawned = spawnWorker(config, this.workerSpawnDependencies);
     } catch (error) {
       const identity: AttemptIdentity = { coordinatorSessionId: this.factWriter!.coordinatorSessionId, teamId: this.teamId!, workerId, attemptId: workerInstanceId };
       this.recordStartupFailure(identity, error instanceof Error ? error.message : String(error));
       throw error;
+    }
+    if (spawned.kind === "failed") {
+      const identity: AttemptIdentity = { coordinatorSessionId: this.factWriter!.coordinatorSessionId, teamId: this.teamId!, workerId, attemptId: workerInstanceId };
+      this.recordStartupFailure(identity, `Worker launch failed: ${spawned.failure.kind}: ${spawned.failure.message}`);
+      throw new Error(spawned.failure.message);
     }
     const { process: child, handle } = spawned;
     if (freeform) handle.freeform = true;
@@ -2109,7 +2114,7 @@ export class TeamLeader {
       throw error;
     }
 
-    this.attachWorkerProcess(workerName, handle, child);
+    this.attachWorkerProcess(workerName, handle, spawned);
     return handle;
   }
 
@@ -2428,8 +2433,8 @@ export class TeamLeader {
         // (same pattern as the compaction auto-resume below and the no-session
         // respawn at line ~2011). Without this, v2 lifecycle stays "failed"
         // even though the new pi process is spawning.
-        const child = this.resumeAsNewAttempt(worker, recovery.prompt);
-        if (!child) return;
+        const launch = this.resumeAsNewAttempt(worker, recovery.prompt);
+        if (!launch) return;
         {
           worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
           worker.routeState = "pending";
@@ -2438,7 +2443,7 @@ export class TeamLeader {
           worker.lastProcessActivityAt = Date.now();
           worker.lastNote = `AUTO-RETRY: ${recovery.error.slice(0, 120)}`;
           this.upsertV2WorkerFromHandle(worker);
-          this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
+          this.recordProcessStart(worker, Date.now(), launch.process.pid ?? worker.pid);
 
           const retryNoteText = isStreamAbortRetry
             ? `AUTO-RETRY: previous turn produced no output — the model stream aborted/errored before any content or tool calls (${recovery.error}). Retrying once with a continuation prompt.`
@@ -2453,23 +2458,7 @@ export class TeamLeader {
             { cwd: this.ctx.cwd, timeout: 5000 },
           ).catch(() => {});
 
-          this.childProcesses.set(name, child);
-          child.on("exit", (code, signal) => {
-            worker.exitCode = code;
-            const attempt = getCurrentAttempt(worker);
-            if (attempt) attempt.exitCode = code;
-            void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
-          });
-          child.on("error", (err) => {
-            worker.exitCode = null;
-            worker.spawnError = err.message;
-            const attempt = getCurrentAttempt(worker);
-            if (attempt) attempt.spawnError = err.message;
-            void this.handleWorkerExit(name, worker, null);
-          });
-
-          this.startActivityMonitor(name, worker);
-          this.renderWidget();
+          this.attachWorkerProcess(name, worker, launch);
           const retryEventContent = isStreamAbortRetry
             ? `${ICONS.warn} ${workerTag(worker)}:\nauto-retrying once after empty/aborted first-turn stream response: ${recovery.error}`
             : `${ICONS.warn} ${workerTag(worker)}:\nauto-retrying once after malformed tool JSON: ${recovery.error}`;
@@ -2518,8 +2507,8 @@ export class TeamLeader {
       // upsertV2WorkerFromHandle then creates a fresh v2 attempt under that id,
       // and the reducer classifies it from spawn_started only — not from the
       // prior exit. Mirrors the no-session respawn pattern at line ~2011.
-      const child = this.resumeAsNewAttempt(worker, resumePrompt);
-      if (!child) return;
+      const launch = this.resumeAsNewAttempt(worker, resumePrompt);
+      if (!launch) return;
       {
         worker.recoveryAttempts = (worker.recoveryAttempts ?? 0) + 1;
         worker.routeState = "pending";
@@ -2528,7 +2517,7 @@ export class TeamLeader {
         worker.lastProcessActivityAt = Date.now();
         worker.lastNote = "AUTO-RESUME: continuing after mid-turn auto-compaction";
         this.upsertV2WorkerFromHandle(worker);
-        this.recordProcessStart(worker, Date.now(), child.pid ?? worker.pid);
+        this.recordProcessStart(worker, Date.now(), launch.process.pid ?? worker.pid);
 
         await this.pi.exec(
           getMaiBin(),
@@ -2540,23 +2529,7 @@ export class TeamLeader {
           { cwd: this.ctx.cwd, timeout: 5000 },
         ).catch(() => {});
 
-        this.childProcesses.set(name, child);
-        child.on("exit", (code, signal) => {
-          worker.exitCode = code;
-          const attempt = getCurrentAttempt(worker);
-          if (attempt) attempt.exitCode = code;
-          void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
-        });
-        child.on("error", (err) => {
-          worker.exitCode = null;
-          worker.spawnError = err.message;
-          const attempt = getCurrentAttempt(worker);
-          if (attempt) attempt.spawnError = err.message;
-          void this.handleWorkerExit(name, worker, null);
-        });
-
-        this.startActivityMonitor(name, worker);
-        this.renderWidget();
+        this.attachWorkerProcess(name, worker, launch);
         this.pi.sendMessage(
           {
             customType: "team-event",
@@ -2623,6 +2596,8 @@ export class TeamLeader {
             "teams-workers",
             `team-${worker.name}-${worker.ticketId}-${workerInstanceId}`,
           ),
+          // A recovery is a new attempt: capture the coordinator launching it now.
+          ...this.coordinatorProvenance(),
         };
         const workerSessionFile = config.sessionMode?.kind === "fork"
           || config.sessionMode?.kind === "resume"
@@ -2632,7 +2607,7 @@ export class TeamLeader {
         this.recordSpawnRequested(config, workerSessionFile);
         let spawned: ReturnType<typeof spawnWorker>;
         try {
-          spawned = spawnWorker(config);
+          spawned = spawnWorker(config, this.workerSpawnDependencies);
         } catch (error) {
           this.recordStartupFailure({
             coordinatorSessionId: this.factWriter!.coordinatorSessionId,
@@ -2640,6 +2615,15 @@ export class TeamLeader {
             workerId: config.workerId,
             attemptId: config.workerInstanceId,
           }, error instanceof Error ? error.message : String(error));
+          return;
+        }
+        if (spawned.kind === "failed") {
+          this.recordStartupFailure({
+            coordinatorSessionId: this.factWriter!.coordinatorSessionId,
+            teamId: this.teamId!,
+            workerId: config.workerId,
+            attemptId: config.workerInstanceId,
+          }, `Worker launch failed: ${spawned.failure.kind}: ${spawned.failure.message}`);
           return;
         }
         const { process: child, handle: newHandle } = spawned;
@@ -2672,23 +2656,7 @@ export class TeamLeader {
           { cwd: this.ctx.cwd, timeout: 5000 },
         ).catch(() => {});
 
-        this.childProcesses.set(name, child);
-        child.on("exit", (code, signal) => {
-          worker.exitCode = code;
-          const attempt = getCurrentAttempt(worker);
-          if (attempt) attempt.exitCode = code;
-          void this.handleWorkerExit(name, worker, code, false, signal ?? undefined);
-        });
-        child.on("error", (err) => {
-          worker.exitCode = null;
-          worker.spawnError = err.message;
-          const attempt = getCurrentAttempt(worker);
-          if (attempt) attempt.spawnError = err.message;
-          void this.handleWorkerExit(name, worker, null);
-        });
-
-        this.startActivityMonitor(name, worker);
-        this.renderWidget();
+        this.attachWorkerProcess(name, worker, spawned);
         this.pi.sendMessage(
           {
             customType: "team-event",
