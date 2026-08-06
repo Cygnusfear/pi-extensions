@@ -1,0 +1,50 @@
+packages/kimi-key-rotate/README.md
+  s_c29214a9b09ec8::t_6da98d2823ee85 1-28,32-33
+  s_c29214a9b09ec8::t_25271de844c354 29-31
+packages/kimi-key-rotate/package.json
+  s_c29214a9b09ec8::t_ddca07fee44850 1-20
+packages/kimi-key-rotate/extensions/kimi-key-rotate.ts
+  s_c29214a9b09ec8::t_3482c5582b8818 151
+  s_c29214a9b09ec8::t_eb132965c7ea6d 178,180
+  s_c29214a9b09ec8::t_758c9c5e848046 129-131,135-137
+  s_c29214a9b09ec8::t_d3f63e3803ae1d 224
+  s_c80280c75e1308::t_da5d722273d50e 181,208,233,240,258,284
+  s_c29214a9b09ec8::t_fcf1f5cb3765de 1-54,98-128,132-134,138-150,152-161,163,165-177,179,182-204,206,209-223,225-232,234-239,241-257,259-283,285-297
+  s_c29214a9b09ec8::t_9d55d94545bfb1 162,164
+  s_c29214a9b09ec8::t_a99737ec5b3436 55-97
+  s_c29214a9b09ec8::t_a6fbddf91dd5f3 205,207
+packages/zai-key-rotate/extensions/zai-key-rotate.ts
+  s_c29214a9b09ec8::t_3f5b5d09a0b4d7 194,196
+  s_c29214a9b09ec8::t_4f9e1e3426786e 151,153
+  s_c29214a9b09ec8::t_d7133531dfcf35 109-111,116-117
+  s_c29214a9b09ec8::t_222630c1511054 167,169
+  s_c29214a9b09ec8::t_f1387998775629 213
+  s_c29214a9b09ec8::t_3e1e4fb57e3c8c 55-77,118
+  s_c80280c75e1308::t_2f21127bc5c7f2 170,197,222,229,247,273
+packages/zai-key-rotate/README.md
+  s_c29214a9b09ec8::t_6155e7c1ac6acb 28-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "603cbe0dea9ed79235942164c7bce9707056a0ec",
+  "prompts": {},
+  "sessions": {
+    "s_c29214a9b09ec8": {
+      "agent_id": {
+        "tool": "Cumrun Parallax Mayor",
+        "id": "019f9e18-722b-7bf1-82a5-14eef01b1524",
+        "model": "kimi-coding/k3-256k"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
