@@ -54,6 +54,76 @@ await modelRouter.liveness();
 await modelRouter.roles();
 ```
 
+## Agent self-serve model switching (`model.current` / `model.switch`)
+
+The `model` namespace (pe-dvdys6os) lets the agent inspect and switch **its own** model from code-mode. It is deliberately separate from the two neighbouring mechanisms:
+
+| Mechanism | Scope | Authority |
+| --- | --- | --- |
+| `model.current` / `model.switch` (this) | the calling agent's own model | local self-serve, conservative admission |
+| `modelRouter` (above) | role → concrete model resolution + fleet health policy | advisory; never mutates the host model |
+| `mesh-model-control` | remote harness control of a session's model | Hooman-authorized only — not conflated with local self-switch |
+
+### `model.current()`
+
+Ground truth about the model the host is running **right now**, read live at invocation time (not the per-call snapshot captured when `execute_code` began — after a same-block `model.switch`, the snapshot is stale, the live read is not):
+
+```javascript
+const cur = await model.current();
+// → { provider, modelId, contextWindow, tokens, contextUnknown }
+// contextWindow: from the model registry (usage fallback); null when unknown
+// tokens:        live context tokens; null when unknown (e.g. right after
+//                compaction, before the next assistant response)
+// contextUnknown: true exactly when tokens === null — never treat null as 0
+```
+
+Calling `model()` directly is shorthand for `model.current()`.
+
+### `model.switch({ target })`
+
+`target` is an **exact `"provider/model"` string only** — trimmed, split on the first `/`, resolved via `modelRegistry.find(provider, modelId)`. No fuzzy matching, no aliases, no family magic; a bare model id is `not_found`. Identity is case-sensitive (`provider ===`, `id ===` — host semantics): a case-variant live model is a *different* model, so switching to the exact target performs a real switch rather than reporting a no-op, and a case-variant entry in `getAvailable()` does not authorize the target.
+
+Checks run in order; the first failure returns a discriminated refusal — never a fake success:
+
+1. **Host capability** — `ctx.setModel` missing → throws (host too old); this is infrastructure, not a refusal.
+2. **Resolution** — target not in the registry → `{ ok: false, code: "not_found" }`.
+3. **Idempotence** — target already IS the live model → `{ ok: true, noop: true, from, to }`; `setModel` is NOT called, nothing is persisted.
+4. **Auth** — `modelRegistry.hasConfiguredAuth(model)` or `getAvailable()` membership, else `{ ok: false, code: "unavailable" }`.
+5. **Health** — model-router liveness (`checkModelHealth`); flagged → `{ ok: false, code: "unhealthy", reason, expires }`. This is pi-extensions policy, separate from core auth.
+6. **Context-window admission** (conservative, extension-only — see matrix below).
+7. **Serialization** — all switches in the session queue on one promise chain; usage is re-read inside the chain, immediately before the mutation, so concurrent switches can never interleave admission with another switch's mutation.
+8. **Mutation** — `await pi.setModel(model)`. Resolves false → `{ ok: false, code: "auth_failed" }`.
+
+Success:
+
+```javascript
+const r = await model.switch({ target: "openai-codex/gpt-5.5" });
+// → { ok: true, from, to,
+//     effective: "next-turn",        // NEVER mid-turn — see timing below
+//     persisted: true,               // model_change appended + default saved
+//     event: "model_select",
+//     admission: "known" | "unknown-nonshrinking",
+//     usage, reserveTokens: 16384 }
+```
+
+### Admission matrix
+
+`reserve = 16384` — the documented pi-agent core default. **Assumption:** the configured reserve is NOT exposed through ExtensionContext, so this conservative extension-only policy hard-codes the default; an exact check needs a core admission/settings seam (pe-na057klm). `limit = target.contextWindow - reserve`.
+
+| Situation | Result |
+| --- | --- |
+| target window invalid/zero/missing | `invalid_window` |
+| `tokens` known and `tokens > limit` | `needs_compaction` (carries `tokens` + `limit`) |
+| `tokens` known and `tokens <= limit` | allowed, `admission: "known"` |
+| `tokens === null` and target window ≥ current window | allowed, `admission: "unknown-nonshrinking"` |
+| `tokens === null` and shrinking (or current window unverifiable) | `context_unknown` |
+
+Unknown tokens are never treated as zero: after a compaction the only honest moves are non-shrinking ones.
+
+### Timing (next-turn semantics)
+
+From the pe-na057klm source research (pi-agent): `pi.setModel` mutates `Agent.state` immediately, appends a `model_change` entry, saves the default, and awaits `model_select`. The agent loop's `prepareNextTurn` refreshes `config.model` after `turn_end`, so the **next** provider request in the same run uses the target. The current assistant turn and every sibling tool call stay on the old model. A switch requested mid-turn is therefore safe — it can never rewrite the in-flight request — but its effect is always `effective: "next-turn"`.
+
 ## DEI (provider dedup)
 
 By default, `resolve()` deduplicates by provider so you get distinct providers for review/oracle dispatch. Set `dedupProviders: false` to allow same-provider duplicates.

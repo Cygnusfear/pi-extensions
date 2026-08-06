@@ -10,8 +10,9 @@ import {
 	classifyRateLimitError,
 	markHealthy,
 	markUnhealthy,
-	type LivenessEntry,
 } from "./router.js";
+
+import type { LivenessEntry } from "./types.js";
 
 export interface AssistantMessageLike {
 	role?: string;
