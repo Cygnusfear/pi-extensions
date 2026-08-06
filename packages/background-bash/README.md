@@ -135,6 +135,12 @@ const logs = await bash_bg_logs({ id: "bg-a3f2c1b7", limit: 50 });
 const more = await bash_bg_logs({ id: "bg-a3f2c1b7", offset: 51, limit: 50 });
 ```
 
+Log pages default to 50 lines, accept at most 250, and cap returned log text at
+8KiB independently of any outer tool-result cap. The result reports
+`truncated`, `clippedLines`, `responseBytes`, and `logPath`; when a line is
+clipped, inspect the durable `logPath` deliberately rather than dumping the
+complete log into the agent turn.
+
 ### Stop a job
 
 ```typescript
@@ -219,7 +225,7 @@ No additional configuration required. Background bash tools are available immedi
  |-----------|-----------|-------------|
 | `bashBgStart` | `{ command, cwd? }` | Start a background job. Returns a **thenable `BashBgHandle`** SYNCHRONOUSLY. `await handle` / `.then(cb)` resolves on child exit. Chain `.each(line => ...)` / `.timeout(ms)` (both return `this`). `{ id, pid, cwd, logPath, status }` available as own getters. Footgun: don't await dev servers — they don't exit. |
 | `bashBgStatus` | `jobId` or `{ id }` | Get job status |
-| `bashBgLogs` | `{ id: jobIdOrJob, offset?, limit? }` | Read paginated logs, returns `{ text, offset, nextOffset, totalLines, hasMore, status }` |
+| `bashBgLogs` | `{ id: jobIdOrJob, offset?, limit? }` | Read a byte-bounded, paginated log preview; returns `{ text, offset, nextOffset, totalLines, hasMore, status, logPath, responseBytes, truncated, clippedLines }` |
 | `bashBgStop` | `{ id: jobIdOrJob, signal? }` | Stop a job |
 | `bashBgList` | *(none)* | List all jobs |
  

@@ -10,15 +10,19 @@ import { Type, type Static } from "@sinclair/typebox";
 import { randomBytes } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { createWriteStream, type WriteStream } from "node:fs";
+import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { registerSandboxFn, registerContextualSandboxFn, type SandboxCallContext } from "@pi-extensions/shared/sandbox-registry";
 
-const DEFAULT_LOG_LIMIT = 200;
-const MAX_LOG_LIMIT = 2000;
+/** Default and maximum model-visible background-log page sizes. */
+export const DEFAULT_LOG_LIMIT = 50;
+export const MAX_LOG_LIMIT = 250;
+/** A log page must be small independently of the outer tool-result cap. */
+export const MAX_LOG_RESPONSE_BYTES = 8 * 1024;
+const LOG_LINE_CLIP_SUFFIX = " … [line clipped]";
 
 type BackgroundJobStatus = "running" | "exited" | "stopped";
 type BashCompatAction = "run" | "start" | "status" | "logs" | "stop" | "list";
@@ -62,6 +66,14 @@ export type BackgroundLogsResult = {
 	totalLines: number;
 	hasMore: boolean;
 	status: BackgroundJobStatus;
+	/** Durable source for intentional full-log inspection. */
+	logPath: string;
+	/** UTF-8 bytes in `text`, after this API's page budget is applied. */
+	responseBytes: number;
+	/** True when the byte budget shortened this page; normal line paging is not truncation. */
+	truncated: boolean;
+	/** Number of returned lines whose content was clipped to fit the byte budget. */
+	clippedLines: number;
 };
 
 /**
@@ -182,6 +194,113 @@ const sanitizeLineNumber = (value: number | undefined, fallback: number, max: nu
 	return Math.min(max, normalized);
 };
 
+type BoundedLogPage = Omit<BackgroundLogsResult, "status">;
+
+/**
+ * Read a single log page without materializing the full file or an arbitrarily
+ * long line. We retain only the bounded prefix that could reach the model and
+ * continue scanning so `totalLines` and pagination stay exact.
+ */
+async function readBoundedLogPage(logPath: string, offset: number, limit: number): Promise<BoundedLogPage> {
+	const startIndex = offset - 1;
+	const renderedLines: string[] = [];
+	let totalLines = 0;
+	let emittedLines = 0;
+	let renderedBytes = 0;
+	let clippedLines = 0;
+	let byteBudgetExhausted = false;
+	let currentLine = "";
+	let currentLineClipped = false;
+	let hasPartialLine = false;
+
+	const shouldCollectCurrentLine = (): boolean =>
+		totalLines >= startIndex && emittedLines < limit && !byteBudgetExhausted;
+
+	const appendSegment = (segment: string): void => {
+		if (segment.length > 0) hasPartialLine = true;
+		if (!shouldCollectCurrentLine() || currentLineClipped) return;
+
+		const available = MAX_LOG_RESPONSE_BYTES - Buffer.byteLength(currentLine, "utf8");
+		if (available <= 0) {
+			currentLineClipped = true;
+			return;
+		}
+
+		const bounded = truncateHead(segment, { maxBytes: available, maxLines: 1 });
+		currentLine += bounded.content;
+		if (bounded.truncated) currentLineClipped = true;
+	};
+
+	const finishLine = (): void => {
+		if (shouldCollectCurrentLine()) {
+			const line = currentLine.endsWith("\r") ? currentLine.slice(0, -1) : currentLine;
+			const numberedLine = `${totalLines + 1}: ${line}`;
+			const separator = renderedLines.length === 0 ? "" : "\n";
+			const available = MAX_LOG_RESPONSE_BYTES - renderedBytes - Buffer.byteLength(separator, "utf8");
+
+			if (!currentLineClipped && Buffer.byteLength(numberedLine, "utf8") <= available) {
+				renderedLines.push(numberedLine);
+				renderedBytes += Buffer.byteLength(separator + numberedLine, "utf8");
+				emittedLines++;
+			} else {
+				const contentBudget = available - Buffer.byteLength(LOG_LINE_CLIP_SUFFIX, "utf8");
+				if (contentBudget > 0) {
+					const clipped = truncateHead(numberedLine, { maxBytes: contentBudget, maxLines: 1 }).content;
+					if (clipped.length > 0) {
+						const visibleLine = clipped + LOG_LINE_CLIP_SUFFIX;
+						renderedLines.push(visibleLine);
+						renderedBytes += Buffer.byteLength(separator + visibleLine, "utf8");
+						emittedLines++;
+						clippedLines++;
+					}
+				}
+				byteBudgetExhausted = true;
+			}
+		}
+
+		totalLines++;
+		currentLine = "";
+		currentLineClipped = false;
+		hasPartialLine = false;
+	};
+
+	try {
+		const stream = createReadStream(logPath);
+		stream.setEncoding("utf8");
+		for await (const chunk of stream) {
+			const text = String(chunk);
+			let segmentStart = 0;
+			for (;;) {
+				const lineEnd = text.indexOf("\n", segmentStart);
+				if (lineEnd === -1) break;
+				appendSegment(text.slice(segmentStart, lineEnd));
+				finishLine();
+				segmentStart = lineEnd + 1;
+			}
+			appendSegment(text.slice(segmentStart));
+		}
+		if (hasPartialLine) finishLine();
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException)?.code;
+		if (code !== "ENOENT") throw error;
+	}
+
+	const pageStart = Math.min(totalLines, startIndex);
+	const text = renderedLines.length === 0 ? "(no output yet)" : renderedLines.join("\n");
+	return {
+		text,
+		offset: pageStart + 1,
+		limit,
+		nextOffset: pageStart + emittedLines + 1,
+		totalLines,
+		hasMore: pageStart + emittedLines < totalLines,
+		logPath,
+		responseBytes: Buffer.byteLength(text, "utf8"),
+		truncated: byteBudgetExhausted || clippedLines > 0,
+		clippedLines,
+	};
+}
+
 const formatJobLine = (job: BackgroundBashJob): string => {
 	const runtime = job.endedAt
 		? `${Math.max(0, Math.floor((job.endedAt - job.startedAt) / 1000))}s`
@@ -224,6 +343,7 @@ const formatForegroundOutput = async (
 const errorResult = (message: string) => ({
 	content: [{ type: "text" as const, text: `Error: ${message}` }],
 	isError: true,
+	details: { error: message },
 });
 
 /**
@@ -236,6 +356,10 @@ interface JobRuntime {
 	logStream: WriteStream;
 	lineListeners: Set<BashBgLineCallback>;
 	exitWaiters: Array<(result: BashBgResult) => void>;
+	/** Resolves after stdout/stderr readline consumers have drained both pipes. */
+	outputDrained: Promise<void>;
+	/** Resolves after output is drained and the durable log stream is finished. */
+	outputComplete?: Promise<void>;
 }
 
 /**
@@ -265,22 +389,49 @@ export function wireLineStreams(
 	stream: NodeJS.ReadableStream | null,
 	label: BashBgStream,
 	deps: { jobId: string; logStream: WriteStream; listeners: Set<BashBgLineCallback> },
-): void {
-	if (!stream) return;
-	const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-	rl.on("line", (line: string) => {
-		try {
-			deps.logStream.write(line);
-			deps.logStream.write("\n");
-		} catch { /* file fd already closed */ }
-		for (const cb of deps.listeners) {
+): Promise<void> {
+	if (!stream) return Promise.resolve();
+	return new Promise((resolve) => {
+		const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+		rl.once("close", resolve);
+		rl.once("error", resolve);
+		rl.on("line", (line: string) => {
 			try {
-				cb(line, label);
-			} catch (err) {
-				console.warn(`[bashBg ${deps.jobId}] .each callback threw: ${err instanceof Error ? err.message : String(err)}`);
+				deps.logStream.write(line);
+				deps.logStream.write("\n");
+			} catch { /* file fd already closed */ }
+			for (const cb of deps.listeners) {
+				try {
+					cb(line, label);
+				} catch (err) {
+					console.warn(`[bashBg ${deps.jobId}] .each callback threw: ${err instanceof Error ? err.message : String(err)}`);
+				}
 			}
+		});
+	});
+}
+
+function finishLogStream(stream: WriteStream): Promise<void> {
+	if (stream.writableFinished || stream.destroyed) return Promise.resolve();
+	return new Promise((resolve) => {
+		const done = (): void => resolve();
+		stream.once("finish", done);
+		stream.once("error", done);
+		try {
+			stream.end();
+		} catch {
+			done();
 		}
 	});
+}
+
+function completeJobOutput(runtime: JobRuntime): Promise<void> {
+	if (!runtime.outputComplete) {
+		runtime.outputComplete = runtime.outputDrained
+			.catch(() => undefined)
+			.then(() => finishLogStream(runtime.logStream));
+	}
+	return runtime.outputComplete;
 }
 
 
@@ -351,7 +502,13 @@ export class BackgroundBashManager {
 				startedAt: failedAt,
 				endedAt: failedAt,
 			};
-			const runtime: JobRuntime = { child, logStream, lineListeners: new Set(), exitWaiters: [] };
+			const runtime: JobRuntime = {
+				child,
+				logStream,
+				lineListeners: new Set(),
+				exitWaiters: [],
+				outputDrained: Promise.resolve(),
+			};
 			this.jobs.set(id, job);
 			this.runtimes.set(id, runtime);
 			try { logStream.end(); } catch { /* already closed */ }
@@ -376,20 +533,23 @@ export class BackgroundBashManager {
 			logStream,
 			lineListeners: new Set(),
 			exitWaiters: [],
+			outputDrained: Promise.resolve(),
 		};
 
 		this.jobs.set(id, job);
 		this.runtimes.set(id, runtime);
 
-		const wireLineStream = (stream: NodeJS.ReadableStream | null, label: BashBgStream): void =>
+		const wireLineStream = (stream: NodeJS.ReadableStream | null, label: BashBgStream): Promise<void> =>
 			wireLineStreams(stream, label, {
 				jobId: id,
 				logStream,
 				listeners: runtime.lineListeners,
 			});
 
-		wireLineStream(child.stdout, "stdout");
-		wireLineStream(child.stderr, "stderr");
+		runtime.outputDrained = Promise.all([
+			wireLineStream(child.stdout, "stdout"),
+			wireLineStream(child.stderr, "stderr"),
+		]).then(() => undefined);
 
 		child.on("error", (err) => {
 			const current = this.jobs.get(id);
@@ -410,13 +570,14 @@ export class BackgroundBashManager {
 			current.signal = toSignalName(signal);
 			current.endedAt = Date.now();
 			if (rt) {
-				try { rt.logStream.end(); } catch { /* already closed */ }
-				const result = this.buildResult(current, current.status as BashBgWaitStatus);
-				const waiters = [...rt.exitWaiters];
-				rt.exitWaiters.length = 0;
-				for (const w of waiters) {
-					try { w(result); } catch { /* user handler */ }
-				}
+				void completeJobOutput(rt).then(() => {
+					const result = this.buildResult(current, current.status as BashBgWaitStatus);
+					const waiters = [...rt.exitWaiters];
+					rt.exitWaiters.length = 0;
+					for (const w of waiters) {
+						try { w(result); } catch { /* user handler */ }
+					}
+				});
 			}
 		});
 
@@ -498,40 +659,12 @@ export class BackgroundBashManager {
 		this.refreshJob(job);
 		const offset = sanitizeLineNumber(options?.offset, 1, Number.MAX_SAFE_INTEGER);
 		const limit = sanitizeLineNumber(options?.limit, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
-
-		let content = "";
-		try {
-			content = await fs.readFile(job.logPath, "utf8");
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if (code !== "ENOENT") throw error;
+		if (job.status !== "running") {
+			const runtime = this.runtimes.get(id);
+			if (runtime) await completeJobOutput(runtime);
 		}
 
-		const normalized = content.replace(/\r/g, "");
-		const lines = normalized ? normalized.split("\n") : [];
-		if (lines.length > 0 && lines[lines.length - 1] === "") {
-			lines.pop();
-		}
-
-		const startIndex = Math.min(lines.length, offset - 1);
-		const selected = lines.slice(startIndex, startIndex + limit);
-		const nextOffset = startIndex + selected.length + 1;
-		const hasMore = startIndex + selected.length < lines.length;
-
-		const text =
-			selected.length === 0
-				? "(no output yet)"
-				: selected.map((line, index) => `${startIndex + index + 1}: ${line}`).join("\n");
-
-		return {
-			text,
-			offset: startIndex + 1,
-			limit,
-			nextOffset,
-			totalLines: lines.length,
-			hasMore,
-			status: job.status,
-		};
+		return { ...(await readBoundedLogPage(job.logPath, offset, limit)), status: job.status };
 	}
 
 	/**
@@ -569,7 +702,10 @@ export class BackgroundBashManager {
 		this.refreshJob(job);
 
 		if (job.status !== "running") {
-			return Promise.resolve(this.buildResult(job, job.status as BashBgWaitStatus));
+			const runtime = this.runtimes.get(id);
+			return runtime
+				? completeJobOutput(runtime).then(() => this.buildResult(job, job.status as BashBgWaitStatus))
+				: Promise.resolve(this.buildResult(job, job.status as BashBgWaitStatus));
 		}
 
 		const rt = this.runtimes.get(id);
@@ -1026,7 +1162,10 @@ export async function runBashToolAction(
 				limit: params.limit,
 			});
 
-			const header = `Job ${id} (${result.status}) lines ${result.offset}-${Math.max(result.offset, result.nextOffset - 1)} of ${result.totalLines}`;
+			const truncation = result.truncated
+				? `; byte-bounded preview (${result.clippedLines} clipped line${result.clippedLines === 1 ? "" : "s"}; full log: ${result.logPath})`
+				: "";
+			const header = `Job ${id} (${result.status}) lines ${result.offset}-${Math.max(result.offset, result.nextOffset - 1)} of ${result.totalLines}${truncation}`;
 			return {
 				content: [{ type: "text" as const, text: `${header}\n\n${result.text}` }],
 				details: result,

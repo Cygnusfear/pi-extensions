@@ -21,7 +21,10 @@ import os from "node:os";
 import path from "node:path";
 import {
 	BackgroundBashManager,
+	DEFAULT_LOG_LIMIT,
 	isUsableChild,
+	MAX_LOG_LIMIT,
+	MAX_LOG_RESPONSE_BYTES,
 	wireLineStreams,
 	type BashBgResult,
 } from "./background-bash.ts";
@@ -239,6 +242,50 @@ describe("BackgroundBashManager.readLogs", () => {
 		const page2 = await manager.readLogs(job.id, { offset: page1.nextOffset, limit: 3 });
 		expect(page2.text).toContain("4: line-4");
 		expect(page2.text).toContain("6: line-6");
+	});
+
+	it("enforces a byte-bounded preview without losing the next page", async () => {
+		const { manager } = await makeManager();
+		const { job, spawnPromise } = manager.startSync({
+			command: "head -c 16384 /dev/zero | tr '\\0' x; printf '\\nafter-long-line\\n'",
+			cwd: process.cwd(),
+		});
+		await spawnPromise;
+		await manager.waitForExit(job.id);
+		await new Promise((r) => setTimeout(r, 50));
+
+		const page1 = await manager.readLogs(job.id);
+		expect(page1.limit).toBe(DEFAULT_LOG_LIMIT);
+		expect(page1.totalLines).toBe(2);
+		expect(page1.truncated).toBe(true);
+		expect(page1.clippedLines).toBe(1);
+		expect(page1.logPath).toBe(job.logPath);
+		expect(Buffer.byteLength(page1.text, "utf8")).toBeLessThanOrEqual(MAX_LOG_RESPONSE_BYTES);
+		expect(page1.nextOffset).toBe(2);
+		expect(page1.hasMore).toBe(true);
+
+		const page2 = await manager.readLogs(job.id, { offset: page1.nextOffset, limit: MAX_LOG_LIMIT + 1 });
+		expect(page2.limit).toBe(MAX_LOG_LIMIT);
+		expect(page2.text).toContain("2: after-long-line");
+		expect(page2.truncated).toBe(false);
+		expect(page2.hasMore).toBe(false);
+	});
+
+	it("drains every buffered line before an exited job becomes readable", async () => {
+		const { manager } = await makeManager();
+		const { job, spawnPromise } = manager.startSync({
+			command: "for i in $(seq 1 3000); do printf 'line-%s\\n' \"$i\"; done",
+			cwd: process.cwd(),
+		});
+		await spawnPromise;
+		await manager.waitForExit(job.id);
+
+		const firstPage = await manager.readLogs(job.id);
+		const finalPage = await manager.readLogs(job.id, { offset: 2951 });
+		expect(firstPage.totalLines).toBe(3000);
+		expect(firstPage.nextOffset).toBe(51);
+		expect(finalPage.text).toContain("3000: line-3000");
+		expect(finalPage.hasMore).toBe(false);
 	});
 });
 
