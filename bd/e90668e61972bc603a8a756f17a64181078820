@@ -1,0 +1,22 @@
+skills/environment/SKILL.md
+  s_c80280c75e1308::t_227e34ce752703 248
+  s_c80280c75e1308::t_ccf8b48f3eea0f 411
+  s_c80280c75e1308::t_f866cd30a2acf0 342-379
+  s_c80280c75e1308::t_fe2d8ee62fa6e4 410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "bde90668e61972bc603a8a756f17a64181078820",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
