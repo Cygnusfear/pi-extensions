@@ -1,0 +1,106 @@
+packages/teams/leader.state.test.ts
+  s_ca8a0e53d9af0d::t_8d08d979509720 9,140-152
+  s_ca8a0e53d9af0d::t_f0d2489aa25bcd 67
+  s_ca8a0e53d9af0d::t_43e43adeb4132c 153-154
+packages/teams/leader.adoption.test.ts
+  s_ca8a0e53d9af0d::t_30d44678ef2257 6,134-136,142-143,171-173,224-226,230-231,233
+  s_ca8a0e53d9af0d::t_ce75f0fc02d617 7,96,160-163,166-168,200-204,219-221
+  s_ca8a0e53d9af0d::t_bc3152a2992497 49,67-70,146,193
+  s_ca8a0e53d9af0d::t_791c7160f482ed 137-141,144,169-170,222-223,232
+packages/teams/leader.ts
+  s_ca8a0e53d9af0d::t_365c58d827d706 1816-1818,1821-1822,1828-1830,1832,1834
+  s_ca8a0e53d9af0d::t_6b6b1c60e946de 1536,1974,2599-2600
+  s_ca8a0e53d9af0d::t_492f20b867d320 8,1357-1361
+  s_ca8a0e53d9af0d::t_8ceea280b00eae 1972,1975-1980,1982,1985,1997
+  s_c80280c75e1308::t_22e7ba8ae623e4 1340-1356,1362-1369
+  s_ca8a0e53d9af0d::t_5aaae65bd03e64 1522,1537-1543
+  s_c80280c75e1308::t_8054eabd0ae54b 1514
+  s_c80280c75e1308::t_cc85aa0e6bd6fc 2051
+  s_ca8a0e53d9af0d::t_a18b76f0176439 1143
+  s_ca8a0e53d9af0d::t_a108629f968499 2620-2626
+  s_ca8a0e53d9af0d::t_f694faa0a55a5c 2436-2437,2446,2461,2510-2511,2520,2532,2659
+  s_ca8a0e53d9af0d::t_bd15d67b7771d9 1835-1837
+  s_ca8a0e53d9af0d::t_12765b3ee931e7 2099-2103,2117
+  s_ca8a0e53d9af0d::t_d01027f17bd2dc 32,795,2093,2610
+  s_c80280c75e1308::t_90b4e00aac8fb7 1916
+  s_ca8a0e53d9af0d::t_a31efe7ed70cb5 1370,1448-1449,1459-1460
+  s_ca8a0e53d9af0d::t_0ecf9339bec1eb 2627-2628
+packages/teams/WORKER_LIFECYCLE.md
+  s_ca8a0e53d9af0d::t_15e67da43646e3 20-27
+packages/teams/spawner.failure.test.ts
+  s_ca8a0e53d9af0d::t_4a29ae67536f43 119-131,134-137,156-163,184-185
+  s_ca8a0e53d9af0d::t_9b112db1f1e3ad 174-177
+  s_ca8a0e53d9af0d::t_5cba2f7c8e17a4 60-72,111,132,138-143,155,168-171,195-196,219
+  s_ca8a0e53d9af0d::t_65ed3b889aa184 1-59,73-110,112-118,186-194,197-218,220-231
+  s_ca8a0e53d9af0d::t_0f5c72943abc27 133,164-167
+  s_ca8a0e53d9af0d::t_ec11be39e0563b 144-154,172-173,178-183
+packages/teams/leader.retry.test.ts
+  s_ca8a0e53d9af0d::t_32c0371a86ca57 557-559,561-566
+  s_ca8a0e53d9af0d::t_299a081afcb4b4 585-587,615-617,619-622
+  s_ca8a0e53d9af0d::t_76a9c737f22c20 636
+  s_ca8a0e53d9af0d::t_57d88b28be44f2 671-674
+  s_ca8a0e53d9af0d::t_00738a896c7c18 643,649-651
+  s_ca8a0e53d9af0d::t_719d337af51d72 635,637-642,645-648
+  s_ca8a0e53d9af0d::t_093c7f9cb83db7 584,618,644
+  s_ca8a0e53d9af0d::t_2b447980ec7efc 623
+packages/shared/src/revive-descriptor.ts
+  s_ca8a0e53d9af0d::t_0f8cb3bbcae35c 66
+  s_ca8a0e53d9af0d::t_56ffd50e0956ff 68
+  s_ca8a0e53d9af0d::t_2cb16ef37ecd30 43
+  s_ca8a0e53d9af0d::t_0fedb3e1bdfddc 78-80
+packages/teams/tool.runtime.test.ts
+  s_c80280c75e1308::t_260a884df5f246 70
+packages/teams/types.ts
+  s_c80280c75e1308::t_1a145c341ed247 106-108
+packages/teams/spawner.activation.test.ts
+  s_ca8a0e53d9af0d::t_014119993ec8f7 217
+  s_ca8a0e53d9af0d::t_48ba6b86d4807e 7,103,108-110,115-120,122,124-125,130-134,136-148,153-156,158-177,182-184,186-204
+  s_ca8a0e53d9af0d::t_2ba4c818731c7d 266-268
+  s_ca8a0e53d9af0d::t_ef99412c6e13c0 13-14,44-58,95-102,104-107,111-114,121,123,126-129,135,149-152,157,179-181,185,205-206,215,231-232,248-254,272-273
+  s_ca8a0e53d9af0d::t_f822ddad033d58 38-43,230,233,235,255-257,262,277
+  s_ca8a0e53d9af0d::t_08e2333513d7da 270-271
+  s_ca8a0e53d9af0d::t_3a024c581b47f0 178
+  s_ca8a0e53d9af0d::t_4df0e96ffd8619 216
+packages/teams/spawner.ts
+  s_ca8a0e53d9af0d::t_a5cf1f6fa1be5c 1,13-40,42-61,77-80,82,84-88,90-91,97-101,103-104,106-240,243-245,251,263,353,393,396-398,403-404,407-447,454,472,477,485,500-502,508,510,513,516,523-553,555,559,572,578,583
+  s_ca8a0e53d9af0d::t_a3de60a4238563 72,74-76
+  s_ca8a0e53d9af0d::t_b14796b2d4b76c 338,342,345,352,354-357,382,384-389,391,507,509,511,518
+  s_ca8a0e53d9af0d::t_51e9aad23c4b4f 92-93,95-96
+  s_ca8a0e53d9af0d::t_a441cdcae8438d 339-341,343-344,346-351,358,360-362,369,371-381
+  s_ca8a0e53d9af0d::t_e2d9403f6478b2 41,62-71,73,81,83,89,94,102,105
+  s_ca8a0e53d9af0d::t_28b1f1fe6deafd 481-483,581-582
+packages/teams/leader.spawn-failure.test.ts
+  s_ca8a0e53d9af0d::t_0405083c2a638b 1-65
+packages/teams/README.md
+  s_c80280c75e1308::t_9e5f59ccbb87e3 157-158
+  s_c80280c75e1308::t_e1496b9a079377 165
+  s_ca8a0e53d9af0d::t_6ccca53b418b64 19,112
+  s_c80280c75e1308::t_9bc9de1e0d885d 71
+  s_c80280c75e1308::t_0da5e94da3a82e 172
+  s_c80280c75e1308::t_98b334ccb63fc0 171
+  s_c80280c75e1308::t_c5640b009b7ebe 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "0034417436c2761535a7fe135b508299e4841a79",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_ca8a0e53d9af0d": {
+      "agent_id": {
+        "tool": "Riccardo Europa Freese",
+        "id": "019fc81f-ff7f-7bec-bce6-ba3c3866033b",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
