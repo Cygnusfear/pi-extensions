@@ -1,0 +1,30 @@
+packages/shared/src/sandbox-registry.ts
+  s_c2120b56ac9c74::t_5b5d654f804c73 69
+  s_c80280c75e1308::t_6e3e1fd08ce2b7 31-37,72-73
+  s_c2120b56ac9c74::t_ab06a106b5fe58 38-48
+  s_c2120b56ac9c74::t_8f6e4f309b4026 54-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "db7a4398cc0c28ecc7d5baf4e1e3b5b3e59269b2",
+  "prompts": {},
+  "sessions": {
+    "s_c2120b56ac9c74": {
+      "agent_id": {
+        "tool": "Lisa Void Rieke",
+        "id": "019fc7a2-4344-77e9-afad-735efb1fbb6c",
+        "model": "kimi-coding/k3"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
