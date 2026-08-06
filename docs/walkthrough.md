@@ -285,6 +285,7 @@ The stuff that makes you smile because someone actually cared.
 | [fork-fixes](packages/fork-fixes/) | Extension-level fork patches |
 | [provider-filter](packages/provider-filter/) | Filter which model providers are available |
 | [zai-key-rotate](packages/zai-key-rotate/) | API key rotation for ZAI provider |
+| [kimi-key-rotate](packages/kimi-key-rotate/) | API key rotation for Kimi For Coding provider |
 
 ---
 

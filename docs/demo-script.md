@@ -151,16 +151,16 @@ console.log(`Context: ${usage.tokens} / ${usage.contextWindow} tokens`);
 // Bookmark before risky changes
 session.tag("before-big-refactor");
 
-// When context gets heavy, squash with narrative
+// When context gets heavy, write the automatic squash handoff
 $.ctx = `AUTH REFACTOR — sessions table migrated. 
 Gotcha: token_hash column NOT token — see migrate.ts:47.
 Dead end: batching inserts hit FK constraint.
 Next: fix column name, run tests.`;
-session.squash({ continue: "Fix token_hash at migrate.ts:47" });
+session.squash({ continue: "Fix token_hash at migrate.ts:47" }); // $.ctx is delivered first
 ```
 
 **Narration:** "Context management built in. Tag your position. When things get heavy, 
-squash with a narrative that preserves your gotchas and line numbers. 
+squash with a narrative that preserves your gotchas and line numbers; `$.ctx` is automatically delivered to the resumed turn.
 The agent picks up exactly where it left off."
 
 ### Demo 4.2: The Tool Belt
