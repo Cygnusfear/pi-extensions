@@ -64,7 +64,7 @@ describe("pi-mesh direct tell envelopes", () => {
 		expect(ack.phase).toBe("delivered");
 		expect(ack.deliveryId).toBe("mesh-tell-123");
 		expect(ack.from).toBe("peer-b");
-		// Unenriched ack carries no snapshot fields.
+		// Minimal ack carries no optional metadata.
 		expect(ack.receiverBusy).toBeUndefined();
 		expect(ack.view).toBeUndefined();
 		expect(ack.receiverDeafened).toBeUndefined();

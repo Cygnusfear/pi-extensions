@@ -194,7 +194,7 @@ describe("fork case", () => {
 // ── AnnouncePayload / PeerInfo type checks ───────────────────────────────────
 
 describe("type extensions", () => {
-	test("AnnouncePayload includes claimedAt and meshId", () => {
+	test("AnnouncePayload includes claimedAt, meshId, and the optional zmx coordinate", () => {
 		const ann: AnnouncePayload = {
 			clientId: "client-1",
 			sessionId: "session-1",
@@ -204,17 +204,21 @@ describe("type extensions", () => {
 			nickname: "Carl Ufo Hawkins",
 			claimedAt: Date.now(),
 			meshId: "mesh-uuid-123",
+			zmxSession: "Ghostty-window-21",
 		};
 		expect(ann.claimedAt).toBeDefined();
 		expect(ann.meshId).toBeDefined();
+		expect(ann.zmxSession).toBe("Ghostty-window-21");
 	});
 
-	test("PeerInfo includes claimedAt", () => {
+	test("PeerInfo includes claimedAt and the optional zmx coordinate", () => {
 		const peer: PeerInfo = {
 			id: "peer-1",
 			lastSeen: Date.now(),
 			claimedAt: 1700000000000,
+			zmxSession: "Ghostty-window-21",
 		};
 		expect(peer.claimedAt).toBe(1700000000000);
+		expect(peer.zmxSession).toBe("Ghostty-window-21");
 	});
 });

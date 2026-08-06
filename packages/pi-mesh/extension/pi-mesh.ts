@@ -42,6 +42,11 @@ import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queu
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
 import { resolveDurableTarget } from "./route-resolve.ts";
 import {
+  readZmxSession,
+  reconcileZmxSession,
+  type ZmxSessionEnvironment,
+} from "./zmx-session.ts";
+import {
   ActiveInboundTellMailbox,
   canonicalTellReceiptPhase,
   isSurfacedReceiptRequested,
@@ -531,6 +536,7 @@ export class PiMesh {
       cwd: process.cwd(),
       lastSeen: Date.now(),
       claimedAt: this.myIdentity?.claimedAt,
+      zmxSession: this.myIdentity?.zmxSession,
     };
   }
 
@@ -752,6 +758,7 @@ export class PiMesh {
       lastSeen: Date.now(),
       claimedAt: ann.claimedAt,
       meshId: ann.meshId,
+      zmxSession: ann.zmxSession,
     };
     this.peerMap.set(key, peer);
     if (!existing) this._emit("peer-join", peer);
@@ -825,6 +832,7 @@ export class PiMesh {
       cwd,
       claimedAt: this.myIdentity?.claimedAt,
       meshId: this.myIdentity?.id,
+      zmxSession: this.myIdentity?.zmxSession,
     };
     this._send({
       cmd: "publish",
@@ -948,7 +956,7 @@ function resolveBroadcastAllowedFromSession(ctx: {
  * nickname rename in _handleAnnounce (and, in v1c, the activation lease) — never
  * by re-minting the id, which was the identity-churn bug (Simon→Robert Kirshner).
  */
-function resolveAndSetIdentity(
+export function resolveAndSetIdentity(
   reason: string,
   ctx: {
     sessionManager: {
@@ -958,21 +966,25 @@ function resolveAndSetIdentity(
   },
   mesh: PiMesh,
   pi: ExtensionAPI,
+  environment: ZmxSessionEnvironment = process.env,
 ): void {
   const existing = resolveIdentityFromSession(ctx);
+  const zmxSession = readZmxSession(environment);
 
   // Reuse the pinned identity for every reason except fork / genuine-new.
   if (existing && isIdentityReuseReason(reason, !!extractRebirthMarker(ctx))) {
-    mesh.setIdentity(existing);
-    setStableId(existing.id);
+    const zmxReconciliation = reconcileZmxSession(existing, zmxSession);
     // Reclaim the DISPLAY nickname only if a DIFFERENT identity already holds it.
     // A lingering same-id predecessor (dead incarnation still in the peer window)
     // is our own id and must not rename us — that keeps /resume's name stable.
-    const { nickname, changed } = resolveReuseNickname(existing, mesh.peers());
-    if (changed) {
-      const updated: MeshIdentity = { ...existing, nickname };
-      mesh.setIdentity(updated);
-      pi.appendEntry(MESH_IDENTITY_TYPE, updated);
+    const nicknameResolution = resolveReuseNickname(zmxReconciliation.identity, mesh.peers());
+    const identity = nicknameResolution.changed
+      ? { ...zmxReconciliation.identity, nickname: nicknameResolution.nickname }
+      : zmxReconciliation.identity;
+    mesh.setIdentity(identity);
+    setStableId(identity.id);
+    if (zmxReconciliation.changed || nicknameResolution.changed) {
+      pi.appendEntry(MESH_IDENTITY_TYPE, identity);
     }
     return;
   }
@@ -992,6 +1004,7 @@ function resolveAndSetIdentity(
     nickname,
     claimedAt: Date.now(),
     host: hostname(),
+    ...(zmxSession === undefined ? {} : { zmxSession }),
   };
   mesh.setIdentity(identity);
   setStableId(identity.id);
@@ -1188,6 +1201,7 @@ function getPeerExtraParts(peer: PeerInfo): string[] {
   if (!peer.nickname && peer.name?.trim()) parts.push(peer.name.trim());
   if (peer.hostname?.trim()) parts.push(peer.hostname.trim());
   if (peer.cwd?.trim()) parts.push(peer.cwd.trim());
+  if (peer.zmxSession?.trim()) parts.push(`zmx: ${peer.zmxSession.trim()}`);
   return parts;
 }
 
@@ -1211,18 +1225,8 @@ function isMeshViewRequest(
  * rode back on the ack. This is the "before" window the sender uses to decide
  * whether to wait, follow up, or preempt.
  */
-function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
+export function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
   const parts: string[] = [];
-  // Un-upgraded detection: an upgraded receiver ALWAYS sets at least receiverBusy
-  // (busy→true, idle→false) or receiverDeafened. All three absent ⟹ the peer is on
-  // an older mesh build that ignored the preempt field — your interrupt was
-  // silently downgraded to a normal tell. Surface this loudly; it is the exact
-  // worst case the wire format exists to make visible.
-  const unenriched =
-    ack.receiverBusy === undefined && ack.receiverDeafened === undefined && ack.view === undefined;
-  if (unenriched) {
-    return "⚠️ peer returned a BARE receipt — likely an UN-UPGRADED mesh build. If you sent an interrupt, the preempt level was IGNORED (treated as a normal tell).";
-  }
   if (ack.receiverDeafened) {
     parts.push("⚠️ peer is DEAFENED (/mesh deafen) — message dropped, not surfaced.");
   } else if (ack.receiverBusy) {
@@ -2209,7 +2213,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       }),
       message: Type.Unknown({
         description:
-          "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering.",
+          "Plain text preferred. For structured messages use {subject: '...', body: '...'} fields for readable rendering. When the Hooman Telegram bridge is available, use its configured durable Hooman ID from the mesh-telegram-bridge skill as sessionId and {image: '/absolute/bridge-visible/render.png', text: 'Here it is.'} to send a photo; file/attachment/path are aliases. text is an ordinary Telegram message sent before the attachment, not its media caption. The path must be a completed local file visible to the bridge, not a URL, blob, base64 payload, or remote-worker-private path. One attachment per tell. The Mesh receipt confirms bridge receipt only, not Telegram upload or Hooman visibility.",
       }),
       waitFor: Type.Optional(
         Type.String({
@@ -2507,7 +2511,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "mesh_peers",
     label: "Mesh Peers",
-    description: "List all pi sessions currently visible on the mesh network.",
+    description: "List all pi sessions currently visible on the mesh network, including zmx coordinates when announced.",
     parameters: Type.Object({}),
     async execute() {
       const me = mesh.self();
@@ -2684,6 +2688,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           if (!p.nickname && p.name) lines.push(`  title: ${p.name}`);
           if (p.hostname) lines.push(`  hostname: ${p.hostname}`);
           if (p.cwd) lines.push(`  cwd: ${p.cwd}`);
+          if (p.zmxSession?.trim()) lines.push(`  zmx: ${p.zmxSession.trim()}`);
           lines.push(`  lastSeen: ${new Date(p.lastSeen).toLocaleTimeString()}`);
           return lines.join("\n");
         };

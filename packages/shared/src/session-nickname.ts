@@ -610,6 +610,8 @@ export type MeshIdentity = {
 	nickname: string;
 	claimedAt: number;
 	host: string;
+	/** Explicit zmx session coordinate inherited from ZMX_SESSION, when present. */
+	zmxSession?: string;
 };
 
 // ── Display color ────────────────────────────────────────────────────────────

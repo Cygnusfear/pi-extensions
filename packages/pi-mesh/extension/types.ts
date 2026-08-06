@@ -14,6 +14,7 @@ export interface PeerInfo {
 	lastSeen: number; // unix ms
 	claimedAt?: number; // unix ms — distributed tie-breaker for nickname conflicts
 	meshId?: string; // stable mesh identity (decoupled from sidecar clientId)
+	zmxSession?: string; // explicit zmx session coordinate, when the peer runs inside zmx
 }
 
 export interface MeshConfig {
@@ -77,18 +78,17 @@ export interface MeshTellAckEnvelope {
 	from: string;
 	phase: MeshTellReceiptPhase;
 	timestamp: number;
-	/** Enriched receipt (always populated by upgraded peers): was the receiver
-	 *  mid-turn when this landed? Optional on the type for back-compat with
-	 *  un-upgraded peers. */
+	/** Optional receipt metadata: was the receiver mid-turn when this landed?
+	 *  Its absence is neutral and must not be used to infer peer version or delivery semantics. */
 	receiverBusy?: boolean;
 	/** True when the receiver has /mesh deafen on and dropped this message. */
 	receiverDeafened?: boolean;
 	/** Tail snapshot of what the receiver was doing when the message landed. */
 	view?: MeshTellAckView;
 	/** For a preempt='abort' interrupt: true iff the receiver actually invoked
-	 *  ctx.abort() (i.e. it had a live session context). Absent on non-abort acks
-	 *  and on un-upgraded receivers. false means the abort was a NO-OP (nothing was
-	 *  cancelled) — the sender must NOT assume the peer's work was stopped. */
+	 *  ctx.abort() (i.e. it had a live session context). false means the abort was a
+	 *  NO-OP (nothing was cancelled). Its absence is inconclusive; do not assume the
+	 *  peer's work was stopped. */
 	aborted?: boolean;
 }
 
@@ -114,6 +114,7 @@ export interface AnnouncePayload {
 	nickname?: string;
 	claimedAt?: number; // unix ms — tie-breaker for nickname conflicts
 	meshId?: string;    // stable mesh identity (decoupled from sidecar clientId)
+	zmxSession?: string; // explicit zmx session coordinate, omitted outside zmx
 }
 
 /** Emitted on the "request" event when another session calls ask() on this session. */

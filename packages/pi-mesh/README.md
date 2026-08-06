@@ -59,8 +59,26 @@ Each session has a layered identity:
 | Client ID | `clientId` | Connection | Per-socket, ephemeral |
 | Session ID | `sessionId` | pi session | Changes on resume/checkout |
 | Mesh ID | `meshId` | Agent identity | Stable across reconnects |
+| zmx coordinate | `zmxSession` | Terminal session | Present only when Pi inherits `ZMX_SESSION` |
 
 The `meshId` is the routing identity — it persists in the session file and survives sidecar restarts, session compaction, and context checkouts.
+
+When Pi runs inside [zmx](https://github.com/neurosnap/zmx), pi-mesh trims the explicit
+`ZMX_SESSION` environment value, persists it with the mesh identity, and includes it as
+optional `zmxSession` metadata in peer announcements. `mesh_peers` and `/mesh list`
+show the coordinate so a session can be located without cwd, process-tree, or footer
+inference. The current process environment is authoritative: resuming outside zmx clears
+a stale saved coordinate. This metadata is for discovery only; pi-mesh does not attach,
+kill, or otherwise manage zmx sessions. Peers that omit the optional field remain fully
+compatible.
+
+On startup, reload, resume, and rebirth, pi-mesh reuses the durable mesh identity and
+reconciles its coordinate with the current environment. It appends a new `mesh_identity`
+entry only when the coordinate or display nickname changes, including a change that clears
+the coordinate; therefore the latest durable record (and an Ouija/session-history lookup)
+describes the current terminal without accumulating no-op reload entries. A fork or a
+non-rebirth new session mints a fresh mesh identity and records the current coordinate on
+that new identity when one is present.
 
 ### Delivery Receipts
 
@@ -73,7 +91,7 @@ This makes messaging diagnosable: timeouts distinguish "peer unreachable" from "
 
 ### Enriched receipts
 
-Every `mesh_tell` receipt is **enriched** so the sender is never blind:
+A `mesh_tell` receipt can carry **enriched metadata**. Use a field only when it is present:
 
 - `receiverBusy` — was the peer mid-turn when the message landed? A busy peer only surfaces a normal tell at the **end of its current turn**.
 - `receiverDeafened` — the peer has `/mesh deafen` on and dropped the message. A deafened peer does NOT return a `view` (it won't leak its activity).
@@ -82,7 +100,7 @@ Every `mesh_tell` receipt is **enriched** so the sender is never blind:
 
 **Dual-snapshot semantics.** A busy receiver acks `delivered` immediately (snapshot = the busy tail, `receiverBusy:true`) and `visible` later on flush (a fresh idle tail, `receiverBusy:false`). A sender that waits for `visible` therefore sees a *different* snapshot than one that waits for `delivered` — both are correct, they describe different moments.
 
-**Un-upgraded peers.** If a peer is on an older mesh build it returns a bare ack with none of the fields above; the sender's receipt then warns "UN-UPGRADED mesh — preempt level IGNORED" rather than showing an empty receipt, because a new sender's `abort`/`steer` is silently downgraded to a normal tell by an old receiver.
+**Optional metadata.** A receipt without these fields reports its delivery phase normally. Missing optional metadata does not establish a peer version or an interrupt outcome; only explicit receipt fields establish those facts.
 
 ### Interrupts (preempt a busy peer)
 
