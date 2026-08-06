@@ -32,6 +32,24 @@ export interface TeamTemplate {
 	freeform?: boolean;
 }
 
+/**
+ * Ordered model preferences for the standard Teams roles.
+ *
+ * Defaults copy these arrays rather than sharing them, while an on-disk
+ * team-templates.json remains the intentional user override.
+ */
+export const STANDARD_TEAM_ROLE_MODELS = {
+	review: ["openai-codex/gpt-5.6-terra", "kimi-coding/k3"],
+	oracle: ["openai-codex/gpt-5.6-sol"],
+	fix: ["openai-codex/gpt-5.6-luna"],
+	implementer: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+	investigate: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+	scribe: ["openai-codex/gpt-5.6-luna"],
+	roleplay: ["anthropic/claude-sonnet-4-6"],
+} as const;
+
+export type StandardTeamRole = keyof typeof STANDARD_TEAM_ROLE_MODELS;
+
 function getHome(): string {
 	return process.env.HOME || os.homedir();
 }
@@ -51,44 +69,44 @@ export function teamTemplatesPath(): string {
 export const DEFAULT_TEAM_TEMPLATES: Record<string, TeamTemplate> = {
 	review: {
 		worktree: false,
-		model: ["anthropic/claude-opus-4-8", "openai-codex/gpt-5.5", "zai-coding/glm-5.2"],
+		model: [...STANDARD_TEAM_ROLE_MODELS.review],
 		prompt:
 			"You are a code reviewer. Be ultra-critical. 10/10 only. Prefer incremental review. Confirm the tree/branch with the coordinator before working via team_comment.",
 	},
 	oracle: {
 		worktree: false,
-		model: ["anthropic/claude-opus-4-8", "openai-codex/gpt-5.5", "zai-coding/glm-5.2"],
+		model: [...STANDARD_TEAM_ROLE_MODELS.oracle],
 		prompt:
 			"You are a research oracle. Investigate deeply using codebase exploration and web search. Synthesize findings into actionable answers. Confirm the tree/branch with the coordinator before working via team_comment.",
 	},
 	fix: {
 		worktree: false,
-		model: ["zai-coding/glm-5.2", "openai-codex/gpt-5.3-codex", "anthropic/claude-opus-4-8"],
+		model: [...STANDARD_TEAM_ROLE_MODELS.fix],
 		prompt:
 			"You are a fixer. Read the review and fix everything, including suggestions. 10/10 only. Do not skip anything. Work in the specified worktree. Confirm the tree/branch with the coordinator before working via team_comment.",
 	},
 	implementer: {
 		worktree: true,
-		model: ["openai-codex/gpt-5.3-codex", "zai-coding/glm-5.2", "anthropic/claude-opus-4-8"],
+		model: [...STANDARD_TEAM_ROLE_MODELS.implementer],
 		prompt:
 			"You are an implementer. Follow the plan exactly. Do not skip steps. Do not ask for confirmation. Confirm the tree/branch with the coordinator before working via team_comment.",
 	},
 	investigate: {
 		worktree: true,
-		model: ["anthropic/claude-opus-4-8", "zai-coding/glm-5.2", "openai-codex/gpt-5.5"],
+		model: [...STANDARD_TEAM_ROLE_MODELS.investigate],
 		prompt:
 			"Investigate this issue and track your investigation in tickets. Confirm the tree/branch with the coordinator before working via team_comment.",
 	},
 	scribe: {
 		worktree: false,
-		model: "openai-codex/gpt-5.5",
+		model: [...STANDARD_TEAM_ROLE_MODELS.scribe],
 		prompt:
 			"You are a long-lived scribe. Keep feature intent on disk while the main discussion continues. Maintain CONTEXT, ROADMAP, and ADR docs and update them as the spec evolves. Never let written intent drift from spoken intent.",
 		freeform: true,
 	},
 	roleplay: {
 		worktree: false,
-		model: "anthropic/claude-sonnet-4-6",
+		model: [...STANDARD_TEAM_ROLE_MODELS.roleplay],
 		prompt: "You are a roleplaying agent, have fun!",
 		freeform: true,
 	},

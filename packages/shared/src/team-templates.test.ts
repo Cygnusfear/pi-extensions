@@ -41,6 +41,29 @@ describe("loadTeamTemplates", () => {
 		expect(Object.keys(t)).toContain("review");
 		expect(Object.keys(t).length).toBeGreaterThanOrEqual(7);
 		expect(t).toBe(m.DEFAULT_TEAM_TEMPLATES);
+		expect(m.loadRoleModels("review")).toEqual([
+			"openai-codex/gpt-5.6-terra",
+			"kimi-coding/k3",
+		]);
+	});
+
+	test("missing file uses the complete current standard role contract as router arrays", async () => {
+		const m = await freshModule();
+		const expected = {
+			review: ["openai-codex/gpt-5.6-terra", "kimi-coding/k3"],
+			oracle: ["openai-codex/gpt-5.6-sol"],
+			fix: ["openai-codex/gpt-5.6-luna"],
+			implementer: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+			investigate: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+			scribe: ["openai-codex/gpt-5.6-luna"],
+			roleplay: ["anthropic/claude-sonnet-4-6"],
+		};
+
+		expect(m.STANDARD_TEAM_ROLE_MODELS).toEqual(expected);
+		expect(m.loadAllRoles()).toEqual(expected);
+		for (const role of Object.keys(expected)) {
+			expect(Array.isArray(m.DEFAULT_TEAM_TEMPLATES[role].model)).toBe(true);
+		}
 	});
 
 	test("valid file → parsed file is authoritative (no merge with defaults)", async () => {
