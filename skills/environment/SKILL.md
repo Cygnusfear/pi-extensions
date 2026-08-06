@@ -245,7 +245,7 @@ Your context window is finite. Watch the percentage in the footer:
 - **≥70%** — squash now: `session.squash()`
 - **≥90%** — squash immediately, no excuses
 
-When you squash, write narrative context — not metadata. Bad: `{ progress: "50%" }`. Good: `"Migrated users table. Gotcha: sessions.token_hash — NOT token — line 47. Next: fix column name."`
+When you squash, write narrative context into `$.ctx` — not metadata. A non-empty `$.ctx` is automatically frozen and delivered before the first resumed turn, so `continue` can stay short. It is capped at 16KiB UTF-8 and must never contain secrets. `$.pinned`, arbitrary `$` values, and `session.save()` records are intentionally not auto-injected. Bad: `{ progress: "50%" }`. Good: `"Migrated users table. Gotcha: sessions.token_hash — NOT token — line 47. Next: fix column name."`
 
 ## Code analysis: tldr
 
@@ -339,9 +339,45 @@ To inspect or kill an in-flight job, use the **direct tools** `execute_code_asyn
 
 Concurrent `execute_code` calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it.
 
-## The tool boundary
+## The tool boundary — two surfaces, never confuse them
 
-Some tools only work inside `execute_code` (Read, Write, Edit, Bash, Glob, etc). Others are direct LLM tools (teams, editor_*, mesh_*, git-ai). Most direct tools have sandbox wrappers with the same name in camelCase: `meshTell`, `editorOpen`, `gitAi`.
+There are exactly TWO ways to run a tool. They are different APIs with different names. Confusing them throws `ReferenceError` and burns tokens — learn this table.
+
+### Surface 1 — SANDBOX functions (run INSIDE `execute_code`)
+You call these as JavaScript functions with `await` inside a code block. They return data you process in the same block. Canonical surface:
+`Read, Write, Edit, Glob, rg, fd, WebFetch, sleep, man, Bash, bashBgStart, ouija, tldr*, fff*, teams, session, mesh, editorOpen, editorState, gitAi, mai, recall, context7*, braveSearch`.
+
+- The mesh sandbox calls all live behind the **`mesh` namespace**: `await mesh()`, `await mesh.tell({...})`, `await mesh.view({...})`, `await mesh.interrupt({...})`, `await mesh.broadcast({...})`, `await mesh.chat({...})`, `await mesh.joinChannel({...})`, `await mesh.leaveChannel({...})`.
+- Code helpers (non-sandbox) like `Promise.all`, `JSON.stringify`, `console.log` are plain JS.
+
+### Surface 2 — DIRECT TOOLS (invoked as native tool calls)
+These are host tools the model emits as a top-level tool call — NOT functions you can call from JS. Their names use underscores/hyphens: `mesh_peers`, `mesh_tell`, `mesh_view`, `mesh_broadcast`, `mesh_chat`, `mesh_inbox`, `mesh_interrupt`, `mesh_join_channel`, `mesh_leave_channel`, `editor_open`, `git-ai`, `teams`, `maestri_ask`, `frontpage_*`.
+
+### ⚠️ The mesh collision (this is the trap)
+`mesh_peers`, `mesh_tell`, `mesh_view`, `mesh_broadcast`, `mesh_chat`, `mesh_interrupt` are **direct tool names**, NOT sandbox functions. Calling `mesh_peers()` inside `execute_code` throws `ReferenceError: mesh_peers is not defined`.
+
+Inside `execute_code`, the ONLY mesh spellings are the `mesh.*` namespace above. The old camelCase wrappers (`meshPeers`, `meshTell`, `meshView`, ...) are **deprecated** — do not use them either.
+
+### The golden rule:
+- Want a value as data in your current script → **sandbox function** (`await mesh()`, `await mesh.view({...})`).
+- Want to fire a host operation standalone → **direct tool** (`mesh_peers`, `mesh_tell`, ...).
+- When in doubt about a mesh call shape, run `man("code-mode/mesh")` — it is authoritative.
+
+Examples — both legitimate, choose by context:
+
+```javascript
+// Correct inside execute_code — sandbox namespace
+const peers = await mesh();                       // NOT mesh_peers(), not meshPeers()
+const recent = await mesh.view({ sessionId: "fixer", start: -5 });
+await mesh.tell({ sessionId: "fixer", message: "check auth.ts" });
+```
+
+```jsonc
+// Correct as direct tools — emitted as native tool calls (not from JS)
+{"tool": "mesh_peers"}                    // → the same peer list as await mesh()
+{"tool": "mesh_view", "args": {"sessionId": "fixer", "start": -5}}
+```
+
 
 ## Git safety
 
@@ -371,5 +407,5 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Find files fast | `fffFind({ query })` |
 | Check context usage | `session.tokens()` |
 | Compact context | `session.squash()` |
-| Open a file in editor | `editorOpen({ file })` — direct tool |
-| Check who wrote code | `gitAi({ command: "blame", args: [file] })` — direct tool |
+| Open a file in editor | `editorOpen({ file })` — sandbox call (inside execute_code) |
+| Check who wrote code | `gitAi({ command: "blame", args: [file] })` — sandbox call (inside execute_code) |
