@@ -1,0 +1,33 @@
+packages/background-bash/extensions/background-bash.ts
+  s_c80280c75e1308::t_94283c3ee64835 428-436,505-511,536,542,549-552,573-580,662-664,705-708
+  s_c80280c75e1308::t_85c7950a679009 197-302
+  s_c80280c75e1308::t_154957da498aed 346
+  s_c80280c75e1308::t_b123d71432cda7 359-362,392-398,400-408,410-423
+  s_c80280c75e1308::t_e33d6055c158c6 1165-1168
+  s_c80280c75e1308::t_df14f5445849ed 667
+  s_c80280c75e1308::t_575446bc4e8730 13,20-25,69-76
+  s_c80280c75e1308::t_e4295fb09d6cff 303
+packages/background-bash/extensions/background-bash.test.ts
+  s_c80280c75e1308::t_bdcc8619c7607a 24,26-27,246-271
+  s_c80280c75e1308::t_07dc7d8d5d5519 273-288
+  s_c80280c75e1308::t_e4d9ed3fcf45a3 272
+  s_c80280c75e1308::t_bbe82c5bc895ce 289
+packages/background-bash/README.md
+  s_c80280c75e1308::t_84b9853585bb48 138-143,228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "c4b2e75283e8f070b88003d47c4d02ac973a4508",
+  "prompts": {},
+  "sessions": {
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
