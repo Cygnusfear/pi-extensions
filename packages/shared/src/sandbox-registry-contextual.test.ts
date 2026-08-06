@@ -93,6 +93,40 @@ describe("contextual sandbox-fn registry", () => {
 		expect(names).toContain(NAMESPACE + "fixedonly");
 	});
 
+	test("V11: getModel/setModel/getContextUsage pass through getSandboxFnsForCall (pe-dvdys6os)", async () => {
+		registerContextualSandboxFn(NAMESPACE + "hostcaps", (ctx) => () => ({
+			hasGetModel: typeof ctx.getModel === "function",
+			hasSetModel: typeof ctx.setModel === "function",
+			hasGetContextUsage: typeof ctx.getContextUsage === "function",
+			live: ctx.getModel?.(),
+			usage: ctx.getContextUsage?.(),
+			setResult: ctx.setModel ? ctx.setModel({ provider: "x", id: "y" }) : undefined,
+		}));
+
+		// Absent by default (older host / minimal ctx) — optional, not required.
+		const bare = getSandboxFnsForCall(makeCtx());
+		const bareOut = (bare[NAMESPACE + "hostcaps"] as () => any)();
+		expect(bareOut.hasGetModel).toBe(false);
+		expect(bareOut.hasSetModel).toBe(false);
+		expect(bareOut.hasGetContextUsage).toBe(false);
+		expect(bareOut.live).toBeUndefined();
+		expect(bareOut.usage).toBeUndefined();
+
+		// Present fields reach the factory verbatim.
+		const ctx = makeCtx();
+		ctx.getModel = () => ({ provider: "live-p", id: "live-m" });
+		ctx.setModel = async () => true;
+		ctx.getContextUsage = () => ({ tokens: 42, contextWindow: 1000, percent: 4.2 });
+		const fns = getSandboxFnsForCall(ctx);
+		const out = (fns[NAMESPACE + "hostcaps"] as () => any)();
+		expect(out.hasGetModel).toBe(true);
+		expect(out.hasSetModel).toBe(true);
+		expect(out.hasGetContextUsage).toBe(true);
+		expect(out.live).toEqual({ provider: "live-p", id: "live-m" });
+		expect(out.usage).toEqual({ tokens: 42, contextWindow: 1000, percent: 4.2 });
+		await expect(out.setResult).resolves.toBe(true);
+	});
+
 	test("V9c: unregisterSandboxFn removes both contextual and constant entries", () => {
 		registerContextualSandboxFn(NAMESPACE + "tmp1", () => () => "x");
 		registerSandboxFn(NAMESPACE + "tmp2", () => "y");
