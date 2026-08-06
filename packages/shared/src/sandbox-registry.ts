@@ -28,13 +28,49 @@ interface RegistryEntry {
 	contextual: boolean;
 }
 
+/** A lightweight immutable parent-session identity for contextual sandbox fns. */
+export interface ParentSessionIdentity {
+	id?: string;
+	name?: string;
+	file?: string;
+}
+
+/**
+ * Live context-usage snapshot for the active model (pe-dvdys6os). Structurally
+ * mirrors the host's ContextUsage; `tokens`/`percent` are null when unknown
+ * (e.g. right after compaction, before the next assistant response).
+ */
+export interface SandboxContextUsage {
+	tokens: number | null;
+	contextWindow: number;
+	percent: number | null;
+}
+
 export interface SandboxCallContext {
 	signal: AbortSignal;
 	cwd: string;
 	model: { provider: string; id: string };
 	modelRegistry: ModelRegistry;
+	/**
+	 * Live host model, read fresh per invocation (pe-dvdys6os). Unlike the
+	 * per-call `model` snapshot above — captured when execute_code began — this
+	 * reflects a same-block model.switch() on the next read.
+	 */
+	getModel?: () => { provider: string; id: string } | undefined;
+	/**
+	 * Request a host model switch; delegates to host pi.setModel. Resolves false
+	 * when the target has no configured auth. Effective next-turn, never mid-turn.
+	 */
+	setModel?: (model: unknown) => Promise<boolean>;
+	/**
+	 * Live context usage for the active model. `tokens` is null when unknown
+	 * (e.g. right after compaction, before the next assistant response).
+	 */
+	getContextUsage?: () => SandboxContextUsage | undefined;
 	sendMessage?: (msg: unknown, opts?: unknown) => void;
 	sendUserMessage?: (msg: string, opts?: { deliverAs?: "followUp" | "steer" }) => void;
+	/** Parent session identity (resolved once by code-mode from its SessionManager). */
+	parentSession?: ParentSessionIdentity;
 }
 
 function getRegistry(): Map<string, RegistryEntry> {
