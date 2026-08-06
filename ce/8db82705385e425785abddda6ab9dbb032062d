@@ -1,0 +1,30 @@
+docs/demo-script.md
+  s_c80280c75e1308::t_227e34ce752703 154,159
+  s_c80280c75e1308::t_9ff22050250cf7 163
+docs/walkthrough.md
+  s_c29214a9b09ec8::t_2019fdc332feda 288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "ce8db82705385e425785abddda6ab9dbb032062d",
+  "prompts": {},
+  "sessions": {
+    "s_c29214a9b09ec8": {
+      "agent_id": {
+        "tool": "Cumrun Parallax Mayor",
+        "id": "019f9e18-722b-7bf1-82a5-14eef01b1524",
+        "model": "kimi-coding/k3-256k"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
