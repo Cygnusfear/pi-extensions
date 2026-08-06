@@ -22,7 +22,7 @@ Instant model switching with slash commands. Zero maintenance — always resolve
 | `/zturbo` | ZAI          | `glm-5-turbo`            | `glm-5-turbo`       |
 | `/z5v`    | ZAI          | `glm-5v*`                | `glm-5v-turbo`      |
 | `/z47`    | ZAI          | `glm-4.7`                | `glm-4.7`           |
-| `/kimi`   | Kimi Coding  | `k2p*`                   | `k2p6`              |
+| `/kimi`   | Kimi Coding  | `k<N>` / `k<N>p<M>`      | `k3`                |
 
 ## How Dynamic Resolution Works
 

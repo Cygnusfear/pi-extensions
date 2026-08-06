@@ -7,7 +7,7 @@ import { findLatest } from "@pi-extensions/shared/model-utils";
  */
 
 export const SHORTCUTS = [
-  { command: "opus", provider: "anthropic", family: /^claude-opus-/, label: "Opus" },
+  { command: "opus", provider: "anthropic", family: /^claude-opus-4-8/, label: "Opus" },
   { command: "sonnet", provider: "anthropic", family: /^claude-sonnet-/, label: "Sonnet" },
   { command: "haiku", provider: "anthropic", family: /^claude-haiku-/, label: "Haiku" },
   { command: "codex", provider: "openai-codex", family: /^gpt-.*-codex$/, label: "Codex" },
@@ -16,7 +16,7 @@ export const SHORTCUTS = [
   { command: "zturbo", provider: "zai", family: /^glm-5-turbo$/, label: "GLM-5-Turbo" },
   { command: "z5v", provider: "zai", family: /^glm-5v/, label: "GLM-5V-Turbo" },
   { command: "z47", provider: "zai", family: /^glm-4.7$/, label: "GLM-4.7" },
-  { command: "kimi", provider: "kimi-coding", family: /^k\d+p/, label: "Kimi K" },
+  { command: "kimi", provider: "kimi-coding", family: /^k\d+(p\d+)?$/, label: "Kimi K" },
 ] as const;
 
 export default function (pi: ExtensionAPI) {
