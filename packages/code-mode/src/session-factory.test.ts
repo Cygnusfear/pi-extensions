@@ -27,6 +27,7 @@ import {
 	executeInSession,
 	type ExecutionDeps,
 } from "./session-factory";
+import { SQUASH_HANDOFF_MAX_BYTES } from "./deferred-squash";
 
 function makeDeps(overrides?: Partial<ExecutionDeps>): ExecutionDeps {
 	const ac = new AbortController();
@@ -198,6 +199,34 @@ describe("executeInSession — error modes", () => {
 		expect(result.output).toContain("thrown at runtime");
 	});
 
+	test("runtime failures summarize a large $ store instead of serializing it", async () => {
+		const sess = createCodeModeSession();
+		const storeKeys = sess.store.proxy.__keys;
+		const storeKeyList = typeof storeKeys === "function" ? storeKeys() : [];
+		const initialKeyCount = Array.isArray(storeKeyList) ? storeKeyList.length : 0;
+		for (let index = 0; index < 600; index++) {
+			(sess.store.proxy as Record<string, unknown>)[`large-recovery-key-${index}`] = "x".repeat(1024);
+		}
+
+		const result = await executeInSession(
+			sess,
+			'JSON.parse("not-json");',
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.output).toContain(`Your $ store survived (${initialKeyCount + 600} keys)`);
+		expect(result.output).toContain("Run $.__status() only when you intentionally need a store inventory");
+		expect(result.output).not.toContain("large-recovery-key-0");
+		expect(Buffer.byteLength(result.output, "utf8")).toBeLessThan(1_200);
+	});
+
 	test("execution timeout aborts Bash and preserves partial subprocess output", async () => {
 		const sess = createCodeModeSession();
 		const result = await executeInSession(
@@ -309,6 +338,9 @@ describe("executeInSession — context guard", () => {
 
 		expect(result.error).toContain("Context guard active");
 		expect(result.output).toContain("95.0% used");
+		expect(result.error).toContain("$.ctx");
+		expect(result.error).toContain("model-visible after compaction");
+		expect(result.error).toContain("Never put secrets in $.ctx");
 	});
 });
 
@@ -367,6 +399,67 @@ describe("executeInSession — contextual sandbox-fn delivery", () => {
 		}
 	});
 
+	test("V10c: getModel/setModel/getContextUsage map through buildSandboxCallContext (pe-dvdys6os)", async () => {
+		const {
+			registerContextualSandboxFn,
+			unregisterSandboxFn,
+		} = await import("../../shared/src/sandbox-registry");
+
+		registerContextualSandboxFn("__pe_dvdys6os_hostcaps", (ctx) => async () => {
+			const setResult = ctx.setModel ? await ctx.setModel({ provider: "t", id: "m" }) : "missing";
+			return JSON.stringify({
+				live: ctx.getModel?.() ?? null,
+				usage: ctx.getContextUsage?.() ?? null,
+				setResult,
+			});
+		});
+		try {
+			const sess = createCodeModeSession();
+			let setCalls = 0;
+			const deps = makeDeps({
+				getModel: () => ({ provider: "live-p", id: "live-m" }),
+				setModel: async () => { setCalls++; return true; },
+				getContextUsage: () => ({ tokens: 7, contextWindow: 128, percent: 5.5 }),
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			});
+			const r = await executeInSession(sess, "console.log(await __pe_dvdys6os_hostcaps())", deps);
+			expect(r.error).toBeUndefined();
+			expect(r.output).toContain('"live":{"provider":"live-p","id":"live-m"}');
+			expect(r.output).toContain('"usage":{"tokens":7,"contextWindow":128,"percent":5.5}');
+			expect(r.output).toContain('"setResult":true');
+			expect(setCalls).toBe(1);
+		} finally {
+			unregisterSandboxFn("__pe_dvdys6os_hostcaps");
+		}
+	});
+
+	test("V10d: absent getModel/setModel/getContextUsage stay undefined in SandboxCallContext (pe-dvdys6os)", async () => {
+		const {
+			registerContextualSandboxFn,
+			unregisterSandboxFn,
+		} = await import("../../shared/src/sandbox-registry");
+
+		registerContextualSandboxFn("__pe_dvdys6os_hostabsent", (ctx) => () =>
+			[typeof ctx.getModel, typeof ctx.setModel, typeof ctx.getContextUsage].join(","),
+		);
+		try {
+			const sess = createCodeModeSession();
+			const deps = makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			});
+			const r = await executeInSession(sess, "console.log(__pe_dvdys6os_hostabsent())", deps);
+			expect(r.output).toContain("undefined,undefined,undefined");
+		} finally {
+			unregisterSandboxFn("__pe_dvdys6os_hostabsent");
+		}
+	});
+
 	test("mesh.inbox is mirrored onto $.inbox as a non-destructive peek", async () => {
 		const { registerSandboxFn, unregisterSandboxFn } = await import("../../shared/src/sandbox-registry");
 		const pending = [{ from: "peer-1", preview: "hello" }];
@@ -389,32 +482,136 @@ describe("executeInSession — contextual sandbox-fn delivery", () => {
 	});
 });
 
+function makeSquashFixture() {
+	const sess = createCodeModeSession();
+	const fakeSm = {
+		getBranch: () => [],
+		getEntries: () => [],
+		getTree: () => [],
+		getLeafId: () => "leaf-x",
+		getSessionId: () => "sess-x",
+		getSessionName: () => null,
+		getLabel: () => undefined,
+		getChildren: () => [],
+		appendLabelChange: () => {},
+		appendCustomEntry: () => {},
+		branchWithSummary: (id: string) => id + "-branch",
+	};
+	const calls: unknown[] = [];
+	const deps = makeDeps({
+		sessionManager: fakeSm,
+		compact: () => {},
+		requestSquash: (opts) => calls.push(opts),
+	});
+	return { sess, calls, deps };
+}
+
 describe("executeInSession — session squash continuation hook", () => {
 	test("V16-equivalent: session.squash() triggers requestSquash callback", async () => {
-		const sess = createCodeModeSession();
-		const fakeSm = {
-			getBranch: () => [],
-			getEntries: () => [],
-			getTree: () => [],
-			getLeafId: () => "leaf-x",
-			getSessionId: () => "sess-x",
-			getSessionName: () => null,
-			getLabel: () => undefined,
-			getChildren: () => [],
-			appendLabelChange: () => {},
-			appendCustomEntry: () => {},
-			branchWithSummary: (id: string) => id + "-branch",
-		};
-		const calls: Array<{ continue?: string }> = [];
-		const deps = makeDeps({
-			sessionManager: fakeSm,
-			compact: () => {},
-			requestSquash: (opts) => {
-				calls.push(opts);
-			},
-		});
+		const { sess, calls, deps } = makeSquashFixture();
 		await executeInSession(sess, "session.squash({ continue: 'go' })", deps);
 		expect(calls).toEqual([{ continue: "go" }]);
+	});
+
+	test("automatically snapshots $.ctx into a typed handoff", async () => {
+		const { sess, calls, deps } = makeSquashFixture();
+		await executeInSession(
+			sess,
+			"$.ctx = 'TASK — migrate'; session.squash({ continue: 'resume' })",
+			deps,
+		);
+		expect(calls).toEqual([
+			{
+				continue: "resume",
+				handoff: { text: "TASK — migrate", source: "ctx" },
+			},
+		]);
+	});
+
+	test("explicit handoff overrides $.ctx without exposing other saved state", async () => {
+		const { sess, calls, deps } = makeSquashFixture();
+		await executeInSession(
+			sess,
+			"$.ctx = 'stale'; $.pinned = [{ content: 'do not inject' }]; session.save('secret', 'do not inject'); session.squash({ handoff: { text: 'explicit' } })",
+			deps,
+		);
+		expect(calls).toEqual([
+			{ handoff: { text: "explicit", source: "explicit" } },
+		]);
+	});
+
+	test("does not infer a handoff from pins or session.save records", async () => {
+		const { sess, calls, deps } = makeSquashFixture();
+		await executeInSession(
+			sess,
+			"$.pinned = [{ content: 'pin text' }]; session.save('ctx', 'saved text'); session.squash({ continue: 'resume' })",
+			deps,
+		);
+		expect(calls).toEqual([{ continue: "resume" }]);
+	});
+
+	test("rejects oversized handoffs rather than silently truncating authority", async () => {
+		const { sess, calls, deps } = makeSquashFixture();
+		const result = await executeInSession(
+			sess,
+			`$.ctx = "x".repeat(${SQUASH_HANDOFF_MAX_BYTES + 1}); session.squash({ continue: "resume" })`,
+			deps,
+		);
+		expect(calls).toEqual([]);
+		expect(result.output).toContain("exceeding the " + SQUASH_HANDOFF_MAX_BYTES + "-byte limit");
+	});
+
+	test("enforces exact UTF-8 handoff bounds for ctx and explicit sources", async () => {
+		const atLimitAscii = "x".repeat(SQUASH_HANDOFF_MAX_BYTES);
+		const overLimitAscii = atLimitAscii + "x";
+		const atLimitMultibyte = "é".repeat(SQUASH_HANDOFF_MAX_BYTES / 2);
+		const overLimitMultibyte = atLimitMultibyte + "x";
+		const cases = [
+			{ source: "ctx" as const, text: atLimitAscii, accepted: true },
+			{ source: "ctx" as const, text: overLimitAscii, accepted: false },
+			{ source: "explicit" as const, text: atLimitMultibyte, accepted: true },
+			{ source: "explicit" as const, text: overLimitMultibyte, accepted: false },
+		];
+
+		for (const testCase of cases) {
+			const { sess, calls, deps } = makeSquashFixture();
+			const code =
+				testCase.source === "ctx"
+					? `$.ctx = ${JSON.stringify(testCase.text)}; session.squash()`
+					: `session.squash({ handoff: { text: ${JSON.stringify(testCase.text)} } })`;
+			const result = await executeInSession(sess, code, deps);
+			if (testCase.accepted) {
+				expect(calls).toHaveLength(1);
+				expect((calls[0] as { handoff: { text: string } }).handoff.text).toBe(
+					testCase.text,
+				);
+			} else {
+				expect(calls).toEqual([]);
+				expect(result.output).toContain("exceeding the " + SQUASH_HANDOFF_MAX_BYTES + "-byte limit");
+			}
+		}
+	});
+
+	test("snapshots ctx and explicit handoff text when session.squash is requested", async () => {
+		const ctxFixture = makeSquashFixture();
+		await executeInSession(
+			ctxFixture.sess,
+			"$.ctx = 'ctx before'; session.squash(); $.ctx = 'ctx after'",
+			ctxFixture.deps,
+		);
+		expect(ctxFixture.calls).toEqual([
+			{ handoff: { text: "ctx before", source: "ctx" } },
+		]);
+
+		const explicitFixture = makeSquashFixture();
+		await executeInSession(
+			explicitFixture.sess,
+			"const handoff = { text: 'explicit before' }; session.squash({ handoff }); handoff.text = 'explicit after'; $.ctx = 'ctx after'",
+			explicitFixture.deps,
+		);
+		expect(explicitFixture.calls).toEqual([
+			{ handoff: { text: "explicit before", source: "explicit" } },
+		]);
 	});
 
 	test("V16b: session.squash() without compact dep logs unavailable + does NOT call requestSquash", async () => {

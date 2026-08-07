@@ -1,3 +1,5 @@
+// @code-mode-manual core | Core tools and process control
+
 /**
  * SANDBOX FUNCTIONS — NAMING CONVENTIONS
  *
@@ -15,7 +17,7 @@
  *
  * RETURN SHAPES — READ THIS. Bash() and Python() return an OBJECT
  * { stdout, stderr, exitCode }. But rg(), fd(), fffFind/fffGrep/fffMultiGrep,
- * ouija(), mesh.tell()/meshTell() and the teams.* helpers return a STRING
+ * ouija(), mesh.tell() and the teams.* helpers return a STRING
  * (Glob returns string[]). On those, `result.stdout` is undefined — use the
  * value directly (result.trim(), result.split, template literals). The silent
  * trap is `(await rg(...)).stdout || "(none)"` → always "(none)". If you want
@@ -231,9 +233,25 @@ declare function bashBgLogs(input: {
   id: BackgroundJobRef;
   /** 1-indexed log line to start from (default: 1) */
   offset?: number;
-  /** Maximum lines to return (default: 200, max: 2000) */
+  /** Maximum lines to return (default: 50, max: 250). Log text is also capped at 8KiB. */
   limit?: number;
-}): Promise<{ text: string; offset: number; limit: number; nextOffset: number; totalLines: number; hasMore: boolean; status: string }>;
+}): Promise<{
+  text: string;
+  offset: number;
+  limit: number;
+  nextOffset: number;
+  totalLines: number;
+  hasMore: boolean;
+  status: string;
+  /** Durable source for deliberate full-log inspection. */
+  logPath: string;
+  /** UTF-8 bytes in text after the 8KiB page budget. */
+  responseBytes: number;
+  /** True only when the page's byte budget shortened it. */
+  truncated: boolean;
+  /** Number of returned lines whose content was clipped. */
+  clippedLines: number;
+}>;
 
 /**
  * Stop a background bash job.
@@ -249,6 +267,8 @@ declare function bashBgStop(input: {
  * List all background bash jobs started in this session.
  */
 declare function bashBgList(): Promise<Array<{ id: string; pid: number; status: string; command: string; cwd: string; startedAt: number; endedAt?: number; exitCode?: number | null }>>;
+
+// @code-mode-manual async | Async execution and filesystem tools
 
 // =====================================================================
 // Async execute_code job management
@@ -408,6 +428,8 @@ declare function WebFetch(input: {
 
 /** Pause execution for the given number of milliseconds. */
 declare function sleep(ms: number): Promise<void>;
+
+// @code-mode-manual records | Maitake, memory, search, and source tools
 
 /**
  * Run a mai CLI command.
@@ -759,6 +781,8 @@ declare const fff: {
 declare const fffGrep: typeof fff.grep;
 declare const fffMultiGrep: typeof fff.multiGrep;
 
+// @code-mode-manual analysis | Semantic code analysis and runtime help
+
 // =====================================================================
 // TLDR Code Analysis (semantic search, call graphs, structure)
 // =====================================================================
@@ -869,6 +893,8 @@ declare function readImage(input: {
 }): Promise<string>;
 
 
+// @code-mode-manual session | Session, context, and persistent state
+
 // =====================================================================
 // Session API (read/manage conversation context)
 // =====================================================================
@@ -880,8 +906,12 @@ declare function readImage(input: {
 declare const session: {
   /** Get conversation messages (filtered to message entries only) */
   messages(): Array<{ id: string; role: string; content: string; timestamp: string }>;
-  /** Get current token usage stats */
-  tokens(): { tokens: number; contextWindow: number } | null;
+  /**
+   * Get the current live context reading. Run this immediately after a compaction
+   * or model switch; never act on a percentage reported by an earlier footer.
+   * Returns null only when the host cannot provide a live reading.
+   */
+  tokens(): { tokens: number; contextWindow: number; percent?: number } | null;
   /** Get all tags/labels in the session */
   tags(): Array<{ id: string; targetId: string; label: string; timestamp: string }>;
   /** Tag the current position (like context_tag) */
@@ -915,11 +945,15 @@ declare const session: {
 
   /**
    * Compact the session immediately. Old messages are replaced by a summary.
-   * $ and session.save() survive compaction.
-   * Pass { continue: "..." } to auto-continue after compaction — the message is
-   * injected as a user message so the agent picks up where it left off.
+   * $ and session.save() survive compaction. A non-empty $.ctx is the designated
+   * narrative handoff: it is frozen and injected before the first continuation
+   * after compaction. It is capped at 16KiB UTF-8 and rejects rather than silently
+   * truncating. $.pinned, arbitrary $ values, and session.save() records are not
+   * implicitly injected. Never put secrets in $.ctx.
+   * Pass { continue: "..." } for a short post-handoff instruction, or
+   * { handoff: { text: "..." } } to explicitly override $.ctx.
    */
-  squash(options?: { continue?: string }): void;
+  squash(options?: { continue?: string; handoff?: { text: string } }): void;
 };
 
 // =====================================================================
@@ -999,6 +1033,8 @@ declare const $: {
 };
 
 
+// @code-mode-manual runbooks | Reusable runbooks
+
 // =====================================================================
 // Runbooks (saved reusable code_mode scripts)
 // =====================================================================
@@ -1045,6 +1081,8 @@ declare const runbookRun: typeof runbook.run;
 /** @deprecated Use `runbook.delete()` instead. */
 declare const runbookDelete: typeof runbook.delete;
 
+
+// @code-mode-manual rlm | Recursive discovery worker
 
 // =====================================================================
 // RLM — recursive code-mode primitive
@@ -1146,6 +1184,8 @@ declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
   return(value: Record<string, unknown>): never;
 };
 
+// @code-mode-manual runtime | Runtime controls and notifications
+
 // =====================================================================
 // Console Extensions
 // =====================================================================
@@ -1172,7 +1212,7 @@ declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
  * $.monitor = (async () => {
  *   for (let i = 0; i < 20; i++) {
  *     await sleep(240000); // 4 minutes
- *     const status = await meshView({ sessionId: 'my-worker', start: -2, end: 0 });
+ *     const status = await mesh.view({ sessionId: 'my-worker', start: -2, end: 0 });
  *     if (status.includes('completed')) {
  *       console.wake("Worker finished! Check results.");
  *       return;
@@ -1227,6 +1267,8 @@ declare function notify(
  * overrides it whenever set. Pass an empty string to clear.
  */
 declare function sessionTitle(title: string): Promise<string>;
+
+// @code-mode-manual teams | Team worker orchestration
 
 /**
  * Coordinate a team of worker agents.
@@ -1495,6 +1537,8 @@ interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
   cancel(): void;
 }
 
+// @code-mode-manual mesh | Mesh coordination
+
 /**
  * mesh — inter-session communication. Callable as peers(), plus tell/view/interrupt/broadcast/chat.
  *
@@ -1518,7 +1562,15 @@ declare const mesh: {
    *  receipt. The receipt is ENRICHED: ack.receiverBusy (was the peer mid-turn?),
    *  ack.receiverDeafened, and ack.view (a bounded snapshot of the peer's recent
    *  activity when your message landed). A busy peer only surfaces your message at
-   *  the end of its current turn — use mesh.interrupt to jump that queue. */
+   *  the end of its current turn — use mesh.interrupt to jump that queue.
+   *  When the Hooman Telegram bridge is available, use its configured durable
+   *  Hooman ID from the mesh-telegram-bridge skill as sessionId and send a completed
+   *  bridge-visible file path as { image: "/absolute/render.png", text: "Here it is." }
+   *  to make a Telegram photo. `text` becomes an ordinary Telegram message sent before
+   *  the attachment, not the media caption. `file`, `attachment`, and `path` are aliases;
+   *  known image extensions become photos, while other files become documents. This is not
+   *  a URL/blob/base64 or a private path from a remote worker; send one attachment per tell.
+   *  A Mesh delivery receipt confirms bridge receipt only, not Telegram upload or Hooman visibility. */
   tell(params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }): Promise<string>;
 
   /** PREEMPT a busy peer's queue. level 'steer' (DEFAULT, SAFE): your message lands

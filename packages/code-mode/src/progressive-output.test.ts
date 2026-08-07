@@ -23,6 +23,12 @@ afterEach(() => {
 });
 
 describe("formatProgressiveOutput", () => {
+
+  test("uses the token-safety preview budget", () => {
+    expect(MODEL_VISIBLE_OUTPUT_MAX_BYTES).toBe(16 * 1024);
+    expect(MODEL_VISIBLE_OUTPUT_MAX_LINES).toBe(500);
+  });
+
   test("returns ordinary output unchanged", () => {
     const result = formatProgressiveOutput("small\nresult", {
       filePrefix: "pi-codemode-test",

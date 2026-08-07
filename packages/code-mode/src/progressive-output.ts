@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   formatSize,
   truncateHead,
   truncateTail,
 } from "@earendil-works/pi-coding-agent";
 
-export const MODEL_VISIBLE_OUTPUT_MAX_BYTES = DEFAULT_MAX_BYTES;
-export const MODEL_VISIBLE_OUTPUT_MAX_LINES = DEFAULT_MAX_LINES;
+/**
+ * A tool result is an index into an artifact, not the artifact itself. Keep
+ * the preview small enough that one accidental console.log cannot dominate an
+ * agent turn; formatProgressiveOutput preserves the complete value on disk.
+ */
+export const MODEL_VISIBLE_OUTPUT_MAX_BYTES = 16 * 1024;
+export const MODEL_VISIBLE_OUTPUT_MAX_LINES = 500;
 export const PROGRESSIVE_READ_LINE_COUNT = 200;
 
 export interface ProgressiveOutputOptions {

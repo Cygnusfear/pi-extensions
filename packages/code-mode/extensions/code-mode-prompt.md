@@ -16,7 +16,7 @@ You have an `execute_code` tool that runs JavaScript with typed async functions 
 All functions are async — use `await`. Use `console.log()` to return output.
 Only console output is returned to you. If you don't log anything, you get "(no output)".
 
-Model-visible `execute_code` results and `console.wake()` messages are hard-capped at 50KB or 2,000 lines. When output exceeds either limit, the complete output is saved to a unique `/tmp` file and the result includes an exact bounded `Read({ path, offset, limit })` call. Inspect successive ranges; never read the entire overflow file at once.
+Model-visible `execute_code` results and `console.wake()` messages are hard-capped at 16KiB or 500 lines. When output exceeds either limit, the complete output is saved to a unique `/tmp` file and the result includes an exact bounded `Read({ path, offset, limit })` call. Inspect successive ranges; never read the entire overflow file at once.
 
 ### Discovery offload
 
@@ -68,8 +68,30 @@ Top-level `function` declarations, `const { stdout: mergeBase } = ...` destructu
 - **`delete $.name`** — drop a single variable you no longer need
 - **`$.__pin('name')` / `$.__unpin('name')`** — legacy no-ops kept for compatibility; eviction no longer exists, so pinning is unnecessary
 
+## Local sandbox API
+
+The complete typed API is local but no longer spends every turn in context. Call `man("code-mode")` for its bounded topic index, then `man("code-mode/<topic>")` before using an unfamiliar API. Do not invent APIs or guess return shapes.
+
+Always-on high-risk rules:
+
+- `Bash()` is for a command that definitely exits in under 30 seconds. Check its real `exitCode`.
+- `bashBgStart()` returns a **thenable** handle. Never `await` a daemon or watcher; for an exiting job use `await bashBgStart(...).timeout(ms)`, otherwise attach `.then(... console.wake(...))` or stop it explicitly.
+- `Read`, `Write`, `Edit`, `Glob`, `rg`, and `fd` are async. Keep tool output bounded; use the progressive `/tmp` path rather than printing a large artifact.
+- Top-level declarations persist between `execute_code` calls. `$` is derived state, not raw conversation storage.
+- `man("code-mode/core")` covers Bash, files, and background jobs; `async`, `records`, `analysis`, `session`, `runbooks`, `rlm`, `runtime`, `teams`, and `mesh` cover the remaining API groups.
+
 ```typescript
-{{CODE_MODE_DECLARATIONS}}```
+declare function Bash(input: { command: string; cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
+declare function bashBgStart(input: { command: string; cwd?: string }): BashBgHandle;
+declare function Read(input: { path: string; cwd?: string; offset?: number; limit?: number; optional?: boolean }): Promise<string | null>;
+declare function Write(input: { path: string; cwd?: string; content: string }): Promise<void>;
+declare function Edit(input: { path: string; cwd?: string; oldText: string; newText: string }): Promise<{ matched: boolean }>;
+declare function Glob(input: { pattern: string; path?: string }): Promise<string[]>;
+declare function rg(input: { args: string; cwd?: string; follow?: boolean }): Promise<string>;
+declare function fd(input: { args: string; cwd?: string; follow?: boolean }): Promise<string>;
+declare function man(name: string): Promise<string>;
+```
+
 
 ### When to use `$`
 
@@ -125,7 +147,7 @@ do **NOT** ask the peer to ping you back.
 $.ralphMonitor = (async () => {
   for (let i = 0; i < 18; i++) {
     await sleep(20_000); // 20s × 18 = 6 min budget
-    const raw = await meshView({ sessionId: '019e54c9-...', start: -3, end: 0, timeoutMs: 8000 });
+    const raw = await mesh.view({ sessionId: '019e54c9-...', start: -3, end: 0, timeoutMs: 8000 });
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     const recent = (parsed.entries || []).slice(-3);
     const blob = JSON.stringify(recent);
@@ -275,9 +297,12 @@ Gotcha: sessions.token_hash column — NOT token — migration uses wrong column
 Dead end: tried batching inserts — FK constraint violation on sessions.user_id
 Next: fix column name at migrate.ts:47, then run test suite`;
 
-// Phase 3 — compact and auto-continue
-session.squash({ continue: "Squash done. Fix token_hash column at migrate.ts:47. Pinned refs in $.pinned." });
+// Phase 3 — compact. A non-empty $.ctx is automatically delivered to the
+// first post-compaction turn; continue is now only the short instruction.
+session.squash({ continue: "Fix token_hash at migrate.ts:47, then run tests." });
 ```
+
+`$.ctx` is the designated squash-handoff channel. `session.squash()` freezes its non-empty text when requested and puts it ahead of the continuation in the first post-compaction turn. It is capped at 16KiB UTF-8 and is never silently truncated; keep it concise and never put secrets in it. To override it deliberately, pass `handoff: { text: "..." }`. `$.pinned`, arbitrary `$` values, and `session.save()` records persist but are never implicitly injected.
 
 **Rule of thumb:** pin first (cheap, verbatim), narrative only for the delta your pins can't carry.
 
@@ -286,7 +311,7 @@ Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specifi
 
 **Quick tools:** `contextTag({ name: "..." })` · `contextLog({ limit: 30 })` · `contextCheckout({ target, message })`
 
-**Thresholds:** 📊 ≥50% tag your position · 🙈 ≥70% write thick `$` vars · 🚨 ≥80% squash now · 💀 ≥90% squash immediately
+**Context check:** A footer is only a nudge, never a compaction order. After any footer, compaction, or model switch, run `session.tokens()` and decide from that live reading. Do not act on an earlier percentage.
 
 ### Ouija — session history search 🔮
 

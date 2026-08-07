@@ -16,13 +16,21 @@
  */
 
 import vm from "node:vm";
+import { Buffer } from "node:buffer";
 import * as acorn from "acorn";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { createPersistentStore } from "./persistent-store";
+import {
+	SQUASH_HANDOFF_MAX_BYTES,
+	type DeferredSquashOptions,
+	type SquashHandoff,
+} from "./deferred-squash";
 import { loadRunbook } from "@pi-extensions/runbooks/engine";
 import {
 	getSandboxFnsForCall,
+	type ParentSessionIdentity,
 	type SandboxCallContext,
+	type SandboxContextUsage,
 } from "@pi-extensions/shared/sandbox-registry";
 import {
 	CONTEXT_GUARD_THRESHOLD,
@@ -161,7 +169,16 @@ export interface ExecutionDeps {
 
 	// ── Optional host fields (mirroring current toolCtx exactly) ────────────────
 	sessionManager?: any;
-	getContextUsage?: () => any;
+	/** Live context usage for the active model; null tokens = unknown (post-compaction). */
+	getContextUsage?: () => SandboxContextUsage | undefined;
+	/**
+	 * Live host model read, fresh per invocation (pe-dvdys6os). Unlike `model`
+	 * above — a snapshot captured when execute_code began — this reflects host
+	 * state at call time (e.g. after a same-block model.switch()).
+	 */
+	getModel?: () => { provider: string; id: string } | undefined;
+	/** Delegates to host pi.setModel. Resolves false when the target lacks configured auth. */
+	setModel?: (model: unknown) => Promise<boolean>;
 	confirmFn?: (title: string, body: string) => Promise<boolean>;
 	compact?: (options?: any) => void;
 	setLabel?: (entryId: string, label: string | undefined) => void;
@@ -223,7 +240,7 @@ export interface ExecutionDeps {
 	// back to extension lifecycle handlers (turn_end / agent_end). The host
 	// extension owns the deferral state; these callbacks bridge from the sandbox.
 	/** Schedule a session.squash() — extension records pending and runs compact() at agent_end. */
-	requestSquash?: (options: { continue?: string }) => void;
+	requestSquash?: (options: DeferredSquashOptions) => void;
 	/** Schedule a contextCheckout() — extension records pending and navigates at agent_end. */
 	requestCheckout?: (info: { targetId: string; enrichedMessage: string; backupTag?: string }) => void;
 	/** Apply a contextSize cap for outgoing messages. `null` resets to 'send everything'. */
@@ -356,10 +373,10 @@ function wrapWithContextGuard(
 							(CONTEXT_GUARD_THRESHOLD * 100).toFixed(0) +
 							"%). " +
 							"Most tools blocked — only context management allowed.\n\n" +
-							"BEFORE squashing, save thick context to $ (survives compaction):\n" +
+							"BEFORE squashing, save bounded narrative context to $.ctx (it becomes model-visible after compaction):\n" +
 							"$.ctx = `TASK — mid-stream\nDone: ...\nGotcha: ...\nNext: ...`;\n\n" +
-							"Then squash with continuation:\n" +
-							'session.squash({ continue: "Squash done. Continue with [next step]." });\n\n' +
+							"Never put secrets in $.ctx. Then squash; it is delivered before the short continuation:\n" +
+							'session.squash({ continue: "Continue with [next step]." });\n\n' +
 							"Toggle guard: /context-guard off",
 					);
 				}
@@ -375,6 +392,81 @@ function wrapWithContextGuard(
 // ───────────────────────────────────────────────────────────────────────────────
 // Session/context helpers — `session` global + contextTag/Log/Checkout
 // ───────────────────────────────────────────────────────────────────────────────
+
+type SessionSquashOptionsInput = {
+	continue?: unknown;
+	handoff?: unknown;
+};
+
+type NormalizedSquashOptions =
+	| { readonly options: DeferredSquashOptions }
+	| { readonly error: string };
+
+/**
+ * Freeze the only narrative that is allowed to cross a squash boundary.
+ *
+ * `$.ctx` is the documented context-handoff channel. Other persistent values
+ * deliberately do not become model-visible: they may be unrelated, large, or
+ * secret-bearing. An explicit `handoff.text` overrides `$.ctx` for callers
+ * that need a different narrative.
+ */
+function normalizeSquashOptions(
+	raw: unknown,
+	store: Record<string, unknown>,
+): NormalizedSquashOptions {
+	if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) {
+		return { error: "session.squash(): options must be an object" };
+	}
+
+	const input = (raw ?? {}) as SessionSquashOptionsInput;
+	if (input.continue !== undefined && typeof input.continue !== "string") {
+		return { error: "session.squash(): continue must be a string" };
+	}
+
+	let text: string | undefined;
+	let source: SquashHandoff["source"] | undefined;
+	if (input.handoff !== undefined) {
+		if (
+			input.handoff === null ||
+			typeof input.handoff !== "object" ||
+			Array.isArray(input.handoff)
+		) {
+			return { error: "session.squash(): handoff must be an object with a non-empty text string" };
+		}
+		const handoffText = (input.handoff as { text?: unknown }).text;
+		if (typeof handoffText !== "string" || handoffText.trim().length === 0) {
+			return { error: "session.squash(): handoff.text must be a non-empty string" };
+		}
+		text = handoffText;
+		source = "explicit";
+	} else if (typeof store.ctx === "string" && store.ctx.trim().length > 0) {
+		text = store.ctx;
+		source = "ctx";
+	}
+
+	if (!text || !source) {
+		return { options: { continue: input.continue as string | undefined } };
+	}
+
+	const bytes = Buffer.byteLength(text, "utf8");
+	if (bytes > SQUASH_HANDOFF_MAX_BYTES) {
+		return {
+			error:
+				"session.squash(): handoff is " +
+				bytes +
+				" UTF-8 bytes, exceeding the " +
+				SQUASH_HANDOFF_MAX_BYTES +
+				"-byte limit. Shorten $.ctx or handoff.text; it is not truncated.",
+		};
+	}
+
+	return {
+		options: {
+			continue: input.continue as string | undefined,
+			handoff: { text, source },
+		},
+	};
+}
 
 function injectSessionHelpers(session: CodeModeSession, deps: ExecutionDeps): void {
 	const sm = deps.sessionManager;
@@ -555,14 +647,27 @@ function injectSessionHelpers(session: CodeModeSession, deps: ExecutionDeps): vo
 				log(msg);
 				return msg;
 			},
-			squash: (options?: { continue?: string }) => {
+			squash: (options?: SessionSquashOptionsInput) => {
 				const log = (msg: string) => session.logs.push(msg);
 				if (!deps.compact) {
 					log("session.squash(): compaction not available in this context");
 					return;
 				}
-				deps.requestSquash?.({ continue: options?.continue });
-				log("session.squash(): compaction scheduled for after this turn completes");
+				const normalized = normalizeSquashOptions(
+					options,
+					session.store.proxy as Record<string, unknown>,
+				);
+				if ("error" in normalized) {
+					log(normalized.error);
+					return;
+				}
+				deps.requestSquash?.(normalized.options);
+				log(
+					"session.squash(): compaction scheduled for after this turn completes" +
+						(normalized.options.handoff
+							? "; generated handoff captured from " + normalized.options.handoff.source
+							: ""),
+				);
 			},
 			load: (key: string) => {
 				const entries = sm.getEntries();
@@ -852,14 +957,37 @@ function injectSessionHelpers(session: CodeModeSession, deps: ExecutionDeps): vo
 // Tool injection — bindings, runbooks, sandbox-fns, $-bare-globals
 // ───────────────────────────────────────────────────────────────────────────────
 
+/** Coerce a possibly-undefined session-manager accessor to a trimmed string. */
+function safeString(fn: () => unknown): string | undefined {
+	try {
+		const v = fn();
+		const s = typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
+		return s ? s : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function buildSandboxCallContext(deps: ExecutionDeps): SandboxCallContext {
+	const sessionManager = deps.sessionManager;
+	const parentSession: ParentSessionIdentity | undefined = sessionManager
+		? {
+				id: safeString(() => sessionManager.getSessionId?.()),
+				name: safeString(() => sessionManager.getSessionName?.()),
+				file: safeString(() => sessionManager.getSessionFile?.()),
+			}
+		: undefined;
 	return {
 		signal: deps.signal,
 		cwd: deps.cwd,
 		model: deps.model,
 		modelRegistry: deps.modelRegistry,
+		getModel: deps.getModel,
+		setModel: deps.setModel,
+		getContextUsage: deps.getContextUsage,
 		sendMessage: deps.sendMessage as ((msg: unknown, opts?: unknown) => void) | undefined,
 		sendUserMessage: deps.sendUserMessage,
+		parentSession,
 	};
 }
 
@@ -1115,10 +1243,12 @@ export async function executeInSession(
 				? "\nThis SyntaxError was thrown at runtime (e.g. JSON.parse() or new RegExp() on invalid input) — your code's syntax is fine; check the data you passed in."
 				: "";
 
-		const storeInfo = session.store.getStatus();
+		const storeKeys = session.store.proxy.__keys;
+		const storeKeyList = typeof storeKeys === "function" ? storeKeys() : [];
+		const storeKeyCount = Array.isArray(storeKeyList) ? storeKeyList.length : 0;
 		const recoveryHint =
-			storeInfo !== "$ is empty"
-				? "Your $ store survived. Use $.<var> to continue from where you left off.\n" + storeInfo
+			storeKeyCount > 0
+				? `Your $ store survived (${storeKeyCount} ${storeKeyCount === 1 ? "key" : "keys"}). Use $.<var> to continue from where you left off. Run $.__status() only when you intentionally need a store inventory.`
 				: "$ store is empty — nothing to recover.";
 
 		const body = "❌ " + error + locator + runtimeSyntaxNote + "\n\n" + recoveryHint;

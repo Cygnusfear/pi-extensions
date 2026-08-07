@@ -24,7 +24,7 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Timeout control** — unbounded by default, with an optional per-call deadline and automatic promotion of slow interactive calls to background work
 - **Errors don't kill your state** — `$` survives crashes. Pick up where you left off with `$.var`.
 - **Context management** — two-phase squash with auto-continue, context usage warnings, and hard-capped model-visible output
-- **Progressive output disclosure** — `execute_code` results and `console.wake()` messages are capped at 50KB or 2,000 lines; complete overflow is saved to a unique `/tmp` file with bounded `Read({ offset, limit })` instructions
+- **Progressive output disclosure** — `execute_code` results and `console.wake()` messages are capped at 16KiB or 500 lines; complete overflow is saved to a unique `/tmp` file with bounded `Read({ offset, limit })` instructions
 - **Background self-wake** — `console.wake()` lets background promises trigger new agent turns (worker monitoring, file watching, etc.)
 - **Passthrough tools** — mesh, editor, git-ai, handbook, teams, context, experiments all remain as direct LLM tools
 - **Escape hatch** — `/escape_code_mode` restores all tools for the session; `/code_mode` re-enables sandbox
@@ -301,11 +301,12 @@ Gotcha: refreshTokens.token_hash — NOT token — wasted 20 min on this
 Dead end: tried session-based approach, FK violations; back to JWT.
 Next: Write rotation logic at src/auth.ts:142`;
 
-// Phase 3 — apply compaction + auto-continue
-session.squash({ continue: "Squash done. Continue at src/auth.ts:142. Pinned refs in $.pinned." });
+// Phase 3 — apply compaction. $.ctx automatically becomes the authoritative
+// handoff delivered before this short continuation instruction.
+session.squash({ continue: "Continue at src/auth.ts:142." });
 ```
 
-`$` (including `$.pinned`, `$.ctx`) and `session.save()` all survive compaction. Pin first — it's verbatim and free. Use narrative only for the delta.
+`$` (including `$.pinned`, `$.ctx`) and `session.save()` all survive compaction. A non-empty `$.ctx` is additionally frozen at `session.squash()` time and injected before the first post-compaction continuation, so the resumed model receives the narrative instead of relying on a long `continue` string. The handoff is capped at 16KiB UTF-8 and rejects rather than truncating. Never put secrets in `$.ctx`; `$.pinned`, other `$` values, and `session.save()` records are deliberately not auto-injected. Pass `handoff: { text: "..." }` only to override the designated `$.ctx` narrative.
 
 ## Available sandbox functions
 
@@ -493,3 +494,9 @@ These remain as **direct LLM tools**: execute_code, context_*, start_supervision
 ## Setup
 
 Code-mode is typically installed via pi's extension system. No additional configuration is required — it activates automatically on session start and injects its system prompt and tool declarations.
+
+## Compact prompt and local manual
+
+Code mode keeps the every-turn system prompt compact. The complete typed sandbox declaration reference remains local and authoritative through `man("code-mode")` and bounded `man("code-mode/<topic>")` pages. Do not infer an API from memory.
+
+Context footers never state a percentage or order compaction. They direct agents to `session.tokens()`, the live checker to run after a footer, compaction, or model switch. Post-compaction continuations carry the same checker reminder without creating an additional turn.

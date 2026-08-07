@@ -35,11 +35,14 @@ import {
   cachedToolReference,
   extendWithAllTools,
   rebuildCachedReference,
+  setCodeModeManual,
 } from "../src/tool-reference";
+import { composeCodeModeSystemPrompt } from "../src/code-mode-manual";
 import {
   createCodeModeSession,
   executeInSession,
   type CodeModeSession,
+  type ExecutionDeps,
 } from "../src/session-factory";
 import {
   buildContextFooter,
@@ -47,7 +50,11 @@ import {
   isContextGuardActive,
 } from "../src/context-usage";
 import { installCodeModeProcessGuard } from "../src/process-guard";
-import { awaitDeferredSquash, type DeferredSquashContext } from "../src/deferred-squash";
+import {
+  awaitDeferredSquash,
+  type DeferredSquashContext,
+  type DeferredSquashOptions,
+} from "../src/deferred-squash";
 import { formatProgressiveOutput } from "../src/progressive-output";
 
 // =============================================================================
@@ -114,21 +121,21 @@ function surfaceCodeModeInternalError(
 }
 
 // =============================================================================
-// TypeScript Declarations (injected into system prompt)
+// Local manual and compact system-prompt spine
 // =============================================================================
 
-const CODE_MODE_DECLARATIONS = fs.readFileSync(
+// The full declarations remain a local, bounded manual. They must never be
+// concatenated into every agent turn.
+const CODE_MODE_MANUAL_SOURCE = fs.readFileSync(
   new URL("./code-mode-declarations.md", import.meta.url),
   "utf-8",
 );
+setCodeModeManual(CODE_MODE_MANUAL_SOURCE);
 
-// =============================================================================
-// System Prompt Addition
-// =============================================================================
-
-const CODE_MODE_SYSTEM_PROMPT = fs
-  .readFileSync(new URL("./code-mode-prompt.md", import.meta.url), "utf-8")
-  .replace("{{CODE_MODE_DECLARATIONS}}", CODE_MODE_DECLARATIONS);
+const CODE_MODE_SYSTEM_PROMPT = fs.readFileSync(
+  new URL("./code-mode-prompt.md", import.meta.url),
+  "utf-8",
+);
 
 // =============================================================================
 // Agent Git Identity
@@ -262,7 +269,7 @@ function formatArg(arg: unknown): string {
 let session: CodeModeSession | null = null;
 let contextSize: number | null = null; // null = send everything
 let pendingCheckout: { targetId: string; enrichedMessage: string; backupTag?: string } | null = null;
-let pendingSquash: { continue?: string } | null = null;
+let pendingSquash: DeferredSquashOptions | null = null;
 let currentOuijaSessionFile: string | null = null;
 
 // ── Context Guard ─────────────────────────────────────────────────────────────
@@ -770,14 +777,21 @@ export default function (pi: ExtensionAPI) {
       // Common deps builder — sync and async paths use the same shape.
       // `runtimeSignal` differs: sync uses the tool-call signal so /cancel
       // works; async uses a fresh controller so the work outlives the call.
-      const buildDeps = (runtimeSignal: AbortSignal) => ({
+      const buildDeps = (runtimeSignal: AbortSignal): ExecutionDeps => ({
         signal: runtimeSignal,
         cwd: ctx.cwd,
         model: model ?? { provider: "unknown", id: "unknown" },
         modelRegistry: (ctx as any).modelRegistry,
         executionTimeoutMs: timeoutMs,
         sessionManager: (ctx as any).sessionManager,
-        getContextUsage: (ctx as any).getContextUsage,
+        // ctx is the host's typed ExtensionContext — getContextUsage is checked
+        // against SandboxContextUsage structurally, no any/cast at this seam.
+        getContextUsage: ctx.getContextUsage,
+        // Live host model read — ctx.model is a getter on the host's extension
+        // context, so this reflects a same-block model.switch() on the next read.
+        // Do NOT substitute the captured per-call `model` snapshot above.
+        getModel: () => ctx.model,
+        setModel: (m: unknown) => pi.setModel(m as any),
         confirmFn: (ctx as any).ui?.confirm?.bind((ctx as any).ui) as
           | ((title: string, body: string) => Promise<boolean>)
           | undefined,
@@ -792,8 +806,17 @@ export default function (pi: ExtensionAPI) {
         ) => (pi as any).sendMessage?.(message, options),
         contextGuardEnabled,
         agentGitIdentity: model ? deriveAgentGitIdentity(model) : undefined,
-        requestSquash: (options: { continue?: string } | undefined) => {
-          pendingSquash = { continue: options?.continue };
+        requestSquash: (options: DeferredSquashOptions) => {
+          // Snapshot primitive values before the current vm turn ends. The
+          // generated handoff must describe the exact state the caller froze,
+          // not a mutable caller-owned options object.
+          pendingSquash = {
+            continue: options.continue,
+            handoff: options.handoff && {
+              text: options.handoff.text,
+              source: options.handoff.source,
+            },
+          };
         },
         requestCheckout: (info: { targetId: string; enrichedMessage: string; backupTag?: string }) => {
           pendingCheckout = info;
@@ -1353,8 +1376,11 @@ export default function (pi: ExtensionAPI) {
   // Inject code-mode declarations and instructions into system prompt
   pi.on("before_agent_start", async (event) => {
     return {
-      systemPrompt:
-        event.systemPrompt + "\n\n" + CODE_MODE_SYSTEM_PROMPT + "\n\n" + cachedToolReference,
+      systemPrompt: composeCodeModeSystemPrompt(
+        event.systemPrompt,
+        CODE_MODE_SYSTEM_PROMPT,
+        cachedToolReference,
+      ),
     };
   });
 }
