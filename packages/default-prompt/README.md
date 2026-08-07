@@ -58,3 +58,9 @@ This overlay is automatically picked up and injected on every agent turn.
 ## Setup
 
 No setup required. The bundled prompt loads automatically. Repo overlays are opt-in via `.prompts/default.md`.
+
+## Progressive disclosure
+
+The bundled `prompts/default.md` is the compact always-on safety and operating spine. Detailed procedures live once in `prompts/default-manual.md` and are served locally by `prompt_manual`. Start with `prompt_manual({ topic: "index" })`, then request one bounded topic. The tool never calls a provider or remote service.
+
+A context footer is only a cue to check current state. Run `session.tokens()` after a footer, compaction, or model switch; never act on a percentage from an earlier turn.
