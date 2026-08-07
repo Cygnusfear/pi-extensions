@@ -1,0 +1,29 @@
+packages/code-mode/src/image-prepare.ts
+  s_2f3a38a9f5b680::t_0c6f5a5368a67d 480-526,529
+  s_2f3a38a9f5b680::t_f2a86ea22992c1 185-241,243-315,319,321-331,335-343,350,352-373,375-427,431-439
+  s_2f3a38a9f5b680::t_622acf819edd86 171-176
+  s_2f3a38a9f5b680::t_4ce257e3d4651d 34-48
+packages/code-mode/src/sandbox-tools.ts
+  s_2f3a38a9f5b680::t_8f25d799e06b28 1478,1480,1483-1484
+  s_2f3a38a9f5b680::t_36f9cf2bbaf620 1030,1032,1035-1037
+  s_2f3a38a9f5b680::t_ade3b4963b74fd 41,43
+packages/code-mode/src/image-prepare.test.ts
+  s_2f3a38a9f5b680::t_ef249f2b4667bf 5-6,8-9,11,13-14,90-98,130-157,159,162-168,171-175,177,180-190,193-210,212-218,220-238,244-257,269-271,284-306
+  s_2f3a38a9f5b680::t_2ea7fa91ae1aa5 307
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "18706bb899e0d37ebf81c726f2dadaad0ca41c2d",
+  "prompts": {},
+  "sessions": {
+    "s_2f3a38a9f5b680": {
+      "agent_id": {
+        "tool": "Mete Quasar Giacconi",
+        "id": "019fdbdf-d8ad-763a-96df-5ba4dd9b3703",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
