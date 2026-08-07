@@ -1,0 +1,90 @@
+packages/default-prompt/src/prompt-manual.test.ts
+  s_c80280c75e1308::t_7b2b5f4ca362dc 15-22
+  s_c80280c75e1308::t_834eaafbc0c1aa 1-14,23-24,34-64
+  s_c80280c75e1308::t_df9b3991d19250 25-33
+packages/default-prompt/prompts/default.md
+  s_c80280c75e1308::t_2755bd1e75456b 63,67,69,73,79-82,86,88,90,94,98,100,104
+  s_c80280c75e1308::t_d0af19e3412877 75,77
+  s_c80280c75e1308::t_5f295150737ddf 10
+  s_c80280c75e1308::t_3ebe3c20d30cac 32
+  s_c80280c75e1308::t_6fec80d038fff4 61,65,71,84,92,96
+  s_c80280c75e1308::t_7c337fc3fd4abb 9
+  s_c80280c75e1308::t_b7e59c9bf66b9e 11
+packages/default-prompt/extensions/default-prompt.test.ts
+  s_c80280c75e1308::t_26b9be563291f7 83-84
+  s_c80280c75e1308::t_304daa24c7832f 1
+  s_c80280c75e1308::t_922274f7099e6c 41-43
+  s_c80280c75e1308::t_c66001f1baad32 107-109
+  s_c80280c75e1308::t_6f7b71b5a309a0 157
+  s_c80280c75e1308::t_c4a3a90900a274 121-123
+  s_c80280c75e1308::t_33534eb2bbc131 141-145
+  s_c80280c75e1308::t_95b7f9e66a0759 66-67
+  s_c80280c75e1308::t_b5d08583deaafb 28-30
+  s_c29214a9b09ec8::t_ed6f6954cc2fdb 45,80,89-99
+  s_c80280c75e1308::t_f70238aead1b40 111-113
+  s_c80280c75e1308::t_baed0ce3fc3ce3 128-132
+  s_c80280c75e1308::t_b40d54d6482d38 69-71
+  s_c80280c75e1308::t_d79c2df056882e 73-74
+  s_c80280c75e1308::t_43706be26a9190 31
+  s_c80280c75e1308::t_bce385b76263b2 46,81,104-105
+  s_c80280c75e1308::t_f8e875738b31b6 204-206
+  s_c80280c75e1308::t_607869def6176c 159-161
+  s_c80280c75e1308::t_7af1057f43dbdf 48-50
+  s_c80280c75e1308::t_cede3af3f4879e 139
+  s_c80280c75e1308::t_64d41c2fd2b3a5 126
+  s_c80280c75e1308::t_1596aff6bab50c 32-34
+  s_c80280c75e1308::t_7c48544d45bd6a 52-59
+  s_c80280c75e1308::t_4910370d65e2b4 3,5-6,162-190
+  s_c80280c75e1308::t_fd66992ff047b2 158
+  s_c80280c75e1308::t_5f10d2cbc71745 2
+  s_c80280c75e1308::t_65fc534e250287 76-78
+  s_c80280c75e1308::t_bdcc8619c7607a 147,149-156,191-193
+  s_c80280c75e1308::t_17016b2ce4ba27 134-136
+  s_c80280c75e1308::t_d7b62c327efa58 39-40,44,47,51,60-61,65,68,72,75,79,82,85,87,103,106,110,114-115,119-120,124-125,127,133,137-138,140,146,148,194-203,207
+  s_c80280c75e1308::t_fe9bab921ef7e9 62-64
+  s_c80280c75e1308::t_c52c35ca56d035 86
+  s_c80280c75e1308::t_cbe081e65906a1 25-27
+  s_c80280c75e1308::t_9b2114d22edf8a 35
+packages/default-prompt/package.json
+  s_c80280c75e1308::t_866b382161282d 23-24
+packages/default-prompt/extensions/default-prompt.ts
+  s_c80280c75e1308::t_23d0f6ae219a13 140-170,172-175
+  s_c80280c75e1308::t_237be0fdd7c20e 13
+  s_c80280c75e1308::t_6f3754e6efd89b 171
+  s_c80280c75e1308::t_e451aa63de2824 20
+  s_c29214a9b09ec8::t_42e60bf36f2849 22-37,55-56,70-78,82
+  s_c29214a9b09ec8::t_66c7075fce2131 79-81
+  s_c29214a9b09ec8::t_88bb16be35e9f4 83
+packages/default-prompt/README.md
+  s_c80280c75e1308::t_4af50104967200 61-66
+packages/default-prompt/prompts/default-manual.md
+  s_c80280c75e1308::t_f62c92c062edbd 1-584
+packages/default-prompt/src/prompt-manual.ts
+  s_c80280c75e1308::t_266f64e32fe40f 1-116
+packages/default-prompt/extensions/default-prompt.manual.test.ts
+  s_c80280c75e1308::t_37368caf7a7cc8 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "6402d169277bff7e29997bed1ada6ef313b8c62a",
+  "prompts": {},
+  "sessions": {
+    "s_c29214a9b09ec8": {
+      "agent_id": {
+        "tool": "Cumrun Parallax Mayor",
+        "id": "019f9e18-722b-7bf1-82a5-14eef01b1524",
+        "model": "kimi-coding/k3-256k"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_c80280c75e1308": {
+      "agent_id": {
+        "tool": "Anna Galaxy Jayawardhana",
+        "id": "019ee54c-2b83-7851-bec3-6019cb152779",
+        "model": "zai/glm-5.2"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
