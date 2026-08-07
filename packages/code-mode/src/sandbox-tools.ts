@@ -38,10 +38,9 @@ import {
 } from "./shell-utils";
 import { formatManPage } from "./tool-reference";
 import {
-  formatImageLoadedNote,
-  formatImageScaledNote,
+  formatImageAttachmentNote,
   formatImageTooLargeError,
-  prepareImageForAttachment,
+  prepareImagesForAttachment,
   resolveImageBudgetBytes,
 } from "./image-prepare";
 import type { SandboxContext } from "./types";
@@ -1028,16 +1027,14 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         // Image files: budget-check, auto-scale if needed, and attach like readImage does
         if (imageMime) {
           const budgetBytes = resolveImageBudgetBytes(model, modelRegistry);
-          const prepared = await prepareImageForAttachment(buffer, imageMime, budgetBytes);
+          const prepared = await prepareImagesForAttachment(buffer, imageMime, budgetBytes);
           const fileName = path.basename(resolved);
-          if (!prepared) {
+          if (!prepared || prepared.length === 0) {
             return formatImageTooLargeError(fileName, buffer.length, budgetBytes);
           }
-          images.push({ data: prepared.data, mimeType: prepared.mimeType });
-          const note = prepared.wasResized
-            ? formatImageScaledNote(fileName, prepared, buffer.length, budgetBytes)
-            : formatImageLoadedNote(fileName, imageMime, buffer.length);
-          return "Read image file [" + prepared.mimeType + "] " + note;
+          for (const part of prepared) images.push({ data: part.data, mimeType: part.mimeType });
+          const note = formatImageAttachmentNote(fileName, prepared, buffer.length, budgetBytes);
+          return "Read image file [" + prepared[0].mimeType + "] " + note;
         }
         // Other binary files: return a clear description instead of garbled bytes
         // Try to detect the actual type from magic bytes for a better message
@@ -1478,15 +1475,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       }
       const buffer = fs.readFileSync(resolved);
       const budgetBytes = resolveImageBudgetBytes(model, modelRegistry);
-      const prepared = await prepareImageForAttachment(buffer, mimeType, budgetBytes);
+      const prepared = await prepareImagesForAttachment(buffer, mimeType, budgetBytes);
       const fileName = path.basename(resolved);
-      if (!prepared) {
+      if (!prepared || prepared.length === 0) {
         return formatImageTooLargeError(fileName, buffer.length, budgetBytes);
       }
-      images.push({ data: prepared.data, mimeType: prepared.mimeType });
-      return prepared.wasResized
-        ? formatImageScaledNote(fileName, prepared, buffer.length, budgetBytes)
-        : formatImageLoadedNote(fileName, mimeType, buffer.length);
+      for (const part of prepared) images.push({ data: part.data, mimeType: part.mimeType });
+      return formatImageAttachmentNote(fileName, prepared, buffer.length, budgetBytes);
     },
 
     // =====================================================================

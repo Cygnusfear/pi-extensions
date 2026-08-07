@@ -2,10 +2,16 @@ import { describe, expect, test } from "bun:test";
 import zlib from "node:zlib";
 import {
   DEFAULT_IMAGE_BUDGET_BYTES,
+  MAX_IMAGE_EDGE_PX,
+  MAX_IMAGE_TILES,
   MIN_IMAGE_BUDGET_BYTES,
+  type PreparedImage,
+  formatImageAttachmentNote,
   formatImageScaledNote,
+  formatImageTiledNote,
   formatImageTooLargeError,
-  prepareImageForAttachment,
+  prepareImagesForAttachment,
+  readImageDimensions,
   resolveImageBudgetBytes,
 } from "./image-prepare";
 
@@ -81,6 +87,15 @@ function makeNoisePng(width: number, height: number): Uint8Array {
   return encodePng(width, height, () => [rand(), rand(), rand(), 255]);
 }
 
+/** Solid-color PNG: compresses to a few KB regardless of dimensions. */
+function makeSolidPng(width: number, height: number): Uint8Array {
+  return encodePng(width, height, () => [12, 34, 56, 255]);
+}
+
+function maxEdge(image: PreparedImage): number {
+  return Math.max(image.width, image.height);
+}
+
 describe("resolveImageBudgetBytes", () => {
   test("defaults when no model or registry is available", () => {
     expect(resolveImageBudgetBytes()).toBe(DEFAULT_IMAGE_BUDGET_BYTES);
@@ -112,41 +127,134 @@ describe("resolveImageBudgetBytes", () => {
   });
 });
 
-describe("prepareImageForAttachment", () => {
-  test("passes images already under budget through untouched", async () => {
-    const png = makeNoisePng(8, 8);
-    const prepared = await prepareImageForAttachment(png, "image/png", 1_000_000);
-
-    expect(prepared).not.toBeNull();
-    expect(prepared!.wasResized).toBe(false);
-    expect(prepared!.mimeType).toBe("image/png");
-    expect(Buffer.from(prepared!.data, "base64").equals(Buffer.from(png))).toBe(true);
+describe("readImageDimensions", () => {
+  test("reads PNG dimensions from the IHDR header", () => {
+    const png = makeSolidPng(13, 7);
+    expect(readImageDimensions(png)).toEqual({ width: 13, height: 7 });
   });
 
-  test("downscales an oversized screenshot until it fits the budget", async () => {
-    const png = makeNoisePng(1600, 1200);
-    expect(png.byteLength).toBeGreaterThan(1_000_000);
+  test("reads GIF dimensions from the logical screen descriptor", () => {
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x20, 0x03, 0x58, 0x02, 0x00, 0x00]);
+    expect(readImageDimensions(gif)).toEqual({ width: 800, height: 600 });
+  });
 
-    const prepared = await prepareImageForAttachment(png, "image/png", 200_000);
+  test("reads JPEG dimensions by scanning to the Start-Of-Frame marker", () => {
+    const jpeg = new Uint8Array([
+      0xff, 0xd8,
+      0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+      0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0xe0, 0x02, 0x80, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+    ]);
+    expect(readImageDimensions(jpeg)).toEqual({ width: 640, height: 480 });
+  });
+
+  test("returns null for formats it cannot parse cheaply", () => {
+    expect(readImageDimensions(new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]))).toBeNull();
+    expect(readImageDimensions(new Uint8Array(4).fill(0))).toBeNull();
+  });
+});
+
+describe("prepareImagesForAttachment", () => {
+  test("passes an in-cap image under budget through untouched", async () => {
+    const png = makeNoisePng(8, 8);
+    const prepared = await prepareImagesForAttachment(png, "image/png", 1_000_000);
 
     expect(prepared).not.toBeNull();
-    expect(prepared!.wasResized).toBe(true);
-    expect(prepared!.originalWidth).toBe(1600);
-    expect(prepared!.originalHeight).toBe(1200);
-    expect(prepared!.width).toBeLessThan(1600);
-    expect(Buffer.byteLength(prepared!.data, "utf-8")).toBeLessThan(200_000);
+    expect(prepared!).toHaveLength(1);
+    const [only] = prepared!;
+    expect(only.wasResized).toBe(false);
+    expect(only.wasTiled).toBe(false);
+    expect(only.tileCount).toBe(1);
+    expect(only.mimeType).toBe("image/png");
+    expect(Buffer.from(only.data, "base64").equals(Buffer.from(png))).toBe(true);
+  });
+
+  test("tiles a tall screenshot that fits the byte budget but exceeds the pixel cap", async () => {
+    // The exact reported failure: a small-byte, very tall page slipped through the
+    // byte-only budget and the provider rejected it on dimensions. It must tile now.
+    const png = makeSolidPng(100, 2000);
+    expect(Math.ceil((png.byteLength / 3) * 4)).toBeLessThan(1_000_000); // genuinely under budget
+
+    const prepared = await prepareImagesForAttachment(png, "image/png", 1_000_000);
+
+    expect(prepared).not.toBeNull();
+    expect(prepared!.length).toBeGreaterThanOrEqual(2);
+    for (const tile of prepared!) {
+      expect(maxEdge(tile)).toBeLessThanOrEqual(MAX_IMAGE_EDGE_PX);
+      expect(tile.wasTiled).toBe(true);
+      expect(tile.tileCount).toBe(prepared!.length);
+      expect(tile.originalWidth).toBe(100);
+      expect(tile.originalHeight).toBe(2000);
+    }
+    expect(prepared!.map((t) => t.tileIndex)).toEqual(prepared!.map((_, i) => i + 1));
+    // A tile is a re-encoded crop, never the original bytes.
+    expect(Buffer.from(prepared![0].data, "base64").equals(Buffer.from(png))).toBe(false);
+  });
+
+  test("preserves native resolution across tiles (no downscale when it fits the tile bound)", async () => {
+    const png = makeSolidPng(800, 2400);
+    const prepared = await prepareImagesForAttachment(png, "image/png", 1_000_000);
+
+    expect(prepared).not.toBeNull();
+    expect(prepared!).toHaveLength(2);
+    for (const tile of prepared!) {
+      expect(tile.width).toBe(800); // full native width kept
+      expect(maxEdge(tile)).toBeLessThanOrEqual(MAX_IMAGE_EDGE_PX);
+      expect(tile.wasResized).toBe(false);
+    }
+    const totalHeight = prepared!.reduce((sum, t) => sum + t.height, 0);
+    expect(totalHeight).toBe(2400); // the whole page is covered, top-to-bottom
+  });
+
+  test("bounds a pathologically tall image to at most MAX_IMAGE_TILES tiles", async () => {
+    const png = makeSolidPng(100, 20_000);
+    const prepared = await prepareImagesForAttachment(png, "image/png", 1_000_000);
+
+    expect(prepared).not.toBeNull();
+    expect(prepared!.length).toBeLessThanOrEqual(MAX_IMAGE_TILES);
+    for (const tile of prepared!) {
+      expect(maxEdge(tile)).toBeLessThanOrEqual(MAX_IMAGE_EDGE_PX);
+      expect(tile.wasResized).toBe(true); // had to downscale to fit the tile bound
+    }
+  });
+
+  test("downscales an in-cap image that is over the byte budget (single image)", async () => {
+    const png = makeNoisePng(1400, 1000);
+    expect(png.byteLength).toBeGreaterThan(200_000);
+
+    const prepared = await prepareImagesForAttachment(png, "image/png", 200_000);
+
+    expect(prepared).not.toBeNull();
+    expect(prepared!).toHaveLength(1);
+    const [only] = prepared!;
+    expect(only.wasResized).toBe(true);
+    expect(only.wasTiled).toBe(false);
+    expect(only.originalWidth).toBe(1400);
+    expect(only.width).toBeLessThan(1400);
+    expect(Buffer.byteLength(only.data, "utf-8")).toBeLessThan(200_000);
   });
 
   test("returns null for undecodable input instead of attaching", async () => {
     const garbage = new Uint8Array(300_000).fill(0x61);
-
-    const prepared = await prepareImageForAttachment(garbage, "image/png", 100_000);
-
+    const prepared = await prepareImagesForAttachment(garbage, "image/png", 100_000);
     expect(prepared).toBeNull();
   });
 });
 
 describe("agent-facing notes", () => {
+  const tile = (over: Partial<PreparedImage>): PreparedImage => ({
+    data: "x".repeat(1000),
+    mimeType: "image/jpeg",
+    originalWidth: 820,
+    originalHeight: 2702,
+    width: 820,
+    height: 1351,
+    wasResized: false,
+    wasTiled: true,
+    tileIndex: 1,
+    tileCount: 2,
+    ...over,
+  });
+
   test("scaled note reports the resize, final size, budget, and crop hint", () => {
     const note = formatImageScaledNote(
       "shot.png",
@@ -158,6 +266,9 @@ describe("agent-facing notes", () => {
         width: 1024,
         height: 665,
         wasResized: true,
+        wasTiled: false,
+        tileIndex: 1,
+        tileCount: 1,
       },
       2_000_000,
       475_000,
@@ -170,9 +281,32 @@ describe("agent-facing notes", () => {
     expect(note).toContain("crop");
   });
 
+  test("tiled note names the tile count, dimensions, cap, and reading order", () => {
+    const tiles = [tile({ tileIndex: 1 }), tile({ tileIndex: 2 })];
+    const note = formatImageTiledNote("page.png", tiles, 1_800_000, 475_000);
+
+    expect(note).toContain("page.png");
+    expect(note).toContain("820x2702");
+    expect(note).toContain("2 tiles of 820x1351");
+    expect(note).toContain(String(MAX_IMAGE_EDGE_PX));
+    expect(note).toContain("top-to-bottom");
+    expect(note).toContain("crop");
+  });
+
+  test("attachment dispatcher routes verbatim, scaled, and tiled cases", () => {
+    const verbatim = [tile({ wasResized: false, wasTiled: false, tileCount: 1, mimeType: "image/png" })];
+    expect(formatImageAttachmentNote("a.png", verbatim, 100_000, 475_000)).toContain("Image loaded");
+    expect(formatImageAttachmentNote("a.png", verbatim, 100_000, 475_000)).not.toContain("tiles");
+
+    const scaled = [tile({ wasResized: true, wasTiled: false, tileCount: 1 })];
+    expect(formatImageAttachmentNote("b.png", scaled, 900_000, 475_000)).toContain("auto-scaled");
+
+    const tiled = [tile({ tileIndex: 1 }), tile({ tileIndex: 2 })];
+    expect(formatImageAttachmentNote("c.png", tiled, 1_800_000, 475_000)).toContain("2 tiles of");
+  });
+
   test("too-large error names the budget and tells the agent to crop", () => {
     const note = formatImageTooLargeError("huge.png", 2_000_000, 475_000);
-
     expect(note).toContain("huge.png");
     expect(note).toContain("475KB");
     expect(note).toContain("Crop");
