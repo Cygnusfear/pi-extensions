@@ -49,3 +49,7 @@ launchctl load ~/Library/LaunchAgents/com.piextensions.mesh-telegram-bridge.plis
 ```
 
 The bot must have **privacy mode OFF** (or be a group admin) to read plain messages.
+
+## Voice transcription
+
+Voice notes use the first configured provider in this order: OpenAI (`OPENAI_API_KEY`, `whisper-1`), Groq (`GROQ_API_KEY`, `whisper-large-v3`), Z.AI (`ZAI_API_KEY`, `glm-asr-2512`), then the legacy OpenRouter (`OPENROUTER_API_KEY`, `whisper-1`) path. Missing keys skip a provider. If every configured provider fails, the bridge reports each provider's status/code instead of returning only one HTTP status.

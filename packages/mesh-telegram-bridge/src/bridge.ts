@@ -33,6 +33,164 @@ const IMG_STABLE_MS = 8000;
 /** Agent-facing routing guidance while the Telegram contact reminder is active. */
 const TELEGRAM_CONTACT_NOTICE = "please contact The Hooman over mesh.tell for now, this way they receive your message on Telegram where they are available now";
 
+const MAX_TRANSCRIPTION_ERROR_DETAIL = 160;
+const TRANSCRIPTION_AUDIO_FILENAME = "voice.ogg";
+
+type TranscriptionProviderFactory = (apiKey: string) => TranscriptionProvider;
+
+export interface TranscriptionProvider {
+	readonly name: string;
+	readonly transcribe: (audio: Buffer) => Promise<string>;
+}
+
+export class TranscriptionProviderError extends Error {
+	readonly status: number | undefined;
+	readonly code: string | undefined;
+
+	constructor(message: string, metadata: { status?: number; code?: string } = {}) {
+		super(message);
+		this.name = "TranscriptionProviderError";
+		this.status = metadata.status;
+		this.code = metadata.code;
+	}
+}
+
+interface HttpTranscriptionProviderOptions {
+	readonly name: string;
+	readonly endpoint: string;
+	readonly model: string;
+	readonly apiKey: string;
+	readonly stream?: boolean;
+}
+
+interface ProviderErrorPayload {
+	readonly code?: unknown;
+	readonly error?: unknown;
+}
+
+function boundedText(value: string): string {
+	const compact = value.replace(/\s+/g, " ").trim();
+	return compact.length > MAX_TRANSCRIPTION_ERROR_DETAIL ? compact.slice(0, MAX_TRANSCRIPTION_ERROR_DETAIL) + "…" : compact;
+}
+
+function stringValue(value: unknown): string | undefined {
+	if (typeof value === "string") return value.trim() || undefined;
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	return undefined;
+}
+
+function providerErrorCode(body: string): string | undefined {
+	if (!body) return undefined;
+	try {
+		const parsed = JSON.parse(body) as ProviderErrorPayload;
+		const nested = parsed.error && typeof parsed.error === "object" ? parsed.error as ProviderErrorPayload : undefined;
+		const code = stringValue(nested?.code) ?? stringValue(parsed.code);
+		return code && /^[A-Za-z0-9_.-]{1,64}$/.test(code) ? code : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+async function transcriptionResponseError(response: Response): Promise<TranscriptionProviderError> {
+	let body = "";
+	try { body = await response.text(); } catch {}
+	return new TranscriptionProviderError("request rejected", {
+		status: response.status,
+		code: providerErrorCode(body) ?? `http_${response.status}`,
+	});
+}
+
+function responseText(payload: unknown): string | undefined {
+	if (!payload || typeof payload !== "object") return undefined;
+	const text = (payload as { readonly text?: unknown }).text;
+	return typeof text === "string" && text.trim() ? text.trim() : undefined;
+}
+
+function createHttpTranscriptionProvider(options: HttpTranscriptionProviderOptions): TranscriptionProvider {
+	return {
+		name: options.name,
+		transcribe: async (audio) => {
+			const form = new FormData();
+			form.append("file", new Blob([blobBytes(audio)]), TRANSCRIPTION_AUDIO_FILENAME);
+			form.append("model", options.model);
+			if (options.stream !== undefined) form.append("stream", String(options.stream));
+			const response = await fetch(options.endpoint, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${options.apiKey}` },
+				body: form,
+			});
+			if (!response.ok) throw await transcriptionResponseError(response);
+			let payload: unknown;
+			try { payload = await response.json(); } catch {
+				throw new TranscriptionProviderError("response was not valid JSON", { code: "invalid_response" });
+			}
+			const text = responseText(payload);
+			if (!text) throw new TranscriptionProviderError("response did not contain a transcription", { code: "empty_transcription" });
+			return text;
+		},
+	};
+}
+
+function createOpenAiTranscriptionProvider(apiKey: string): TranscriptionProvider {
+	return createHttpTranscriptionProvider({ name: "OpenAI", endpoint: "https://api.openai.com/v1/audio/transcriptions", model: "whisper-1", apiKey });
+}
+
+function createGroqTranscriptionProvider(apiKey: string): TranscriptionProvider {
+	return createHttpTranscriptionProvider({ name: "Groq", endpoint: "https://api.groq.com/openai/v1/audio/transcriptions", model: "whisper-large-v3", apiKey });
+}
+
+function createZaiTranscriptionProvider(apiKey: string): TranscriptionProvider {
+	return createHttpTranscriptionProvider({ name: "Z.ai", endpoint: "https://api.z.ai/api/paas/v4/audio/transcriptions", model: "glm-asr-2512", stream: false, apiKey });
+}
+
+function createOpenRouterTranscriptionProvider(apiKey: string): TranscriptionProvider {
+	return createHttpTranscriptionProvider({ name: "OpenRouter", endpoint: "https://openrouter.ai/api/v1/audio/transcriptions", model: "whisper-1", apiKey });
+}
+
+const TRANSCRIPTION_PROVIDER_FACTORIES: ReadonlyArray<readonly [string, TranscriptionProviderFactory]> = [
+	["OPENAI_API_KEY", createOpenAiTranscriptionProvider],
+	["GROQ_API_KEY", createGroqTranscriptionProvider],
+	["ZAI_API_KEY", createZaiTranscriptionProvider],
+	["OPENROUTER_API_KEY", createOpenRouterTranscriptionProvider],
+];
+
+function availableTranscriptionProviders(env: NodeJS.ProcessEnv = process.env): TranscriptionProvider[] {
+	return TRANSCRIPTION_PROVIDER_FACTORIES.flatMap(([envName, create]) => {
+		const apiKey = env[envName]?.trim();
+		return apiKey ? [create(apiKey)] : [];
+	});
+}
+
+function describeTranscriptionFailure(error: unknown): string {
+	if (error instanceof TranscriptionProviderError) {
+		const details = [
+			error.status === undefined ? undefined : `status=${error.status}`,
+			error.code ? `code=${error.code}` : undefined,
+			error.message ? boundedText(error.message) : undefined,
+		].filter((detail): detail is string => detail !== undefined);
+		return details.join(" ") || "unknown error";
+	}
+	if (error instanceof Error) return boundedText(error.message || error.name) || "unknown error";
+	return boundedText(String(error)) || "unknown error";
+}
+
+/** Try each configured provider in order; all failures stay user-visible and actionable. */
+export async function transcribeWithFallback(providers: readonly TranscriptionProvider[], audio: Buffer): Promise<string> {
+	if (!providers.length) return "(voice transcription failed: no transcription providers configured)";
+	const failures: string[] = [];
+	for (const provider of providers) {
+		try {
+			const text = (await provider.transcribe(audio)).trim();
+			if (text) return text;
+			failures.push(provider.name + ": code=empty_transcription");
+		} catch (error) {
+			failures.push(provider.name + ": " + describeTranscriptionFailure(error));
+		}
+	}
+	const tried = providers.map((provider) => provider.name).join(", ");
+	return `(voice transcription failed; tried ${tried}: ${failures.join("; ")})`;
+}
+
 /** Bound pre-announcement tells; a transient connection id must never create a persistent forum topic. */
 const MAX_PENDING_TOPIC_PEERS = 256;
 const PENDING_TOPIC_ANNOUNCEMENT_MS = 10_000;
@@ -51,7 +209,7 @@ interface PendingTopicPeer {
  *   forum  — each agent gets its own topic; reply in an agent's topic → that agent;
  *            post in the Broadcast topic → everyone.
  *   single — (legacy) one chat; reply to a tagged message to reach its agent.
- * Accepts inbound text, voice notes (transcribed via OpenAI Whisper), photos and documents
+ * Accepts inbound text, voice notes (transcribed through a configured provider chain), photos and documents
  * (saved to the inbox dir so agents on this machine can open them). Outbound messages are
  * chunked to fit Telegram's limit. Handles group→supergroup migration.
  */
@@ -628,16 +786,10 @@ export class Bridge {
 	}
 
 	private async transcribeVoice(fileId: string): Promise<string> {
+		const providers = availableTranscriptionProviders();
+		if (!providers.length) return "(voice transcription failed: no transcription providers configured)";
 		const buf = await this.tgDownload(fileId);
-		const key = process.env.OPENROUTER_API_KEY;
-		if (!key) return "(voice note — OPENROUTER_API_KEY not set, can't transcribe)";
-		const form = new FormData();
-		form.append("file", new Blob([blobBytes(buf)]), "voice.ogg");
-		form.append("model", "whisper-1");
-		const r = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
-		if (!r.ok) return `(voice transcription failed: ${r.status})`;
-		const j = (await r.json()) as { text?: string };
-		return j.text?.trim() || "(empty voice transcription)";
+		return transcribeWithFallback(providers, buf);
 	}
 
 	private async inboundFileText(fileId: string, kind: "photo" | "document", caption: string | undefined, filename?: string): Promise<string> {
