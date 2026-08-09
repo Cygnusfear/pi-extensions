@@ -1,0 +1,43 @@
+packages/mesh-telegram-bridge/src/bridge-state.ts
+  s_8866d3c514b4cc::t_21ebac6fd2ab0c 63-64
+  s_8866d3c514b4cc::t_f2ccc665ab8a30 243-248
+  s_8866d3c514b4cc::t_39cb6dfa18dc51 76
+  s_8866d3c514b4cc::t_2b76601fd2e647 87
+  s_8866d3c514b4cc::t_7d1fa2b98f77fd 284
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_8866d3c514b4cc::t_9f83b818bc4cae 232-237,239-243,252-255
+  s_8866d3c514b4cc::t_0c5c786900ca29 147
+  s_8866d3c514b4cc::t_e6da23553f7313 358
+  s_8866d3c514b4cc::t_da6ba93c09dfba 85
+  s_8866d3c514b4cc::t_5534bcf00ba936 138-139,143
+  s_8866d3c514b4cc::t_663a5290de2416 306
+  s_8866d3c514b4cc::t_69df2dbd697e8a 321
+  s_8866d3c514b4cc::t_588e775ac0296a 640-641
+  s_8866d3c514b4cc::t_6811e7859e136c 38-62,71-74,78,80,100-105,119-137,140-142,144,150,153-154
+  s_8866d3c514b4cc::t_ec3d01a07f08aa 876,880-882
+  s_8866d3c514b4cc::t_78b0de41bab03f 366-380
+packages/mesh-telegram-bridge/src/transcription.test.ts
+  s_8866d3c514b4cc::t_dab3f25d262d58 50-58,102
+  s_8866d3c514b4cc::t_cb0e7f7801a66b 5
+  s_8866d3c514b4cc::t_1196ec924b7b35 3,49,59-100
+  s_8866d3c514b4cc::t_d478290fd2ab91 101
+packages/mesh-telegram-bridge/src/bridge-state.test.ts
+  s_8866d3c514b4cc::t_57ac3c1a1cc60a 92-101
+  s_8866d3c514b4cc::t_7c6a585a540469 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "ee818e1b4fe85d1d7048d9c1ab90105a546124e3",
+  "prompts": {},
+  "sessions": {
+    "s_8866d3c514b4cc": {
+      "agent_id": {
+        "tool": "Carolyn Nebula Wechsler",
+        "id": "019fe747-0a7e-706d-b58c-52d73b198d0a",
+        "model": "openai-codex/gpt-5.6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
