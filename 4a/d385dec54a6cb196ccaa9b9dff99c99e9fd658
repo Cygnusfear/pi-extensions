@@ -1,0 +1,28 @@
+packages/mesh-telegram-bridge/README.md
+  s_0b8cf69cfcfbbe::t_9eedaadc0dea0b 51-55
+packages/mesh-telegram-bridge/src/transcription.test.ts
+  s_0b8cf69cfcfbbe::t_41ba9b173dd79e 1-46
+packages/mesh-telegram-bridge/skills/mesh-telegram-bridge/SKILL.md
+  s_0b8cf69cfcfbbe::t_974094bfcfbcc9 158
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_0b8cf69cfcfbbe::t_cdf48e75316ebf 82-83,87-88,90,97,99
+  s_0b8cf69cfcfbbe::t_02a56bbe4dd5f2 789-790,792
+  s_0b8cf69cfcfbbe::t_46172b1857cf57 212
+  s_0b8cf69cfcfbbe::t_5ae84d63763059 36-81,84-86,89,91-96,98,100-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "4ad385dec54a6cb196ccaa9b9dff99c99e9fd658",
+  "prompts": {},
+  "sessions": {
+    "s_0b8cf69cfcfbbe": {
+      "agent_id": {
+        "tool": "Caroline Cosmos Szkody",
+        "id": "019fe731-88f3-7e0c-bfea-61a9f822658d",
+        "model": "openai-codex/gpt-5.6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
