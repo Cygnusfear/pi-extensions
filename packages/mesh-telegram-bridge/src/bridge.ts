@@ -35,6 +35,31 @@ const TELEGRAM_CONTACT_NOTICE = "please contact The Hooman over mesh.tell for no
 
 const MAX_TRANSCRIPTION_ERROR_DETAIL = 160;
 const TRANSCRIPTION_AUDIO_FILENAME = "voice.ogg";
+const TRANSCRIPTION_CREDIT_NOTIFICATION_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+const OUT_OF_CREDITS_CODES = new Set([
+	"billing_hard_limit_reached",
+	"credits_depleted",
+	"credits_exhausted",
+	"insufficient_credits",
+	"insufficient_funds",
+	"insufficient_quota",
+	"out_of_credits",
+	"out_of_funds",
+	"quota_depleted",
+	"quota_exceeded",
+	"quota_exhausted",
+]);
+
+const OUT_OF_CREDITS_PATTERNS = [
+	/\binsufficient(?:\s+(?:account|available|current))?\s+(?:credits?|funds?|quota)\b/i,
+	/\b(?:credits?|funds?|quota)\s+(?:is|are|has\s+been)?\s*(?:depleted|exhausted|insufficient)\b/i,
+	/\bout\s+of\s+(?:credits?|funds?|quota)\b/i,
+	/\b(?:credits?|funds?|quota)\s+(?:depleted|exhausted|exceeded)\b/i,
+	/\b(?:billing\s+)?hard\s+limit\s+(?:exceeded|reached)\b/i,
+	/\byou\s+exceeded\s+your\s+(?:current\s+)?quota\b/i,
+	/\bnot\s+enough\s+(?:credits?|funds?)\b/i,
+];
 
 type TranscriptionProviderFactory = (apiKey: string) => TranscriptionProvider;
 
@@ -43,15 +68,21 @@ export interface TranscriptionProvider {
 	readonly transcribe: (audio: Buffer) => Promise<string>;
 }
 
+export interface TranscriptionFallbackHooks {
+	readonly onOutOfCredits?: (provider: TranscriptionProvider, error: unknown) => void | Promise<void>;
+}
+
 export class TranscriptionProviderError extends Error {
 	readonly status: number | undefined;
 	readonly code: string | undefined;
+	readonly outOfCredits: boolean;
 
-	constructor(message: string, metadata: { status?: number; code?: string } = {}) {
+	constructor(message: string, metadata: { status?: number; code?: string; outOfCredits?: boolean } = {}) {
 		super(message);
 		this.name = "TranscriptionProviderError";
 		this.status = metadata.status;
 		this.code = metadata.code;
+		this.outOfCredits = metadata.outOfCredits ?? (metadata.status === 402 || isOutOfCreditsCode(metadata.code) || isOutOfCreditsText(message));
 	}
 }
 
@@ -66,6 +97,12 @@ interface HttpTranscriptionProviderOptions {
 interface ProviderErrorPayload {
 	readonly code?: unknown;
 	readonly error?: unknown;
+	readonly message?: unknown;
+}
+
+interface ProviderErrorDetails {
+	readonly code?: string;
+	readonly outOfCredits: boolean;
 }
 
 function boundedText(value: string): string {
@@ -79,24 +116,42 @@ function stringValue(value: unknown): string | undefined {
 	return undefined;
 }
 
-function providerErrorCode(body: string): string | undefined {
-	if (!body) return undefined;
-	try {
-		const parsed = JSON.parse(body) as ProviderErrorPayload;
-		const nested = parsed.error && typeof parsed.error === "object" ? parsed.error as ProviderErrorPayload : undefined;
-		const code = stringValue(nested?.code) ?? stringValue(parsed.code);
-		return code && /^[A-Za-z0-9_.-]{1,64}$/.test(code) ? code : undefined;
-	} catch {
-		return undefined;
-	}
+function isOutOfCreditsCode(value: string | undefined): boolean {
+	if (!value) return false;
+	const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+	return OUT_OF_CREDITS_CODES.has(normalized);
 }
 
-async function transcriptionResponseError(response: Response): Promise<TranscriptionProviderError> {
+function isOutOfCreditsText(value: string): boolean {
+	const normalized = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+	return OUT_OF_CREDITS_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function providerErrorDetails(body: string): ProviderErrorDetails {
+	if (!body) return { outOfCredits: false };
+	let parsed: unknown;
+	try { parsed = JSON.parse(body); } catch {
+		return { outOfCredits: isOutOfCreditsText(body) };
+	}
+	const root = parsed && typeof parsed === "object" ? parsed as ProviderErrorPayload : undefined;
+	const nested = root?.error && typeof root.error === "object" ? root.error as ProviderErrorPayload : undefined;
+	const rawCode = stringValue(nested?.code) ?? stringValue(root?.code);
+	const code = rawCode && /^[A-Za-z0-9_.-]{1,64}$/.test(rawCode) ? rawCode : undefined;
+	const messages = [stringValue(nested?.message), stringValue(root?.message), body].filter((message): message is string => message !== undefined);
+	return {
+		code,
+		outOfCredits: isOutOfCreditsCode(rawCode) || messages.some(isOutOfCreditsText),
+	};
+}
+
+export async function transcriptionResponseError(response: Response): Promise<TranscriptionProviderError> {
 	let body = "";
 	try { body = await response.text(); } catch {}
+	const details = providerErrorDetails(body);
 	return new TranscriptionProviderError("request rejected", {
 		status: response.status,
-		code: providerErrorCode(body) ?? `http_${response.status}`,
+		code: details.code ?? `http_${response.status}`,
+		outOfCredits: response.status === 402 || details.outOfCredits,
 	});
 }
 
@@ -174,8 +229,18 @@ function describeTranscriptionFailure(error: unknown): string {
 	return boundedText(String(error)) || "unknown error";
 }
 
+function isOutOfCreditsFailure(error: unknown): boolean {
+	if (error instanceof TranscriptionProviderError) return error.outOfCredits;
+	if (error instanceof Error) return isOutOfCreditsText(error.message);
+	return isOutOfCreditsText(String(error));
+}
+
 /** Try each configured provider in order; all failures stay user-visible and actionable. */
-export async function transcribeWithFallback(providers: readonly TranscriptionProvider[], audio: Buffer): Promise<string> {
+export async function transcribeWithFallback(
+	providers: readonly TranscriptionProvider[],
+	audio: Buffer,
+	hooks: TranscriptionFallbackHooks = {},
+): Promise<string> {
 	if (!providers.length) return "(voice transcription failed: no transcription providers configured)";
 	const failures: string[] = [];
 	for (const provider of providers) {
@@ -184,6 +249,10 @@ export async function transcribeWithFallback(providers: readonly TranscriptionPr
 			if (text) return text;
 			failures.push(provider.name + ": code=empty_transcription");
 		} catch (error) {
+			if (isOutOfCreditsFailure(error)) {
+				try { await hooks.onOutOfCredits?.(provider, error); }
+				catch (notificationError) { console.warn("[bridge] transcription credit notification failed:", describeTranscriptionFailure(notificationError)); }
+			}
 			failures.push(provider.name + ": " + describeTranscriptionFailure(error));
 		}
 	}
@@ -234,6 +303,7 @@ export class Bridge {
 	private afk: { on: boolean; message: string; since: number } = { on: false, message: "", since: 0 };
 	/** Agents already reminded during the current activation (avoid spam). Cleared on toggle. */
 	private readonly afkNotified = new Set<string>();
+	private readonly transcriptionCreditNotifiedAt = new Map<string, number>();
 	private readonly stateStore: BridgeStateStore;
 
 	constructor(private readonly cfg: Config) {
@@ -248,6 +318,7 @@ export class Bridge {
 		for (const [topicId, route] of state.topicAgents) this.topicAgent.set(topicId, route);
 		for (const [messageId, route] of state.legacySentMessages) this.legacyMsgToAgent.set(messageId, route);
 		this.afk = state.telegramContact;
+		for (const [provider, timestamp] of state.transcriptionCreditNotifications) this.transcriptionCreditNotifiedAt.set(provider, timestamp);
 		this.topicRoutes = new TopicRouteController({
 			api: {
 				createForumTopic: (chatId, name) => this.bot.api.createForumTopic(chatId, name),
@@ -284,11 +355,27 @@ export class Bridge {
 			sentMessages: [...this.retention.entries()],
 			legacySentMessages: [...this.legacyMsgToAgent.entries()],
 			telegramContact: this.afk,
+			transcriptionCreditNotifications: [...this.transcriptionCreditNotifiedAt.entries()],
 		};
 	}
 
 	private saveState(): void {
 		this.stateStore.saveNow();
+	}
+
+	/** Notify the Hooman once per provider per 12 hours when a provider's credit pool is depleted. */
+	private notifyTranscriptionProviderOutOfCredits(provider: TranscriptionProvider, thread: Record<string, unknown>): void {
+		const chatId = this.chatId;
+		if (chatId == null) return;
+		const now = Date.now();
+		const lastNotifiedAt = this.transcriptionCreditNotifiedAt.get(provider.name);
+		if (lastNotifiedAt !== undefined && now - lastNotifiedAt < TRANSCRIPTION_CREDIT_NOTIFICATION_WINDOW_MS) return;
+		this.transcriptionCreditNotifiedAt.set(provider.name, now);
+		this.saveState();
+		const alert = `⚠️ ${provider.name} is out of credits — refill to restore voice transcription.`;
+		void this.sendText(chatId, alert, thread).catch((error: unknown) => {
+			console.warn("[bridge] transcription credit alert failed:", (error as Error).message);
+		});
 	}
 
 	/** /afk [on|off|status] [note] — legacy command name for the Telegram contact reminder. */
@@ -550,7 +637,8 @@ export class Bridge {
 		try {
 			if (typeof msg.text === "string") text = msg.text;
 			else if (msg.voice) {
-				const t = await this.transcribeVoice(msg.voice.file_id);
+				const thread = this.forumMode && typeof m.message_thread_id === "number" ? { message_thread_id: m.message_thread_id } : {};
+				const t = await this.transcribeVoice(msg.voice.file_id, thread);
 				void ctx.reply("🎤 transcribed: " + t).catch(() => {});
 				text = t;
 			}
@@ -785,11 +873,13 @@ export class Bridge {
 		return Buffer.from(await r.arrayBuffer());
 	}
 
-	private async transcribeVoice(fileId: string): Promise<string> {
+	private async transcribeVoice(fileId: string, thread: Record<string, unknown> = {}): Promise<string> {
 		const providers = availableTranscriptionProviders();
 		if (!providers.length) return "(voice transcription failed: no transcription providers configured)";
 		const buf = await this.tgDownload(fileId);
-		return transcribeWithFallback(providers, buf);
+		return transcribeWithFallback(providers, buf, {
+			onOutOfCredits: (provider) => this.notifyTranscriptionProviderOutOfCredits(provider, thread),
+		});
 	}
 
 	private async inboundFileText(fileId: string, kind: "photo" | "document", caption: string | undefined, filename?: string): Promise<string> {

@@ -60,6 +60,8 @@ export interface BridgeStateSnapshot {
 	/** Old numeric ids remain readable for reactions, but cannot become deletion records. */
 	legacySentMessages: Array<readonly [number, LegacyReactionRoute]>;
 	telegramContact: TelegramContactState;
+	/** Last proactive credit alert timestamp per transcription provider. */
+	transcriptionCreditNotifications: Array<readonly [string, number]>;
 }
 
 interface PersistedBridgeState {
@@ -71,6 +73,7 @@ interface PersistedBridgeState {
 	/** Old records without a valid tuple stay legacy reaction-only during migration. */
 	sentMessages?: unknown[];
 	legacySentMessages?: unknown[];
+	transcriptionCreditNotifications?: Record<string, unknown>;
 }
 
 function emptyState(): BridgeStateSnapshot {
@@ -81,6 +84,7 @@ function emptyState(): BridgeStateSnapshot {
 		sentMessages: [],
 		legacySentMessages: [],
 		telegramContact: { on: false, message: "", since: 0 },
+		transcriptionCreditNotifications: [],
 	};
 }
 
@@ -236,6 +240,12 @@ function parseState(value: unknown): BridgeStateSnapshot {
 			since: isPlausibleSentAtMs(value.afk.since) ? value.afk.since : Date.now(),
 		};
 	}
+	if (isRecord(value.transcriptionCreditNotifications)) {
+		for (const [provider, rawTimestamp] of Object.entries(value.transcriptionCreditNotifications)) {
+			if (!provider.trim() || !isPlausibleSentAtMs(rawTimestamp)) continue;
+			state.transcriptionCreditNotifications.push([provider, rawTimestamp]);
+		}
+	}
 
 	const routes = new Map<string, DeleteEligibleSentMessageRoute>();
 	const legacyRoutes = new Map<number, LegacyReactionRoute>();
@@ -271,6 +281,7 @@ function serializeState(state: BridgeStateSnapshot): PersistedBridgeState {
 		topicAgent: Object.fromEntries(state.topicAgents),
 		sentMessages: state.sentMessages.map(([, route]) => route),
 		legacySentMessages: state.legacySentMessages.map(([messageId, route]) => ({ messageId, ...route })),
+		transcriptionCreditNotifications: Object.fromEntries(state.transcriptionCreditNotifications),
 	};
 	if (state.broadcastTopicId !== null) persisted.broadcastTopicId = state.broadcastTopicId;
 	if (state.telegramContact.on) persisted.afk = state.telegramContact;

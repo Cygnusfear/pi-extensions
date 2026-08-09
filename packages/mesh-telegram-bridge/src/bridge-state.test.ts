@@ -51,6 +51,7 @@ function snapshot(messageId = 101): BridgeStateSnapshot {
 		sentMessages: [[sentMessageRouteKey(route.chatId, route.messageId)!, route]],
 		legacySentMessages: [],
 		telegramContact: { on: true, message: "Telegram contact reminder", since: SENT_AT },
+		transcriptionCreditNotifications: [],
 	};
 }
 
@@ -86,6 +87,16 @@ describe("BridgeStateStore migration and persistence", () => {
 		const persisted = JSON.parse(readFileSync(path, "utf8")) as { agentTopic: Record<string, unknown>; sentMessages: unknown[] };
 		expect(persisted.agentTopic["mesh-1"]).toEqual({ topicId: 11, title: "Build Agent One" });
 		expect(persisted.sentMessages).toHaveLength(1);
+	});
+
+	test("round-trips transcription credit notification timestamps by provider", () => {
+		const path = temporaryStatePath();
+		const expected = { ...snapshot(), transcriptionCreditNotifications: [["OpenRouter", SENT_AT] as const] };
+		new BridgeStateStore(path, () => expected).saveNow();
+		const loaded = new BridgeStateStore(path, () => snapshot()).load();
+		expect(loaded.transcriptionCreditNotifications).toEqual([["OpenRouter", SENT_AT]]);
+		const persisted = JSON.parse(readFileSync(path, "utf8")) as { transcriptionCreditNotifications: Record<string, number> };
+		expect(persisted.transcriptionCreditNotifications).toEqual({ OpenRouter: SENT_AT });
 	});
 
 	test("preserves equal message IDs from separate chats instead of collapsing retention obligations", () => {
