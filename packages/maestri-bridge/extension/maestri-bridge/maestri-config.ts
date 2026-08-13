@@ -252,9 +252,39 @@ export interface LaunchAuditRow {
 	commandState: ParsedPiCommand["kind"];
 	resumeCommand?: string;
 	resumeState?: ParsedPiCommand["kind"] | "missing";
+	lifecycle?: TerminalLifecycle;
+	commandFallback: boolean;
 	terminalId?: string;
 	pinState?: ReturnType<typeof terminalPinState>["kind"];
 	ephemeral: boolean;
+}
+
+export type TerminalLifecycle = "running" | "restored" | "unknown";
+
+export function parseTerminalLifecycle(value: unknown): TerminalLifecycle {
+	return value === "running" || value === "restored" ? value : "unknown";
+}
+
+/**
+ * Maestri consumes resumeCommand after a successful restore and persists the
+ * terminal as running. In that state it falls back to command on the next
+ * launch. Every other missing or non-wrapper resume command remains blocked.
+ */
+export function terminalLaunchProtection(
+	commandState: ParsedPiCommand["kind"],
+	resumeState: ParsedPiCommand["kind"] | "missing",
+	lifecycle: TerminalLifecycle,
+): { protected: boolean; commandFallback: boolean } {
+	const commandFallback =
+		commandState === "wrapper" &&
+		resumeState === "missing" &&
+		lifecycle === "running";
+	return {
+		protected:
+			commandState === "wrapper" &&
+			(resumeState === "wrapper" || commandFallback),
+		commandFallback,
+	};
 }
 
 function readJsonConfig(
@@ -332,6 +362,7 @@ export function collectLaunchAuditRows(
 					location: `preset:${preset.name ?? preset.id ?? "unknown"}`,
 					command: String(preset.command ?? ""),
 					commandState: parsed.kind,
+					commandFallback: false,
 					ephemeral: parsed.ephemeral,
 				});
 			}
@@ -349,12 +380,20 @@ export function collectLaunchAuditRows(
 				typeof terminal.id === "string" && isValidTerminalId(terminal.id)
 					? terminal.id
 					: undefined;
+			const lifecycle = parseTerminalLifecycle(terminal.status);
+			const protection = terminalLaunchProtection(
+				command.kind,
+				resume?.kind ?? "missing",
+				lifecycle,
+			);
 			rows.push({
 				location: `terminal:${terminal.name ?? terminal.id ?? node.id ?? "unknown"}`,
 				command: String(terminal.command ?? ""),
 				commandState: command.kind,
 				resumeCommand: terminal.resumeCommand,
 				resumeState: resume?.kind ?? "missing",
+				lifecycle,
+				commandFallback: protection.commandFallback,
 				terminalId,
 				pinState: terminalId ? stateFor(terminalId).kind : undefined,
 				ephemeral: command.ephemeral,
@@ -369,6 +408,8 @@ export interface TerminalLaunchConfiguration {
 	commandState: ParsedPiCommand["kind"];
 	resumeCommand?: string;
 	resumeState: ParsedPiCommand["kind"] | "missing";
+	lifecycle: TerminalLifecycle;
+	commandFallback: boolean;
 	protected: boolean;
 }
 
@@ -391,12 +432,20 @@ export function findTerminalLaunchConfiguration(
 				terminal.resumeCommand === undefined
 					? undefined
 					: parsePiCommand(terminal.resumeCommand, wrapperTarget);
+			const lifecycle = parseTerminalLifecycle(terminal.status);
+			const protection = terminalLaunchProtection(
+				command.kind,
+				resume?.kind ?? "missing",
+				lifecycle,
+			);
 			return {
 				command: String(terminal.command ?? ""),
 				commandState: command.kind,
 				resumeCommand: terminal.resumeCommand,
 				resumeState: resume?.kind ?? "missing",
-				protected: command.kind === "wrapper" && resume?.kind === "wrapper",
+				lifecycle,
+				commandFallback: protection.commandFallback,
+				protected: protection.protected,
 			};
 		}
 	}

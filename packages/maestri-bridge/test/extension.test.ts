@@ -311,6 +311,109 @@ describe("status observability", () => {
 		expect(notices.at(-1)?.type).toBe("info");
 	});
 
+	test("running terminal with consumed resumeCommand reports protected command fallback", async () => {
+		process.env.PI_MAESTRI_PIN_MODE = "resume";
+		const h = track(
+			await loadBridge(
+				{ killed: true } as ExecOutcome,
+				true,
+				undefined,
+				(home) => {
+					const wrapper = join(home, ".pi", "agent", "bin", "pi-maestri");
+					mkdirSync(join(home, ".pi", "agent", "bin"), { recursive: true });
+					writeFileSync(wrapper, "#!/bin/sh\nexit 0\n");
+					chmodSync(wrapper, 0o755);
+					const configHome = join(home, ".maestri");
+					process.env.PI_MAESTRI_CONFIG_HOME = configHome;
+					const workspace = join(configHome, "workspaces", "running");
+					mkdirSync(workspace, { recursive: true });
+					writeFileSync(
+						join(workspace, "workspace.json"),
+						JSON.stringify({
+							payload: {
+								nodes: [
+									{
+										content: {
+											terminal: {
+												_0: {
+													id: TERMINAL,
+													command: wrapper,
+													status: "running",
+												},
+											},
+										},
+									},
+								],
+							},
+						}),
+					);
+				},
+			),
+		);
+		await h.handlers.get("session_start")?.(
+			{ type: "session_start", reason: "startup" },
+			h.ctx,
+		);
+		const notices: Array<{ message: string; type?: string }> = [];
+		h.ctx.ui.notify = (message: string, type?: string) =>
+			notices.push({ message, type });
+		await h.tools.get("command:maestri-bridge").handler("", h.ctx);
+		expect(notices.at(-1)?.message).toContain("configured launch: protected");
+		expect(notices.at(-1)?.message).toContain(
+			"resume=missing command-fallback",
+		);
+		expect(notices.at(-1)?.message).toContain("lifecycle=running");
+		expect(notices.at(-1)?.type).toBe("info");
+	});
+
+	test("running non-wrapper terminal is blocked without claiming command fallback", async () => {
+		process.env.PI_MAESTRI_PIN_MODE = "resume";
+		const h = track(
+			await loadBridge(
+				{ killed: true } as ExecOutcome,
+				true,
+				undefined,
+				(home) => {
+					const wrapper = join(home, ".pi", "agent", "bin", "pi-maestri");
+					mkdirSync(join(home, ".pi", "agent", "bin"), { recursive: true });
+					writeFileSync(wrapper, "#!/bin/sh\nexit 0\n");
+					chmodSync(wrapper, 0o755);
+					const configHome = join(home, ".maestri");
+					process.env.PI_MAESTRI_CONFIG_HOME = configHome;
+					const workspace = join(configHome, "workspaces", "running-bare");
+					mkdirSync(workspace, { recursive: true });
+					writeFileSync(
+						join(workspace, "workspace.json"),
+						JSON.stringify({
+							payload: {
+								nodes: [
+									{
+										content: {
+											terminal: {
+												_0: { id: TERMINAL, command: "pi", status: "running" },
+											},
+										},
+									},
+								],
+							},
+						}),
+					);
+				},
+			),
+		);
+		await h.handlers.get("session_start")?.(
+			{ type: "session_start", reason: "startup" },
+			h.ctx,
+		);
+		const notices: Array<{ message: string; type?: string }> = [];
+		h.ctx.ui.notify = (message: string, type?: string) =>
+			notices.push({ message, type });
+		await h.tools.get("command:maestri-bridge").handler("", h.ctx);
+		expect(notices.at(-1)?.message).toContain("configured launch: BLOCKED");
+		expect(notices.at(-1)?.message).not.toContain("command-fallback");
+		expect(notices.at(-1)?.type).toBe("warning");
+	});
+
 	test("malformed persisted configuration is reported BLOCKED without throwing", async () => {
 		process.env.PI_MAESTRI_PIN_MODE = "resume";
 		const h = track(await loadBridge({ killed: true } as ExecOutcome));

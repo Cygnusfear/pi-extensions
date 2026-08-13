@@ -24,6 +24,7 @@ import {
 	dynamicTerminalCommand,
 	isConfiguredPi,
 	rewritePiCommand,
+	terminalLaunchProtection,
 } from "../extension/maestri-bridge/maestri-config.ts";
 import {
 	agentDir,
@@ -344,13 +345,21 @@ function audit(root: string = MAESTRI_HOME): number {
 		console.log(`  BLOCKED   malformed configuration ${issue.path} (${issue.reason})`);
 	for (const row of rows) {
 		const commandOk = row.commandState === "wrapper";
-		const resumeOk = row.terminalId === undefined || row.resumeState === "wrapper";
+		const resumeOk =
+			row.terminalId === undefined ||
+			terminalLaunchProtection(
+				row.commandState,
+				row.resumeState ?? "missing",
+				row.lifecycle ?? "unknown",
+			).protected;
 		const pinOk = row.terminalId === undefined || row.ephemeral || row.pinState === "pinned";
 		if (!commandOk || !resumeOk || !pinOk) blocked += 1;
 		console.log(
 			`${commandOk && resumeOk && pinOk ? "  PROTECTED" : "  BLOCKED  "} ${row.location}` +
 				` command=${row.commandState}` +
-				(row.resumeState ? ` resume=${row.resumeState}` : "") +
+				(row.resumeState
+					? ` resume=${row.resumeState}${row.commandFallback ? "(command-fallback)" : ""}`
+					: "") +
 				(row.pinState ? ` pin=${row.pinState}` : "") +
 				(row.ephemeral ? " intentional-ephemeral" : ""),
 		);

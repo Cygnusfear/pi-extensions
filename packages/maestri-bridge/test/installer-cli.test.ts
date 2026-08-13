@@ -205,6 +205,47 @@ describe("maestri-pin-install v2 subprocess", () => {
 		}
 	});
 
+	test("--audit accepts consumed resumeCommand only for a running wrapper launch", () => {
+		const home = mkdtempSync(join(tmpdir(), "pin-running-fallback-v2-"));
+		try {
+			const paths = config(home);
+			session(home, TERMINAL, 2);
+			expect(runInstaller(home, ["--recover", "--install"]).code).toBe(0);
+			expect(
+				runInstaller(home, ["--patch"], {
+					PI_MAESTRI_ALLOW_RUNNING_PATCH: "1",
+				}).code,
+			).toBe(0);
+			const data = JSON.parse(readFileSync(paths.workspace, "utf8"));
+			const terminal = data.payload.nodes[0].content.terminal._0;
+			terminal.status = "running";
+			delete terminal.resumeCommand;
+			writeFileSync(paths.workspace, JSON.stringify(data));
+
+			const running = runInstaller(home, ["--audit"]);
+			expect(running.code).toBe(0);
+			expect(running.stdout).toContain("resume=missing(command-fallback)");
+
+			terminal.status = "restored";
+			writeFileSync(paths.workspace, JSON.stringify(data));
+			expect(runInstaller(home, ["--audit"]).code).toBe(1);
+
+			terminal.status = "running";
+			terminal.resumeCommand = "pi --session stale";
+			writeFileSync(paths.workspace, JSON.stringify(data));
+			expect(runInstaller(home, ["--audit"]).code).toBe(1);
+
+			terminal.command = "pi";
+			delete terminal.resumeCommand;
+			writeFileSync(paths.workspace, JSON.stringify(data));
+			const nonWrapper = runInstaller(home, ["--audit"]);
+			expect(nonWrapper.code).toBe(1);
+			expect(nonWrapper.stdout).not.toContain("command-fallback");
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
 	test("bare wrapper commands remain blocked until patch normalizes them", () => {
 		const home = mkdtempSync(join(tmpdir(), "pin-bare-wrapper-v2-"));
 		try {

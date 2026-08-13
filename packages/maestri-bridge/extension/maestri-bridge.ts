@@ -824,7 +824,7 @@ export default function (pi: ExtensionAPI) {
 					lines.push(
 						configured === undefined
 							? "configured launch: terminal not found in persisted Maestri state"
-							: `configured launch: ${configured.protected ? "protected" : "BLOCKED"} (command=${configured.commandState}, resume=${configured.resumeState})`,
+							: `configured launch: ${configured.protected ? "protected" : "BLOCKED"} (command=${configured.commandState}, resume=${configured.resumeState}${configured.commandFallback ? " command-fallback" : ""}, lifecycle=${configured.lifecycle})`,
 					);
 			}
 			const hasBlockedConfiguration = lines.some((line) =>

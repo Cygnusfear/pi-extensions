@@ -21,7 +21,9 @@ import {
 	collectLaunchAuditRows,
 	dynamicTerminalCommand,
 	parsePiCommand,
+	parseTerminalLifecycle,
 	rewritePiCommand,
+	terminalLaunchProtection,
 	tokenizeSimpleCommand,
 } from "../extension/maestri-bridge/maestri-config.ts";
 import type { TerminalPinState } from "../extension/maestri-bridge/session-pinning.ts";
@@ -119,6 +121,32 @@ describe("live terminal identity scan", () => {
 		).toEqual({
 			terminalIds: [],
 			malformedValues: [malformed],
+		});
+	});
+});
+
+describe("persisted terminal lifecycle protection", () => {
+	test("accepts only the running-state command fallback", () => {
+		expect(parseTerminalLifecycle("running")).toBe("running");
+		expect(parseTerminalLifecycle("restored")).toBe("restored");
+		expect(parseTerminalLifecycle("future-state")).toBe("unknown");
+		expect(terminalLaunchProtection("wrapper", "missing", "running")).toEqual({
+			protected: true,
+			commandFallback: true,
+		});
+		for (const lifecycle of ["restored", "unknown"] as const)
+			expect(terminalLaunchProtection("wrapper", "missing", lifecycle)).toEqual(
+				{
+					protected: false,
+					commandFallback: false,
+				},
+			);
+		expect(terminalLaunchProtection("wrapper", "pi", "running").protected).toBe(
+			false,
+		);
+		expect(terminalLaunchProtection("pi", "missing", "running")).toEqual({
+			protected: false,
+			commandFallback: false,
 		});
 	});
 });
