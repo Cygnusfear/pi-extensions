@@ -1,0 +1,39 @@
+packages/maestri-bridge/test/installer-cli.test.ts
+  s_ff5de09c052690::t_af46ad47a4d2e0 237-243
+  s_ff5de09c052690::t_1a78e725cb1c9d 208-236,244-248
+packages/maestri-bridge/extension/maestri-bridge.ts
+  s_ff5de09c052690::t_9a258e66d5982d 827
+packages/maestri-bridge/extension/maestri-bridge/maestri-config.ts
+  s_ff5de09c052690::t_af46ad47a4d2e0 278-281,283
+  s_ff5de09c052690::t_9a258e66d5982d 255-256,262-277,282,284-289,365,383-388,395-396,411-412,435-440,446
+  s_ff5de09c052690::t_df6fa0776afa1f 447-448
+packages/maestri-bridge/test/installer.test.ts
+  s_ff5de09c052690::t_1a78e725cb1c9d 24,26,128-141,143-146
+  s_ff5de09c052690::t_af46ad47a4d2e0 147-150
+  s_ff5de09c052690::t_8a873bef1a569f 142
+  s_ff5de09c052690::t_3f3f10877d3865 151-153
+packages/maestri-bridge/README.md
+  s_ff5de09c052690::t_9a258e66d5982d 66
+packages/maestri-bridge/test/extension.test.ts
+  s_ff5de09c052690::t_af46ad47a4d2e0 369-416
+  s_ff5de09c052690::t_1a78e725cb1c9d 314-362,364-368
+  s_ff5de09c052690::t_2ce426a0db0dec 363
+packages/maestri-bridge/bin/maestri-pin-install
+  s_ff5de09c052690::t_9a258e66d5982d 27,348-354,360-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "cc15ec7eb7db0ac45cc56f7a575dfada9f7c531f",
+  "prompts": {},
+  "sessions": {
+    "s_ff5de09c052690": {
+      "agent_id": {
+        "tool": "Johannes Transit Centrella",
+        "id": "019ff6ff-38d3-7ff8-83dc-630a73433024",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
