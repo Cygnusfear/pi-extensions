@@ -281,6 +281,16 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/maestri-bridge": {
+      "name": "@pi-extensions/maestri-bridge",
+      "version": "1.2.0",
+      "dependencies": {
+        "@sinclair/typebox": "*",
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.80.10",
+      },
+    },
     "packages/mesh-model-control": {
       "name": "@pi-extensions/mesh-model-control",
       "version": "0.0.1",
@@ -785,6 +795,8 @@
     "@pi-extensions/lipgloss-theme": ["@pi-extensions/lipgloss-theme@workspace:packages/lipgloss-theme"],
 
     "@pi-extensions/lock-mode": ["@pi-extensions/lock-mode@workspace:packages/lock-mode"],
+
+    "@pi-extensions/maestri-bridge": ["@pi-extensions/maestri-bridge@workspace:packages/maestri-bridge"],
 
     "@pi-extensions/mesh-model-control": ["@pi-extensions/mesh-model-control@workspace:packages/mesh-model-control"],
 
