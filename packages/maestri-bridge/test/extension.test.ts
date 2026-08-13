@@ -39,6 +39,7 @@ async function loadBridge(
 	isIdle = true,
 	sendUserMessageImpl?: (text: string) => unknown,
 	setup?: (home: string) => void,
+	resetProcessOwnership = true,
 ): Promise<Harness> {
 	const execFor = typeof exec === "function" ? exec : () => exec;
 	const home = mkdtempSync(join(tmpdir(), "pi-maestri-bridge-test-"));
@@ -52,7 +53,7 @@ async function loadBridge(
 	const pinning = await import(
 		"../extension/maestri-bridge/session-pinning.ts"
 	);
-	pinning.resetProcessLaunchModeForTests();
+	if (resetProcessOwnership) pinning.resetProcessLaunchModeForTests();
 	mkdirSync(join(home, ".pi", "agent"), { recursive: true });
 	writeFileSync(
 		join(home, ".pi", "agent", "maestri-bridge.secret"),
@@ -203,6 +204,64 @@ describe("session_start concrete-file pinning", () => {
 			).toBe(replacement);
 			expect(replacement).not.toBe(firstFile);
 		}
+	});
+
+	test("extension reinitialization during resume retains wrapper ownership", async () => {
+		process.env.PI_MAESTRI_PIN_MODE = "resume";
+		const initial = track(await loadBridge({ killed: true } as ExecOutcome));
+		await initial.handlers.get("session_start")?.(
+			{ type: "session_start", reason: "startup" },
+			initial.ctx,
+		);
+
+		const resumed = track(
+			await loadBridge(
+				{ killed: true } as ExecOutcome,
+				true,
+				undefined,
+				undefined,
+				false,
+			),
+		);
+		const notices: string[] = [];
+		resumed.ctx.ui.notify = (message: string) => notices.push(message);
+		const replacement = join(
+			resumed.home,
+			".pi",
+			"agent",
+			"sessions",
+			"--project--",
+			"replacement-reinitialized-resume.jsonl",
+		);
+		writeFileSync(
+			replacement,
+			JSON.stringify({
+				type: "session",
+				id: "replacement-reinitialized-resume",
+				cwd: resumed.home,
+			}) + "\n",
+		);
+		resumed.ctx.sessionManager.getSessionId = () =>
+			"replacement-reinitialized-resume";
+		resumed.ctx.sessionManager.getSessionFile = () => replacement;
+		await resumed.handlers.get("session_start")?.(
+			{ type: "session_start", reason: "resume" },
+			resumed.ctx,
+		);
+
+		expect(notices).toEqual([]);
+		expect(
+			readlinkSync(
+				join(resumed.home, ".pi", "agent", "maestri-sessions", TERMINAL),
+			),
+		).toBe(replacement);
+		expect(
+			resumed.audits.find((entry: any) => entry.event === "session-pinned"),
+		).toMatchObject({
+			launchMode: "resume",
+			sessionId: "replacement-reinitialized-resume",
+			sessionFile: replacement,
+		});
 	});
 
 	test("restart exposes wrapper ownership only for the deliberate re-exec boundary", async () => {

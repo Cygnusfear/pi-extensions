@@ -256,7 +256,6 @@ export function consumeProcessLaunchMode(
 	delete env[PIN_MODE_ENV];
 	delete env[PIN_ENV];
 	if (supplied !== "unmanaged") owner[PROCESS_MODE_KEY] = supplied;
-	else if (env === process.env) owner[PROCESS_MODE_KEY] = undefined;
 	return owner[PROCESS_MODE_KEY] ?? "unmanaged";
 }
 

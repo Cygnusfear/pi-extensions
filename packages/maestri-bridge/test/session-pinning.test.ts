@@ -219,6 +219,16 @@ describe("process-local launch ownership", () => {
 		expect(isManagedLaunch()).toBe(true);
 	});
 
+	test("repeated consumption retains process ownership across session replacement", () => {
+		const wrapperEnv = {
+			PI_MAESTRI_PIN_MODE: "resume",
+			PI_MAESTRI_PINNED: "1",
+		} as NodeJS.ProcessEnv;
+		expect(consumeProcessLaunchMode(wrapperEnv)).toBe("resume");
+		expect(consumeProcessLaunchMode({} as NodeJS.ProcessEnv)).toBe("resume");
+		expect(processLaunchMode()).toBe("resume");
+	});
+
 	test("restart exposure is explicit and unmanaged processes gain nothing", () => {
 		const env = {} as NodeJS.ProcessEnv;
 		exposeLaunchModeForRestart("resume", env);
