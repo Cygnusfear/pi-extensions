@@ -1,0 +1,22 @@
+packages/maestri-bridge/test/extension.test.ts
+  s_ff5de09c052690::t_065708f271ac70 209-216,226-266
+  s_ff5de09c052690::t_d117472aa014a4 42,56,217-225
+packages/maestri-bridge/test/session-pinning.test.ts
+  s_ff5de09c052690::t_065708f271ac70 222-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "65e91672a3ec996f20f2c2aebf56093ed97844a1",
+  "prompts": {},
+  "sessions": {
+    "s_ff5de09c052690": {
+      "agent_id": {
+        "tool": "Johannes Transit Centrella",
+        "id": "019ff6ff-38d3-7ff8-83dc-630a73433024",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
