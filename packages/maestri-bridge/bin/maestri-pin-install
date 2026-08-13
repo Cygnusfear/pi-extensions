@@ -1,0 +1,514 @@
+#!/usr/bin/env bun
+/** Install, recover, audit, and patch Maestri ↔ Pi concrete session continuity. */
+
+import {
+	chmodSync,
+	closeSync,
+	copyFileSync,
+	existsSync,
+	fsyncSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readdirSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+	collectLaunchAuditRows,
+	type ConfigurationReadIssue,
+	dynamicTerminalCommand,
+	isConfiguredPi,
+	rewritePiCommand,
+} from "../extension/maestri-bridge/maestri-config.ts";
+import {
+	agentDir,
+	isValidSessionFilePath,
+	isValidSessionId,
+	isValidTerminalId,
+	mappingDir,
+	parseLegacyMappingContent,
+	recordSessionForTerminal,
+	terminalPinState,
+	type TerminalPinState,
+} from "../extension/maestri-bridge/session-pinning.ts";
+
+const HOME = homedir();
+const AGENT_DIR = agentDir();
+const BIN_DIR = join(AGENT_DIR, "bin");
+const WRAPPER_TARGET = join(BIN_DIR, "pi-maestri");
+const WRAPPER_SOURCE = join(dirname(fileURLToPath(import.meta.url)), "pi-maestri");
+const MAPPING_DIR = mappingDir();
+const MAESTRI_HOME = process.env.PI_MAESTRI_CONFIG_HOME
+	? resolve(process.env.PI_MAESTRI_CONFIG_HOME)
+	: join(HOME, ".maestri");
+const MAX_TIMESTAMP_FUTURE_MS = 24 * 60 * 60 * 1000;
+const PATCH_FAIL_AFTER_ENV = "PI_MAESTRI_TEST_FAIL_AFTER_RENAMES";
+
+function shellOut(cmd: string[]): { code: number; stdout: string; stderr: string } {
+	const result = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
+	return { code: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
+}
+
+function backup(path: string): string {
+	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const dest = `${path}.pin-backup-${stamp}`;
+	copyFileSync(path, dest);
+	return dest;
+}
+
+// ── coverage ───────────────────────────────────────────────────────────────
+
+export type MappingVerdict = "pinned" | "missing" | "legacy" | "dangling" | "invalid";
+export interface TerminalCoverage {
+	terminalId: string;
+	verdict: MappingVerdict;
+	sessionFile?: string;
+	detail?: string;
+}
+
+export function coverageFor(
+	terminals: readonly string[],
+	stateFor: (terminalId: string) => TerminalPinState = (terminalId) => terminalPinState(terminalId),
+): TerminalCoverage[] {
+	return [...terminals].sort().map((terminalId) => {
+		const state = stateFor(terminalId);
+		switch (state.kind) {
+			case "pinned":
+				return { terminalId, verdict: "pinned", sessionFile: state.sessionFile };
+			case "dangling":
+				return { terminalId, verdict: "dangling", sessionFile: state.sessionFile, detail: state.reason };
+			case "legacy":
+				return { terminalId, verdict: "legacy", detail: state.sessionId };
+			case "invalid":
+				return { terminalId, verdict: "invalid", detail: state.reason };
+			case "missing":
+				return { terminalId, verdict: "missing" };
+		}
+	});
+}
+
+/** Compatibility helper retained for v1 tests/callers. */
+export function classifyMapping(content: string | undefined): "valid" | "invalid" | "missing" {
+	if (content === undefined) return "missing";
+	return parseLegacyMappingContent(content) === undefined ? "invalid" : "valid";
+}
+
+export interface LiveTerminalScan {
+	terminalIds: string[];
+	malformedValues: string[];
+}
+
+/** Scan complete environment-assignment tokens; never extract a UUID prefix. */
+export function scanLiveTerminalIds(ps: string): LiveTerminalScan {
+	const terminals = new Set<string>();
+	const malformed = new Set<string>();
+	for (const token of ps.split(/\s+/)) {
+		if (!token.startsWith("MAESTRI_TERMINAL_ID=")) continue;
+		const value = token.slice("MAESTRI_TERMINAL_ID=".length);
+		if (isValidTerminalId(value)) terminals.add(value);
+		else malformed.add(value || "<empty>");
+	}
+	return { terminalIds: [...terminals], malformedValues: [...malformed] };
+}
+
+function liveTerminalIds(): LiveTerminalScan {
+	return scanLiveTerminalIds(shellOut(["ps", "eww", "-eo", "args="]).stdout);
+}
+
+function harvest(): number {
+	mkdirSync(MAPPING_DIR, { recursive: true, mode: 0o700 });
+	const live = liveTerminalIds();
+	for (const value of live.malformedValues)
+		console.error(`  BLOCKED   malformed MAESTRI_TERMINAL_ID=${JSON.stringify(value)}`);
+	if (live.terminalIds.length === 0) {
+		if (live.malformedValues.length > 0) {
+			console.error("harvest: malformed live terminal identities make restart unsafe.");
+			return 1;
+		}
+		console.log("harvest: no live Maestri terminals found in process env");
+		return 0;
+	}
+	const coverage = coverageFor(live.terminalIds);
+	let blocked = live.malformedValues.length;
+	for (const entry of coverage) {
+		const label = entry.verdict.toUpperCase().padEnd(8);
+		const suffix = entry.sessionFile ? ` -> ${entry.sessionFile}` : entry.detail ? ` (${entry.detail})` : "";
+		console.log(`  ${label} ${entry.terminalId}${suffix}`);
+		if (entry.verdict !== "pinned") blocked += 1;
+	}
+	console.log(`harvest: ${coverage.length - blocked}/${coverage.length} live terminals pinned${blocked ? `, ${blocked} BLOCKED` : ""}`);
+	if (blocked) console.error("harvest: restart drill is unsafe — run --recover and resolve every non-PINNED row.");
+	return blocked ? 1 : 0;
+}
+
+// ── provenance-strict recovery ─────────────────────────────────────────────
+
+export interface RecoveredPin {
+	sessionId: string;
+	sessionFile: string;
+	at: string;
+	atMs: number;
+	version: 1 | 2;
+}
+
+function strictTimestamp(value: unknown, now: number): number | undefined {
+	if (typeof value !== "string") return undefined;
+	const atMs = Date.parse(value);
+	if (Number.isNaN(atMs) || new Date(atMs).toISOString() !== value) return undefined;
+	return atMs <= now + MAX_TIMESTAMP_FUTURE_MS ? atMs : undefined;
+}
+
+function readSessionHeader(file: string): { id: string } | undefined {
+	try {
+		const first = readFileSync(file, "utf8").split("\n", 1)[0];
+		if (!first) return undefined;
+		const header = JSON.parse(first) as Record<string, unknown>;
+		return header.type === "session" && typeof header.id === "string" && isValidSessionId(header.id)
+			? { id: header.id }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Collect recovery evidence from containing files. The containing valid JSONL
+ * path is authoritative; a payload cannot nominate some other file.
+ */
+export function collectPinnedEntriesFromFiles(
+	files: readonly string[],
+	now: number = Date.now(),
+): Map<string, RecoveredPin> {
+	const newest = new Map<string, RecoveredPin>();
+	for (const input of files) {
+		const sessionFile = resolve(input);
+		if (!isValidSessionFilePath(sessionFile)) continue;
+		const header = readSessionHeader(sessionFile);
+		if (!header) continue;
+		let lines: string[];
+		try {
+			lines = readFileSync(sessionFile, "utf8").split("\n");
+		} catch {
+			continue;
+		}
+		for (const line of lines) {
+			if (!line.includes("session-pinned")) continue;
+			let raw: unknown;
+			try {
+				raw = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (typeof raw !== "object" || raw === null) continue;
+			const record = raw as Record<string, unknown>;
+			if (record.type !== "custom" || record.customType !== "maestri-pi-bridge") continue;
+			if (typeof record.data !== "object" || record.data === null) continue;
+			const data = record.data as Record<string, unknown>;
+			if ((data.version !== 1 && data.version !== 2) || data.event !== "session-pinned") continue;
+			if (typeof data.terminalId !== "string" || !isValidTerminalId(data.terminalId)) continue;
+			if (typeof data.sessionId !== "string" || !isValidSessionId(data.sessionId)) continue;
+			if (data.sessionId !== header.id) continue;
+			if (data.version === 2 && data.sessionFile !== sessionFile) continue;
+			const atMs = strictTimestamp(data.at, now);
+			if (atMs === undefined) continue;
+			const candidate: RecoveredPin = {
+				sessionId: data.sessionId,
+				sessionFile,
+				at: data.at as string,
+				atMs,
+				version: data.version,
+			};
+			const current = newest.get(data.terminalId);
+			if (!current || candidate.atMs > current.atMs) newest.set(data.terminalId, candidate);
+		}
+	}
+	return newest;
+}
+
+/** Compatibility collector for old pure line tests; v1 evidence has no file identity. */
+export function collectPinnedEntries(lines: Iterable<string>, now: number = Date.now()): Map<string, { sessionId: string; at: string; atMs: number }> {
+	const newest = new Map<string, { sessionId: string; at: string; atMs: number }>();
+	for (const line of lines) {
+		let raw: unknown;
+		try { raw = JSON.parse(line); } catch { continue; }
+		if (typeof raw !== "object" || raw === null) continue;
+		const record = raw as Record<string, unknown>;
+		if (record.type !== "custom" || record.customType !== "maestri-pi-bridge") continue;
+		if (typeof record.data !== "object" || record.data === null) continue;
+		const data = record.data as Record<string, unknown>;
+		if (data.version !== 1 || data.event !== "session-pinned") continue;
+		if (typeof data.terminalId !== "string" || !isValidTerminalId(data.terminalId)) continue;
+		if (typeof data.sessionId !== "string" || !isValidSessionId(data.sessionId)) continue;
+		const atMs = strictTimestamp(data.at, now);
+		if (atMs === undefined) continue;
+		const current = newest.get(data.terminalId);
+		if (!current || atMs > current.atMs) newest.set(data.terminalId, { sessionId: data.sessionId, at: data.at as string, atMs });
+	}
+	return newest;
+}
+
+function sessionFilesWithPins(): string[] {
+	const root = join(AGENT_DIR, "sessions");
+	if (!existsSync(root)) return [];
+	const result = shellOut(["rg", "-l", "--no-messages", "session-pinned", root]);
+	return result.code === 0 ? result.stdout.trim().split("\n").filter(Boolean) : [];
+}
+
+function recover(): number {
+	const files = sessionFilesWithPins();
+	if (files.length === 0) {
+		console.log("recover: no session-pinned records found");
+		return 0;
+	}
+	const recovered = collectPinnedEntriesFromFiles(files);
+	if (recovered.size === 0) {
+		console.log("recover: records found, but none passed provenance validation");
+		return 1;
+	}
+	// Migration is intentionally fail-closed. Every legacy map represents an
+	// existing terminal conversation; recovery must bind each one to strict
+	// containing-file provenance before any production restart.
+	const unresolvedLegacy: string[] = [];
+	if (existsSync(MAPPING_DIR)) {
+		for (const terminalId of readdirSync(MAPPING_DIR)) {
+			const state = terminalPinState(terminalId);
+			if (state.kind === "legacy" && !recovered.has(terminalId)) unresolvedLegacy.push(terminalId);
+		}
+	}
+	let written = 0;
+	let kept = 0;
+	for (const [terminalId, entry] of [...recovered.entries()].sort()) {
+		const state = terminalPinState(terminalId);
+		if (state.kind === "pinned") {
+			kept += 1;
+			console.log(`  kept      ${terminalId} -> ${state.sessionFile}`);
+			continue;
+		}
+		const result = recordSessionForTerminal(terminalId, entry.sessionId, entry.sessionFile);
+		if (result === "rejected") {
+			console.error(`  rejected  ${terminalId} -> ${entry.sessionFile}`);
+			continue;
+		}
+		written += 1;
+		console.log(`  recovered ${terminalId} -> ${entry.sessionFile} (from v${entry.version} record)`);
+	}
+	console.log(`recover: ${written} rebuilt/upgraded, ${kept} existing v2 pins kept`);
+	for (const terminalId of unresolvedLegacy.sort()) {
+		console.error(`  BLOCKED   ${terminalId}: legacy pin has no provenance-valid containing session file`);
+	}
+	if (unresolvedLegacy.length > 0) {
+		console.error("recover: unresolved legacy pins remain; do not restart Maestri.");
+		return 1;
+	}
+	return 0;
+}
+
+// ── install / command audit / patch ────────────────────────────────────────
+
+function audit(root: string = MAESTRI_HOME): number {
+	const issues: ConfigurationReadIssue[] = [];
+	const rows = collectLaunchAuditRows(root, WRAPPER_TARGET, (terminalId) => terminalPinState(terminalId), issues);
+	let blocked = issues.length;
+	for (const issue of issues)
+		console.log(`  BLOCKED   malformed configuration ${issue.path} (${issue.reason})`);
+	for (const row of rows) {
+		const commandOk = row.commandState === "wrapper";
+		const resumeOk = row.terminalId === undefined || row.resumeState === "wrapper";
+		const pinOk = row.terminalId === undefined || row.ephemeral || row.pinState === "pinned";
+		if (!commandOk || !resumeOk || !pinOk) blocked += 1;
+		console.log(
+			`${commandOk && resumeOk && pinOk ? "  PROTECTED" : "  BLOCKED  "} ${row.location}` +
+				` command=${row.commandState}` +
+				(row.resumeState ? ` resume=${row.resumeState}` : "") +
+				(row.pinState ? ` pin=${row.pinState}` : "") +
+				(row.ephemeral ? " intentional-ephemeral" : ""),
+		);
+	}
+	const total = rows.length + issues.length;
+	console.log(`audit: ${rows.length - (blocked - issues.length)}/${total} Pi launch records protected${blocked ? `, ${blocked} BLOCKED` : ""}`);
+	return blocked ? 1 : 0;
+}
+
+function install(): string {
+	if (!existsSync(WRAPPER_SOURCE)) throw new Error(`launcher source missing: ${WRAPPER_SOURCE}`);
+	mkdirSync(BIN_DIR, { recursive: true });
+	copyFileSync(WRAPPER_SOURCE, WRAPPER_TARGET);
+	chmodSync(WRAPPER_TARGET, 0o755);
+	return WRAPPER_TARGET;
+}
+
+function maestriIsRunning(): boolean {
+	return shellOut(["pgrep", "-x", "Maestri"]).stdout.trim().length > 0;
+}
+
+interface ConfigPatch {
+	path: string;
+	original: string;
+	updated: string;
+	changes: number;
+}
+
+function planJsonPatch(path: string, mutate: (data: any) => number): ConfigPatch {
+	const original = readFileSync(path, "utf8");
+	let data: any;
+	try {
+		data = JSON.parse(original);
+	} catch (error) {
+		throw new Error(`malformed configuration ${path}: ${(error as Error)?.message ?? String(error)}`);
+	}
+	const changes = mutate(data);
+	return { path, original, updated: JSON.stringify(data, null, 2), changes };
+}
+
+function applyPatchPlan(plan: readonly ConfigPatch[]): number {
+	const changed = plan.filter((entry) => entry.changes > 0);
+	for (const entry of plan) if (entry.changes === 0) console.log(`  nothing to patch in ${entry.path}`);
+	if (changed.length === 0) return 0;
+	const backups = new Map<string, string>();
+	const staged = new Map<string, string>();
+	const replaced: ConfigPatch[] = [];
+	let completed = false;
+	try {
+		for (const entry of changed) {
+			const tmp = `${entry.path}.tmp-${process.pid}`;
+			writeFileSync(tmp, entry.updated);
+			const fd = openSync(tmp, "r");
+			try { fsyncSync(fd); } finally { closeSync(fd); }
+			staged.set(entry.path, tmp);
+		}
+		for (const entry of changed) backups.set(entry.path, backup(entry.path));
+		for (const entry of changed) {
+			const tmp = staged.get(entry.path);
+			if (tmp === undefined) throw new Error(`missing staged patch for ${entry.path}`);
+			renameSync(tmp, entry.path);
+			staged.delete(entry.path);
+			replaced.push(entry);
+			const failAfter = Number(process.env[PATCH_FAIL_AFTER_ENV] ?? "0");
+			if (failAfter > 0 && replaced.length >= failAfter)
+				throw new Error("injected configuration rename failure");
+		}
+		completed = true;
+	} catch (error) {
+		for (const entry of [...replaced].reverse()) {
+			try {
+				writeFileSync(entry.path, entry.original);
+				const fd = openSync(entry.path, "r");
+				try { fsyncSync(fd); } finally { closeSync(fd); }
+			} catch (rollbackError) {
+				console.error(`patch: rollback failed for ${entry.path}: ${String(rollbackError)}`);
+			}
+		}
+		throw error;
+	} finally {
+		for (const tmp of staged.values()) {
+			try { unlinkSync(tmp); } catch { /* staging may not have completed */ }
+		}
+		if (!completed)
+			for (const backupPath of backups.values()) {
+				try {
+					unlinkSync(backupPath);
+				} catch {
+					// best-effort cleanup after rollback
+				}
+			}
+	}
+	for (const entry of changed)
+		console.log(`  patched ${entry.path} (${entry.changes} field${entry.changes === 1 ? "" : "s"}, backup: ${backups.get(entry.path)})`);
+	return changed.reduce((total, entry) => total + entry.changes, 0);
+}
+
+function patch(): number {
+	if (maestriIsRunning() && process.env.PI_MAESTRI_ALLOW_RUNNING_PATCH !== "1") {
+		console.error("REFUSING to patch: Maestri is running and would overwrite the edit on autosave.");
+		console.error("Quit Maestri, re-run maestri-pin-install --patch, then start Maestri again.");
+		return 2;
+	}
+	const plan: ConfigPatch[] = [];
+	try {
+		const preferences = join(MAESTRI_HOME, "preferences.json");
+		if (existsSync(preferences)) {
+			plan.push(planJsonPatch(preferences, (data) => {
+				let n = 0;
+				for (const preset of data?.payload?.agentPresets ?? []) {
+					const rewritten = rewritePiCommand(preset?.command, WRAPPER_TARGET);
+					if (rewritten !== undefined && rewritten !== preset.command) { preset.command = rewritten; n += 1; }
+				}
+				return n;
+			}));
+		}
+		const workspaces = join(MAESTRI_HOME, "workspaces");
+		if (existsSync(workspaces)) for (const entry of readdirSync(workspaces).sort()) {
+			const file = join(workspaces, entry, "workspace.json");
+			if (!existsSync(file)) continue;
+			plan.push(planJsonPatch(file, (data) => {
+				let n = 0;
+				for (const node of data?.payload?.nodes ?? []) {
+					const terminal = node?.content?.terminal?._0;
+					if (!terminal || !isConfiguredPi(terminal, WRAPPER_TARGET)) continue;
+					const dynamic = dynamicTerminalCommand(terminal.command, WRAPPER_TARGET);
+					if (dynamic === undefined) continue;
+					if (terminal.command !== dynamic) { terminal.command = dynamic; n += 1; }
+					if (terminal.resumeCommand !== dynamic) { terminal.resumeCommand = dynamic; n += 1; }
+				}
+				return n;
+			}));
+		}
+	} catch (error) {
+		console.error(`patch: preflight failed before any mutation: ${(error as Error)?.message ?? String(error)}`);
+		return 1;
+	}
+	let total: number;
+	try {
+		total = applyPatchPlan(plan);
+	} catch (error) {
+		console.error(`patch: transactional write failed and prior files were restored: ${(error as Error)?.message ?? String(error)}`);
+		return 1;
+	}
+	console.log(`patch: ${total} launch field${total === 1 ? "" : "s"} updated`);
+	const post = audit();
+	if (post !== 0) console.error("patch: postcondition audit failed; manual command repair is required.");
+	return post;
+}
+
+if (import.meta.main) {
+	const rawArgs = process.argv.slice(2);
+	const supported = new Set(["--harvest", "--recover", "--install", "--audit", "--patch"]);
+	const invalid = rawArgs.filter((arg) => !supported.has(arg));
+	if (invalid.length > 0) {
+		console.error(`maestri-pin-install: unsupported argument${invalid.length === 1 ? "" : "s"}: ${invalid.join(", ")}`);
+		console.error("usage: maestri-pin-install [--harvest] [--recover] [--install] [--audit] [--patch]");
+		process.exit(64);
+	}
+	const args = new Set(rawArgs);
+	let exitCode = 0;
+	if (args.has("--harvest") || args.size === 0) {
+		const result = harvest();
+		if (result !== 0) exitCode = result;
+	}
+	if (args.has("--recover")) {
+		const result = recover();
+		if (result !== 0) exitCode = result;
+	}
+	if (args.has("--install") || (args.size === 0 && exitCode === 0)) console.log(`install: ${install()}`);
+	if (args.has("--audit")) {
+		const result = audit();
+		if (result !== 0) exitCode = result;
+	}
+	if (args.has("--patch")) {
+		const result = patch();
+		if (result !== 0) exitCode = result;
+	}
+	if (args.size === 0) {
+		console.log("\nNext steps:");
+		console.log("  1. Use --recover, then --harvest; bare/unmanaged Pi cannot publish continuity.");
+		console.log("  2. Quit Maestri (it autosaves configuration while running).");
+		console.log("  3. Run maestri-pin-install --recover --patch --audit.");
+		console.log("  4. Start Maestri only after every audit/harvest row is protected/pinned.");
+	}
+	process.exitCode = exitCode;
+}

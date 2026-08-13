@@ -1,0 +1,162 @@
+#!/bin/sh
+# pi-maestri — bind one Maestri terminal to one concrete Pi JSONL session.
+#
+# Launch modes:
+#   resume   no explicit selector; consume the concrete-file pin (or bootstrap
+#            a deterministic first session when no mapping exists)
+#   adopt    caller supplied a persistent session selector; Pi owns selection,
+#            then the extension adopts getSessionFile() on session_start
+#   disabled caller supplied --no-session; intentionally ephemeral, no pin
+
+warn_unpinned() {
+	echo "pi-maestri: MAESTRI_TERMINAL_ID is not a canonical UUID; launching unpinned" >&2
+	exec pi "$@"
+}
+
+if [ -z "$MAESTRI_TERMINAL_ID" ]; then
+	exec pi "$@"
+fi
+
+# The UUID is one scalar, not a matching grep record. Capture the sole matching
+# line and require byte-for-byte equality with the complete environment value.
+MATCHED_TERMINAL_ID=$(printf '%s' "$MAESTRI_TERMINAL_ID" | LC_ALL=C grep -E '^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$' | sed -n '1p')
+if [ "$MATCHED_TERMINAL_ID" != "$MAESTRI_TERMINAL_ID" ]; then
+	warn_unpinned "$@"
+fi
+
+# Explicit selectors must never be combined with the stale map. Keep wrapper
+# ownership so the extension can atomically adopt Pi's selected session file.
+MODE=resume
+EXPECT_VALUE=0
+for arg in "$@"; do
+	if [ "$EXPECT_VALUE" = "1" ]; then
+		EXPECT_VALUE=0
+		continue
+	fi
+	case "$arg" in
+		--no-session)
+			MODE=disabled
+			break
+			;;
+		--session|--session-id|--continue|-c|--resume|-r|--fork)
+			MODE=adopt
+			;;
+		# Mirror Pi's value-taking built-in flags. Their values are opaque data,
+		# even when a model name, prompt, or path equals a session selector.
+		--mode|--provider|--model|--api-key|--system-prompt|--append-system-prompt|--name|-n|--session-dir|--models|--tools|-t|--exclude-tools|-xt|--extension|-e|--skill|--prompt-template|--theme|--thinking|--export)
+			EXPECT_VALUE=1
+			;;
+	esac
+done
+
+PI_MAESTRI_PIN_MODE=$MODE
+export PI_MAESTRI_PIN_MODE
+if [ "$MODE" != "disabled" ]; then
+	PI_MAESTRI_PINNED=1
+	export PI_MAESTRI_PINNED
+fi
+
+if [ "$MODE" = "adopt" ] || [ "$MODE" = "disabled" ]; then
+	exec pi "$@"
+fi
+
+# Resolve Pi's agent directory exactly as the extension/installer do.
+if [ -n "$PI_MAESTRI_BRIDGE_HOME" ]; then
+	AGENT_DIR="$PI_MAESTRI_BRIDGE_HOME/.pi/agent"
+elif [ -n "$PI_CODING_AGENT_DIR" ]; then
+	AGENT_DIR="$PI_CODING_AGENT_DIR"
+else
+	AGENT_DIR="$HOME/.pi/agent"
+fi
+MAP="$AGENT_DIR/maestri-sessions/$MAESTRI_TERMINAL_ID"
+
+# No map is the one valid bootstrap state. The terminal UUID gives the first
+# session a stable id; session_start immediately replaces this with a v2 symlink.
+if [ ! -e "$MAP" ] && [ ! -L "$MAP" ]; then
+	SID=$(printf '%s' "$MAESTRI_TERMINAL_ID" | tr 'A-F' 'a-f')
+	exec pi --session-id "$SID" "$@"
+fi
+
+# v2 maps are symlinks. Regular files are legacy v1 and cannot provide
+# cross-project continuity; directories/devices are invalid.
+if [ ! -L "$MAP" ]; then
+	echo "pi-maestri: terminal pin is legacy or invalid: $MAP" >&2
+	echo "pi-maestri: run maestri-pin-install --recover before restarting this terminal" >&2
+	exit 78
+fi
+
+# BSD readlink -n preserves every target byte, including trailing newlines.
+SESSION_FILE=$(readlink -n "$MAP") || {
+	echo "pi-maestri: terminal pin symlink is unreadable: $MAP" >&2
+	exit 78
+}
+
+# The path is one absolute, control-free, normalized .jsonl scalar. The shell
+# validates the byte boundary; Pi validates the session header after exec.
+case "$SESSION_FILE" in
+	/*) ;;
+	*)
+		echo "pi-maestri: terminal pin target is not an absolute session path" >&2
+		exit 78
+		;;
+esac
+case "$SESSION_FILE" in
+	*.jsonl) ;;
+	*)
+		echo "pi-maestri: terminal pin target is not a JSONL session path" >&2
+		exit 78
+		;;
+esac
+if [ "$(printf '%s' "$SESSION_FILE" | LC_ALL=C tr -d '\001-\037\177')" != "$SESSION_FILE" ]; then
+	echo "pi-maestri: terminal pin target contains control bytes" >&2
+	exit 78
+fi
+CANONICAL_SESSION_FILE=$(realpath "$SESSION_FILE" 2>/dev/null) || {
+	echo "pi-maestri: pinned session file is missing: $SESSION_FILE" >&2
+	exit 78
+}
+# macOS /var is a filesystem alias of /private/var. Compare the input against
+# realpath -m's lexical normalization while allowing that platform alias; the
+# actual file is still opened by its recorded absolute identity below.
+SESSION_PARENT=$(dirname "$SESSION_FILE")
+SESSION_BASENAME=$(basename "$SESSION_FILE")
+LEXICAL_PARENT=$(cd "$SESSION_PARENT" 2>/dev/null && pwd -L) || {
+	echo "pi-maestri: pinned session path could not be normalized: $SESSION_FILE" >&2
+	exit 78
+}
+LEXICAL_SESSION_FILE="$LEXICAL_PARENT/$SESSION_BASENAME"
+case "$SESSION_FILE:$CANONICAL_SESSION_FILE" in
+	/var/*:/private/var/*) PLATFORM_ALIAS_OK=1 ;;
+	*) PLATFORM_ALIAS_OK=0 ;;
+esac
+if [ "$LEXICAL_SESSION_FILE" != "$SESSION_FILE" ] && [ "$PLATFORM_ALIAS_OK" != "1" ]; then
+	echo "pi-maestri: pinned session path is not normalized: $SESSION_FILE" >&2
+	exit 78
+fi
+if [ ! -f "$SESSION_FILE" ] || [ ! -s "$SESSION_FILE" ]; then
+	echo "pi-maestri: pinned session file is missing, empty, or not regular: $SESSION_FILE" >&2
+	exit 78
+fi
+
+# Re-read immediately before exec. If another managed Pi moved this terminal's
+# pin while validation was in progress, fail closed. A subsequent Maestri
+# launch validates and consumes the new identity; this process never opens the
+# stale conversation. File existence is checked again after the map check.
+CURRENT_SESSION_FILE=$(readlink -n "$MAP") || {
+	echo "pi-maestri: terminal pin changed while it was being validated" >&2
+	exit 78
+}
+if [ ! -L "$MAP" ] || [ "$CURRENT_SESSION_FILE" != "$SESSION_FILE" ]; then
+	echo "pi-maestri: terminal pin changed while it was being validated; relaunch the terminal" >&2
+	exit 78
+fi
+FINAL_CANONICAL_SESSION_FILE=$(realpath "$SESSION_FILE" 2>/dev/null) || {
+	echo "pi-maestri: pinned session file changed while it was being validated: $SESSION_FILE" >&2
+	exit 78
+}
+if [ "$FINAL_CANONICAL_SESSION_FILE" != "$CANONICAL_SESSION_FILE" ] || [ ! -f "$SESSION_FILE" ] || [ ! -s "$SESSION_FILE" ]; then
+	echo "pi-maestri: pinned session file changed while it was being validated: $SESSION_FILE" >&2
+	exit 78
+fi
+
+exec pi --session "$SESSION_FILE" "$@"
