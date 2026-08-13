@@ -1,0 +1,21 @@
+packages/maestri-bridge/test/installer.test.ts
+  s_ff5de09c052690::t_8dd38b21cf38dd 16,18,76-108
+packages/maestri-bridge/bin/maestri-pin-install
+  s_ff5de09c052690::t_8dd38b21cf38dd 119-137,139,144-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6c8356059e6afa892d09c266c943e4600fbfcee6",
+  "prompts": {},
+  "sessions": {
+    "s_ff5de09c052690": {
+      "agent_id": {
+        "tool": "Johannes Transit Centrella",
+        "id": "019ff6ff-38d3-7ff8-83dc-630a73433024",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
