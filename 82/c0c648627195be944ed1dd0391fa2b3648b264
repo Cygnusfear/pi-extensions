@@ -1,0 +1,14 @@
+bun.lock
+  h_59730e3e3c55ed 284-293,799-800
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "82c0c648627195be944ed1dd0391fa2b3648b264",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
