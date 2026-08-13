@@ -116,13 +116,39 @@ export function scanLiveTerminalIds(ps: string): LiveTerminalScan {
 	return { terminalIds: [...terminals], malformedValues: [...malformed] };
 }
 
+/** Select the process-table column that includes environment assignments. */
+export function liveTerminalProcessCommand(
+	platform: NodeJS.Platform = process.platform,
+): string[] {
+	return platform === "darwin"
+		? ["ps", "eww", "-axo", "command="]
+		: ["ps", "eww", "-eo", "args="];
+}
+
+/** Reject acquisition failures before interpreting stdout as a valid empty scan. */
+export function scanLiveTerminalProcessResult(result: {
+	code: number;
+	stdout: string;
+}): LiveTerminalScan {
+	if (result.code !== 0)
+		throw new Error(`process-table scan exited with status ${result.code}`);
+	return scanLiveTerminalIds(result.stdout);
+}
+
 function liveTerminalIds(): LiveTerminalScan {
-	return scanLiveTerminalIds(shellOut(["ps", "eww", "-eo", "args="]).stdout);
+	return scanLiveTerminalProcessResult(shellOut(liveTerminalProcessCommand()));
 }
 
 function harvest(): number {
 	mkdirSync(MAPPING_DIR, { recursive: true, mode: 0o700 });
-	const live = liveTerminalIds();
+	let live: LiveTerminalScan;
+	try {
+		live = liveTerminalIds();
+	} catch {
+		console.error("  BLOCKED   unable to read the process table");
+		console.error("harvest: live terminal discovery failed; restart safety is unproven.");
+		return 1;
+	}
 	for (const value of live.malformedValues)
 		console.error(`  BLOCKED   malformed MAESTRI_TERMINAL_ID=${JSON.stringify(value)}`);
 	if (live.terminalIds.length === 0) {

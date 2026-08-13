@@ -13,7 +13,9 @@ import {
 	collectPinnedEntries,
 	collectPinnedEntriesFromFiles,
 	coverageFor,
+	liveTerminalProcessCommand,
 	scanLiveTerminalIds,
+	scanLiveTerminalProcessResult,
 } from "../bin/maestri-pin-install";
 import {
 	collectLaunchAuditRows,
@@ -71,6 +73,39 @@ describe("legacy compatibility collector", () => {
 });
 
 describe("live terminal identity scan", () => {
+	test("selects the environment-bearing process column for each ps implementation", () => {
+		expect(liveTerminalProcessCommand("darwin")).toEqual([
+			"ps",
+			"eww",
+			"-axo",
+			"command=",
+		]);
+		expect(liveTerminalProcessCommand("linux")).toEqual([
+			"ps",
+			"eww",
+			"-eo",
+			"args=",
+		]);
+	});
+
+	test("fails closed when process-table acquisition fails", () => {
+		expect(() =>
+			scanLiveTerminalProcessResult({
+				code: 1,
+				stdout: `cmd MAESTRI_TERMINAL_ID=${TERMINAL}`,
+			}),
+		).toThrow("process-table scan exited with status 1");
+	});
+
+	test("parses validated process-table output after successful acquisition", () => {
+		expect(
+			scanLiveTerminalProcessResult({
+				code: 0,
+				stdout: `cmd MAESTRI_TERMINAL_ID=${TERMINAL}`,
+			}),
+		).toEqual({ terminalIds: [TERMINAL], malformedValues: [] });
+	});
+
 	test("accepts only complete assignment scalars, never UUID prefixes", () => {
 		const malformed = `${TERMINAL}-suffix`;
 		expect(
