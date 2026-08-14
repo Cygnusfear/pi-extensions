@@ -29,13 +29,20 @@ describe("voiceTextFor", () => {
 describe("createFishTtsProvider", () => {
 	const ok = (body: BodyInit, status = 200): typeof fetch => ((async () => new Response(body, { status })) as unknown as typeof fetch);
 
+	function capturingFetch(record: { body?: string }, body: BodyInit, status = 200): typeof fetch {
+		return ((async (_input: RequestInfo | URL, init?: RequestInit) => {
+			record.body = init?.body as string | undefined;
+			return new Response(body, { status });
+		}) as unknown as typeof fetch);
+	}
+
 	test("maps 402 to outOfCredits", async () => {
 		const provider = createFishTtsProvider({
 			apiKey: "k",
 			voiceId: "v",
 			fetchFn: ok(JSON.stringify({ status: 402, message: "No payment" }), 402),
 		});
-		await expect(provider.synthesize("hi")).rejects.toMatchObject({ outOfCredits: true, status: 402 });
+		await expect(provider.synthesize("hi", "v")).rejects.toMatchObject({ outOfCredits: true, status: 402 });
 	});
 
 	test("maps credit codes in error bodies to outOfCredits", async () => {
@@ -44,7 +51,7 @@ describe("createFishTtsProvider", () => {
 			voiceId: "v",
 			fetchFn: ok(JSON.stringify({ status: 503, message: "credits_exhausted" }), 503),
 		});
-		await expect(provider.synthesize("hi")).rejects.toMatchObject({ outOfCredits: true });
+		await expect(provider.synthesize("hi", "v")).rejects.toMatchObject({ outOfCredits: true });
 	});
 
 	test("returns mp3 audio bytes on success", async () => {
@@ -53,9 +60,19 @@ describe("createFishTtsProvider", () => {
 			voiceId: "v",
 			fetchFn: ok(new Uint8Array([1, 2, 3])),
 		});
-		const audio = await provider.synthesize("hi");
+		const audio = await provider.synthesize("hi", "v");
 		expect(audio.extension).toBe("mp3");
 		expect(audio.bytes.length).toBe(3);
+	});
+
+	test("sends the per-call voiceId as reference_id", async () => {
+		const record: { body?: string } = {};
+		const provider = createFishTtsProvider({
+			apiKey: "k",
+			fetchFn: capturingFetch(record, new Uint8Array([1])),
+		});
+		await provider.synthesize("hi", "voice-male-1");
+		expect(JSON.parse(record.body ?? "{}").reference_id).toBe("voice-male-1");
 	});
 
 	test("empty audio body throws", async () => {
@@ -64,6 +81,6 @@ describe("createFishTtsProvider", () => {
 			voiceId: "v",
 			fetchFn: ok(new Uint8Array(0)),
 		});
-		await expect(provider.synthesize("hi")).rejects.toBeInstanceOf(TtsProviderError);
+		await expect(provider.synthesize("hi", "v")).rejects.toBeInstanceOf(TtsProviderError);
 	});
 });

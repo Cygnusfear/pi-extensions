@@ -14,7 +14,12 @@ export interface Config {
 	hoomanMeshId: string;
 	/** fish.audio TTS credentials — optional; voice mode degrades to text-only when absent. */
 	fishApiKey?: string;
-	fishVoiceId?: string;
+	/** Male (Herzog) voice model id — the default for agents not in the female set. */
+	fishVoiceIdMale?: string;
+	/** Female voice model id — used for agents listed in FISH_AUDIO_FEMALE_AGENTS. */
+	fishVoiceIdFemale?: string;
+	/** Lowercased agent nicknames that speak with the female voice. */
+	fishFemaleAgents: Set<string>;
 }
 
 /** Load KEY=VALUE lines from the out-of-repo config file into process.env (without overriding real env). */
@@ -45,7 +50,9 @@ export function loadConfig(): Config {
 		hoomanNickname: process.env.HOOMAN_NICKNAME ?? "The Hooman",
 		hoomanMeshId,
 		fishApiKey: process.env.FISH_AUDIO_API_KEY?.trim() || undefined,
-		fishVoiceId: process.env.FISH_AUDIO_VOICE_ID?.trim() || undefined,
+		fishVoiceIdMale: process.env.FISH_AUDIO_VOICE_ID_MALE?.trim() || undefined,
+		fishVoiceIdFemale: process.env.FISH_AUDIO_VOICE_ID_FEMALE?.trim() || undefined,
+		fishFemaleAgents: new Set((process.env.FISH_AUDIO_FEMALE_AGENTS ?? "").split(",").map((name) => name.trim().toLowerCase()).filter(Boolean)),
 	};
 }
 

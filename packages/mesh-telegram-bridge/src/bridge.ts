@@ -258,9 +258,7 @@ export class Bridge {
 		this.afk = state.telegramContact;
 		this.voice = state.voice;
 		this.ttsCreditNotifiedAt = state.ttsCreditNotifiedAt;
-		this.tts = cfg.fishApiKey && cfg.fishVoiceId
-			? createFishTtsProvider({ apiKey: cfg.fishApiKey, voiceId: cfg.fishVoiceId })
-			: null;
+		this.tts = cfg.fishApiKey ? createFishTtsProvider({ apiKey: cfg.fishApiKey }) : null;
 		for (const [provider, timestamp] of state.transcriptionCreditNotifications) this.transcriptionCreditNotifiedAt.set(provider, timestamp);
 		this.topicRoutes = new TopicRouteController({
 			api: {
@@ -363,7 +361,7 @@ export class Bridge {
 		if (action === "on") {
 			this.voice = { on: true, since: Date.now() };
 			this.saveState();
-			const warning = this.tts ? "" : "\n⚠️ TTS not configured yet — set FISH_AUDIO_API_KEY and FISH_AUDIO_VOICE_ID in the bridge config.";
+			const warning = this.tts ? "" : "\n⚠️ TTS not configured yet — set FISH_AUDIO_API_KEY (plus voice ids) in the bridge config.";
 			void ctx.reply("✅ Voice mode on — agents will speak. Text still arrives first, voice follows." + warning).catch(() => {});
 			console.log("[bridge] voice mode on");
 			return;
@@ -561,10 +559,15 @@ export class Bridge {
 			console.warn("[bridge] voice mode on but TTS not configured — skipping voice");
 			return;
 		}
+		const voiceId = this.voiceIdFor(t.nickname);
+		if (!voiceId) {
+			console.warn("[bridge] no voice id configured for " + t.nickname + " — skipping voice");
+			return;
+		}
 		const text = voiceTextFor(rawText);
 		if (!text) return;
 		try {
-			const audio = await this.tts.synthesize(text);
+			const audio = await this.tts.synthesize(text, voiceId);
 			const sent = await this.bot.api.sendAudio(chatId, new InputFile(Buffer.from(audio.bytes), `voice-${Date.now()}.${audio.extension}`), {
 				...thread,
 				title: t.nickname + " · voice",
@@ -575,6 +578,12 @@ export class Bridge {
 			if (error instanceof TtsProviderError && error.outOfCredits) void this.notifyTtsOutOfCredits(chatId, thread);
 			console.error("[bridge] voice send failed:", (error as Error).message);
 		}
+	}
+
+	/** Per-agent voice selection: female-set nicknames get the female voice, everyone else the male (Herzog) default. */
+	private voiceIdFor(nickname: string): string | undefined {
+		if (this.cfg.fishFemaleAgents.has(nickname.trim().toLowerCase()) && this.cfg.fishVoiceIdFemale) return this.cfg.fishVoiceIdFemale;
+		return this.cfg.fishVoiceIdMale;
 	}
 
 	/** One proactive alert per credit window when the TTS provider runs out of credits. */

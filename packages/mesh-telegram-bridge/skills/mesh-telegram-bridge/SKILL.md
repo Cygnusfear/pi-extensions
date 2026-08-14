@@ -155,7 +155,7 @@ When the Hooman toggles voice mode, the bridge synthesizes a spoken version of *
 
 **Delivery order:** text first (zero added latency), then the spoken MP3 seconds later. TTS failures never block text. Long texts are capped at 600 chars for speech (markdown stripped); the text channel always carries the full message.
 
-**Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY` + `FISH_AUDIO_VOICE_ID` in `~/.config/mesh-telegram-bridge/config.env`. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
+**Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY`, `FISH_AUDIO_VOICE_ID_MALE` (default, Herzog), `FISH_AUDIO_VOICE_ID_FEMALE`, and `FISH_AUDIO_FEMALE_AGENTS` (comma-separated nicknames that speak with the female voice) in `~/.config/mesh-telegram-bridge/config.env`. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
 
 ---
 

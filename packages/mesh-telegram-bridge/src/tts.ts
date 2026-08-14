@@ -10,13 +10,12 @@ export interface TtsAudio {
 
 export interface TtsProvider {
 	readonly name: string;
-	readonly synthesize: (text: string) => Promise<TtsAudio>;
+	readonly synthesize: (text: string, voiceId: string) => Promise<TtsAudio>;
 }
 
 export interface TtsProviderOptions {
 	readonly name?: string;
 	readonly apiKey: string;
-	readonly voiceId: string;
 	readonly model?: string;
 	readonly fetchFn?: typeof fetch;
 }
@@ -71,12 +70,11 @@ const FISH_TTS_ENDPOINT = "https://api.fish.audio/v1/tts";
  */
 export function createFishTtsProvider(options: TtsProviderOptions): TtsProvider {
 	const apiKey = options.apiKey;
-	const voiceId = options.voiceId;
 	const model = options.model ?? "s2.1-pro";
 	const fetchFn = options.fetchFn ?? fetch;
 	return {
 		name: options.name ?? "Fish Audio",
-		synthesize: async (text) => {
+		synthesize: async (text, voiceId) => {
 			const response = await fetchFn(FISH_TTS_ENDPOINT, {
 				method: "POST",
 				headers: {
