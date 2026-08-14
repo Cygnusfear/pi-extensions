@@ -38,9 +38,10 @@ function stripLeadIns(text: string): string {
 /**
  * Detect a voice-mode toggle in an inbound hooman message.
  * Accepts "/voice [on|off|status]" (bare "/voice" enables, mirroring /afk)
- * and the exact phrases "speak to me" (on) / "text only" (off) — including
- * when the hooman speaks them as a voice note and the bridge transcribes it.
- * Whole-message exact match only: "speak to me please" is not a toggle.
+ * and the phrases "speak to me" (on) / "text only" (off) — including when the
+ * hooman speaks them as a voice note and the bridge transcribes it. The phrase
+ * must open the message (after discourse lead-ins); trailing explanation is
+ * fine, mid-sentence occurrence is not.
  */
 export function parseVoiceToggle(raw: string): VoiceToggleAction | null {
 	const text = stripLeadIns(normalizeVoiceMessage(raw));
@@ -51,7 +52,19 @@ export function parseVoiceToggle(raw: string): VoiceToggleAction | null {
 		if (sub === "status") return "status";
 		return sub === "" ? "on" : null;
 	}
-	if (text === "speak to me") return "on";
-	if (text === "text only") return "off";
+	if (startsPhrase(text, "speak to me")) return "on";
+	if (startsPhrase(text, "text only")) return "off";
 	return null;
+}
+
+/**
+ * The toggle fires when the lead-in-stripped message STARTS with the phrase,
+ * followed by a clause boundary. Real usage keeps the phrase first and appends
+ * an explanation ("speak to me because the first time…") — that must toggle.
+ * Mid-sentence occurrences ("tell them to speak to me") never do.
+ */
+function startsPhrase(text: string, phrase: string): boolean {
+	if (!text.startsWith(phrase)) return false;
+	const rest = text.slice(phrase.length);
+	return rest === "" || /^[\s,;:!?]/.test(rest);
 }

@@ -29,11 +29,15 @@ describe("parseVoiceToggle", () => {
 	});
 
 	test("near-miss phrases are not toggles", () => {
-		expect(parseVoiceToggle("well, speak to me please")).toBeNull();
-		expect(parseVoiceToggle("all right then, text only from here on")).toBeNull();
-		expect(parseVoiceToggle("speak to me please")).toBeNull();
-		expect(parseVoiceToggle("text only mode")).toBeNull();
+		expect(parseVoiceToggle("well, speak to me please")).toBe("on");
+		expect(parseVoiceToggle("So okay, speak to me because the first time it did not work")).toBe("on");
+		expect(parseVoiceToggle("all right then, text only from here on")).toBe("off");
+		expect(parseVoiceToggle("text only mode is fine")).toBe("off");
+		expect(parseVoiceToggle("speak to me please")).toBe("on");
+		expect(parseVoiceToggle("text only mode")).toBe("off");
 		expect(parseVoiceToggle("hello there")).toBeNull();
+		expect(parseVoiceToggle("tell them to speak to me")).toBeNull();
+		expect(parseVoiceToggle("from now on text only")).toBeNull();
 		expect(parseVoiceToggle("/voice louder")).toBeNull();
 		expect(parseVoiceToggle("")).toBeNull();
 	});
