@@ -381,4 +381,14 @@ test("stopping the bridge resolves and clears pending unannounced topic waits", 
 	bridge.clearPendingTopicPeers();
 	expect(await queued).toBeNull();
 	expect(bridge.pendingTopicPeers.size).toBe(0);
+
+	
+});
+
+test("voice mode defaults on and an explicit off survives reload", () => {
+	const path = temporaryStatePath();
+	const store = () => new BridgeStateStore(path, () => snapshot());
+	expect(store().load().voice.on).toBe(true); // no record → default on
+	writeFileSync(path, JSON.stringify({ voice: { on: false, since: 0 } }));
+	expect(store().load().voice.on).toBe(false); // explicit off sticks
 });

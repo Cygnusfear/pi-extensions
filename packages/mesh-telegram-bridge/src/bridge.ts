@@ -240,7 +240,7 @@ export class Bridge {
 	private readonly afkNotified = new Set<string>();
 	private readonly transcriptionCreditNotifiedAt = new Map<string, number>();
 	/** Voice mode (bridge-side TTS): when on, agent tells are also spoken. Persisted like the contact reminder. */
-	private voice: { on: boolean; since: number } = { on: false, since: 0 };
+	private voice: { on: boolean; since: number } = { on: true, since: 0 };
 	private readonly tts: TtsProvider | null;
 	private ttsCreditNotifiedAt: number | null = null;
 	private readonly stateStore: BridgeStateStore;
@@ -354,7 +354,7 @@ export class Bridge {
 	private async handleVoiceToggle(action: VoiceToggleAction, ctx: Context): Promise<void> {
 		if (action === "status") {
 			const status = this.voice.on
-				? "🎙️ Voice mode on since " + new Date(this.voice.since).toLocaleString() + ". Agent messages arrive as text first, then a spoken version."
+				? "🎙️ Voice mode on" + (this.voice.since > 0 ? " since " + new Date(this.voice.since).toLocaleString() : "") + ". Agent messages arrive as text first, then a spoken version."
 				: "🔇 Voice mode off — text only.";
 			void ctx.reply(status).catch(() => {});
 			return;

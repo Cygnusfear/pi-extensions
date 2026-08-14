@@ -96,7 +96,8 @@ function emptyState(): BridgeStateSnapshot {
 		sentMessages: [],
 		legacySentMessages: [],
 		telegramContact: { on: false, message: "", since: 0 },
-		voice: { on: false, since: 0 },
+		/** Voice mode is ON by default — the Hooman opted in by wiring fish.audio; "text only" turns it off. */
+		voice: { on: true, since: 0 },
 		ttsCreditNotifiedAt: null,
 		transcriptionCreditNotifications: [],
 	};
@@ -254,11 +255,10 @@ function parseState(value: unknown): BridgeStateSnapshot {
 			since: isPlausibleSentAtMs(value.afk.since) ? value.afk.since : Date.now(),
 		};
 	}
-	if (isRecord(value.voice) && value.voice.on === true) {
-		state.voice = {
-			on: true,
-			since: isPlausibleSentAtMs(value.voice.since) ? value.voice.since : Date.now(),
-		};
+	if (isRecord(value.voice) && (value.voice.on === true || value.voice.on === false)) {
+		state.voice = value.voice.on
+			? { on: true, since: isPlausibleSentAtMs(value.voice.since) ? value.voice.since : Date.now() }
+			: { on: false, since: 0 };
 	}
 	if (isPlausibleSentAtMs(value.ttsCreditNotifiedAt)) state.ttsCreditNotifiedAt = value.ttsCreditNotifiedAt;
 	if (isRecord(value.transcriptionCreditNotifications)) {
@@ -306,7 +306,7 @@ function serializeState(state: BridgeStateSnapshot): PersistedBridgeState {
 	};
 	if (state.broadcastTopicId !== null) persisted.broadcastTopicId = state.broadcastTopicId;
 	if (state.telegramContact.on) persisted.afk = state.telegramContact;
-	if (state.voice.on) persisted.voice = state.voice;
+	persisted.voice = state.voice;
 	if (state.ttsCreditNotifiedAt !== null) persisted.ttsCreditNotifiedAt = state.ttsCreditNotifiedAt;
 	return persisted;
 }
