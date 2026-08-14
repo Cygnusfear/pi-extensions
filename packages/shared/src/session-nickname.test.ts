@@ -6,6 +6,8 @@ import {
 	LAST_NAMES,
 	COSMIC_MIDDLES,
 	getAllSessionNicknames,
+	classifyNicknameVoice,
+	type NicknameOccupancy,
 } from "./session-nickname.ts";
 
 // ── Array integrity ──────────────────────────────────────────────────────────
@@ -187,24 +189,27 @@ describe("claimNickname", () => {
 
 	test("fallback with id suffix when namespace exhausted", () => {
 		const id = "exhausted-test";
-		// Build a set of ALL possible combinations (too expensive to enumerate 2.6M)
-		// Instead, just verify the fallback format works by mocking
-		const live = new Set<string>();
-
-		// Fill every possible triple name for this test
-		for (const first of FIRST_NAMES) {
-			for (const cosmic of COSMIC_MIDDLES) {
-				for (const last of LAST_NAMES) {
-					live.add(`${first} ${cosmic} ${last}`);
-				}
-			}
-		}
-		// Also add all real astronomers
-		for (const name of getAllSessionNicknames()) {
-			live.add(name);
-		}
-
-		const claimed = claimNickname(id, live);
+		const allNamesOccupied: NicknameOccupancy = { has: () => true };
+		const claimed = claimNickname(id, allNamesOccupied);
 		expect(claimed).toContain(`#${id.slice(0, 4)}`);
+	}, 20_000);
+});
+
+describe("classifyNicknameVoice", () => {
+	test("classifies female first-name tokens as female", () => {
+		expect(classifyNicknameVoice("Vera Accretion Rubin")).toBe("female");
+		expect(classifyNicknameVoice("Jocelyn Stargate Burnell")).toBe("female");
+		expect(classifyNicknameVoice("Andrea Ecliptic Ghez")).toBe("female");
+		expect(classifyNicknameVoice("Mae Gravitas Jemison")).toBe("female");
+	});
+	test("classifies male first-name tokens as male", () => {
+		expect(classifyNicknameVoice("Volker Stargate Newcomb")).toBe("male");
+		expect(classifyNicknameVoice("Galileo Accretion Rubin")).toBe("male");
+		expect(classifyNicknameVoice("Bohdan Ecliptic Paczyński")).toBe("male");
+	});
+	test("classifies easter-egg single-astronomer names by first token", () => {
+		expect(classifyNicknameVoice("Vera Rubin")).toBe("female");
+		expect(classifyNicknameVoice("Carl Sagan")).toBe("male");
+		expect(classifyNicknameVoice("A. G. W. Cameron")).toBe("male");
 	});
 });

@@ -13,6 +13,7 @@ import { blobBytes, telegramReactionEmoji } from "./telegram-values.ts";
 import { isOutOfCreditsCode, isOutOfCreditsText, providerErrorDetails } from "./provider-errors.ts";
 import { parseVoiceToggle, type VoiceToggleAction } from "./voice-toggle.ts";
 import { createFishTtsProvider, voiceTextFor, TtsProviderError, type TtsProvider } from "./tts.ts";
+import { classifyNicknameVoice } from "@pi-extensions/shared/session-nickname";
 import { TopicRouteController } from "./topic-routes.ts";
 import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -580,9 +581,9 @@ export class Bridge {
 		}
 	}
 
-	/** Per-agent voice selection: female-set nicknames get the female voice, everyone else the male (Herzog) default. */
+	/** Per-agent voice selection: the nickname generator classifies first names; female names get the female voice, everyone else the male (Herzog) default. */
 	private voiceIdFor(nickname: string): string | undefined {
-		if (this.cfg.fishFemaleAgents.has(nickname.trim().toLowerCase()) && this.cfg.fishVoiceIdFemale) return this.cfg.fishVoiceIdFemale;
+		if (classifyNicknameVoice(nickname) === "female" && this.cfg.fishVoiceIdFemale) return this.cfg.fishVoiceIdFemale;
 		return this.cfg.fishVoiceIdMale;
 	}
 

@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "grammy": "^1.30.0",
-    "@pi-extensions/pi-mesh": "workspace:*"
+    "@pi-extensions/pi-mesh": "workspace:*",
+    "@pi-extensions/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3"
