@@ -1,0 +1,39 @@
+packages/shared/src/session-nickname.test.ts
+  s_5bd1433e6daac3::t_e2705a6dbd3ff4 9
+  s_436dfca88435a4::t_4a44bdbc9a5cc2 10,192-193
+  s_436dfca88435a4::t_576dd8b6df21d4 195
+  s_5bd1433e6daac3::t_a3cc26906c5c38 197-213
+packages/mesh-telegram-bridge/src/config.ts
+  s_5bd1433e6daac3::t_5fc36524120ad6 19
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_5bd1433e6daac3::t_a2f6531b311b22 16,584,586
+packages/mesh-telegram-bridge/package.json
+  s_5bd1433e6daac3::t_ff3a68b5cb8a95 13-14
+packages/shared/src/session-nickname.ts
+  s_436dfca88435a4::t_f25af375b7d675 737-741
+  s_5bd1433e6daac3::t_ec32421154b1af 667-700
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "b477db17d11ddf3ee86e9fee6f535f332500b45f",
+  "prompts": {},
+  "sessions": {
+    "s_436dfca88435a4": {
+      "agent_id": {
+        "tool": "Paula Parsec Aderin-Pocock",
+        "id": "019fdbdb-fc48-740c-a798-525b49dc7d95",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_5bd1433e6daac3": {
+      "agent_id": {
+        "tool": "Volker Stargate Newcomb",
+        "id": "01a00263-b314-7338-a013-ec00989776ba",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
