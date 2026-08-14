@@ -138,3 +138,10 @@ describe("markdownToTelegramHtml", () => {
 		);
 	});
 });
+
+test("projects the voice field from object and JSON-string payloads", () => {
+	expect(projectAgentPayload({ text: "plain", voice: "[calm] spoken form" }).voice).toBe("[calm] spoken form");
+	expect(projectAgentPayload(JSON.stringify({ subject: "s", body: "b", voice: "  [excited] hi (break) there  " })).voice).toBe("[excited] hi (break) there");
+	expect(projectAgentPayload({ text: "no voice here" }).voice).toBeUndefined();
+	expect(projectAgentPayload("just text").voice).toBeUndefined();
+});

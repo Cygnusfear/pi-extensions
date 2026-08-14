@@ -155,6 +155,16 @@ When the Hooman toggles voice mode, the bridge synthesizes a spoken version of *
 
 **Delivery order:** text first (zero added latency), then the spoken MP3 seconds later. TTS failures never block text. Long texts are capped at 600 chars for speech (markdown stripped); the text channel always carries the full message.
 
+**Obligation — tag your speech.** When you send a tell to the Hooman, include a `voice` field: the spoken form of your message, written for the ear, with fish.audio expression tags (s2.1-pro bracket syntax):
+
+- Emotions at clause starts: `[calm]` `[excited]` `[confident]` `[worried]` `[sarcastic]` `[curious]` `[grateful]` (64+ available).
+- Paralanguage: `(break)` short pause, `(long-break)`, `(breath)`, `(laugh)`, `(sigh)`; natural pause words "um", "uh".
+- Spoken-form numbers, dates, URLs (write "twelve forty" not "12:40"). Keep it under 600 chars; one or two tags per sentence, not more.
+
+Example: `voice: "[calm] The deploy finished, (break) all seventy tests green. [excited] We are live! (laugh)"`
+
+The bridge synthesizes your `voice` field verbatim (tags intact) when present; without it, it falls back to the markdown-cleaned text. The text channel keeps your normal markdown — the `voice` field is heard, never shown.
+
 **Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY`, `FISH_AUDIO_VOICE_ID_MALE` (default, Herzog), `FISH_AUDIO_VOICE_ID_FEMALE`, and `FISH_AUDIO_FEMALE_AGENTS` (comma-separated nicknames that speak with the female voice) in `~/.config/mesh-telegram-bridge/config.env`. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
 
 ---

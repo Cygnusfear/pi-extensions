@@ -28,6 +28,7 @@ const STRUCTURED_PAYLOAD_KEYS = [
 	"image",
 	"file",
 	"path",
+	"voice",
 ] as const;
 
 /** Parse structured JSON strings emitted by agents without changing ordinary text. */
@@ -58,6 +59,8 @@ export interface ProjectedAgentPayload {
 	text: string;
 	attachment?: string;
 	reaction?: string;
+	/** TTS-tagged speech text (fish.audio bracket/paren tags) — synthesized instead of text when present. */
+	voice?: string;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -76,6 +79,7 @@ export function projectAgentPayload(payload: unknown): ProjectedAgentPayload {
 		text: displayPayload(normalized),
 		attachment: nonEmptyString(attachment),
 		reaction: nonEmptyString(reaction),
+		voice: nonEmptyString(record?.voice),
 	};
 }
 

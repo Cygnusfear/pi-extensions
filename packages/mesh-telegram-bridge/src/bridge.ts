@@ -565,7 +565,9 @@ export class Bridge {
 			console.warn("[bridge] no voice id configured for " + t.nickname + " — skipping voice");
 			return;
 		}
-		const text = voiceTextFor(rawText);
+		// Agents obliged to tag their speech (fish tags) put it in the voice field;
+		// the markdown-cleaned text remains the fallback.
+		const text = voiceTextFor(t.voice ?? rawText);
 		if (!text) return;
 		try {
 			const audio = await this.tts.synthesize(text, voiceId);

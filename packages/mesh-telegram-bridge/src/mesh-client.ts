@@ -26,6 +26,8 @@ export interface InboundTell {
 	text: string;
 	attachment?: string;
 	reaction?: string;
+	/** Agent-authored speech text with fish.audio expression tags — preferred over text for synthesis. */
+	voice?: string;
 	sessionName?: string;
 	/** present ⇒ the sender asked for a delivery receipt; we ack it */
 	deliveryId?: string;
