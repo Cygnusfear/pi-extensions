@@ -1,0 +1,28 @@
+packages/mesh-telegram-bridge/skills/mesh-telegram-bridge/SKILL.md
+  s_5bd1433e6daac3::t_2c0b9a4b57ddcd 158
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_5bd1433e6daac3::t_7e5c1a8b2fd692 261,364,562-566,570,583-586
+  s_5bd1433e6daac3::t_69755d9a5cce13 587-588
+packages/mesh-telegram-bridge/src/tts.test.ts
+  s_5bd1433e6daac3::t_b4e7bfd2eba8cb 32-38,45,54,63,68-77,84
+packages/mesh-telegram-bridge/src/tts.ts
+  s_5bd1433e6daac3::t_a534875c77b4cc 13,77
+packages/mesh-telegram-bridge/src/config.ts
+  s_5bd1433e6daac3::t_bbc1f9ad9fd468 17-22,53-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "5e2fd7eff7eaea05e33d5cc4fc9407ee8a530e3d",
+  "prompts": {},
+  "sessions": {
+    "s_5bd1433e6daac3": {
+      "agent_id": {
+        "tool": "Volker Stargate Newcomb",
+        "id": "01a00263-b314-7338-a013-ec00989776ba",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
