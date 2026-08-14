@@ -51,6 +51,8 @@ function snapshot(messageId = 101): BridgeStateSnapshot {
 		sentMessages: [[sentMessageRouteKey(route.chatId, route.messageId)!, route]],
 		legacySentMessages: [],
 		telegramContact: { on: true, message: "Telegram contact reminder", since: SENT_AT },
+		voice: { on: false, since: 0 },
+		ttsCreditNotifiedAt: null,
 		transcriptionCreditNotifications: [],
 	};
 }

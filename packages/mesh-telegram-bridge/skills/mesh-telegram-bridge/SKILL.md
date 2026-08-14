@@ -138,12 +138,28 @@ Use direct `mesh.tell` for anything meant for the Hooman specifically; broadcast
 Things the Hooman types in Telegram — you don't run them, but they explain behavior you'll see:
 
 - **`/agents`** — posts a tappable roster of mesh agents (🟢 live <90s / ⚪ stale). Tapping an agent opens their topic.
+- **`/voice on|off|status`** — toggle the Hooman-facing voice mode (bridge-side TTS).
 - **`/dm <agent>`** — create a topic for any mesh peer on demand.
 - **`@ramdock_bot <query>`** — inline autocomplete; tap inserts `/dm <agent>`.
 
 ---
 
-## 9. Gotchas
+
+---
+
+## 9. Voice mode (bridge-side TTS)
+
+When the Hooman toggles voice mode, the bridge synthesizes a spoken version of **every agent tell** and sends it as a Telegram audio message after the text. Agents are **unchanged** — keep sending plain text tells; the bridge owns the speech.
+
+**Toggle (typed or spoken):** the exact phrases `speak to me` (on) / `text only` (off), or `/voice on|off|status`. Spoken toggles work too — voice notes are transcribed and fed through the same matcher. The pref persists in `state.json` and survives restarts.
+
+**Delivery order:** text first (zero added latency), then the spoken MP3 seconds later. TTS failures never block text. Long texts are capped at 600 chars for speech (markdown stripped); the text channel always carries the full message.
+
+**Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY` + `FISH_AUDIO_VOICE_ID` in `~/.config/mesh-telegram-bridge/config.env`. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
+
+---
+
+## 10. Gotchas
 
 1. **Durable id over nickname** — the ~90s post-restart duplicate window makes "The Hooman" ambiguous. Always `0d10973c-…`.
 2. **Finish writing before you send an image** — mid-write / truncated files are skipped.

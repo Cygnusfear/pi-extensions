@@ -50,6 +50,12 @@ export interface TelegramContactState {
 	since: number;
 }
 
+/** Bridge-side TTS voice mode: when on, agent tells are also spoken to the Hooman. */
+export interface VoiceModeState {
+	on: boolean;
+	since: number;
+}
+
 export interface BridgeStateSnapshot {
 	broadcastTopicId: number | null;
 	agentTopics: Array<readonly [string, AgentTopicRoute]>;
@@ -60,6 +66,10 @@ export interface BridgeStateSnapshot {
 	/** Old numeric ids remain readable for reactions, but cannot become deletion records. */
 	legacySentMessages: Array<readonly [number, LegacyReactionRoute]>;
 	telegramContact: TelegramContactState;
+	/** Voice-mode pref set by the Hooman ("speak to me" / "text only" / /voice). */
+	voice: VoiceModeState;
+	/** Last proactive credit alert timestamp for the TTS provider (null = never). */
+	ttsCreditNotifiedAt: number | null;
 	/** Last proactive credit alert timestamp per transcription provider. */
 	transcriptionCreditNotifications: Array<readonly [string, number]>;
 }
@@ -70,6 +80,8 @@ interface PersistedBridgeState {
 	agentTopic: Record<string, number | AgentTopicRoute>;
 	topicAgent: Record<string, AgentRoute>;
 	afk?: TelegramContactState;
+	voice?: VoiceModeState;
+	ttsCreditNotifiedAt?: unknown;
 	/** Old records without a valid tuple stay legacy reaction-only during migration. */
 	sentMessages?: unknown[];
 	legacySentMessages?: unknown[];
@@ -84,6 +96,8 @@ function emptyState(): BridgeStateSnapshot {
 		sentMessages: [],
 		legacySentMessages: [],
 		telegramContact: { on: false, message: "", since: 0 },
+		voice: { on: false, since: 0 },
+		ttsCreditNotifiedAt: null,
 		transcriptionCreditNotifications: [],
 	};
 }
@@ -240,6 +254,13 @@ function parseState(value: unknown): BridgeStateSnapshot {
 			since: isPlausibleSentAtMs(value.afk.since) ? value.afk.since : Date.now(),
 		};
 	}
+	if (isRecord(value.voice) && value.voice.on === true) {
+		state.voice = {
+			on: true,
+			since: isPlausibleSentAtMs(value.voice.since) ? value.voice.since : Date.now(),
+		};
+	}
+	if (isPlausibleSentAtMs(value.ttsCreditNotifiedAt)) state.ttsCreditNotifiedAt = value.ttsCreditNotifiedAt;
 	if (isRecord(value.transcriptionCreditNotifications)) {
 		for (const [provider, rawTimestamp] of Object.entries(value.transcriptionCreditNotifications)) {
 			if (!provider.trim() || !isPlausibleSentAtMs(rawTimestamp)) continue;
@@ -285,6 +306,8 @@ function serializeState(state: BridgeStateSnapshot): PersistedBridgeState {
 	};
 	if (state.broadcastTopicId !== null) persisted.broadcastTopicId = state.broadcastTopicId;
 	if (state.telegramContact.on) persisted.afk = state.telegramContact;
+	if (state.voice.on) persisted.voice = state.voice;
+	if (state.ttsCreditNotifiedAt !== null) persisted.ttsCreditNotifiedAt = state.ttsCreditNotifiedAt;
 	return persisted;
 }
 

@@ -10,6 +10,9 @@ import {
 	type LegacyReactionRoute,
 } from "./bridge-state.ts";
 import { blobBytes, telegramReactionEmoji } from "./telegram-values.ts";
+import { isOutOfCreditsCode, isOutOfCreditsText, providerErrorDetails } from "./provider-errors.ts";
+import { parseVoiceToggle, type VoiceToggleAction } from "./voice-toggle.ts";
+import { createFishTtsProvider, voiceTextFor, TtsProviderError, type TtsProvider } from "./tts.ts";
 import { TopicRouteController } from "./topic-routes.ts";
 import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -35,31 +38,7 @@ const TELEGRAM_CONTACT_NOTICE = "please contact The Hooman over mesh.tell for no
 
 const MAX_TRANSCRIPTION_ERROR_DETAIL = 160;
 const TRANSCRIPTION_AUDIO_FILENAME = "voice.ogg";
-const TRANSCRIPTION_CREDIT_NOTIFICATION_WINDOW_MS = 12 * 60 * 60 * 1000;
-
-const OUT_OF_CREDITS_CODES = new Set([
-	"billing_hard_limit_reached",
-	"credits_depleted",
-	"credits_exhausted",
-	"insufficient_credits",
-	"insufficient_funds",
-	"insufficient_quota",
-	"out_of_credits",
-	"out_of_funds",
-	"quota_depleted",
-	"quota_exceeded",
-	"quota_exhausted",
-]);
-
-const OUT_OF_CREDITS_PATTERNS = [
-	/\binsufficient(?:\s+(?:account|available|current))?\s+(?:credits?|funds?|quota)\b/i,
-	/\b(?:credits?|funds?|quota)\s+(?:is|are|has\s+been)?\s*(?:depleted|exhausted|insufficient)\b/i,
-	/\bout\s+of\s+(?:credits?|funds?|quota)\b/i,
-	/\b(?:credits?|funds?|quota)\s+(?:depleted|exhausted|exceeded)\b/i,
-	/\b(?:billing\s+)?hard\s+limit\s+(?:exceeded|reached)\b/i,
-	/\byou\s+exceeded\s+your\s+(?:current\s+)?quota\b/i,
-	/\bnot\s+enough\s+(?:credits?|funds?)\b/i,
-];
+const CREDIT_NOTIFICATION_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 type TranscriptionProviderFactory = (apiKey: string) => TranscriptionProvider;
 
@@ -94,54 +73,9 @@ interface HttpTranscriptionProviderOptions {
 	readonly stream?: boolean;
 }
 
-interface ProviderErrorPayload {
-	readonly code?: unknown;
-	readonly error?: unknown;
-	readonly message?: unknown;
-}
-
-interface ProviderErrorDetails {
-	readonly code?: string;
-	readonly outOfCredits: boolean;
-}
-
 function boundedText(value: string): string {
 	const compact = value.replace(/\s+/g, " ").trim();
 	return compact.length > MAX_TRANSCRIPTION_ERROR_DETAIL ? compact.slice(0, MAX_TRANSCRIPTION_ERROR_DETAIL) + "…" : compact;
-}
-
-function stringValue(value: unknown): string | undefined {
-	if (typeof value === "string") return value.trim() || undefined;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	return undefined;
-}
-
-function isOutOfCreditsCode(value: string | undefined): boolean {
-	if (!value) return false;
-	const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-	return OUT_OF_CREDITS_CODES.has(normalized);
-}
-
-function isOutOfCreditsText(value: string): boolean {
-	const normalized = value.replace(/[_-]+/g, " ").replace(/\s+/g, " ");
-	return OUT_OF_CREDITS_PATTERNS.some((pattern) => pattern.test(normalized));
-}
-
-function providerErrorDetails(body: string): ProviderErrorDetails {
-	if (!body) return { outOfCredits: false };
-	let parsed: unknown;
-	try { parsed = JSON.parse(body); } catch {
-		return { outOfCredits: isOutOfCreditsText(body) };
-	}
-	const root = parsed && typeof parsed === "object" ? parsed as ProviderErrorPayload : undefined;
-	const nested = root?.error && typeof root.error === "object" ? root.error as ProviderErrorPayload : undefined;
-	const rawCode = stringValue(nested?.code) ?? stringValue(root?.code);
-	const code = rawCode && /^[A-Za-z0-9_.-]{1,64}$/.test(rawCode) ? rawCode : undefined;
-	const messages = [stringValue(nested?.message), stringValue(root?.message), body].filter((message): message is string => message !== undefined);
-	return {
-		code,
-		outOfCredits: isOutOfCreditsCode(rawCode) || messages.some(isOutOfCreditsText),
-	};
 }
 
 export async function transcriptionResponseError(response: Response): Promise<TranscriptionProviderError> {
@@ -304,6 +238,10 @@ export class Bridge {
 	/** Agents already reminded during the current activation (avoid spam). Cleared on toggle. */
 	private readonly afkNotified = new Set<string>();
 	private readonly transcriptionCreditNotifiedAt = new Map<string, number>();
+	/** Voice mode (bridge-side TTS): when on, agent tells are also spoken. Persisted like the contact reminder. */
+	private voice: { on: boolean; since: number } = { on: false, since: 0 };
+	private readonly tts: TtsProvider | null;
+	private ttsCreditNotifiedAt: number | null = null;
 	private readonly stateStore: BridgeStateStore;
 
 	constructor(private readonly cfg: Config) {
@@ -318,6 +256,11 @@ export class Bridge {
 		for (const [topicId, route] of state.topicAgents) this.topicAgent.set(topicId, route);
 		for (const [messageId, route] of state.legacySentMessages) this.legacyMsgToAgent.set(messageId, route);
 		this.afk = state.telegramContact;
+		this.voice = state.voice;
+		this.ttsCreditNotifiedAt = state.ttsCreditNotifiedAt;
+		this.tts = cfg.fishApiKey && cfg.fishVoiceId
+			? createFishTtsProvider({ apiKey: cfg.fishApiKey, voiceId: cfg.fishVoiceId })
+			: null;
 		for (const [provider, timestamp] of state.transcriptionCreditNotifications) this.transcriptionCreditNotifiedAt.set(provider, timestamp);
 		this.topicRoutes = new TopicRouteController({
 			api: {
@@ -344,6 +287,7 @@ export class Bridge {
 			onError: (chatId, messageIds, error) => console.warn(`[bridge] retention deleteMessages failed in chat ${chatId} for ${messageIds.length} message(s):`, error.message),
 		});
 		if (this.afk.on) console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")");
+		if (this.voice.on) console.log("[bridge] loaded voice mode: on" + (this.tts ? "" : " (TTS not configured)"));
 		console.log(`[bridge] loaded state: ${state.agentTopics.length} agent topics, ${this.retention.size() + this.legacyMsgToAgent.size} reaction routes, broadcast=${this.broadcastTopicId}`);
 	}
 
@@ -355,6 +299,8 @@ export class Bridge {
 			sentMessages: [...this.retention.entries()],
 			legacySentMessages: [...this.legacyMsgToAgent.entries()],
 			telegramContact: this.afk,
+			voice: this.voice,
+			ttsCreditNotifiedAt: this.ttsCreditNotifiedAt,
 			transcriptionCreditNotifications: [...this.transcriptionCreditNotifiedAt.entries()],
 		};
 	}
@@ -369,7 +315,7 @@ export class Bridge {
 		if (chatId == null) return;
 		const now = Date.now();
 		const lastNotifiedAt = this.transcriptionCreditNotifiedAt.get(provider.name);
-		if (lastNotifiedAt !== undefined && now - lastNotifiedAt < TRANSCRIPTION_CREDIT_NOTIFICATION_WINDOW_MS) return;
+		if (lastNotifiedAt !== undefined && now - lastNotifiedAt < CREDIT_NOTIFICATION_WINDOW_MS) return;
 		this.transcriptionCreditNotifiedAt.set(provider.name, now);
 		this.saveState();
 		const alert = `⚠️ ${provider.name} is out of credits — refill to restore voice transcription.`;
@@ -403,6 +349,29 @@ export class Bridge {
 		this.mesh.broadcast(TELEGRAM_CONTACT_NOTICE);
 		void ctx.reply("✅ Telegram contact reminder on. Agents directed to mesh.tell.").catch(() => {});
 		console.log("[bridge] Telegram contact reminder on (" + message + ")");
+	}
+
+	/** Voice-mode toggle from a typed or transcribed hooman message. Global pref, persisted like the contact reminder. */
+	private async handleVoiceToggle(action: VoiceToggleAction, ctx: Context): Promise<void> {
+		if (action === "status") {
+			const status = this.voice.on
+				? "🎙️ Voice mode on since " + new Date(this.voice.since).toLocaleString() + ". Agent messages arrive as text first, then a spoken version."
+				: "🔇 Voice mode off — text only.";
+			void ctx.reply(status).catch(() => {});
+			return;
+		}
+		if (action === "on") {
+			this.voice = { on: true, since: Date.now() };
+			this.saveState();
+			const warning = this.tts ? "" : "\n⚠️ TTS not configured yet — set FISH_AUDIO_API_KEY and FISH_AUDIO_VOICE_ID in the bridge config.";
+			void ctx.reply("✅ Voice mode on — agents will speak. Text still arrives first, voice follows." + warning).catch(() => {});
+			console.log("[bridge] voice mode on");
+			return;
+		}
+		this.voice = { on: false, since: 0 };
+		this.saveState();
+		void ctx.reply("✅ Text only.").catch(() => {});
+		console.log("[bridge] voice mode off");
 	}
 
 	async start(): Promise<void> {
@@ -562,6 +531,7 @@ export class Bridge {
 					if (!this.forumMode) { this.replyTargets.set(sent.message_id, { clientId: t.fromClientId, meshId: t.fromMeshId, nickname: t.nickname }); this.trimTargets(); }
 				}
 			}
+			if (this.voice.on && t.text && t.text.trim()) await this.sendVoiceFor(chatId, t.text, thread, t);
 			await this.uploadAttachment(chatId, t, topic);
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
 		// Send the same routing guidance once per agent during each activation.
@@ -584,6 +554,39 @@ export class Bridge {
 		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
 	}
 
+
+	/** Synthesize and send a spoken version of an agent tell. Runs after the text path; never blocks it. */
+	private async sendVoiceFor(chatId: number, rawText: string, thread: Record<string, unknown>, t: InboundTell): Promise<void> {
+		if (!this.tts) {
+			console.warn("[bridge] voice mode on but TTS not configured — skipping voice");
+			return;
+		}
+		const text = voiceTextFor(rawText);
+		if (!text) return;
+		try {
+			const audio = await this.tts.synthesize(text);
+			const sent = await this.bot.api.sendAudio(chatId, new InputFile(Buffer.from(audio.bytes), `voice-${Date.now()}.${audio.extension}`), {
+				...thread,
+				title: t.nickname + " · voice",
+				performer: this.tts.name,
+			});
+			this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, rawText);
+		} catch (error) {
+			if (error instanceof TtsProviderError && error.outOfCredits) void this.notifyTtsOutOfCredits(chatId, thread);
+			console.error("[bridge] voice send failed:", (error as Error).message);
+		}
+	}
+
+	/** One proactive alert per credit window when the TTS provider runs out of credits. */
+	private async notifyTtsOutOfCredits(chatId: number, thread: Record<string, unknown>): Promise<void> {
+		const now = Date.now();
+		if (this.ttsCreditNotifiedAt !== null && now - this.ttsCreditNotifiedAt < CREDIT_NOTIFICATION_WINDOW_MS) return;
+		this.ttsCreditNotifiedAt = now;
+		this.saveState();
+		await this.sendText(chatId, "⚠️ " + (this.tts?.name ?? "TTS provider") + " is out of credits — voice messages paused until refilled. Text delivery is unaffected.", thread).catch((error: unknown) => {
+			console.error("[bridge] TTS credit notification failed:", (error as Error).message);
+		});
+	}
 
 	/**
 	 * Legacy ids have no chat authority. Their retirement is durably committed
@@ -634,18 +637,24 @@ export class Bridge {
 
 		// Turn whatever the hooman sent (text / voice / photo / document) into the outbound text.
 		let text: string | null = null;
+		let wasVoice = false;
 		try {
 			if (typeof msg.text === "string") text = msg.text;
 			else if (msg.voice) {
 				const thread = this.forumMode && typeof m.message_thread_id === "number" ? { message_thread_id: m.message_thread_id } : {};
 				const t = await this.transcribeVoice(msg.voice.file_id, thread);
-				void ctx.reply("🎤 transcribed: " + t).catch(() => {});
+				wasVoice = true;
 				text = t;
 			}
 			else if (msg.photo && msg.photo.length) text = await this.inboundFileText(msg.photo[msg.photo.length - 1].file_id, "photo", msg.caption);
 			else if (msg.document) text = await this.inboundFileText(msg.document.file_id, "document", msg.caption, msg.document.file_name);
 		} catch (e) { console.error("[bridge] inbound media failed:", (e as Error).message); return; }
 		if (!text) return;
+
+		// Voice-mode toggle — typed or SPOKEN ("speak to me" / "text only" voice notes transcribe into these).
+		const toggle = parseVoiceToggle(text);
+		if (toggle) { await this.handleVoiceToggle(toggle, ctx); return; }
+		if (wasVoice) void ctx.reply("🎤 transcribed: " + text).catch(() => {});
 
 		// /agents — post a tappable live roster (tap a button → opens that agent's topic).
 		if (text.startsWith("/agents") && (text.length === 7 || text[7] === " " || text[7] === "@")) {

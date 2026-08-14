@@ -12,6 +12,9 @@ export interface Config {
 	channel: string;
 	hoomanNickname: string;
 	hoomanMeshId: string;
+	/** fish.audio TTS credentials — optional; voice mode degrades to text-only when absent. */
+	fishApiKey?: string;
+	fishVoiceId?: string;
 }
 
 /** Load KEY=VALUE lines from the out-of-repo config file into process.env (without overriding real env). */
@@ -41,6 +44,8 @@ export function loadConfig(): Config {
 		channel: process.env.MESH_CHANNEL ?? "hooman",
 		hoomanNickname: process.env.HOOMAN_NICKNAME ?? "The Hooman",
 		hoomanMeshId,
+		fishApiKey: process.env.FISH_AUDIO_API_KEY?.trim() || undefined,
+		fishVoiceId: process.env.FISH_AUDIO_VOICE_ID?.trim() || undefined,
 	};
 }
 
