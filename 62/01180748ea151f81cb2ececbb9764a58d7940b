@@ -1,0 +1,21 @@
+packages/telegram-coordinator/extensions/telegram-coordinator.ts
+  s_5bd1433e6daac3::t_7d3234cf8e56ed 119-120
+packages/telegram-coordinator/src/config.ts
+  s_5bd1433e6daac3::t_598d5920dbf2f1 13,35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "6201180748ea151f81cb2ececbb9764a58d7940b",
+  "prompts": {},
+  "sessions": {
+    "s_5bd1433e6daac3": {
+      "agent_id": {
+        "tool": "Volker Stargate Newcomb",
+        "id": "01a00263-b314-7338-a013-ec00989776ba",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
