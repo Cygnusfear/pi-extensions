@@ -1,0 +1,59 @@
+packages/telegram-coordinator/tsconfig.json
+  s_5bd1433e6daac3::t_384147b2ad725a 1-15
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_5bd1433e6daac3::t_8bb26a8a151b51 13,15
+  s_5bd1433e6daac3::t_6b590cc4a048b3 16-20
+packages/shared/src/provider-reset.ts
+  s_436dfca88435a4::t_18aab6ba477085 16-22,26-28,36-48,51-54
+  s_436dfca88435a4::t_830f1549c224f5 1-7,29-35,49-50,55-81
+  s_436dfca88435a4::t_0bfcaacfc73b4c 8-15,23-25
+packages/shared/src/transcription.ts
+  s_5bd1433e6daac3::t_71c5a8989e9280 1-116,118-166
+  s_5bd1433e6daac3::t_dcf33040d638a2 117
+packages/telegram-coordinator/extensions/telegram-coordinator.ts
+  s_5bd1433e6daac3::t_2ece2fbf9c1981 21-29,63,134,136
+  s_5bd1433e6daac3::t_b6a9a673a20e29 1-20,30-62,64-133,135,137-138
+packages/telegram-coordinator/package.json
+  s_5bd1433e6daac3::t_46ad8acb68d886 1-17
+packages/telegram-coordinator/README.md
+  s_5bd1433e6daac3::t_f3aee1c263489d 1-20
+packages/shared/src/provider-limits.ts
+  s_436dfca88435a4::t_fb0e5dc7c094a0 10
+  s_436dfca88435a4::t_db3beb73d39bf4 13-19
+  s_436dfca88435a4::t_fc9b2dd204e185 28,44,60-61
+  s_436dfca88435a4::t_8fc245807d4024 43
+  s_436dfca88435a4::t_7917937f283f2c 20-27,29-30,33,36-42,49,56-59,62
+  s_436dfca88435a4::t_97e1ca320cdb32 3-9,11-12,67
+  s_436dfca88435a4::t_1fe5e6a43e8505 31-32,34-35,45-48,50-55,63-66
+packages/telegram-coordinator/src/config.ts
+  s_5bd1433e6daac3::t_245ace20c87f93 1-60
+packages/telegram-coordinator/SYSTEM.md
+  s_5bd1433e6daac3::t_28616c2b8ccd9e 1-22
+packages/shared/package.json
+  s_5bd1433e6daac3::t_93d28fd721d8f9 18-19
+  s_5bd1433e6daac3::t_0330c190b4df91 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8393289fffd7dba41c7b34f97f7294a5e7665517",
+  "prompts": {},
+  "sessions": {
+    "s_436dfca88435a4": {
+      "agent_id": {
+        "tool": "Paula Parsec Aderin-Pocock",
+        "id": "019fdbdb-fc48-740c-a798-525b49dc7d95",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_5bd1433e6daac3": {
+      "agent_id": {
+        "tool": "Volker Stargate Newcomb",
+        "id": "01a00263-b314-7338-a013-ec00989776ba",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
