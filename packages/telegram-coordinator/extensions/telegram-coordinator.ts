@@ -1,5 +1,5 @@
 /**
- * telegram-coordinator — Ada, the hooman's calling agent.
+ * telegram-coordinator — Valencia, the hooman's calling agent.
  *
  * This extension turns a DEDICATED pi session into a Telegram voice loop:
  *   inbound:  voice note → Whisper transcription (shared chain) → session input
@@ -21,12 +21,12 @@ import { loadCoordinatorConfig, persistChatId, type CoordinatorConfig } from "..
 import { appendFileSync } from "node:fs";
 
 /** Append-only service log — the TUI pane is not a reliable console surface. */
-function adaLog(line: string): void {
+function valLog(line: string): void {
 	try {
-		appendFileSync("/tmp/ada-extension.log", new Date().toISOString() + " " + line + "\n");
+		appendFileSync("/tmp/valencia-extension.log", new Date().toISOString() + " " + line + "\n");
 	} catch {}
 }
-adaLog("module loaded");
+valLog("module loaded");
 
 const TG_MAX = 4000;
 
@@ -60,7 +60,7 @@ function chunkReply(text: string): string[] {
 }
 
 export default async function telegramCoordinator(pi: ExtensionAPI): Promise<void> {
-	adaLog("factory start");
+	valLog("factory start");
 	const cfg = loadCoordinatorConfig();
 	const bot = new Bot(cfg.botToken);
 	const tts = cfg.fishApiKey ? createFishTtsProvider({ apiKey: cfg.fishApiKey }) : null;
@@ -95,7 +95,7 @@ export default async function telegramCoordinator(pi: ExtensionAPI): Promise<voi
 				pendingReply = true;
 				await pi.sendUserMessage(transcript);
 			} catch (error) {
-				console.error("[ada] inbound voice failed:", (error as Error).message);
+				console.error("[valencia] inbound voice failed:", (error as Error).message);
 			}
 			return;
 		}
@@ -111,7 +111,7 @@ export default async function telegramCoordinator(pi: ExtensionAPI): Promise<voi
 				await bot.api.sendMessage(cfg.chatId, chunk);
 			}
 		} catch (error) {
-			console.error("[ada] text reply failed:", (error as Error).message);
+			console.error("[valencia] text reply failed:", (error as Error).message);
 		}
 		if (tts) {
 			try {
@@ -120,19 +120,19 @@ export default async function telegramCoordinator(pi: ExtensionAPI): Promise<voi
 					const audio = await tts.synthesize(speech, cfg.fishVoiceIdFemale);
 					await bot.api.sendAudio(
 						cfg.chatId,
-						new InputFile(Buffer.from(audio.bytes), "ada-" + Date.now() + "." + audio.extension),
-						{ title: "Ada", performer: tts.name },
+						new InputFile(Buffer.from(audio.bytes), "valencia-" + Date.now() + "." + audio.extension),
+						{ title: "Valencia", performer: tts.name },
 					);
 				}
 			} catch (error) {
-				console.error("[ada] voice reply failed:", (error as Error).message);
+				console.error("[valencia] voice reply failed:", (error as Error).message);
 			}
 		}
 	});
 
 	void bot
-		.start({ allowed_updates: ["message"], onStart: (info) => { console.log("[ada] @" + info.username + " polling"); adaLog("polling as @" + info.username); } })
+		.start({ allowed_updates: ["message"], onStart: (info) => { console.log("[valencia] @" + info.username + " polling"); valLog("polling as @" + info.username); } })
 		.catch((error: unknown) => {
-			console.error("[ada] bot loop failed:", (error as Error).message); adaLog("bot loop failed: " + (error as Error).message);
+			console.error("[valencia] bot loop failed:", (error as Error).message); valLog("bot loop failed: " + (error as Error).message);
 		});
 }

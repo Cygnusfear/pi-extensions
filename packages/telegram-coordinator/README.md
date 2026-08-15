@@ -1,4 +1,4 @@
-# telegram-coordinator — Ada
+# telegram-coordinator — Valencia
 
 The hooman's calling agent: a dedicated pi session whose extension gives it a
 Telegram voice loop. Voice notes in (Whisper, shared transcription chain),
@@ -17,4 +17,4 @@ female-voiced speech out (fish.audio, shared TTS module).
    independent of agent turns.
 
 Source: `extensions/telegram-coordinator.ts` (ears + mouth), `src/config.ts`
-(config), SYSTEM.md (Ada's role).
+(config), SYSTEM.md (Valencia's role).
