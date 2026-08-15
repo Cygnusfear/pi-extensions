@@ -14,6 +14,21 @@ that talks to the same per-machine mesh sidecar (`~/.pi/mesh.sock`) every agent 
   `mesh_tell` to *that specific agent*. A **plain** (non-reply) message → broadcast to
   the shared mesh channel.
 
+## Voice companions
+
+Telegram TTS has two channels:
+
+- `text` is the lossless on-screen message. It may contain exact commits, IDs,
+  URLs, paths, commands, tables, and diagnostics.
+- `voice` is an optional separately authored spoken companion. It should state
+  the meaning of the technical detail in normal language rather than pronounce
+  opaque tokens. Fish expression tags belong here.
+
+If `voice` is absent, the bridge fallback keeps the visible message untouched
+and speaks a safe projection: code, opaque identifiers, URLs, paths, commands,
+tables, configuration keys, timestamps, phone numbers, credentials, and long machine values become phrases such as
+“the identifier is in the text.” An authored `voice` sidecar remains preferred.
+
 ## Design notes
 
 - Identity is a **fixed durable mesh id** + nickname `The Hooman` (post-v1a durable-id

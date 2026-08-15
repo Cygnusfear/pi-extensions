@@ -1570,6 +1570,7 @@ declare const mesh: {
    *  the attachment, not the media caption. `file`, `attachment`, and `path` are aliases;
    *  known image extensions become photos, while other files become documents. This is not
    *  a URL/blob/base64 or a private path from a remote worker; send one attachment per tell.
+   *  For Telegram speech, use `{ text: "visible technical message", voice: "spoken companion" }`: `text` remains lossless on screen; `voice` is a separately authored oral summary. Keep opaque IDs, hashes, URLs, paths, commands, and tables in `text`; in `voice`, describe their role rather than pronouncing them. If `voice` is absent, the bridge makes a safe speech fallback.
    *  A Mesh delivery receipt confirms bridge receipt only, not Telegram upload or Hooman visibility. */
   tell(params: { sessionId: string; message: unknown; waitFor?: string; timeoutMs?: number }): Promise<string>;
 

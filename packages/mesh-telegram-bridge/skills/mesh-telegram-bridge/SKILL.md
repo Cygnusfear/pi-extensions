@@ -155,15 +155,25 @@ When the Hooman toggles voice mode, the bridge synthesizes a spoken version of *
 
 **Delivery order:** text first (zero added latency), then the spoken MP3 seconds later. TTS failures never block text. Long texts are capped at 600 chars for speech (markdown stripped); the text channel always carries the full message.
 
-**Obligation — tag your speech.** When you send a tell to the Hooman, include a `voice` field: the spoken form of your message, written for the ear, with fish.audio expression tags (s2.1-pro bracket syntax):
+**Obligation — write a spoken companion.** When you send a tell to the Hooman, send both fields:
+
+- `text` is the **lossless screen channel**. Keep exact commits, UUIDs, hex values, paths, URLs, commands, tables, config keys, and diagnostics here when they help the Hooman act.
+- `voice` is the **separate spoken companion**. It is heard, never shown. Write a short natural summary with fish.audio expression tags; say what technical detail *means*, not its character sequence. Say “the deployed revision,” “the session identifier,” “the configuration setting,” “the command is in the text,” or “the link is in the text.” Do not read raw hex, UUIDs, hashes, URLs, file paths, shell commands, Markdown/table syntax, emoji, punctuation soup, timestamps, phone numbers, network/hardware identifiers, credentials, or opaque long numbers unless the Hooman specifically asks.
 
 - Emotions at clause starts: `[calm]` `[excited]` `[confident]` `[worried]` `[sarcastic]` `[curious]` `[grateful]` (64+ available).
-- Paralanguage: `(break)` short pause, `(long-break)`, `(breath)`, `(laugh)`, `(sigh)`; natural pause words "um", "uh".
-- Spoken-form numbers, dates, URLs (write "twelve forty" not "12:40"). Keep it under 600 chars; one or two tags per sentence, not more.
+- Paralanguage: `(break)` short pause, `(long-break)`, `(breath)`, `(laugh)`, `(sigh)`; natural pause words “um”, “uh”.
+- Use spoken-form numbers and dates. Keep `voice` under 600 chars; one or two tags per sentence, not more.
 
-Example: `voice: "[calm] The deploy finished, (break) all seventy tests green. [excited] We are live! (laugh)"`
+Example:
 
-The bridge synthesizes your `voice` field verbatim (tags intact) when present; without it, it falls back to the markdown-cleaned text. The text channel keeps your normal markdown — the `voice` field is heard, never shown.
+```ts
+{
+  text: "Landed 26d5ce57. Set FISH_AUDIO_VOICE_ID in packages/mesh-telegram-bridge/src/config.ts.",
+  voice: "[confident] The Telegram voice change landed. (break) The revision and configuration details are in the text.",
+}
+```
+
+The bridge sends `text` first and synthesizes the `voice` sidecar when present. If an agent omits `voice`, the bridge fallback preserves the visible text unchanged but replaces hostile technical tokens with spoken role phrases. That safety net is not a substitute for an authored oral summary.
 
 **Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY` and one `FISH_AUDIO_VOICE_ID` in `~/.config/mesh-telegram-bridge/config.env`. Every Telegram TTS reply uses that same explicit model; agent nicknames and gender do not affect voice selection. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
 

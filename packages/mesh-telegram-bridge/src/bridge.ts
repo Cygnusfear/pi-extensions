@@ -12,7 +12,7 @@ import {
 import { blobBytes, telegramReactionEmoji } from "./telegram-values.ts";
 import { isOutOfCreditsCode, isOutOfCreditsText, providerErrorDetails } from "@pi-extensions/shared/provider-errors";
 import { parseVoiceToggle, type VoiceToggleAction } from "./voice-toggle.ts";
-import { createFishTtsProvider, voiceTextFor, TtsProviderError, type TtsProvider } from "@pi-extensions/shared/tts";
+import { createFishTtsProvider, fallbackVoiceTextFor, voiceTextFor, TtsProviderError, type TtsProvider } from "@pi-extensions/shared/tts";
 import { transcribeWithFallback, availableTranscriptionProviders, TranscriptionProviderError } from "@pi-extensions/shared/transcription";
 import type { TranscriptionProvider, TranscriptionFallbackHooks } from "@pi-extensions/shared/transcription";
 // Re-exported for transcription.test.ts (imports the tested surface from bridge.ts).
@@ -415,9 +415,8 @@ export class Bridge {
 			console.warn("[bridge] no global voice id configured — skipping voice");
 			return;
 		}
-		// Agents obliged to tag their speech (fish tags) put it in the voice field;
-		// the markdown-cleaned text remains the fallback.
-		const text = voiceTextFor(t.voice ?? rawText);
+		// An authored voice sidecar keeps its Fish tags; raw visible text takes the bridge fallback.
+		const text = t.voice ? voiceTextFor(t.voice) : fallbackVoiceTextFor(rawText);
 		if (!text) return;
 		try {
 			const audio = await this.tts.synthesize(text, voiceId);
