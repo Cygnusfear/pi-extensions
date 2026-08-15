@@ -18,7 +18,6 @@ import type { TranscriptionProvider, TranscriptionFallbackHooks } from "@pi-exte
 // Re-exported for transcription.test.ts (imports the tested surface from bridge.ts).
 export { TranscriptionProviderError, transcriptionResponseError, transcribeWithFallback } from "@pi-extensions/shared/transcription";
 export type { TranscriptionProvider, TranscriptionFallbackHooks } from "@pi-extensions/shared/transcription";
-import { classifyNicknameVoice } from "@pi-extensions/shared/session-nickname";
 import { TopicRouteController } from "./topic-routes.ts";
 import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -411,9 +410,9 @@ export class Bridge {
 			console.warn("[bridge] voice mode on but TTS not configured — skipping voice");
 			return;
 		}
-		const voiceId = this.voiceIdFor(t.nickname);
+		const voiceId = this.cfg.fishVoiceId;
 		if (!voiceId) {
-			console.warn("[bridge] no voice id configured for " + t.nickname + " — skipping voice");
+			console.warn("[bridge] no global voice id configured — skipping voice");
 			return;
 		}
 		// Agents obliged to tag their speech (fish tags) put it in the voice field;
@@ -432,12 +431,6 @@ export class Bridge {
 			if (error instanceof TtsProviderError && error.outOfCredits) void this.notifyTtsOutOfCredits(chatId, thread);
 			console.error("[bridge] voice send failed:", (error as Error).message);
 		}
-	}
-
-	/** Per-agent voice selection: the nickname generator classifies first names; female names get the female voice, everyone else the male (Herzog) default. */
-	private voiceIdFor(nickname: string): string | undefined {
-		if (classifyNicknameVoice(nickname) === "female" && this.cfg.fishVoiceIdFemale) return this.cfg.fishVoiceIdFemale;
-		return this.cfg.fishVoiceIdMale;
 	}
 
 	/** One proactive alert per credit window when the TTS provider runs out of credits. */

@@ -165,7 +165,7 @@ Example: `voice: "[calm] The deploy finished, (break) all seventy tests green. [
 
 The bridge synthesizes your `voice` field verbatim (tags intact) when present; without it, it falls back to the markdown-cleaned text. The text channel keeps your normal markdown — the `voice` field is heard, never shown.
 
-**Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY`, `FISH_AUDIO_VOICE_ID_MALE` (default, Herzog), `FISH_AUDIO_VOICE_ID_FEMALE`, and `FISH_AUDIO_FEMALE_AGENTS` (comma-separated nicknames that speak with the female voice) in `~/.config/mesh-telegram-bridge/config.env`. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
+**Provider:** fish.audio (`s2.1-pro`), configured via `FISH_AUDIO_API_KEY` and one `FISH_AUDIO_VOICE_ID` in `~/.config/mesh-telegram-bridge/config.env`. Every Telegram TTS reply uses that same explicit model; agent nicknames and gender do not affect voice selection. MP3 is sent as `sendAudio`; Telegram voice notes (OGG/opus) would need a transcode step. Out-of-credits alerts the Hooman once per 12h window and voice pauses until refilled.
 
 ---
 

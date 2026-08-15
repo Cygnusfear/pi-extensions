@@ -8,7 +8,7 @@ female-voiced speech out (fish.audio, shared TTS module).
 
 1. Config: `~/.config/telegram-coordinator/config.env` (mode 600) with
    `TELEGRAM_BOT_TOKEN` and `FISH_AUDIO_API_KEY` (+ optional
-   `FISH_AUDIO_VOICE_ID_FEMALE`). `TELEGRAM_CHAT_ID` is auto-persisted from
+   `FISH_AUDIO_VOICE_ID`). `TELEGRAM_CHAT_ID` is auto-persisted from
    the first inbound message.
 2. Launch a dedicated pi session in a persistent pane (pi is TUI-first — "use
    tmux"): `pi --extension @pi-extensions/telegram-coordinator` with this

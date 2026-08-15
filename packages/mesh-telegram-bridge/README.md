@@ -33,6 +33,8 @@ HOOMAN_MESH_ID=...            # fixed UUID (pinned once)
 MESH_CHANNEL=hooman
 HOOMAN_NICKNAME="The Hooman"
 TELEGRAM_CHAT_ID=...          # auto-captured on first message, persisted here
+FISH_AUDIO_API_KEY=...        # enables Fish Audio TTS
+FISH_AUDIO_VOICE_ID=...       # one global Fish model for every Telegram TTS reply
 ```
 
 ## Run

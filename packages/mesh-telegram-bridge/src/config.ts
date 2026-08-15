@@ -14,10 +14,8 @@ export interface Config {
 	hoomanMeshId: string;
 	/** fish.audio TTS credentials — optional; voice mode degrades to text-only when absent. */
 	fishApiKey?: string;
-	/** Male (Herzog) voice model id — the default for agents not in the female set. */
-	fishVoiceIdMale?: string;
-fishVoiceIdFemale?: string;
-	/** Lowercased agent nicknames that speak with the female voice. */
+	/** Fish Audio model used by every Telegram TTS response. */
+	fishVoiceId?: string;
 }
 
 /** Load KEY=VALUE lines from the out-of-repo config file into process.env (without overriding real env). */
@@ -34,23 +32,27 @@ function loadEnvFile(): void {
 	}
 }
 
-export function loadConfig(): Config {
-	loadEnvFile();
-	const botToken = process.env.TELEGRAM_BOT_TOKEN;
+/** Parse the transport configuration after its file has been loaded. Kept pure for configuration-contract tests. */
+export function parseConfig(env: NodeJS.ProcessEnv): Config {
+	const botToken = env.TELEGRAM_BOT_TOKEN;
 	if (!botToken) throw new Error(`TELEGRAM_BOT_TOKEN missing (set it in ${CONFIG_PATH})`);
-	const hoomanMeshId = process.env.HOOMAN_MESH_ID;
+	const hoomanMeshId = env.HOOMAN_MESH_ID;
 	if (!hoomanMeshId) throw new Error(`HOOMAN_MESH_ID missing (set it in ${CONFIG_PATH})`);
-	const chatRaw = process.env.TELEGRAM_CHAT_ID;
+	const chatRaw = env.TELEGRAM_CHAT_ID;
 	return {
 		botToken,
 		chatId: chatRaw && chatRaw.trim() ? Number(chatRaw) : null,
-		channel: process.env.MESH_CHANNEL ?? "hooman",
-		hoomanNickname: process.env.HOOMAN_NICKNAME ?? "The Hooman",
+		channel: env.MESH_CHANNEL ?? "hooman",
+		hoomanNickname: env.HOOMAN_NICKNAME ?? "The Hooman",
 		hoomanMeshId,
-		fishApiKey: process.env.FISH_AUDIO_API_KEY?.trim() || undefined,
-		fishVoiceIdMale: process.env.FISH_AUDIO_VOICE_ID_MALE?.trim() || undefined,
-		fishVoiceIdFemale: process.env.FISH_AUDIO_VOICE_ID_FEMALE?.trim() || undefined,
+		fishApiKey: env.FISH_AUDIO_API_KEY?.trim() || undefined,
+		fishVoiceId: env.FISH_AUDIO_VOICE_ID?.trim() || undefined,
 	};
+}
+
+export function loadConfig(): Config {
+	loadEnvFile();
+	return parseConfig(process.env);
 }
 
 /** Persist the captured chat id back into the config file so it survives restarts. */

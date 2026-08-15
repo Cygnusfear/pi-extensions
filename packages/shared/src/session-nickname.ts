@@ -664,40 +664,6 @@ function fnv1a32(input: string): number {
 	return hash >>> 0;
 }
 
-/**
- * First-name tokens that classify as female — derived from the real
- * astronomers the FIRST_NAMES pool was extracted from (e.g. Vera Rubin,
- * Jocelyn Bell Burnell, Andrea Ghez). Source of truth for voice selection:
- * the bridge speaks the female fish.audio voice for these names, the male
- * (Herzog) default otherwise.
- */
-export const FEMALE_FIRST_NAMES: readonly string[] = [
-	"Alessandra", "Allison", "Alycia", "Alyssa", "Amina", "Andrea", "Anna", "Annie",
-	"Antonia", "Aomawa", "Beatrice", "Beth", "Brenna", "Caroline", "Carolyn",
-	"Cecilia", "Chiara", "Claire", "Deborah", "Debra", "Dorrit", "Duília",
-	"Eleanor", "Emily", "Feryal", "Fran", "Gabriela", "Heidi", "Helen",
-	"Henrietta", "Jackie", "Jane", "Janna", "Jedidah", "Jill", "Joan",
-	"Jocelyn", "Katherine", "Kathryn", "Katie", "Kirsten", "Lia", "Lisa",
-	"Lucianne", "Lucie", "Lucy", "Lynne", "Mae", "Maggie", "Malena", "Marcia",
-	"Margaret", "Maria", "Martha", "Megan", "Mercedes", "Michele", "Monica",
-	"Nabila", "Nadia", "Nancy", "Natalie", "Nergis", "Neta", "Paris", "Paula",
-	"Peggy", "Priyamvada", "Raisa", "Rebecca", "Renata", "Renu", "Renée",
-	"Risa", "Rohini", "Sandra", "Sara", "Smadar", "Vera", "Vicky", "Vivienne",
-	"Wendy", "Williamina",
-];
-
-const FEMALE_FIRST_NAME_SET = new Set(FEMALE_FIRST_NAMES);
-
-/**
- * Classify a generated nickname for voice selection: female if its first
- * token is in FEMALE_FIRST_NAMES, male otherwise. Works for triple names
- * AND the ~5% single-real-astronomer easter-egg drops.
- */
-export function classifyNicknameVoice(nickname: string): "female" | "male" {
-	const firstToken = nickname.trim().split(/\s+/)[0] ?? "";
-	return FEMALE_FIRST_NAME_SET.has(firstToken) ? "female" : "male";
-}
-
 // ── Triple-name derivation ───────────────────────────────────────────────────
 
 /**
