@@ -1,0 +1,32 @@
+packages/mesh-telegram-bridge/src/config.ts
+  s_5bd1433e6daac3::t_7cb2c9acdeda38 17-18
+  s_5bd1433e6daac3::t_34456db931d100 35-37,39,41,45-46,48-49,53-55
+  s_5bd1433e6daac3::t_f504eb01c222e8 56-57
+packages/mesh-telegram-bridge/skills/mesh-telegram-bridge/SKILL.md
+  s_5bd1433e6daac3::t_29882443d46d9a 168
+packages/mesh-telegram-bridge/src/config.test.ts
+  s_5bd1433e6daac3::t_bda7f4dd657953 11-12
+  s_5bd1433e6daac3::t_86a8ce54bc4c0a 1-10,13-19
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_5bd1433e6daac3::t_86a67e434a205d 413,415
+packages/mesh-telegram-bridge/README.md
+  s_5bd1433e6daac3::t_eb10ba82c6ff25 36-37
+packages/telegram-coordinator/README.md
+  s_5bd1433e6daac3::t_28b3aa2424d4cf 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "26d5ce57cf022539c7c5f72e6eb9fdd929d99994",
+  "prompts": {},
+  "sessions": {
+    "s_5bd1433e6daac3": {
+      "agent_id": {
+        "tool": "Volker Stargate Newcomb",
+        "id": "01a00263-b314-7338-a013-ec00989776ba",
+        "model": "openai-codex/gpt-5.6-terra"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
