@@ -1,0 +1,17 @@
+{
+  "name": "@pi-extensions/telegram-coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ada — the hooman's calling agent: a pi session with a Telegram voice loop (STT in, female-voiced TTS out)",
+  "dependencies": {
+    "grammy": "^1.30.0",
+    "@pi-extensions/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
