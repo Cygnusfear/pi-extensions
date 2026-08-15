@@ -116,8 +116,8 @@ export default async function telegramCoordinator(pi: ExtensionAPI): Promise<voi
 		if (tts) {
 			try {
 				const speech = voiceTextFor(reply);
-				if (speech && cfg.fishVoiceIdFemale) {
-					const audio = await tts.synthesize(speech, cfg.fishVoiceIdFemale);
+				if (speech && cfg.fishVoiceId) {
+					const audio = await tts.synthesize(speech, cfg.fishVoiceId);
 					await bot.api.sendAudio(
 						cfg.chatId,
 						new InputFile(Buffer.from(audio.bytes), "valencia-" + Date.now() + "." + audio.extension),

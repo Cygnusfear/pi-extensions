@@ -10,7 +10,7 @@ export interface CoordinatorConfig {
 	botToken: string;
 	chatId: number | null;
 	fishApiKey?: string;
-	fishVoiceIdFemale?: string;
+	fishVoiceId?: string;
 }
 
 function loadEnvFile(): void {
@@ -32,7 +32,7 @@ export function loadCoordinatorConfig(): CoordinatorConfig {
 		botToken,
 		chatId: process.env.TELEGRAM_CHAT_ID?.trim() ? Number(process.env.TELEGRAM_CHAT_ID) : null,
 		fishApiKey: process.env.FISH_AUDIO_API_KEY?.trim() || undefined,
-		fishVoiceIdFemale: process.env.FISH_AUDIO_VOICE_ID_FEMALE?.trim() || undefined,
+		fishVoiceId: process.env.FISH_AUDIO_VOICE_ID?.trim() || undefined,
 	};
 }
 
