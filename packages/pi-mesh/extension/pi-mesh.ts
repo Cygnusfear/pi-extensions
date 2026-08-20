@@ -1404,6 +1404,37 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const resolveTargetSessionId = (rawSessionId: string): string =>
     resolveDurableTarget(mesh.peers(), rawSessionId);
 
+  // /agent <name> <message> — message a mesh peer by name (native mesh command).
+  pi.registerCommand("agent", {
+    description: "Message a mesh peer by name",
+    getArgumentCompletions: (prefix: string): { value: string; label: string }[] | null => {
+      const names = mesh
+        .peers()
+        .map((p) => p.nickname ?? p.name)
+        .filter((n): n is string => !!n)
+        .filter((n) => n.toLowerCase().startsWith(prefix.toLowerCase()))
+        .map((n) => ({ value: n, label: n }));
+      return names.length > 0 ? names : null;
+    },
+    handler: async (args, ctx) => {
+      const trimmed = (args ?? "").trim();
+      const sp = trimmed.indexOf(" ");
+      const name = sp === -1 ? trimmed : trimmed.slice(0, sp).trim();
+      const message = sp === -1 ? "" : trimmed.slice(sp + 1).trim();
+      if (!name || !message) {
+        ctx.ui.notify("Usage: /agent <name> <message>", "error");
+        return;
+      }
+      try {
+        const target = resolveTargetSessionId(name);
+        mesh.tell(target, message);
+        ctx.ui.notify("Told " + name + ": " + message.slice(0, 60), "info");
+      } catch (e) {
+        ctx.ui.notify("mesh: " + (e instanceof Error ? e.message : String(e)), "error");
+      }
+    },
+  });
+
   // ── v1c revive-on-send (activator: supervisor-NOTIFIED, v1 = notify) ────────
   const selfLabel = (): string => getPeerLabel(mesh.self());
 
@@ -1910,7 +1941,20 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
     try {
       const name = pi.getSessionName?.() ?? undefined;
-      mesh.start(binPath, sessionId, ctx.cwd, { mode: "peer", scouting: true }, name);
+      // Cross-machine federation: PI_MESH_ENDPOINTS (comma-separated
+      // tcp/<host>:<port> Zenoh endpoints, e.g. the ex63 tailnet router)
+      // makes the sidecar connect to remote mesh peers beyond mDNS.
+      const endpoints = (process.env.PI_MESH_ENDPOINTS ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      mesh.start(
+        binPath,
+        sessionId,
+        ctx.cwd,
+        { mode: "peer", scouting: true, ...(endpoints.length > 0 ? { endpoints } : {}) },
+        name,
+      );
 
       // Resolve identity once sidecar is ready (tentatively — peer list may be empty)
       mesh.on("ready", () => {
