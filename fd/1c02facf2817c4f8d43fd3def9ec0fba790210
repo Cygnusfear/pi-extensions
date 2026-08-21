@@ -1,0 +1,25 @@
+packages/code-mode-runtime/test/runtime.test.ts
+  s_f0bf700fd7f493::t_902111cc00e4a3 249,270-271,283,299-315
+  s_f0bf700fd7f493::t_442c9f65bd3968 316-317,319-391
+  s_f0bf700fd7f493::t_d4fec5f88d1cc4 318
+packages/code-mode-runtime/package.json
+  s_f0bf700fd7f493::t_3e7eb7782af56e 3
+packages/code-mode-runtime/src/index.ts
+  s_f0bf700fd7f493::t_db19002e2cc74c 570,578
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "fd1c02facf2817c4f8d43fd3def9ec0fba790210",
+  "prompts": {},
+  "sessions": {
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
