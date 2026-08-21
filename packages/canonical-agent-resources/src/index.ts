@@ -401,12 +401,12 @@ export async function decodeCanonicalAgentAssets(
 		expectedManifest.delete(logicalPath);
 	}
 	unique(resourcePaths, "resource");
-	if (
-		resourcePaths.some(
-			(path, index) => index > 0 && resourcePaths[index - 1] >= path,
-		)
-	)
-		throw new Error("canonical_assets_invalid:resource_order");
+	let previousPath: string | undefined;
+	for (const path of resourcePaths) {
+		if (previousPath !== undefined && previousPath >= path)
+			throw new Error("canonical_assets_invalid:resource_order");
+		previousPath = path;
+	}
 	if (expectedManifest.size !== 0)
 		throw new Error("canonical_assets_missing_resource_manifest_entry");
 

@@ -1,6 +1,6 @@
 {
 	"name": "@pi-extensions/canonical-agent-resources",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
@@ -12,6 +12,7 @@
 		"node"
 	],
 	"scripts": {
+		"typecheck": "bunx --bun tsc --noEmit --strict --noUncheckedIndexedAccess --skipLibCheck --allowImportingTsExtensions --target esnext --module esnext --moduleResolution bundler src/index.ts node/compile.ts",
 		"test": "bun test test/compile.test.ts",
 		"test:upstream": "bun test test/upstream-integration.test.ts",
 		"test:all": "bun run test && bun run test:upstream"
