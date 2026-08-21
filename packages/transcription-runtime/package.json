@@ -1,0 +1,14 @@
+{
+	"name": "@pi-extensions/transcription-runtime",
+	"version": "0.0.3",
+	"type": "module",
+	"files": [
+		"src"
+	],
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test"
+	}
+}

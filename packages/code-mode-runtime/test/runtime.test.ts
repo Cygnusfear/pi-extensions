@@ -1,0 +1,677 @@
+import { describe, expect, test } from "bun:test";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, win32 } from "node:path";
+import {
+	boundCodeOutput,
+	buildBunHandsRunner,
+	CODE_MODE_LIMITS,
+	CodeExecutionEngine,
+	type CodeExecutionOutcomeV1,
+	decodeCodeSessionState,
+	decodeSandboxCapabilityGrant,
+	type SandboxCapabilityGrantV1,
+	type SandboxExecutionIntentV2,
+	type SandboxHost,
+} from "../src/index.ts";
+
+const state = { version: 1 as const, revision: 0, values: {} };
+const request = {
+	version: 1 as const,
+	thinking: "prove the operation",
+	code: `$.count = ($.count ?? 0) + 1; console.log($.count)`,
+};
+const noTools: SandboxCapabilityGrantV1 = {
+	version: 1,
+	tools: [],
+	environment: [],
+	egressOrigins: [],
+};
+function outcome(): CodeExecutionOutcomeV1 {
+	return {
+		version: 1,
+		operationId: "effect-request-0",
+		paramsDigest: "a".repeat(64),
+		output: "1",
+		state: { version: 1, revision: 1, values: { count: 1 } },
+		elapsedMs: 1,
+	};
+}
+function intent(
+	code: string,
+	grant: SandboxCapabilityGrantV1,
+	timeoutMs?: number,
+): SandboxExecutionIntentV2 {
+	return {
+		version: 2,
+		operationId: outcome().operationId,
+		paramsDigest: outcome().paramsDigest,
+		request: { ...request, code, ...(timeoutMs ? { timeoutMs } : {}) },
+		state,
+		grant,
+	};
+}
+async function runRunner(
+	value: SandboxExecutionIntentV2,
+	cwd: string,
+	environment: Record<string, string> = {},
+	preload?: string,
+) {
+	const command = [
+		process.execPath,
+		...(preload ? ["--preload", preload] : []),
+		"-e",
+		buildBunHandsRunner(value),
+	];
+	const proc = Bun.spawn(command, {
+		cwd,
+		env: { ...process.env, ...environment },
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, exitCode] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return { stdout, stderr, exitCode };
+}
+function decodeMarker(stdout: string): CodeExecutionOutcomeV1 {
+	const marker = stdout.trim().match(/^__KALI_CODE_MODE_V1__(.+)$/)?.[1];
+	if (!marker) throw new Error("outcome marker missing");
+	return JSON.parse(
+		Buffer.from(marker, "base64").toString(),
+	) as CodeExecutionOutcomeV1;
+}
+
+describe("CodeExecutionEngine", () => {
+	test("queries before execute and replays a terminal outcome", async () => {
+		let executes = 0;
+		const terminal = outcome();
+		const host: SandboxHost = {
+			query: async () => ({ kind: "terminal", outcome: terminal }),
+			execute: async () => {
+				executes++;
+				return terminal;
+			},
+		};
+		expect(
+			await new CodeExecutionEngine(host).execute(
+				terminal.operationId,
+				terminal.paramsDigest,
+				request,
+				state,
+				noTools,
+			),
+		).toEqual(terminal);
+		expect(executes).toBe(0);
+	});
+
+	test("rejects conflicts and invalid state advancement", async () => {
+		const conflict: SandboxHost = {
+			query: async () => ({ kind: "conflict" }),
+			execute: async () => outcome(),
+		};
+		await expect(
+			new CodeExecutionEngine(conflict).execute(
+				"x",
+				"b".repeat(64),
+				request,
+				state,
+				noTools,
+			),
+		).rejects.toThrow("code_operation_conflict");
+		const invalid: SandboxHost = {
+			query: async () => ({ kind: "unknown" }),
+			execute: async () => ({ ...outcome(), state }),
+		};
+		await expect(
+			new CodeExecutionEngine(invalid).execute(
+				outcome().operationId,
+				outcome().paramsDigest,
+				request,
+				state,
+				noTools,
+			),
+		).rejects.toThrow("invalid_code_execution_outcome_v1");
+	});
+
+	test("strictly rejects non-JSON state and malformed terminal replay", async () => {
+		expect(() =>
+			decodeCodeSessionState({
+				version: 1,
+				revision: 0,
+				values: { missing: undefined },
+			}),
+		).toThrow("invalid_code_session_state_v1");
+		expect(() =>
+			decodeCodeSessionState({
+				version: 1,
+				revision: 0,
+				values: { number: Number.NaN },
+			}),
+		).toThrow("invalid_code_session_state_v1");
+		const cyclic: Record<string, unknown> = {};
+		cyclic.self = cyclic;
+		expect(() =>
+			decodeCodeSessionState({ version: 1, revision: 0, values: cyclic }),
+		).toThrow("invalid_code_session_state_v1");
+		const malformed: SandboxHost = {
+			query: async () => ({
+				kind: "terminal",
+				outcome: { ...outcome(), elapsedMs: -1 },
+			}),
+			execute: async () => outcome(),
+		};
+		await expect(
+			new CodeExecutionEngine(malformed).execute(
+				outcome().operationId,
+				outcome().paramsDigest,
+				request,
+				state,
+				noTools,
+			),
+		).rejects.toThrow("invalid_code_execution_outcome_v1");
+	});
+
+	test("requires typed command authority and a fixed safe environment set", () => {
+		expect(() =>
+			decodeSandboxCapabilityGrant({
+				version: 1,
+				tools: ["Bash"],
+				environment: [],
+				egressOrigins: [],
+			}),
+		).toThrow("invalid_sandbox_capability_grant_v1");
+		expect(() =>
+			decodeSandboxCapabilityGrant({
+				version: 1,
+				tools: [],
+				environment: ["OPENAI_API_KEY"],
+				egressOrigins: [],
+			}),
+		).toThrow("invalid_sandbox_capability_grant_v1");
+		expect(
+			decodeSandboxCapabilityGrant({
+				version: 1,
+				tools: ["WebFetch"],
+				environment: [],
+				egressOrigins: ["http://localhost:8080"],
+			}).egressOrigins,
+		).toEqual(["http://localhost:8080"]);
+		expect(() =>
+			decodeSandboxCapabilityGrant({
+				version: 1,
+				tools: ["WebFetch"],
+				environment: [],
+				egressOrigins: ["ftp://example.com"],
+			}),
+		).toThrow("invalid_sandbox_capability_grant_v1");
+	});
+
+	test("bounds UTF-8 output including the truncation marker", () => {
+		const bounded = boundCodeOutput("🐉".repeat(CODE_MODE_LIMITS.outputBytes));
+		expect(new TextEncoder().encode(bounded).byteLength).toBeLessThanOrEqual(
+			CODE_MODE_LIMITS.outputBytes,
+		);
+		expect(bounded).toEndWith("[output truncated by code-mode runtime]");
+	});
+});
+
+test("runner containment rule accepts Windows descendants only", () => {
+	const root = "C:\\work\\repo";
+	const inside = (target: string): boolean => {
+		const relativePath = win32.relative(root, target);
+		return (
+			relativePath === "" ||
+			(relativePath !== ".." &&
+				!relativePath.startsWith(`..${win32.sep}`) &&
+				!win32.isAbsolute(relativePath))
+		);
+	};
+	expect(inside("C:\\work\\repo\\sub\\file.txt")).toBe(true);
+	expect(inside("C:\\work\\repo-other\\file.txt")).toBe(false);
+	expect(inside("D:\\work\\repo\\file.txt")).toBe(false);
+	const runner = buildBunHandsRunner(intent("console.log('ok')", noTools));
+	expect(runner).toContain(
+		'import { dirname, isAbsolute, relative, resolve, sep } from "node:path";',
+	);
+	expect(runner).toContain("!isAbsolute(rel)");
+});
+
+test("generated runner exposes only granted root-confined file tools", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-runtime-"));
+	const workspace = join(base, "workspace");
+	try {
+		await mkdir(workspace);
+		await mkdir(join(base, "outside-dir"));
+		await writeFile(join(base, "outside.txt"), "outside-readable");
+		await symlink(join(base, "outside.txt"), join(workspace, "escape.txt"));
+		await symlink(join(base, "outside-dir"), join(workspace, "escape-dir"));
+		const grant: SandboxCapabilityGrantV1 = {
+			version: 1,
+			tools: ["Read", "Write"],
+			environment: [],
+			egressOrigins: [],
+		};
+		const result = await runRunner(
+			intent(
+				`await Write({path:"fact.txt",content:"durable 🐉"});
+$.fact = await Read({path:"fact.txt"});
+try { await Read({path:"escape.txt"}); } catch { console.log("outside denied"); }
+try { await Write({path:"escape-dir/created/fact.txt",content:"escaped"}); } catch { console.log("write outside denied"); }
+try { $.constructor.constructor("return process")(); console.log("state escaped"); } catch { console.log("state denied"); }
+try { console.log.constructor("return process")(); console.log("console escaped"); } catch { console.log("console denied"); }
+console.log($.fact, typeof Bash, typeof process);`,
+				grant,
+			),
+			workspace,
+			{ SECRET_TOKEN: "must-not-leak" },
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		const decoded = decodeMarker(result.stdout);
+		expect(decoded.output).toBe(
+			"outside denied\nwrite outside denied\nstate denied\nconsole denied\ndurable 🐉 undefined undefined",
+		);
+		expect(decoded.output).not.toContain("outside-readable");
+		expect(decoded.output).not.toContain("must-not-leak");
+		expect(decoded.state.values).toEqual({ fact: "durable 🐉" });
+		expect(await readFile(join(workspace, "fact.txt"), "utf8")).toBe(
+			"durable 🐉",
+		);
+		await expect(
+			readFile(join(base, "outside-dir", "created", "fact.txt"), "utf8"),
+		).rejects.toThrow();
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("generated runner preserves the public file and command tool contract", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-contract-"));
+	const workspace = join(base, "workspace");
+	const adapter = join(base, "adapter.mjs");
+	const calls = join(base, "calls.jsonl");
+	try {
+		await mkdir(join(workspace, "sub"), { recursive: true });
+		await writeFile(join(workspace, "sub", "lines.txt"), "one\ntwo\nthree");
+		await writeFile(
+			adapter,
+			`import { appendFile } from "node:fs/promises";
+const request = JSON.parse(await Bun.stdin.text());
+await appendFile(${JSON.stringify(calls)}, JSON.stringify(request) + "\\n");
+const stdout = request.tool === "Glob" ? "alpha.txt\\nbeta.txt\\n" : request.tool === "rg" ? "match\\n" : request.tool === "fd" ? "found\\n" : "bash-output";
+process.stdout.write(JSON.stringify({ exitCode: 0, stdout, stderr: "", stdoutTruncated: false, stderrTruncated: false }));`,
+		);
+		const grant: SandboxCapabilityGrantV1 = {
+			version: 1,
+			tools: ["Read", "Write", "Edit", "Bash", "Glob", "rg", "fd", "sleep"],
+			environment: [],
+			egressOrigins: [],
+			commandAdapter: {
+				version: 1,
+				executable: process.execPath,
+				arguments: [adapter],
+			},
+		};
+		const result = await runRunner(
+			intent(
+				`const page = await Read({path:"lines.txt",cwd:"sub",offset:2,limit:1});
+const missing = await Read({path:"missing.txt",cwd:"sub",optional:true});
+const writeResult = await Write({path:"nested/fact.txt",cwd:"sub",content:"alpha"});
+const editMiss = await Edit({path:"nested/fact.txt",cwd:"sub",oldText:"beta",newText:"gamma"});
+const editHit = await Edit({path:"nested/fact.txt",cwd:"sub",oldText:"alpha",newText:"gamma"});
+const glob = await Glob({pattern:"*.txt",path:"sub"});
+const rgResult = await rg({args:"needle",cwd:"sub",follow:false});
+const fdResult = await fd({args:"-e txt",cwd:"sub"});
+const bash = await Bash({command:"echo safe",cwd:"sub",timeout:7});
+const sleepResult = await sleep(0);
+console.log(JSON.stringify({page,missing,writeIsUndefined:writeResult===undefined,editMiss,editHit,glob,rgResult,fdResult,bash,bashKeys:Object.keys(bash).sort(),sleepIsUndefined:sleepResult===undefined}));`,
+				grant,
+			),
+			workspace,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(JSON.parse(decodeMarker(result.stdout).output)).toEqual({
+			page: "two",
+			missing: null,
+			writeIsUndefined: true,
+			editMiss: { matched: false },
+			editHit: { matched: true },
+			glob: ["alpha.txt", "beta.txt"],
+			rgResult: "match\n",
+			fdResult: "found\n",
+			bash: { stdout: "bash-output", stderr: "", exitCode: 0 },
+			bashKeys: ["exitCode", "stderr", "stdout"],
+			sleepIsUndefined: true,
+		});
+		expect(
+			await readFile(join(workspace, "sub", "nested", "fact.txt"), "utf8"),
+		).toBe("gamma");
+		const adapterCalls = (await readFile(calls, "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(adapterCalls.map((call) => call.tool)).toEqual([
+			"Glob",
+			"rg",
+			"fd",
+			"Bash",
+		]);
+		expect(adapterCalls.map((call) => call.input)).toEqual([
+			{ pattern: "*.txt", path: "sub" },
+			{ args: "needle", cwd: "sub", follow: false },
+			{ args: "-e txt", cwd: "sub", follow: true },
+			{ command: "echo safe", cwd: "sub", timeout: 7 },
+		]);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("generated runner enforces one request-wide deadline and never publishes late success", async () => {
+	const workspace = await mkdtemp(join(tmpdir(), "code-mode-timeout-"));
+	try {
+		const result = await runRunner(
+			intent(
+				`await sleep(20); console.log("late success");`,
+				{ ...noTools, tools: ["sleep"] },
+				1,
+			),
+			workspace,
+		);
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toBe("code_execution_timed_out");
+		expect(result.stdout).not.toContain("__KALI_CODE_MODE_V1__");
+		expect(result.stdout).not.toContain("late success");
+	} finally {
+		await rm(workspace, { recursive: true, force: true });
+	}
+});
+
+test("generated runner denies ungranted egress and dynamic module authority", async () => {
+	const workspace = await mkdtemp(join(tmpdir(), "code-mode-egress-"));
+	try {
+		const result = await runRunner(
+			intent(
+				`try { await WebFetch({url:"https://example.com/private"}); } catch { console.log("egress denied"); }
+try { await import("node:fs"); } catch { console.log("import denied"); }`,
+				{ ...noTools, tools: ["WebFetch"] },
+			),
+			workspace,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe(
+			"egress denied\nimport denied",
+		);
+	} finally {
+		await rm(workspace, { recursive: true, force: true });
+	}
+});
+
+test("WebFetch preserves formats, per-call timeout, and string results", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-webfetch-contract-"));
+	const workspace = join(base, "workspace");
+	const preload = join(base, "fetch-preload.mjs");
+	const attempts = join(base, "fetch-attempts.txt");
+	const pageUrl = "https://allowed.example/page";
+	const slowUrl = "https://allowed.example/slow";
+	const okUrl = "https://allowed.example/ok";
+	const html =
+		"<h1>Title</h1><script>secret()</script><p>Hello <strong>world</strong></p>";
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			preload,
+			`import { appendFile } from "node:fs/promises";
+const attempts = ${JSON.stringify(attempts)};
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  await appendFile(attempts, url + "\\n");
+  if (url === ${JSON.stringify(slowUrl)}) return new Promise(() => {});
+  if (url === ${JSON.stringify(pageUrl)}) return new Response(${JSON.stringify(html)}, { status: 200 });
+  if (url === ${JSON.stringify(okUrl)}) return new Response("ok", { status: 200 });
+  return new Response("unexpected", { status: 500 });
+};`,
+		);
+		const result = await runRunner(
+			intent(
+				`const text = await WebFetch({url:${JSON.stringify(pageUrl)},format:"text",timeout:1});
+const markdown = await WebFetch({url:${JSON.stringify(pageUrl)},format:"markdown"});
+const html = await WebFetch({url:${JSON.stringify(pageUrl)},format:"html"});
+let timeoutCode; try { await WebFetch({url:${JSON.stringify(slowUrl)},timeout:0.01}); } catch (error) { timeoutCode = error.code; }
+const afterTimeout = await WebFetch({url:${JSON.stringify(okUrl)}});
+console.log(JSON.stringify({text,markdown,html,timeoutCode,afterTimeout}));`,
+				{
+					...noTools,
+					tools: ["WebFetch"],
+					egressOrigins: ["https://allowed.example"],
+				},
+			),
+			workspace,
+			{},
+			preload,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(JSON.parse(decodeMarker(result.stdout).output)).toEqual({
+			text: "Title Hello world",
+			markdown: "# Title\n\nHello **world**",
+			html,
+			timeoutCode: "fetch_timed_out",
+			afterTimeout: "ok",
+		});
+		expect(await readFile(attempts, "utf8")).toBe(
+			`${pageUrl}\n${pageUrl}\n${pageUrl}\n${slowUrl}\n${okUrl}\n`,
+		);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("generated runner rejects redirects before an ungranted destination request", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-redirect-"));
+	const workspace = join(base, "workspace");
+	const preload = join(base, "fetch-preload.mjs");
+	const attempts = join(base, "fetch-attempts.txt");
+	const allowedUrl = "https://allowed.example/start";
+	const destinationUrl = "https://unlisted.example/private";
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			preload,
+			`import { appendFile } from "node:fs/promises";
+const attempts = ${JSON.stringify(attempts)};
+const allowed = ${JSON.stringify(allowedUrl)};
+const destination = ${JSON.stringify(destinationUrl)};
+globalThis.fetch = async (input, init = {}) => {
+  const url = String(input);
+  await appendFile(attempts, url + "\\n");
+  if (url === allowed && init.redirect === "manual") {
+    return new Response("", { status: 302, headers: { location: destination } });
+  }
+  if (url === allowed) {
+    await appendFile(attempts, destination + "\\n");
+    return new Response("escaped", { status: 200 });
+  }
+  return new Response("unexpected", { status: 200 });
+};`,
+		);
+		const result = await runRunner(
+			intent(
+				`try { await WebFetch({url:${JSON.stringify(allowedUrl)}}); } catch { console.log("redirect denied"); }`,
+				{
+					...noTools,
+					tools: ["WebFetch"],
+					egressOrigins: ["https://allowed.example"],
+				},
+			),
+			workspace,
+			{},
+			preload,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe("redirect denied");
+		expect(await readFile(attempts, "utf8")).toBe(`${allowedUrl}\n`);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("redirect cancellation failure remains an egress denial without a second request", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-redirect-cancel-"));
+	const workspace = join(base, "workspace");
+	const preload = join(base, "fetch-preload.mjs");
+	const attempts = join(base, "fetch-attempts.txt");
+	const allowedUrl = "https://allowed.example/cancel-rejects";
+	const successUrl = "https://allowed.example/ok";
+	const destinationUrl = "https://unlisted.example/private";
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			preload,
+			`import { appendFile } from "node:fs/promises";
+const attempts = ${JSON.stringify(attempts)};
+const allowed = ${JSON.stringify(allowedUrl)};
+const success = ${JSON.stringify(successUrl)};
+const destination = ${JSON.stringify(destinationUrl)};
+globalThis.fetch = async (input, init = {}) => {
+  const url = String(input);
+  await appendFile(attempts, url + "\\n");
+  if (url === allowed && init.redirect === "manual") {
+    return {
+      status: 302,
+      type: "default",
+      headers: new Headers({ location: destination }),
+      body: { cancel: async () => { throw new Error("cancel refused"); } },
+    };
+  }
+  if (url === allowed) {
+    await appendFile(attempts, destination + "\\n");
+    return new Response("escaped", { status: 200 });
+  }
+  if (url === success) return new Response("ok", { status: 200 });
+  return new Response("unexpected", { status: 200 });
+};`,
+		);
+		const result = await runRunner(
+			intent(
+				`try { await WebFetch({url:${JSON.stringify(allowedUrl)}}); } catch (error) { console.log(error.code); }
+console.log(await WebFetch({url:${JSON.stringify(successUrl)}}));`,
+				{
+					...noTools,
+					tools: ["WebFetch"],
+					egressOrigins: ["https://allowed.example"],
+				},
+			),
+			workspace,
+			{},
+			preload,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe("egress_denied\nok");
+		expect(await readFile(attempts, "utf8")).toBe(
+			`${allowedUrl}\n${successUrl}\n`,
+		);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("fetch overflow cleanup does not poison a later allowed fetch", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-fetch-overflow-"));
+	const workspace = join(base, "workspace");
+	const preload = join(base, "fetch-preload.mjs");
+	const attempts = join(base, "fetch-attempts.txt");
+	const oversizedUrl = "https://allowed.example/oversized";
+	const successUrl = "https://allowed.example/ok";
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			preload,
+			`import { appendFile } from "node:fs/promises";
+const attempts = ${JSON.stringify(attempts)};
+const oversized = ${JSON.stringify(oversizedUrl)};
+const success = ${JSON.stringify(successUrl)};
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  await appendFile(attempts, url + "\\n");
+  if (url === oversized) {
+    return new Response("bounded", { status: 200, headers: { "content-length": "1048577" } });
+  }
+  if (url === success) return new Response("ok", { status: 200 });
+  return new Response("unexpected", { status: 200 });
+};`,
+		);
+		const result = await runRunner(
+			intent(
+				`try { await WebFetch({url:${JSON.stringify(oversizedUrl)}}); } catch (error) { console.log(error.code); }
+console.log(await WebFetch({url:${JSON.stringify(successUrl)}}));`,
+				{
+					...noTools,
+					tools: ["WebFetch"],
+					egressOrigins: ["https://allowed.example"],
+				},
+			),
+			workspace,
+			{},
+			preload,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe("fetch_limit_exceeded\nok");
+		expect(await readFile(attempts, "utf8")).toBe(
+			`${oversizedUrl}\n${successUrl}\n`,
+		);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("command execution crosses only the granted adapter with an allowlisted environment", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-adapter-"));
+	const workspace = join(base, "workspace");
+	const adapter = join(base, "adapter.mjs");
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			adapter,
+			`const request = JSON.parse(await Bun.stdin.text());
+const command = request.input.command;
+const result = command === "environment"
+  ? { exitCode: 0, stdout: process.env.SECRET_TOKEN ?? "absent", stderr: "", stdoutTruncated: false, stderrTruncated: false }
+  : { exitCode: 126, stdout: "", stderr: "denied", stdoutTruncated: false, stderrTruncated: false };
+process.stdout.write(JSON.stringify(result));`,
+		);
+		const grant: SandboxCapabilityGrantV1 = {
+			version: 1,
+			tools: ["Bash"],
+			environment: ["LANG"],
+			egressOrigins: [],
+			commandAdapter: {
+				version: 1,
+				executable: process.execPath,
+				arguments: [adapter],
+			},
+		};
+		const result = await runRunner(
+			intent(
+				`console.log((await Bash({command:"environment"})).stdout);
+console.log((await Bash({command:"read-outside"})).stderr);`,
+				grant,
+			),
+			workspace,
+			{ SECRET_TOKEN: "must-not-leak" },
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe("absent\ndenied");
+		expect(result.stdout).not.toContain("must-not-leak");
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});

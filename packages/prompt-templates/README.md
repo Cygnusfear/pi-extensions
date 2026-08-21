@@ -4,7 +4,7 @@ Slash commands that inject focused prompt templates — guard protocols, workflo
 
 ## Features
 
-- **14 built-in templates** covering workflow, communication, and review patterns
+- **21 built-in templates** covering workflow, communication, review, code quality, and system operations
 - **Slash command activation** — type the command name to inject the template into the current context
 - **Guard protocol enforcement** — commands like `/wtf` and `/handoff` enforce critical workflow behaviors
 
@@ -21,6 +21,8 @@ Slash commands that inject focused prompt templates — guard protocols, workflo
 | `/burndown` | Start a burndown flow — dispatches an async oracle for review, then works through remaining items. |
 | `/unit-of-work` | Lock in all remaining phases as one autonomous UOW — no intermediate check-ins, just execute. |
 | `/singleticket` | Capture everything the agent just said into a single mai ticket, word for word. |
+| `/complete-tickets` | Require every ticket to be an exact implementation contract with concrete wiring, edits, removals, and tests. |
+| `/ticket-review` | Review a ticket against the exact implementation-contract standard before work begins. |
 
 ### Communication
 
@@ -30,19 +32,24 @@ Slash commands that inject focused prompt templates — guard protocols, workflo
 | `/attitude` | Reset agent attitude — a behavioral correction when the agent gets uppity. |
 | `/mierenneuk` | Stop and assess the big picture — are you micromanaging details instead of making progress? (Dutch: "ant-fucking") |
 | `/wtf` | Quality enforcement — demands the best solution, not the simplest. Rejects shortcuts that drop fidelity or effort. |
+| `/directive` | Enable concise directive mode — strip filler and deliver only the underlying data or instruction. |
+| `/make-a-call` | Reframe a decision with enough context, tradeoffs, and rationale for the hooman to make an informed call. |
 
 ### Code Quality
 
 | Command | Description |
 |---------|-------------|
 | `/dedup` | Find and eliminate duplicated code paths — enforce SRP and a single happy path. |
-| `/codehealth` | Code health assessment template. |
+| `/async-review` | Run the guarded asynchronous DEI review workflow with the required review skills. |
+| `/review.rust` | Run the guarded Rust DEI review workflow with the required professional Rust skills. |
 
 ### System
 
 | Command | Description |
 |---------|-------------|
-| `/codex` | Generic pi system prompt template. |
+| `/harness` | Update the mai harness with exact guidance learned from the current work so future agents do not repeat mistakes. |
+| `/manage-context` | Reduce the active context below 200k tokens. |
+| `/open-worktree` | Open the current worktree in VSCodium. |
 
 ## Setup
 

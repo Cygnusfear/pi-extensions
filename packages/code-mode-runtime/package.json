@@ -1,0 +1,15 @@
+{
+	"name": "@pi-extensions/code-mode-runtime",
+	"version": "0.0.3",
+	"type": "module",
+	"files": [
+		"src"
+	],
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "bunx --bun tsc --noEmit --strict --target esnext --module esnext --moduleResolution bundler src/index.ts"
+	}
+}

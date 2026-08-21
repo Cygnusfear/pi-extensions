@@ -1,26 +1,30 @@
 {
-  "name": "@pi-extensions/default-prompt",
-  "version": "0.0.1",
-  "type": "module",
-  "keywords": [
-    "pi-package"
-  ],
-  "pi": {
-    "extensions": [
-      "./extensions/default-prompt.ts"
-    ]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "@earendil-works/pi-tui": "*",
-    "@sinclair/typebox": "*"
-  },
-  "dependencies": {
-    "@pi-extensions/shared": "*"
-  },
-  "files": [
-    "extensions",
-    "prompts",
-    "src"
-  ]
+	"name": "@pi-extensions/default-prompt",
+	"version": "0.0.1",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/default-prompt.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": ">=0.74.0",
+		"@earendil-works/pi-tui": "*",
+		"@sinclair/typebox": "*"
+	},
+	"dependencies": {
+		"@pi-extensions/shared": "*",
+		"@pi-extensions/canonical-agent-resources": "*"
+	},
+	"scripts": {
+		"test": "bun test extensions/default-prompt.test.ts test/compose-seam.test.ts"
+	},
+	"files": [
+		"extensions",
+		"prompts",
+		"src"
+	]
 }

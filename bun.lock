@@ -41,6 +41,16 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/canonical-agent-resources": {
+      "name": "@pi-extensions/canonical-agent-resources",
+      "version": "0.0.7",
+      "peerDependencies": {
+        "@earendil-works/pi-agent-core": ">=0.80.10",
+      },
+      "optionalPeers": [
+        "@earendil-works/pi-agent-core",
+      ],
+    },
     "packages/code-mode": {
       "name": "@pi-extensions/code-mode",
       "version": "0.0.1",
@@ -57,6 +67,10 @@
         "@earendil-works/pi-tui": "*",
         "@sinclair/typebox": "*",
       },
+    },
+    "packages/code-mode-runtime": {
+      "name": "@pi-extensions/code-mode-runtime",
+      "version": "0.0.3",
     },
     "packages/code-review-guard": {
       "name": "@pi-extensions/code-review-guard",
@@ -127,6 +141,7 @@
       "name": "@pi-extensions/default-prompt",
       "version": "0.0.1",
       "dependencies": {
+        "@pi-extensions/canonical-agent-resources": "*",
         "@pi-extensions/shared": "*",
       },
       "peerDependencies": {
@@ -555,6 +570,10 @@
         "@sinclair/typebox": "*",
       },
     },
+    "packages/transcription-runtime": {
+      "name": "@pi-extensions/transcription-runtime",
+      "version": "0.0.3",
+    },
     "packages/webfetch": {
       "name": "@pi-extensions/webfetch",
       "version": "0.0.1",
@@ -773,8 +792,10 @@
 
     "@pi-extensions/brave-search": ["@pi-extensions/brave-search@workspace:packages/brave-search"],
 
+    "@pi-extensions/canonical-agent-resources": ["@pi-extensions/canonical-agent-resources@workspace:packages/canonical-agent-resources"],
     "@pi-extensions/code-mode": ["@pi-extensions/code-mode@workspace:packages/code-mode"],
 
+    "@pi-extensions/code-mode-runtime": ["@pi-extensions/code-mode-runtime@workspace:packages/code-mode-runtime"],
     "@pi-extensions/code-review-guard": ["@pi-extensions/code-review-guard@workspace:packages/code-review-guard"],
 
     "@pi-extensions/context": ["@pi-extensions/context@workspace:packages/context"],
@@ -859,6 +880,7 @@
 
     "@pi-extensions/tldr-code": ["@pi-extensions/tldr-code@workspace:packages/tldr-code"],
 
+    "@pi-extensions/transcription-runtime": ["@pi-extensions/transcription-runtime@workspace:packages/transcription-runtime"],
     "@pi-extensions/webfetch": ["@pi-extensions/webfetch@workspace:packages/webfetch"],
 
     "@pi-extensions/worktree-summaries": ["@pi-extensions/worktree-summaries@workspace:packages/worktree-summaries"],

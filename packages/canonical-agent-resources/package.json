@@ -1,0 +1,27 @@
+{
+	"name": "@pi-extensions/canonical-agent-resources",
+	"version": "0.0.7",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./node": "./node/compile.ts",
+		"./compose": "./src/compose.ts"
+	},
+	"files": [
+		"src",
+		"node"
+	],
+	"scripts": {
+		"test": "bun test test/compile.test.ts",
+		"test:upstream": "bun test test/upstream-integration.test.ts",
+		"test:all": "bun run test && bun run test:upstream"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-agent-core": ">=0.80.10"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-agent-core": {
+			"optional": true
+		}
+	}
+}
