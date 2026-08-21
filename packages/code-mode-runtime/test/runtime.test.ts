@@ -246,7 +246,7 @@ test("runner containment rule accepts Windows descendants only", () => {
 	expect(runner).toContain("!isAbsolute(rel)");
 });
 
-test("generated runner exposes only granted root-confined file tools", async () => {
+test("generated runner keeps a fixed surface while enforcing subset file grants", async () => {
 	const base = await mkdtemp(join(tmpdir(), "code-mode-runtime-"));
 	const workspace = join(base, "workspace");
 	try {
@@ -267,6 +267,8 @@ test("generated runner exposes only granted root-confined file tools", async () 
 $.fact = await Read({path:"fact.txt"});
 try { await Read({path:"escape.txt"}); } catch { console.log("outside denied"); }
 try { await Write({path:"escape-dir/created/fact.txt",content:"escaped"}); } catch { console.log("write outside denied"); }
+try { await Bash({command:"echo denied"}); } catch (error) { console.log(error.code); }
+try { await WebFetch({url:"https://example.com"}); } catch (error) { console.log(error.code); }
 try { $.constructor.constructor("return process")(); console.log("state escaped"); } catch { console.log("state denied"); }
 try { console.log.constructor("return process")(); console.log("console escaped"); } catch { console.log("console denied"); }
 console.log($.fact, typeof Bash, typeof process);`,
@@ -278,7 +280,7 @@ console.log($.fact, typeof Bash, typeof process);`,
 		expect(result.exitCode, result.stderr).toBe(0);
 		const decoded = decodeMarker(result.stdout);
 		expect(decoded.output).toBe(
-			"outside denied\nwrite outside denied\nstate denied\nconsole denied\ndurable 🐉 undefined undefined",
+			"outside denied\nwrite outside denied\ncapability_denied\ncapability_denied\nstate denied\nconsole denied\ndurable 🐉 function undefined",
 		);
 		expect(decoded.output).not.toContain("outside-readable");
 		expect(decoded.output).not.toContain("must-not-leak");
@@ -289,6 +291,99 @@ console.log($.fact, typeof Bash, typeof process);`,
 		await expect(
 			readFile(join(base, "outside-dir", "created", "fact.txt"), "utf8"),
 		).rejects.toThrow();
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("generated runner exposes the fixed surface for an empty grant and denies every call explicitly", async () => {
+	const workspace = await mkdtemp(join(tmpdir(), "code-mode-empty-grant-"));
+	try {
+		const result = await runRunner(
+			intent(
+				`console.log([typeof Read, typeof Write, typeof Edit, typeof Bash, typeof Glob, typeof rg, typeof fd, typeof WebFetch, typeof sleep].join(","));
+for (const [name, call] of [["Read",()=>Read({path:"x"})],["Bash",()=>Bash({command:"true"})],["WebFetch",()=>WebFetch({url:"https://example.com"})],["sleep",()=>sleep(0)]]) { try { await call(); } catch (error) { console.log(name, error.code); } }`,
+				noTools,
+			),
+			workspace,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe(
+			"function,function,function,function,function,function,function,function,function\nRead capability_denied\nBash capability_denied\nWebFetch capability_denied\nsleep capability_denied",
+		);
+	} finally {
+		await rm(workspace, { recursive: true, force: true });
+	}
+});
+
+test("generated runner supports the complete fixed tool grant in one authority boundary", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-full-grant-"));
+	const workspace = join(base, "workspace");
+	const adapter = join(base, "adapter.mjs");
+	const preload = join(base, "fetch-preload.mjs");
+	const calls = join(base, "calls.jsonl");
+	const allowedUrl = "https://allowed.example/full-grant";
+	try {
+		await mkdir(workspace);
+		await writeFile(
+			adapter,
+			`import { appendFile } from "node:fs/promises";
+const request = JSON.parse(await Bun.stdin.text());
+await appendFile(${JSON.stringify(calls)}, JSON.stringify(request) + "\\n");
+process.stdout.write(JSON.stringify({ exitCode: 0, stdout: "adapter-ok", stderr: "", stdoutTruncated: false, stderrTruncated: false }));`,
+		);
+		await writeFile(
+			preload,
+			`globalThis.fetch = async (input) => String(input) === ${JSON.stringify(allowedUrl)}
+  ? new Response("fetch-ok", { status: 200 })
+  : new Response("unexpected", { status: 500 });`,
+		);
+		const grant: SandboxCapabilityGrantV1 = {
+			version: 1,
+			tools: [
+				"Read",
+				"Write",
+				"Edit",
+				"Bash",
+				"Glob",
+				"rg",
+				"fd",
+				"WebFetch",
+				"sleep",
+			],
+			environment: [],
+			egressOrigins: ["https://allowed.example"],
+			commandAdapter: {
+				version: 1,
+				executable: process.execPath,
+				arguments: [adapter],
+			},
+		};
+		const result = await runRunner(
+			intent(
+				`console.log([typeof Read, typeof Write, typeof Edit, typeof Bash, typeof Glob, typeof rg, typeof fd, typeof WebFetch, typeof sleep].join(","));
+const command = await Bash({command:"full-grant"});
+const fetched = await WebFetch({url:${JSON.stringify(allowedUrl)}});
+console.log(command.stdout, fetched);`,
+				grant,
+			),
+			workspace,
+			{},
+			preload,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe(
+			"function,function,function,function,function,function,function,function,function\nadapter-ok fetch-ok",
+		);
+		const adapterCalls = (await readFile(calls, "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(adapterCalls).toHaveLength(1);
+		expect(adapterCalls[0]).toMatchObject({
+			tool: "Bash",
+			input: { command: "full-grant" },
+		});
 	} finally {
 		await rm(base, { recursive: true, force: true });
 	}

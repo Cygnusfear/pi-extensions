@@ -567,6 +567,7 @@ if (granted.has("WebFetch")) handlers.WebFetch = async ({ url, format = "text", 
   }
 };
 if (granted.has("sleep")) handlers.sleep = async (milliseconds) => { requireTool("sleep"); if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw Object.assign(new Error("invalid_sleep"), { code: "invalid_sleep" }); await withinDeadline(new Promise((resolveSleep) => setTimeout(resolveSleep, Math.min(milliseconds, remaining())))); };
+for (const name of ${JSON.stringify(CODE_TOOL_NAMES)}) if (typeof handlers[name] !== "function") handlers[name] = async () => { throw denied(); };
 const logs = []; let logBytes = 0;
 const record = (...items) => { if (logBytes >= OUTPUT_LIMIT) return null; let line; try { line = items.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" "); } catch { line = "[unserializable]"; } const bytes = Buffer.from(line + "\\n"); const kept = bytes.subarray(0, OUTPUT_LIMIT - logBytes); logs.push(kept); logBytes += kept.byteLength; return null; };
 handlers.console = (items) => { if (!Array.isArray(items)) throw Object.assign(new Error("invalid_console_input"), { code: "invalid_console_input" }); return record(...items); };
@@ -574,7 +575,7 @@ const bridgeCode = (error) => typeof error?.code === "string" && /^[a-z0-9_]+$/.
 const bridge = async (payload) => { try { bounded(payload, IO_LIMIT, "bridge_limit_exceeded"); const call = JSON.parse(payload); if (!call || typeof call !== "object" || Array.isArray(call) || Object.keys(call).sort().join(",") !== "input,name" || typeof call.name !== "string") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const handler = handlers[call.name]; if (typeof handler !== "function") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const value = await handler(call.input); const response = JSON.stringify(value === undefined ? { ok: true, undefined: true } : { ok: true, value }); if (Buffer.byteLength(response) > IO_LIMIT * 2 + 4096) throw Object.assign(new Error("bridge_limit_exceeded"), { code: "bridge_limit_exceeded" }); return response; } catch (error) { return JSON.stringify({ ok: false, code: bridgeCode(error) }); } };
 const context = createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false } });
 context.__bridge = bridge;
-context.__toolsJson = JSON.stringify(I.grant.tools);
+context.__toolsJson = JSON.stringify(${JSON.stringify(CODE_TOOL_NAMES)});
 context.__stateJson = JSON.stringify(I.state.values);
 try {
 	new Script(${JSON.stringify(SANDBOX_BOOTSTRAP)}).runInContext(context, { timeout: remaining() });
