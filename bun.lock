@@ -306,6 +306,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@pi-extensions/pi-mesh": "workspace:*",
+        "@pi-extensions/shared": "workspace:*",
         "grammy": "^1.30.0",
       },
       "devDependencies": {
@@ -525,6 +526,20 @@
         "@earendil-works/pi-coding-agent": ">=0.74.0",
         "@earendil-works/pi-tui": "*",
         "@sinclair/typebox": "*",
+      },
+    },
+    "packages/telegram-coordinator": {
+      "name": "@pi-extensions/telegram-coordinator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pi-extensions/shared": "workspace:*",
+        "grammy": "^1.30.0",
+      },
+      "devDependencies": {
+        "typescript": "5.9.3",
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "*",
       },
     },
     "packages/tldr-code": {
@@ -839,6 +854,8 @@
     "@pi-extensions/supervisor": ["@pi-extensions/supervisor@workspace:packages/supervisor"],
 
     "@pi-extensions/teams": ["@pi-extensions/teams@workspace:packages/teams"],
+
+    "@pi-extensions/telegram-coordinator": ["@pi-extensions/telegram-coordinator@workspace:packages/telegram-coordinator"],
 
     "@pi-extensions/tldr-code": ["@pi-extensions/tldr-code@workspace:packages/tldr-code"],
 
