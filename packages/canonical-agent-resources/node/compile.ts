@@ -32,9 +32,9 @@ export interface CanonicalBuildProfileV1 {
 	readonly workspaceRootId: string;
 	readonly logicalCwd: CanonicalAgentHarnessAssetsV1["logicalCwd"];
 	readonly documentationPaths: {
-		readonly readme: `resource://${string}`;
-		readonly docs: `resource://${string}`;
-		readonly examples: `resource://${string}`;
+		readonly readme: string;
+		readonly docs: string;
+		readonly examples: string;
 	};
 	readonly projectContext: readonly DeclaredSourceV1[];
 	readonly appendPrompts: readonly DeclaredSourceV1[];

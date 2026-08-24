@@ -219,6 +219,19 @@ describe("canonical agent assets compiler", () => {
 			}),
 		).rejects.toThrow("canonical_assets_host_path");
 	});
+	test("preserves declared workspace documentation paths", async () => {
+		const root = await fixture();
+		const declared = profile();
+		const artifact = await compileCanonicalAgentAssets(
+			{ ...declared, documentationPaths: { readme: "/workspace/README.md", docs: "/workspace/docs", examples: "/workspace/packages/canonical-agent-resources" } },
+			{ workspace: root },
+			await adapter(),
+		);
+		const decoded = await decodeCanonicalAgentAssets(artifact);
+		expect(decoded.staticSystemPrompt).toContain("/workspace/README.md");
+		expect(decoded.staticSystemPrompt).toContain("/workspace/docs");
+		expect(decoded.staticSystemPrompt).toContain("/workspace/packages/canonical-agent-resources");
+	});
 	test("rejects empty declared prompt templates", async () => {
 		const root = await fixture();
 		await writeFile(
