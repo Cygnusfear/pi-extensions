@@ -15,6 +15,7 @@ import {
 	CODE_MODE_LIMITS,
 	CodeExecutionEngine,
 	type CodeExecutionOutcomeV1,
+	decodeCodeExecutionRequest,
 	decodeCodeSessionState,
 	decodeSandboxCapabilityGrant,
 	type SandboxCapabilityGrantV1,
@@ -47,13 +48,12 @@ function outcome(): CodeExecutionOutcomeV1 {
 function intent(
 	code: string,
 	grant: SandboxCapabilityGrantV1,
-	timeoutMs?: number,
 ): SandboxExecutionIntentV2 {
 	return {
 		version: 2,
 		operationId: outcome().operationId,
 		paramsDigest: outcome().paramsDigest,
-		request: { ...request, code, ...(timeoutMs ? { timeoutMs } : {}) },
+		request: { ...request, code },
 		state,
 		grant,
 	};
@@ -112,6 +112,30 @@ describe("CodeExecutionEngine", () => {
 			),
 		).toEqual(terminal);
 		expect(executes).toBe(0);
+	});
+
+	test("forwards the caller cancellation signal to a new sandbox execution", async () => {
+		const controller = new AbortController();
+		let observed: AbortSignal | undefined;
+		const terminal = outcome();
+		const host: SandboxHost = {
+			query: async () => ({ kind: "unknown" }),
+			execute: async (_intent, signal) => {
+				observed = signal;
+				return terminal;
+			},
+		};
+		expect(
+			await new CodeExecutionEngine(host).execute(
+				terminal.operationId,
+				terminal.paramsDigest,
+				request,
+				state,
+				noTools,
+				controller.signal,
+			),
+		).toEqual(terminal);
+		expect(observed).toBe(controller.signal);
 	});
 
 	test("rejects conflicts and invalid state advancement", async () => {
@@ -424,9 +448,9 @@ const writeResult = await Write({path:"nested/fact.txt",cwd:"sub",content:"alpha
 const editMiss = await Edit({path:"nested/fact.txt",cwd:"sub",oldText:"beta",newText:"gamma"});
 const editHit = await Edit({path:"nested/fact.txt",cwd:"sub",oldText:"alpha",newText:"gamma"});
 const glob = await Glob({pattern:"*.txt",path:"sub"});
-const rgResult = await rg({args:"needle",cwd:"sub",follow:false});
-const fdResult = await fd({args:"-e txt",cwd:"sub"});
-const bash = await Bash({command:"echo safe",cwd:"sub",timeout:7});
+const rgResult = await rg({args:["needle"],cwd:"sub",follow:false});
+const fdResult = await fd({args:["-e","txt"],cwd:"sub"});
+const bash = await Bash({command:"echo safe",cwd:"sub"});
 const sleepResult = await sleep(0);
 console.log(JSON.stringify({page,missing,writeIsUndefined:writeResult===undefined,editMiss,editHit,glob,rgResult,fdResult,bash,bashKeys:Object.keys(bash).sort(),sleepIsUndefined:sleepResult===undefined}));`,
 				grant,
@@ -462,30 +486,105 @@ console.log(JSON.stringify({page,missing,writeIsUndefined:writeResult===undefine
 		]);
 		expect(adapterCalls.map((call) => call.input)).toEqual([
 			{ pattern: "*.txt", path: "sub" },
-			{ args: "needle", cwd: "sub", follow: false },
-			{ args: "-e txt", cwd: "sub", follow: true },
-			{ command: "echo safe", cwd: "sub", timeout: 7 },
+			{ args: ["needle"], cwd: "sub", follow: false },
+			{ args: ["-e", "txt"], cwd: "sub", follow: true },
+			{ command: "echo safe", cwd: "sub" },
 		]);
 	} finally {
 		await rm(base, { recursive: true, force: true });
 	}
 });
 
-test("generated runner enforces one request-wide deadline and never publishes late success", async () => {
-	const workspace = await mkdtemp(join(tmpdir(), "code-mode-timeout-"));
+test("generated runner reports exact call-shape errors before limits or adapter execution", async () => {
+	const base = await mkdtemp(join(tmpdir(), "code-mode-call-shapes-"));
+	const workspace = join(base, "workspace");
+	const adapter = join(base, "adapter.mjs");
+	const calls = join(base, "calls.jsonl");
 	try {
+		await mkdir(workspace);
+		await writeFile(
+			adapter,
+			`import { appendFile } from "node:fs/promises";
+const request = JSON.parse(await Bun.stdin.text());
+await appendFile(${JSON.stringify(calls)}, JSON.stringify(request) + "\\n");
+process.stdout.write(JSON.stringify({ exitCode: 0, stdout: request.tool + "-ok", stderr: "", stdoutTruncated: false, stderrTruncated: false }));`,
+		);
+		const grant: SandboxCapabilityGrantV1 = {
+			version: 1,
+			tools: ["Read", "Write", "Edit", "Bash", "Glob", "rg", "fd", "WebFetch", "sleep"],
+			environment: [],
+			egressOrigins: [],
+			commandAdapter: {
+				version: 1,
+				executable: process.execPath,
+				arguments: [adapter],
+			},
+		};
 		const result = await runRunner(
 			intent(
-				`await sleep(20); console.log("late success");`,
-				{ ...noTools, tools: ["sleep"] },
-				1,
+				`const wrong = [
+  ["Read", () => Read("x")],
+  ["Write", () => Write("x")],
+  ["Edit", () => Edit("x")],
+  ["Bash", () => Bash("true")],
+  ["Glob", () => Glob("*.ts")],
+  ["rg", () => rg("needle")],
+  ["fd", () => fd("needle")],
+  ["WebFetch", () => WebFetch("https://example.com")],
+  ["sleep", () => sleep({})],
+  ["BashType", () => Bash({command: 1})],
+  ["GlobType", () => Glob({pattern: []})],
+  ["rgArgs", () => rg({args: ["ok", 1]})],
+  ["fdExtra", () => fd({args: ["ok"], invented: true})],
+];
+for (const [name, call] of wrong) { try { await call(); } catch (error) { console.log(name, error.code); } }
+console.log(await rg({args:["needle","two words"]}));
+console.log(await fd({args:["-e","txt"]}));`,
+				grant,
 			),
 			workspace,
 		);
-		expect(result.exitCode).not.toBe(0);
-		expect(result.stderr).toBe("code_execution_timed_out");
-		expect(result.stdout).not.toContain("__KALI_CODE_MODE_V1__");
-		expect(result.stdout).not.toContain("late success");
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe([
+			"Read invalid_read_input",
+			"Write invalid_write_input",
+			"Edit invalid_edit_input",
+			"Bash invalid_bash_input",
+			"Glob invalid_glob_input",
+			"rg invalid_rg_input",
+			"fd invalid_fd_input",
+			"WebFetch invalid_webfetch_input",
+			"sleep invalid_sleep",
+			"BashType invalid_bash_command",
+			"GlobType invalid_glob_pattern",
+			"rgArgs invalid_command_arguments",
+			"fdExtra invalid_fd_input",
+			"rg-ok",
+			"fd-ok",
+		].join("\n"));
+		const adapterCalls = (await readFile(calls, "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(adapterCalls.map((call) => ({ tool: call.tool, args: call.input.args }))).toEqual([
+			{ tool: "rg", args: ["needle", "two words"] },
+			{ tool: "fd", args: ["-e", "txt"] },
+		]);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
+test("generated runner completes on the requested sleep event and rejects legacy deadline authority", async () => {
+	const workspace = await mkdtemp(join(tmpdir(), "code-mode-event-completion-"));
+	try {
+		expect(() => decodeCodeExecutionRequest({ ...request, timeoutMs: 1 })).toThrow("invalid_code_execution_request_v1");
+		const result = await runRunner(
+			intent(`await sleep(20); console.log("event complete");`, { ...noTools, tools: ["sleep"] }),
+			workspace,
+		);
+		expect(result.exitCode, result.stderr).toBe(0);
+		expect(decodeMarker(result.stdout).output).toBe("event complete");
 	} finally {
 		await rm(workspace, { recursive: true, force: true });
 	}
@@ -511,13 +610,12 @@ try { await import("node:fs"); } catch { console.log("import denied"); }`,
 	}
 });
 
-test("WebFetch preserves formats, per-call timeout, and string results", async () => {
+test("WebFetch preserves formats and follows network completion events", async () => {
 	const base = await mkdtemp(join(tmpdir(), "code-mode-webfetch-contract-"));
 	const workspace = join(base, "workspace");
 	const preload = join(base, "fetch-preload.mjs");
 	const attempts = join(base, "fetch-attempts.txt");
 	const pageUrl = "https://allowed.example/page";
-	const slowUrl = "https://allowed.example/slow";
 	const okUrl = "https://allowed.example/ok";
 	const html =
 		"<h1>Title</h1><script>secret()</script><p>Hello <strong>world</strong></p>";
@@ -530,7 +628,6 @@ const attempts = ${JSON.stringify(attempts)};
 globalThis.fetch = async (input) => {
   const url = String(input);
   await appendFile(attempts, url + "\\n");
-  if (url === ${JSON.stringify(slowUrl)}) return new Promise(() => {});
   if (url === ${JSON.stringify(pageUrl)}) return new Response(${JSON.stringify(html)}, { status: 200 });
   if (url === ${JSON.stringify(okUrl)}) return new Response("ok", { status: 200 });
   return new Response("unexpected", { status: 500 });
@@ -538,12 +635,12 @@ globalThis.fetch = async (input) => {
 		);
 		const result = await runRunner(
 			intent(
-				`const text = await WebFetch({url:${JSON.stringify(pageUrl)},format:"text",timeout:1});
+				`const text = await WebFetch({url:${JSON.stringify(pageUrl)},format:"text"});
 const markdown = await WebFetch({url:${JSON.stringify(pageUrl)},format:"markdown"});
 const html = await WebFetch({url:${JSON.stringify(pageUrl)},format:"html"});
-let timeoutCode; try { await WebFetch({url:${JSON.stringify(slowUrl)},timeout:0.01}); } catch (error) { timeoutCode = error.code; }
-const afterTimeout = await WebFetch({url:${JSON.stringify(okUrl)}});
-console.log(JSON.stringify({text,markdown,html,timeoutCode,afterTimeout}));`,
+let legacyCode; try { await WebFetch({url:${JSON.stringify(okUrl)},timeout:1}); } catch (error) { legacyCode = error.code; }
+const afterEvent = await WebFetch({url:${JSON.stringify(okUrl)}});
+console.log(JSON.stringify({text,markdown,html,legacyCode,afterEvent}));`,
 				{
 					...noTools,
 					tools: ["WebFetch"],
@@ -559,11 +656,11 @@ console.log(JSON.stringify({text,markdown,html,timeoutCode,afterTimeout}));`,
 			text: "Title Hello world",
 			markdown: "# Title\n\nHello **world**",
 			html,
-			timeoutCode: "fetch_timed_out",
-			afterTimeout: "ok",
+			legacyCode: "invalid_webfetch_input",
+			afterEvent: "ok",
 		});
 		expect(await readFile(attempts, "utf8")).toBe(
-			`${pageUrl}\n${pageUrl}\n${pageUrl}\n${slowUrl}\n${okUrl}\n`,
+			`${pageUrl}\n${pageUrl}\n${pageUrl}\n${okUrl}\n`,
 		);
 	} finally {
 		await rm(base, { recursive: true, force: true });

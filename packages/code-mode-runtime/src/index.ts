@@ -5,7 +5,6 @@ export const CODE_MODE_LIMITS = {
 	stateBytes: 262_144,
 	outputBytes: 65_536,
 	ioBytes: 1_048_576,
-	timeoutMs: 300_000,
 	grantEnvironmentNames: 3,
 	grantEgressOrigins: 16,
 	grantAdapterArguments: 16,
@@ -29,7 +28,6 @@ export interface CodeExecutionRequestV1 {
 	version: 1;
 	thinking: string;
 	code: string;
-	timeoutMs?: number;
 }
 export interface CodeSessionStateV1 {
 	version: 1;
@@ -69,7 +67,7 @@ export interface SandboxExecutionIntentV2 {
 }
 export interface SandboxHost {
 	query(operationId: string, paramsDigest: string): Promise<SandboxQueryV1>;
-	execute(intent: SandboxExecutionIntentV2): Promise<CodeExecutionOutcomeV1>;
+	execute(intent: SandboxExecutionIntentV2, signal?: AbortSignal): Promise<CodeExecutionOutcomeV1>;
 }
 
 function byteLength(value: string): number {
@@ -282,13 +280,9 @@ export function decodeCodeExecutionOutcome(
 export function decodeCodeExecutionRequest(
 	value: unknown,
 ): CodeExecutionRequestV1 {
-	const optional =
-		typeof (value as Record<string, unknown>)?.timeoutMs !== "undefined";
 	const object = exact(
 		value,
-		optional
-			? ["version", "thinking", "code", "timeoutMs"]
-			: ["version", "thinking", "code"],
+		["version", "thinking", "code"],
 		"invalid_code_execution_request_v1",
 	);
 	if (
@@ -301,21 +295,7 @@ export function decodeCodeExecutionRequest(
 		byteLength(object.code) > CODE_MODE_LIMITS.codeBytes
 	)
 		throw new Error("invalid_code_execution_request_v1");
-	if (
-		object.timeoutMs !== undefined &&
-		(!Number.isSafeInteger(object.timeoutMs) ||
-			Number(object.timeoutMs) < 1 ||
-			Number(object.timeoutMs) > CODE_MODE_LIMITS.timeoutMs)
-	)
-		throw new Error("invalid_code_execution_request_v1");
-	return {
-		version: 1,
-		thinking: object.thinking,
-		code: object.code,
-		...(object.timeoutMs === undefined
-			? {}
-			: { timeoutMs: Number(object.timeoutMs) }),
-	};
+	return { version: 1, thinking: object.thinking, code: object.code };
 }
 export function decodeCodeSessionState(value: unknown): CodeSessionStateV1 {
 	const object = exact(
@@ -357,6 +337,7 @@ export class CodeExecutionEngine {
 		requestValue: unknown,
 		stateValue: unknown,
 		grantValue: unknown,
+		signal?: AbortSignal,
 	): Promise<CodeExecutionOutcomeV1> {
 		if (!validOperationId(operationId) || !validDigest(paramsDigest))
 			throw new Error("invalid_code_execution_identity");
@@ -386,14 +367,17 @@ export class CodeExecutionEngine {
 		if (existing.kind !== "unknown")
 			throw new Error("invalid_sandbox_query_v1");
 		return decodeCodeExecutionOutcome(
-			await this.host.execute({
-				version: 2,
-				operationId,
-				paramsDigest,
-				request,
-				state,
-				grant,
-			}),
+			await this.host.execute(
+				{
+					version: 2,
+					operationId,
+					paramsDigest,
+					request,
+					state,
+					grant,
+				},
+				signal,
+			),
 			{ operationId, paramsDigest, stateRevision: state.revision + 1 },
 		);
 	}
@@ -486,52 +470,49 @@ const IO_LIMIT = ${CODE_MODE_LIMITS.ioBytes};
 const OUTPUT_LIMIT = ${CODE_MODE_LIMITS.outputBytes};
 const STATE_LIMIT = ${CODE_MODE_LIMITS.stateBytes};
 const started = performance.now();
-const timeoutMs = I.request.timeoutMs ?? ${CODE_MODE_LIMITS.timeoutMs};
-const deadline = started + timeoutMs;
 const children = new Set();
 const fetchControllers = new Set();
-const timedOut = () => Object.assign(new Error("code_execution_timed_out"), { code: "code_execution_timed_out" });
-const remaining = () => { const value = Math.floor(deadline - performance.now()); if (value < 1) throw timedOut(); return value; };
 const abortAll = () => { for (const fetchController of fetchControllers) fetchController.abort(); for (const child of children) { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch {} try { child.kill("SIGKILL"); } catch {} } };
-const withinDeadline = (promise, onTimeout) => new Promise((resolveValue, rejectValue) => { let timer; try { timer = setTimeout(() => { try { onTimeout?.(); } catch {} abortAll(); rejectValue(timedOut()); }, remaining()); } catch (error) { rejectValue(error); return; } Promise.resolve(promise).then(resolveValue, rejectValue).finally(() => clearTimeout(timer)); });
-const cleanupFetch = async (cancel, fetchController) => { try { await withinDeadline(Promise.resolve().then(cancel), () => fetchController.abort()); } catch (error) { if (error?.code === "code_execution_timed_out") throw error; } finally { fetchController.abort(); } };
+const cleanupFetch = async (cancel, fetchController) => { fetchController.abort(); try { await Promise.resolve().then(cancel); } catch {} };
 const root = await realpath(process.cwd());
 const inside = (path) => { const rel = relative(root, path); return rel === "" || (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel)); };
 const denied = () => Object.assign(new Error("capability_denied"), { code: "capability_denied" });
 const pathText = (value) => { if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value) > 4096) throw denied(); return value; };
 const lexical = (path, cwd = ".") => { const base = resolve(root, pathText(cwd)); if (!inside(base)) throw denied(); const target = resolve(base, pathText(path)); if (!inside(target)) throw denied(); return target; };
 const existing = async (path, cwd = ".") => { const resolved = await realpath(lexical(path, cwd)); if (!inside(resolved)) throw denied(); return resolved; };
-const writable = async (path, cwd = ".") => { const target = lexical(path, cwd); try { await lstat(target); return await existing(path, cwd); } catch (error) { if (error?.code !== "ENOENT") throw error; const parentPath = dirname(target); let ancestor = parentPath; while (true) { try { const resolved = await realpath(ancestor); if (!inside(resolved)) throw denied(); break; } catch (parentError) { if (parentError?.code !== "ENOENT") throw parentError; const next = dirname(ancestor); if (next === ancestor) throw denied(); ancestor = next; } } await withinDeadline(mkdir(parentPath, { recursive: true })); const parent = await realpath(parentPath); if (!inside(parent)) throw denied(); return target; } };
-const bounded = (value, limit, code) => { if (typeof value !== "string" || Buffer.byteLength(value) > limit) throw Object.assign(new Error(code), { code }); return value; };
-const readBounded = async (path, cwd = ".") => { remaining(); const bytes = await withinDeadline(readFile(await existing(path, cwd))); if (bytes.byteLength > IO_LIMIT) throw Object.assign(new Error("read_limit_exceeded"), { code: "read_limit_exceeded" }); try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw Object.assign(new Error("read_invalid_utf8"), { code: "read_invalid_utf8" }); } };
+const writable = async (path, cwd = ".") => { const target = lexical(path, cwd); try { await lstat(target); return await existing(path, cwd); } catch (error) { if (error?.code !== "ENOENT") throw error; const parentPath = dirname(target); let ancestor = parentPath; while (true) { try { const resolved = await realpath(ancestor); if (!inside(resolved)) throw denied(); break; } catch (parentError) { if (parentError?.code !== "ENOENT") throw parentError; const next = dirname(ancestor); if (next === ancestor) throw denied(); ancestor = next; } } await mkdir(parentPath, { recursive: true }); const parent = await realpath(parentPath); if (!inside(parent)) throw denied(); return target; } };
+const invalid = (code) => Object.assign(new Error(code), { code });
+const inputRecord = (value, required, optional, code) => { if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalid(code); const keys = Object.keys(value); const allowed = new Set([...required, ...optional]); if (required.some((key) => !keys.includes(key)) || keys.some((key) => !allowed.has(key))) throw invalid(code); return value; };
+const bounded = (value, limit, limitCode, typeCode = "invalid_argument_type") => { if (typeof value !== "string") throw invalid(typeCode); if (Buffer.byteLength(value) > limit) throw invalid(limitCode); return value; };
+const commandArguments = (value) => { if (typeof value === "string") return bounded(value, IO_LIMIT, "command_limit_exceeded", "invalid_command_arguments"); if (!Array.isArray(value) || value.length > 256) throw invalid("invalid_command_arguments"); let bytes = 2; const result = []; for (const argument of value) { if (typeof argument !== "string" || argument.includes(String.fromCharCode(0))) throw invalid("invalid_command_arguments"); bytes += Buffer.byteLength(argument) + 1; if (bytes > IO_LIMIT) throw invalid("command_limit_exceeded"); result.push(argument); } return result; };
+const readBounded = async (path, cwd = ".") => { const bytes = await readFile(await existing(path, cwd)); if (bytes.byteLength > IO_LIMIT) throw Object.assign(new Error("read_limit_exceeded"), { code: "read_limit_exceeded" }); try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw Object.assign(new Error("read_invalid_utf8"), { code: "read_invalid_utf8" }); } };
 const granted = new Set(I.grant.tools);
-const requireTool = (name) => { if (!granted.has(name)) throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); remaining(); };
+const requireTool = (name) => { if (!granted.has(name)) throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); };
 const safeEnv = Object.create(null); for (const name of I.grant.environment) { const value = process.env[name]; if (value !== undefined) safeEnv[name] = value; }
-const runAdapter = async (tool, input) => { requireTool(tool); const adapter = I.grant.commandAdapter; if (!adapter) throw denied(); const payload = bounded(JSON.stringify({ version: 1, tool, workspaceRoot: root, input }), IO_LIMIT, "command_limit_exceeded"); const child = spawn(adapter.executable, adapter.arguments, { cwd: root, env: safeEnv, detached: true, stdio: ["pipe", "pipe", "pipe"] }); children.add(child); child.stdin.end(payload); const stdout = [], stderr = []; let outBytes = 0, errBytes = 0; const capture = (chunks, chunk, current) => { if (current >= IO_LIMIT) return current; const kept = chunk.subarray(0, IO_LIMIT - current); chunks.push(kept); return current + kept.byteLength; }; child.stdout.on("data", (chunk) => { outBytes = capture(stdout, chunk, outBytes); }); child.stderr.on("data", (chunk) => { errBytes = capture(stderr, chunk, errBytes); }); const exitCode = await withinDeadline(new Promise((resolveExit, rejectExit) => { child.on("error", rejectExit); child.on("close", resolveExit); }), () => { try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch {} try { child.kill("SIGKILL"); } catch {} }); children.delete(child); if (exitCode !== 0) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); let result; try { result = JSON.parse(Buffer.concat(stdout).toString("utf8")); } catch { throw Object.assign(new Error("command_adapter_invalid"), { code: "command_adapter_invalid" }); } const keys = result && typeof result === "object" && !Array.isArray(result) ? Object.keys(result).sort().join(",") : ""; if (!result || (keys !== "exitCode,stderr,stderrTruncated,stdout,stdoutTruncated" && keys !== "exitCode,stderr,stderrTruncated,stdout,stdoutTruncated,timedOut") || !Number.isSafeInteger(result.exitCode) || typeof result.stdout !== "string" || typeof result.stderr !== "string" || typeof result.stdoutTruncated !== "boolean" || typeof result.stderrTruncated !== "boolean" || (result.timedOut !== undefined && typeof result.timedOut !== "boolean") || Buffer.byteLength(result.stdout) > IO_LIMIT || Buffer.byteLength(result.stderr) > IO_LIMIT || errBytes > 0) throw Object.assign(new Error("command_adapter_invalid"), { code: "command_adapter_invalid" }); return result; };
+const runAdapter = async (tool, input) => { requireTool(tool); const adapter = I.grant.commandAdapter; if (!adapter) throw denied(); const payload = bounded(JSON.stringify({ version: 1, tool, workspaceRoot: root, input }), IO_LIMIT, "command_limit_exceeded"); const child = spawn(adapter.executable, adapter.arguments, { cwd: root, env: safeEnv, detached: true, stdio: ["pipe", "pipe", "pipe"] }); children.add(child); child.stdin.end(payload); const stdout = [], stderr = []; let outBytes = 0, errBytes = 0; const capture = (chunks, chunk, current) => { if (current >= IO_LIMIT) return current; const kept = chunk.subarray(0, IO_LIMIT - current); chunks.push(kept); return current + kept.byteLength; }; child.stdout.on("data", (chunk) => { outBytes = capture(stdout, chunk, outBytes); }); child.stderr.on("data", (chunk) => { errBytes = capture(stderr, chunk, errBytes); }); const exitCode = await new Promise((resolveExit, rejectExit) => { child.on("error", rejectExit); child.on("close", resolveExit); }); children.delete(child); if (exitCode !== 0) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); let result; try { result = JSON.parse(Buffer.concat(stdout).toString("utf8")); } catch { throw Object.assign(new Error("command_adapter_invalid"), { code: "command_adapter_invalid" }); } const keys = result && typeof result === "object" && !Array.isArray(result) ? Object.keys(result).sort().join(",") : ""; if (!result || keys !== "exitCode,stderr,stderrTruncated,stdout,stdoutTruncated" || !Number.isSafeInteger(result.exitCode) || typeof result.stdout !== "string" || typeof result.stderr !== "string" || typeof result.stdoutTruncated !== "boolean" || typeof result.stderrTruncated !== "boolean" || Buffer.byteLength(result.stdout) > IO_LIMIT || Buffer.byteLength(result.stderr) > IO_LIMIT || errBytes > 0) throw Object.assign(new Error("command_adapter_invalid"), { code: "command_adapter_invalid" }); return result; };
 const truncated = (value, wasTruncated) => { if (!wasTruncated) return value; const suffix = "\\n[output truncated by code-mode runtime]"; let kept = Buffer.from(value).subarray(0, Math.max(0, IO_LIMIT - Buffer.byteLength(suffix))).toString("utf8"); while (Buffer.byteLength(kept + suffix) > IO_LIMIT) kept = kept.slice(0, -1); return kept + suffix; };
 const handlers = Object.create(null);
-if (granted.has("Read")) handlers.Read = async ({ path, cwd = ".", offset, limit, optional = false }) => { requireTool("Read"); if ((offset !== undefined && (!Number.isSafeInteger(offset) || offset < 1)) || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) || typeof optional !== "boolean") throw Object.assign(new Error("invalid_read_options"), { code: "invalid_read_options" }); let value; try { value = await readBounded(path, cwd); } catch (error) { if (optional && error?.code === "ENOENT") return null; throw error; } if (offset === undefined && limit === undefined) return value; const lines = value.split("\\n"); const start = (offset ?? 1) - 1; return lines.slice(start, limit === undefined ? lines.length : start + limit).join("\\n"); };
-if (granted.has("Write")) handlers.Write = async ({ path, cwd = ".", content }) => { requireTool("Write"); bounded(content, IO_LIMIT, "write_limit_exceeded"); await withinDeadline(writeFile(await writable(path, cwd), content)); };
-if (granted.has("Edit")) handlers.Edit = async ({ path, cwd = ".", oldText, newText }) => { requireTool("Edit"); if (typeof oldText !== "string" || typeof newText !== "string") throw Object.assign(new Error("invalid_edit_content"), { code: "invalid_edit_content" }); const target = await existing(path, cwd), value = await readBounded(path, cwd); if (!value.includes(oldText)) return { matched: false }; const edited = value.replace(oldText, newText); bounded(edited, IO_LIMIT, "write_limit_exceeded"); await withinDeadline(writeFile(target, edited)); return { matched: true }; };
-if (granted.has("Bash")) handlers.Bash = async ({ command, cwd = ".", timeout }) => { await existing(cwd); if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0)) throw Object.assign(new Error("invalid_command_timeout"), { code: "invalid_command_timeout" }); const result = await runAdapter("Bash", { command: bounded(command, IO_LIMIT, "command_limit_exceeded"), cwd, ...(timeout === undefined ? {} : { timeout }) }); return { stdout: truncated(result.stdout, result.stdoutTruncated), stderr: truncated(result.stderr, result.stderrTruncated), exitCode: result.exitCode, ...(result.timedOut === undefined ? {} : { timedOut: result.timedOut }) }; };
-if (granted.has("Glob")) handlers.Glob = async ({ pattern, path = "." }) => { await existing(path); const result = await runAdapter("Glob", { pattern: bounded(pattern, 4096, "command_limit_exceeded"), path }); if (result.stdoutTruncated || result.stderrTruncated || result.exitCode !== 0 || result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout.trim().split("\\n").filter(Boolean); };
-if (granted.has("rg")) handlers.rg = async ({ args, cwd = ".", follow = true }) => { await existing(cwd); if (typeof follow !== "boolean") throw Object.assign(new Error("invalid_command_follow"), { code: "invalid_command_follow" }); const result = await runAdapter("rg", { args: bounded(args, IO_LIMIT, "command_limit_exceeded"), cwd, follow }); if (result.stdoutTruncated || result.stderrTruncated) throw Object.assign(new Error("command_output_truncated"), { code: "command_output_truncated" }); if (!result.stdout && result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout; };
-if (granted.has("fd")) handlers.fd = async ({ args, cwd = ".", follow = true }) => { await existing(cwd); if (typeof follow !== "boolean") throw Object.assign(new Error("invalid_command_follow"), { code: "invalid_command_follow" }); const result = await runAdapter("fd", { args: bounded(args, IO_LIMIT, "command_limit_exceeded"), cwd, follow }); if (result.stdoutTruncated || result.stderrTruncated) throw Object.assign(new Error("command_output_truncated"), { code: "command_output_truncated" }); if (!result.stdout && result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout; };
+if (granted.has("Read")) handlers.Read = async (input) => { const { path, cwd = ".", offset, limit, optional = false } = inputRecord(input, ["path"], ["cwd", "offset", "limit", "optional"], "invalid_read_input"); requireTool("Read"); if ((offset !== undefined && (!Number.isSafeInteger(offset) || offset < 1)) || (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) || typeof optional !== "boolean") throw Object.assign(new Error("invalid_read_options"), { code: "invalid_read_options" }); let value; try { value = await readBounded(path, cwd); } catch (error) { if (optional && error?.code === "ENOENT") return null; throw error; } if (offset === undefined && limit === undefined) return value; const lines = value.split("\\n"); const start = (offset ?? 1) - 1; return lines.slice(start, limit === undefined ? lines.length : start + limit).join("\\n"); };
+if (granted.has("Write")) handlers.Write = async (input) => { const { path, cwd = ".", content } = inputRecord(input, ["path", "content"], ["cwd"], "invalid_write_input"); requireTool("Write"); bounded(content, IO_LIMIT, "write_limit_exceeded", "invalid_write_content"); await writeFile(await writable(path, cwd), content); };
+if (granted.has("Edit")) handlers.Edit = async (input) => { const { path, cwd = ".", oldText, newText } = inputRecord(input, ["path", "oldText", "newText"], ["cwd"], "invalid_edit_input"); requireTool("Edit"); if (typeof oldText !== "string" || typeof newText !== "string") throw Object.assign(new Error("invalid_edit_content"), { code: "invalid_edit_content" }); const target = await existing(path, cwd), value = await readBounded(path, cwd); if (!value.includes(oldText)) return { matched: false }; const edited = value.replace(oldText, newText); bounded(edited, IO_LIMIT, "write_limit_exceeded"); await writeFile(target, edited); return { matched: true }; };
+if (granted.has("Bash")) handlers.Bash = async (input) => { const { command, cwd = "." } = inputRecord(input, ["command"], ["cwd"], "invalid_bash_input"); await existing(cwd); const result = await runAdapter("Bash", { command: bounded(command, IO_LIMIT, "command_limit_exceeded", "invalid_bash_command"), cwd }); return { stdout: truncated(result.stdout, result.stdoutTruncated), stderr: truncated(result.stderr, result.stderrTruncated), exitCode: result.exitCode }; };
+if (granted.has("Glob")) handlers.Glob = async (input) => { const { pattern, path = "." } = inputRecord(input, ["pattern"], ["path"], "invalid_glob_input"); await existing(path); const result = await runAdapter("Glob", { pattern: bounded(pattern, 4096, "command_limit_exceeded", "invalid_glob_pattern"), path }); if (result.stdoutTruncated || result.stderrTruncated || result.exitCode !== 0 || result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout.trim().split("\\n").filter(Boolean); };
+if (granted.has("rg")) handlers.rg = async (input) => { const { args, cwd = ".", follow = true } = inputRecord(input, ["args"], ["cwd", "follow"], "invalid_rg_input"); await existing(cwd); if (typeof follow !== "boolean") throw Object.assign(new Error("invalid_command_follow"), { code: "invalid_command_follow" }); const result = await runAdapter("rg", { args: commandArguments(args), cwd, follow }); if (result.stdoutTruncated || result.stderrTruncated) throw Object.assign(new Error("command_output_truncated"), { code: "command_output_truncated" }); if (!result.stdout && result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout; };
+if (granted.has("fd")) handlers.fd = async (input) => { const { args, cwd = ".", follow = true } = inputRecord(input, ["args"], ["cwd", "follow"], "invalid_fd_input"); await existing(cwd); if (typeof follow !== "boolean") throw Object.assign(new Error("invalid_command_follow"), { code: "invalid_command_follow" }); const result = await runAdapter("fd", { args: commandArguments(args), cwd, follow }); if (result.stdoutTruncated || result.stderrTruncated) throw Object.assign(new Error("command_output_truncated"), { code: "command_output_truncated" }); if (!result.stdout && result.stderr.trim()) throw Object.assign(new Error("command_adapter_failed"), { code: "command_adapter_failed" }); return result.stdout; };
 const htmlText = (html) => html.replace(/<\\s*(script|style|noscript)[^>]*>[\\s\\S]*?<\\s*\\/\\1\\s*>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim();
 const htmlMarkdown = (html) => html.replace(/<\\s*(script|style|noscript|meta|link)[^>]*>[\\s\\S]*?<\\s*\\/\\1\\s*>/gi, "").replace(/<\\s*br\\s*\\/?>/gi, "\\n").replace(/<\\s*\\/\\s*(p|div|section|article|header|footer|ul|ol|pre|blockquote)\\s*>/gi, "\\n\\n").replace(/<\\s*li[^>]*>/gi, "- ").replace(/<\\s*\\/\\s*li\\s*>/gi, "\\n").replace(/<\\s*h([1-6])[^>]*>/gi, (_, level) => "#".repeat(Number(level)) + " ").replace(/<\\s*\\/\\s*h[1-6]\\s*>/gi, "\\n\\n").replace(/<\\s*(strong|b)[^>]*>/gi, "**").replace(/<\\s*\\/\\s*(strong|b)\\s*>/gi, "**").replace(/<\\s*(em|i)[^>]*>/gi, "_").replace(/<\\s*\\/\\s*(em|i)\\s*>/gi, "_").replace(/<\\s*code[^>]*>/gi, String.fromCharCode(96)).replace(/<\\s*\\/\\s*code\\s*>/gi, String.fromCharCode(96)).replace(/<[^>]+>/g, "").replace(/\\n[ \\t]+/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trim();
-if (granted.has("WebFetch")) handlers.WebFetch = async ({ url, format = "text", timeout = 30 }) => {
+if (granted.has("WebFetch")) handlers.WebFetch = async (input) => {
+  const { url, format = "text" } = inputRecord(input, ["url"], ["format"], "invalid_webfetch_input");
   requireTool("WebFetch");
-  if (!(["text", "markdown", "html"].includes(format)) || typeof timeout !== "number" || !Number.isFinite(timeout) || timeout <= 0 || timeout > 120) throw Object.assign(new Error("invalid_fetch_options"), { code: "invalid_fetch_options" });
+  if (typeof url !== "string") throw invalid("invalid_webfetch_url");
+  if (!( ["text", "markdown", "html"].includes(format))) throw invalid("invalid_fetch_options");
   let target;
   try { target = new URL(url); } catch { throw Object.assign(new Error("egress_denied"), { code: "egress_denied" }); }
   if ((target.protocol !== "https:" && target.protocol !== "http:") || target.username || target.password || !I.grant.egressOrigins.includes(target.origin)) throw Object.assign(new Error("egress_denied"), { code: "egress_denied" });
   const fetchController = new AbortController();
   fetchControllers.add(fetchController);
-  const fetchDeadline = Math.min(deadline, performance.now() + timeout * 1000);
-  const fetchRemaining = () => { const value = Math.floor(fetchDeadline - performance.now()); if (value < 1) { if (fetchDeadline === deadline) throw timedOut(); throw Object.assign(new Error("fetch_timed_out"), { code: "fetch_timed_out" }); } return value; };
-  const withinFetch = (promise) => new Promise((resolveValue, rejectValue) => { let timer; try { timer = setTimeout(() => { fetchController.abort(); if (fetchDeadline === deadline) { abortAll(); rejectValue(timedOut()); } else rejectValue(Object.assign(new Error("fetch_timed_out"), { code: "fetch_timed_out" })); }, fetchRemaining()); } catch (error) { rejectValue(error); return; } Promise.resolve(promise).then(resolveValue, rejectValue).finally(() => clearTimeout(timer)); });
   try {
-    const response = await withinFetch(fetch(target, { redirect: "manual", signal: fetchController.signal }));
+    const response = await fetch(target, { redirect: "manual", signal: fetchController.signal });
     if ((response.status >= 300 && response.status <= 399) || response.type === "opaqueredirect") {
       await cleanupFetch(() => response.body?.cancel(), fetchController);
       throw Object.assign(new Error("egress_denied"), { code: "egress_denied" });
@@ -550,7 +531,7 @@ if (granted.has("WebFetch")) handlers.WebFetch = async ({ url, format = "text", 
     let total = 0;
     if (reader) {
       while (true) {
-        const next = await withinFetch(reader.read());
+        const next = await reader.read();
         if (next.done) break;
         total += next.value.byteLength;
         if (total > IO_LIMIT) {
@@ -566,27 +547,26 @@ if (granted.has("WebFetch")) handlers.WebFetch = async ({ url, format = "text", 
     fetchControllers.delete(fetchController);
   }
 };
-if (granted.has("sleep")) handlers.sleep = async (milliseconds) => { requireTool("sleep"); if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw Object.assign(new Error("invalid_sleep"), { code: "invalid_sleep" }); await withinDeadline(new Promise((resolveSleep) => setTimeout(resolveSleep, Math.min(milliseconds, remaining())))); };
+if (granted.has("sleep")) handlers.sleep = async (milliseconds) => { requireTool("sleep"); if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) throw Object.assign(new Error("invalid_sleep"), { code: "invalid_sleep" }); await new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds)); };
 for (const name of ${JSON.stringify(CODE_TOOL_NAMES)}) if (typeof handlers[name] !== "function") handlers[name] = async () => { throw denied(); };
 const logs = []; let logBytes = 0;
 const record = (...items) => { if (logBytes >= OUTPUT_LIMIT) return null; let line; try { line = items.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" "); } catch { line = "[unserializable]"; } const bytes = Buffer.from(line + "\\n"); const kept = bytes.subarray(0, OUTPUT_LIMIT - logBytes); logs.push(kept); logBytes += kept.byteLength; return null; };
 handlers.console = (items) => { if (!Array.isArray(items)) throw Object.assign(new Error("invalid_console_input"), { code: "invalid_console_input" }); return record(...items); };
 const bridgeCode = (error) => typeof error?.code === "string" && /^[a-z0-9_]+$/.test(error.code) && error.code.length <= 64 ? error.code : "code_execution_failed";
-const bridge = async (payload) => { try { bounded(payload, IO_LIMIT, "bridge_limit_exceeded"); const call = JSON.parse(payload); if (!call || typeof call !== "object" || Array.isArray(call) || Object.keys(call).sort().join(",") !== "input,name" || typeof call.name !== "string") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const handler = handlers[call.name]; if (typeof handler !== "function") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const value = await handler(call.input); const response = JSON.stringify(value === undefined ? { ok: true, undefined: true } : { ok: true, value }); if (Buffer.byteLength(response) > IO_LIMIT * 2 + 4096) throw Object.assign(new Error("bridge_limit_exceeded"), { code: "bridge_limit_exceeded" }); return response; } catch (error) { return JSON.stringify({ ok: false, code: bridgeCode(error) }); } };
+const bridge = async (payload) => { try { bounded(payload, IO_LIMIT, "bridge_limit_exceeded", "invalid_bridge_payload"); const call = JSON.parse(payload); if (!call || typeof call !== "object" || Array.isArray(call) || Object.keys(call).sort().join(",") !== "input,name" || typeof call.name !== "string") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const handler = handlers[call.name]; if (typeof handler !== "function") throw Object.assign(new Error("capability_denied"), { code: "capability_denied" }); const value = await handler(call.input); const response = JSON.stringify(value === undefined ? { ok: true, undefined: true } : { ok: true, value }); if (Buffer.byteLength(response) > IO_LIMIT * 2 + 4096) throw Object.assign(new Error("bridge_limit_exceeded"), { code: "bridge_limit_exceeded" }); return response; } catch (error) { return JSON.stringify({ ok: false, code: bridgeCode(error) }); } };
 const context = createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false } });
 context.__bridge = bridge;
 context.__toolsJson = JSON.stringify(${JSON.stringify(CODE_TOOL_NAMES)});
 context.__stateJson = JSON.stringify(I.state.values);
 try {
-	new Script(${JSON.stringify(SANDBOX_BOOTSTRAP)}).runInContext(context, { timeout: remaining() });
+	new Script(${JSON.stringify(SANDBOX_BOOTSTRAP)}).runInContext(context);
 const importDenied = () => new Script("Promise.reject(Object.assign(new Error('capability_denied'), { code: 'capability_denied' }))").runInContext(context);
 const script = new Script("(async () => {\\n" + I.request.code + "\\n})()", { filename: "agent-code.js", importModuleDynamically: importDenied });
-	const execution = script.runInContext(context, { timeout: remaining() });
-	await withinDeadline(execution);
-	remaining();
-	const valuesJson = new Script("globalThis.__kaliStateJson()").runInContext(context, { timeout: remaining() });
-	bounded(valuesJson, STATE_LIMIT, "state_limit_exceeded");
+	const execution = script.runInContext(context);
+	await execution;
+	const valuesJson = new Script("globalThis.__kaliStateJson()").runInContext(context);
+	bounded(valuesJson, STATE_LIMIT, "state_limit_exceeded", "invalid_state_json");
 	const outcome = { version: 1, operationId: I.operationId, paramsDigest: I.paramsDigest, output: Buffer.concat(logs).toString("utf8").replace(/\\n$/, ""), state: { version: 1, revision: I.state.revision + 1, values: JSON.parse(valuesJson) }, elapsedMs: Math.max(0, Math.floor(performance.now() - started)) };
 	process.stdout.write("__KALI_CODE_MODE_V1__" + Buffer.from(JSON.stringify(outcome)).toString("base64") + "\\n");
-} catch (error) { abortAll(); const timeout = error?.code === "code_execution_timed_out" || error?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT"; process.stderr.write(timeout ? "code_execution_timed_out" : "code_execution_failed"); process.exitCode = 1; }`;
+} catch { abortAll(); process.stderr.write("code_execution_failed"); process.exitCode = 1; }`;
 }
