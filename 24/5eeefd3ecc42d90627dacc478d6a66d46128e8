@@ -1,0 +1,43 @@
+packages/code-mode-runtime/test/runtime.test.ts
+  s_f0bf700fd7f493::t_e25d4fc6bb63b1 498-502,504-522,525-543,547-577
+  s_f0bf700fd7f493::t_e31cd97f8d2f7f 18
+  s_f0bf700fd7f493::t_17a00f5810a627 56,453,491,578-587,613,638,641-643,659-660,663
+  s_f0bf700fd7f493::t_ee665a8caadbc8 452
+  s_f0bf700fd7f493::t_b60dfa3f8c6d6d 451
+  s_f0bf700fd7f493::t_10aab967a95544 489
+  s_f0bf700fd7f493::t_e61a261930a622 490
+  s_f0bf700fd7f493::t_1359f89548ed27 117-140
+packages/code-mode-runtime/src/index.ts
+  s_f0bf700fd7f493::t_de9507e663b49e 340
+  s_f0bf700fd7f493::t_452adaf33b191d 484-486
+  s_f0bf700fd7f493::t_0fdb1e19ea7de3 70
+  s_f0bf700fd7f493::t_00bede747043c9 500
+  s_f0bf700fd7f493::t_cb11d6cfc9b3fc 495
+  s_f0bf700fd7f493::t_cb4bc6b8ac9337 568
+  s_f0bf700fd7f493::t_bc7288477f9115 505,507-508,515,534
+  s_f0bf700fd7f493::t_d1bb9af5334f31 556
+  s_f0bf700fd7f493::t_06ebc736a01bd7 499
+  s_f0bf700fd7f493::t_f5c2b12e18d5ce 504
+  s_f0bf700fd7f493::t_dc0fb7588f4836 370-380
+  s_f0bf700fd7f493::t_362102c6b1841a 501
+  s_f0bf700fd7f493::t_c268403632621a 285,298,476,483,488,490,492,496-498,550,562,565-567,571
+  s_f0bf700fd7f493::t_de5ec6dafa8c85 487
+packages/code-mode-runtime/package.json
+  s_f0bf700fd7f493::t_cccf773398ff3c 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "245eeefd3ecc42d90627dacc478d6a66d46128e8",
+  "prompts": {},
+  "sessions": {
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
