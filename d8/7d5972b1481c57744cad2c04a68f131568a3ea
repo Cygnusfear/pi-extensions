@@ -1,0 +1,20 @@
+packages/pi-mesh/native/src/main.rs
+  s_f0bf700fd7f493::t_7e32aacc550b55 11-12
+  s_f0bf700fd7f493::t_214cbed06d8cc4 13-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "d87d5972b1481c57744cad2c04a68f131568a3ea",
+  "prompts": {},
+  "sessions": {
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
