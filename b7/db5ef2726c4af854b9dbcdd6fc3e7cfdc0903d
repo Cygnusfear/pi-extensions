@@ -1,0 +1,93 @@
+packages/pi-mesh/extension/active-inbound-mailbox.test.ts
+  s_f0bf700fd7f493::t_4823471fea4c8e 20-22
+  s_f0bf700fd7f493::t_fd9919e7fb1707 50
+packages/pi-mesh/extension/tell-protocol.ts
+  s_1fa3b565be9e6f::t_a1d33fdda81ff7 15-40
+packages/pi-mesh/extension/pi-mesh.ts
+  s_f0bf700fd7f493::t_7de91d85a32425 728,730-731
+  s_f0bf700fd7f493::t_7410309e66cf0c 816
+  s_f0bf700fd7f493::t_1e558274e84c04 204
+  s_f0bf700fd7f493::t_b1a11e32b0caa2 1481-1482
+  s_f0bf700fd7f493::t_a08bb8d7f22489 2158
+  s_f0bf700fd7f493::t_afdd7ae11a3210 121-131
+  s_f0bf700fd7f493::t_6d6a0707adb73c 166-175,179-188
+  s_f0bf700fd7f493::t_4f99bf104ccdc3 543-547
+  s_f0bf700fd7f493::t_7167ea38afdbed 761
+  s_f0bf700fd7f493::t_4588122db1d892 351
+  s_f0bf700fd7f493::t_fb5c29cba584ca 2092
+  s_f0bf700fd7f493::t_3f36a2be743fac 273-278,280
+  s_f0bf700fd7f493::t_6f79bf23233734 833-835
+  s_f0bf700fd7f493::t_df1af635cba7f4 62
+  s_f0bf700fd7f493::t_37877e38357907 58
+  s_f0bf700fd7f493::t_df136ee8f86ee6 763
+  s_f0bf700fd7f493::t_e4d5cb1caf88d1 1721
+  s_f0bf700fd7f493::t_dc41376e5f9bb5 2219
+  s_f0bf700fd7f493::t_ab8774af5597b5 796,805,807
+  s_f0bf700fd7f493::t_9ad087b784c08f 20
+  s_f0bf700fd7f493::t_c6a825379e9bcd 221-230
+  s_f0bf700fd7f493::t_14960073013752 789,794-795,797-804,806,808
+  s_f0bf700fd7f493::t_e510a2425ac208 442-448
+  s_f0bf700fd7f493::t_4c0494232ba61c 352,540,655-680,689-691,693-694,696-697
+  s_f0bf700fd7f493::t_e1d03a85204ca9 721
+  s_f0bf700fd7f493::t_2716865a4c3388 2084-2091,2093-2095
+  s_f0bf700fd7f493::t_b49aaf29977a5e 210
+  s_f0bf700fd7f493::t_f8a3c62941b12d 384-387,389,391,399-400,402-407,409-413,416-429,434,437-439,441,449,451-476,483,485-491,495-499,503-509,511-513,515-522,526-539
+  s_f0bf700fd7f493::t_3e742c23887c5a 564-568
+  s_f0bf700fd7f493::t_97a42e263e235b 2103
+  s_f0bf700fd7f493::t_d077fb9595d285 200
+  s_f0bf700fd7f493::t_b5f1ebac8815f8 817-818
+  s_f0bf700fd7f493::t_a2ef3bfe02efeb 23
+  s_f0bf700fd7f493::t_5ba46f7e806d82 69-70,73,75
+  s_f0bf700fd7f493::t_2ddb58687e9b24 79
+  s_f0bf700fd7f493::t_74edde2c1f89bb 215
+  s_f0bf700fd7f493::t_059b163b88b6c2 777
+  s_f0bf700fd7f493::t_2c388e3fbb0262 771
+  s_f0bf700fd7f493::t_406768a49f6b02 239-242,245,249,251-253,258,260-271,279,281-282,286-298,300-302,304,308-350,355-359,369,371-373,377
+  s_f0bf700fd7f493::t_481783af78f662 769
+  s_f0bf700fd7f493::t_b93fbe026678d1 353
+  s_f0bf700fd7f493::t_0b75b000bf05d2 541
+packages/pi-mesh/README.md
+  s_f0bf700fd7f493::t_fa3f91b9609931 116-134,136-140
+  s_f0bf700fd7f493::t_805821f2d769f2 135
+packages/pi-mesh/package.json
+  s_f0bf700fd7f493::t_ba62ea7b4b5911 3
+packages/pi-mesh/extension/types.ts
+  s_f0bf700fd7f493::t_1109c23df7714d 148-149
+  s_f0bf700fd7f493::t_bec68af71d1692 193
+  s_f0bf700fd7f493::t_e0ae40cd49986b 179,181-187
+  s_1fa3b565be9e6f::t_c4b825d2044d1d 120-147,150-178,180,188-192,194-195
+packages/pi-mesh/extension/active-inbound-mailbox.ts
+  s_1fa3b565be9e6f::t_da84ab29dbafea 70-76
+packages/pi-mesh/extension/pi-mesh.core.test.ts
+  s_f0bf700fd7f493::t_7b02acaf861097 101-108
+  s_f0bf700fd7f493::t_4c709fe38e1430 125-126,129-130
+  s_f0bf700fd7f493::t_01079c64bc85a8 1-50,59-74,77-82,90-94,96-100,109-124,127-128,131-154
+  s_f0bf700fd7f493::t_1a9fd3c3fb7e53 83-89
+  s_f0bf700fd7f493::t_cbf2bbdacde6c6 51-58
+  s_f0bf700fd7f493::t_8fc8895046178f 75-76
+  s_f0bf700fd7f493::t_a04c8eeb9df94b 95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "b7db5ef2726c4af854b9dbcdd6fc3e7cfdc0903d",
+  "prompts": {},
+  "sessions": {
+    "s_1fa3b565be9e6f": {
+      "agent_id": {
+        "tool": "Jill Singularity Maldacena",
+        "id": "01a034af-7c5d-78d6-8eae-3b04138c2496",
+        "model": "kimi-coding/k3"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
