@@ -1,0 +1,19 @@
+packages/canonical-agent-resources/package.json
+  s_f0bf700fd7f493::t_8267537d2f41c7 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "6504d6c9273a759445fe25aef410e86eb627795e",
+  "prompts": {},
+  "sessions": {
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
