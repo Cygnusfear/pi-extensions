@@ -1,0 +1,38 @@
+packages/pi-mesh/extension/types.ts
+  s_7ce46e9f13033b::t_4297be9df5f002 21-24
+packages/pi-mesh/README.md
+  s_7ce46e9f13033b::t_6815269f27bc14 161-168,172-175,180-182
+packages/pi-mesh/extension/mesh-config.test.ts
+  s_7ce46e9f13033b::t_1a794dce7aa34d 1-125
+packages/pi-mesh/package.json
+  s_7ce46e9f13033b::t_6b27fd883c4714 3
+packages/pi-mesh/extension/pi-mesh.ts
+  s_7ce46e9f13033b::t_7ca5dd560ed0e4 202
+  s_7ce46e9f13033b::t_cb1c4521b04367 1258-1259
+  s_7ce46e9f13033b::t_b38bac34c31f6e 43
+  s_7ce46e9f13033b::t_5436071dfe6e95 1753
+  s_7ce46e9f13033b::t_6be1ac008f6748 1952-1955
+  s_7ce46e9f13033b::t_544f63957190cb 183
+  s_7ce46e9f13033b::t_7d9dd2a2167217 224,226
+  s_7ce46e9f13033b::t_995d74b23fa5bb 1255-1257,1260-1262
+  s_7ce46e9f13033b::t_87fdb00732bb3f 190
+  s_7ce46e9f13033b::t_32f69b8668d253 225
+packages/pi-mesh/extension/mesh-config.ts
+  s_7ce46e9f13033b::t_5e41c1725be57c 1-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "2c2f7d12bf219cdb18e64f5ab82819535519ce56",
+  "prompts": {},
+  "sessions": {
+    "s_7ce46e9f13033b": {
+      "agent_id": {
+        "tool": "Tycho Jupiter Spergel",
+        "id": "01a0338f-1b4a-75d7-a5c7-c44af4f766ad",
+        "model": "openai-codex/gpt-5.6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
