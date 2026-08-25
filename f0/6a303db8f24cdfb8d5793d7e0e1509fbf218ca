@@ -1,0 +1,29 @@
+packages/pi-mesh/native/src/startup_lock_tests.rs
+  s_f0bf700fd7f493::t_de08b43fa72561 11-12
+  s_f0bf700fd7f493::t_e2cbbfd3a23287 1-10,13-19
+packages/pi-mesh/native/src/main.rs
+  s_f0bf700fd7f493::t_8e6262c98755a3 160,164
+  s_f0bf700fd7f493::t_e387c2eee83840 79-99,101-116
+  s_f0bf700fd7f493::t_54d312dda5cbab 14-16
+  s_f0bf700fd7f493::t_dbe8b169f9d738 100
+  s_f0bf700fd7f493::t_fc401a8dfc42cd 17-23
+  s_f0bf700fd7f493::t_bdae9a027de26b 205-207
+  s_f0bf700fd7f493::t_cf98c55b2b9d4b 322
+  s_f0bf700fd7f493::t_b43bc4ca01cb71 144-151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "f06a303db8f24cdfb8d5793d7e0e1509fbf218ca",
+  "prompts": {},
+  "sessions": {
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
