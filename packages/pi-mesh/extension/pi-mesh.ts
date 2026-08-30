@@ -15,12 +15,12 @@ import {
 } from "@pi-extensions/shared/session-nickname";
 import { renderToolResult } from "@pi-extensions/shared/tool-ui-utils";
 import { type TSchema, Type } from "@sinclair/typebox";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { hostname } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildSessionTailSnapshotFromLeaf,
@@ -83,6 +83,13 @@ import {
   formatReviveDrainBatch,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
+import {
+  DEFAULT_MACHINE_MESH_CONFIG,
+  loadMachineMeshConfig,
+  machineMeshConfigPath,
+  toMeshConfig,
+  type MachineMeshConfigV1,
+} from "./machine-mesh-config.ts";
 import { DurableInboundMailbox } from "./durable-inbound-mailbox.ts";
 import {
   buildReviveNotify,
@@ -142,6 +149,150 @@ function resolveBinPath(): string | null {
   return null;
 }
 
+// ── Sidecar paths, probe, and stray cleanup ──────────────────────────────────
+
+/** HOME-rooted sidecar paths (the ~/.pi dir is created by the sidecar). */
+function meshHomeDir(): string {
+  return process.env.HOME ?? "/tmp";
+}
+function meshSocketPath(): string {
+  return join(meshHomeDir(), ".pi", "mesh.sock");
+}
+function meshPidPath(): string {
+  return join(meshHomeDir(), ".pi", "mesh.pid");
+}
+
+// Pacing for event-demanded repairs (kal-9g0w8pof): each failure event
+// schedules the next attempt with doubled, capped pacing. A scheduler for
+// retries the events demanded — never a failure verdict, deadline, or give-up
+// counter. Nothing is ever abandoned by a clock.
+const REPAIR_RETRY_BASE_MS = 250;
+const REPAIR_RETRY_MAX_MS = 10_000;
+
+/**
+ * Connect-probe verdict for the singleton socket: the kernel 'connect' event
+ * means a sidecar is serving; the 'error' event (missing/stale socket, dead
+ * listener) means it is not. Both are events — there is no elapsed-time
+ * verdict (kal-9g0w8pof).
+ */
+export function probeSidecarSocket(sockPath: string): Promise<"serving" | "down"> {
+  // A missing socket file can never have a listener (kernel invariant), so
+  // the verdict is immediate and no connection attempt is made. (This also
+  // avoids a failed pipe connect, whose error event bun test mis-delivers.)
+  let fileExists = false;
+  try {
+    fileExists = existsSync(sockPath);
+  } catch {}
+  if (!fileExists) return Promise.resolve("down");
+  // File present: the verdict is the kernel connect/error event (a stale
+  // file — dead listener, e.g. a SIGKILLed sidecar — yields "error").
+  return new Promise((resolvePromise) => {
+    const probe = createConnection(sockPath);
+    let settled = false;
+    let connected = false;
+    const settle = (verdict: "serving" | "down") => {
+      if (settled) return;
+      settled = true;
+      try {
+        probe.destroy();
+      } catch {}
+      resolvePromise(verdict);
+    };
+    probe.once("connect", () => {
+      connected = true;
+      settle("serving");
+    });
+    // Both settle paths are idempotent: a failed socket always errors and/or
+    // closes, and error delivery can vary across runtimes (e.g. bun test
+    // skips the "error" emit for pipes), so "close" without a prior
+    // "connect" settles "down" as well.
+    probe.on("error", () => settle("down"));
+    probe.once("close", () => {
+      if (!connected) settle("down");
+    });
+  });
+}
+
+/**
+ * Every pi-mesh sidecar process on this machine: command-line matches of this
+ * install's binary path (precise) plus process-name matches of the sidecar
+ * (strays spawned from an older install path).
+ */
+export function findStraySidecarPids(binPath: string): number[] {
+  const pids = new Set<number>();
+  const collect = (raw: string) => {
+    for (const line of raw.split("\n")) {
+      const pid = Number(line.trim());
+      if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) pids.add(pid);
+    }
+  };
+  try {
+    const escaped = binPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    collect(execFileSync("pgrep", ["-f", escaped]).toString());
+  } catch {
+    // no matches (or no pgrep) — nothing to kill
+  }
+  const binName = basename(binPath);
+  if (binName === "pi-mesh" || binName === "pi-mesh.exe") {
+    try {
+      collect(execFileSync("pgrep", ["-x", binName]).toString());
+    } catch {
+      // same as above
+    }
+  }
+  return [...pids];
+}
+
+/**
+ * Dead = kill(0) reports ESRCH, or the process is a zombie (killed but not
+ * yet reaped — kill(0) still succeeds against a zombie).
+ */
+function isProcessDead(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return true;
+  }
+  try {
+    const state = execFileSync("ps", ["-o", "state=", "-p", String(pid)]).toString().trim();
+    return state.startsWith("Z");
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Kill every stray sidecar process (the nuke directive, kal-0suu3dur):
+ * SIGTERM, then SIGKILL anything still visible, then one decisive liveness
+ * probe per pid. SIGKILL cannot be caught, so the final probe is conclusive.
+ *
+ * exceptPid: the pidfile's recorded holder, when it is still alive. The
+ * recorded holder is the daemon's own authority — a broken one is disposed
+ * of by the daemon itself under the start lock (kal-0suu3dur), so the
+ * session-side nuke never kills a process that has already published itself.
+ */
+export function killStraySidecars(binPath: string, exceptPid: number | null = null): { killed: number[]; survivors: number[] } {
+  const killed: number[] = [];
+  for (const pid of findStraySidecarPids(binPath)) {
+    if (exceptPid !== null && pid === exceptPid) continue;
+    try {
+      process.kill(pid, "SIGTERM");
+      killed.push(pid);
+    } catch {}
+  }
+  const survivors: number[] = [];
+  for (const pid of killed) {
+    if (!isProcessDead(pid)) {
+      // Still running after SIGTERM — escalate.
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
+    if (!isProcessDead(pid)) survivors.push(pid);
+  }
+  return { killed, survivors };
+}
+
 // ── Sidecar process wrapper ──────────────────────────────────────────────────
 
 type MeshEventType = "ready" | "message" | "peer-join" | "peer-leave" | "request" | "channel";
@@ -178,6 +329,13 @@ export class PiMesh {
   private channelSubs: Set<string> = new Set();
   private channelWildcardSubbed = false;
   private isSocketReady = false;
+  private stopped = false;
+  private binPath: string | null = null;
+  private sockPath: string | null = null;
+  private ensuringSidecar = false;
+  private readyWaiters: Array<() => void> = [];
+  private repairRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private repairRetryDelayMs = REPAIR_RETRY_BASE_MS;
 
   start(binPath: string, sessionId: string, cwd: string, config?: MeshConfig, name?: string): void {
     if (!sessionId) {
@@ -188,85 +346,311 @@ export class PiMesh {
     this.myName = name;
     this.announceIntervalMs = config?.announceIntervalMs ?? 30_000;
 
-    const sockPath = join(process.env.HOME ?? "/tmp", ".pi", "mesh.sock");
+    this.binPath = binPath;
+    this.sockPath = meshSocketPath();
 
-    // Ensure sidecar is running, then connect
-    this._ensureSidecar(binPath, config, sockPath, () => {
-      this._connectSocket(sockPath, cwd);
-    });
+    // Ensure the singleton sidecar is serving (spawn/repair if not), then
+    // connect. Reconnect-on-loss reuses this exact path (kal-0suu3dur).
+    this._ensureSidecar(() => this._connectSocket());
   }
 
-  private _ensureSidecar(
-    binPath: string,
-    config: MeshConfig | undefined,
-    sockPath: string,
-    onReady: () => void,
-  ): void {
-    const pidPath = join(process.env.HOME ?? "/tmp", ".pi", "mesh.pid");
+  /**
+   * Make sure the singleton sidecar is serving, then run onReady.
+   *
+   * The verdict is an event, never a clock (kal-9g0w8pof): a connect probe
+   * settles on the kernel connect/error event. If the sidecar is down, the
+   * repair path kills ALL stray pi-mesh processes, unlinks the stale
+   * mesh.sock/mesh.pid, re-reads ~/.pi/mesh-config.json, and spawns a fresh
+   * sidecar (kal-0suu3dur). Single-instance is enforced by the sidecar's OS
+   * advisory lock (kal-kbu1f9xy) — the session never emulates it.
+   */
+  private _ensureSidecar(onReady: () => void): void {
+    if (this.stopped) return;
+    this.readyWaiters.push(onReady);
+    void this._runEnsure();
+  }
 
-    // Check if sidecar is already running
-    if (existsSync(pidPath) && existsSync(sockPath)) {
+  private async _runEnsure(): Promise<void> {
+    if (this.ensuringSidecar) return;
+    this.ensuringSidecar = true;
+    try {
+      await this._ensureSidecarRun();
+    } catch (e) {
+      console.warn("[pi-mesh] sidecar ensure failed:", e);
+    } finally {
+      this.ensuringSidecar = false;
+    }
+  }
+
+  private async _ensureSidecarRun(): Promise<void> {
+    const sockPath = this.sockPath;
+    const binPath = this.binPath;
+    if (!sockPath || !binPath) return;
+
+    // Fast path: the singleton is already serving (connect-probe event).
+    if ((await probeSidecarSocket(sockPath)) === "serving") {
+      this._flushReadyWaiters();
+      return;
+    }
+    if (this.stopped) return;
+
+    // Repair: nuke every stray sidecar process and the stale socket/pidfile
+    // BEFORE spawning — restarts ALWAYS nuke old sidecars (Hooman directive,
+    // kal-0suu3dur). The probe just proved nothing is serving at the
+    // singleton path, so every matched process is a stray — except the
+    // pidfile's live recorded holder, which the daemon itself disposes of
+    // under the start lock.
+    let recordedHolder: number | null = null;
+    let holderAlive = false;
+    try {
+      const holder = parseInt(readFileSync(meshPidPath(), "utf8").trim(), 10);
+      if (Number.isInteger(holder) && holder > 0) {
+        recordedHolder = holder;
+        try {
+          process.kill(holder, 0);
+          holderAlive = true;
+        } catch {}
+      }
+    } catch {}
+    const { killed, survivors } = killStraySidecars(binPath, holderAlive ? recordedHolder : null);
+    if (killed.length > 0 || survivors.length > 0) {
+      console.warn(
+        `[pi-mesh] sidecar repair: killed ${killed.length} stray sidecar(s) [${killed.join(", ")}]` +
+          (survivors.length > 0 ? ` — still alive after SIGKILL: [${survivors.join(", ")}]` : ""),
+      );
+    }
+    // Only unlink state that is genuinely stale. A live recorded holder owns
+    // (or is about to publish) these files — unlinking under it would race
+    // its bind; the daemon's lock + re-check resolves the duplicate.
+    if (!holderAlive) {
       try {
-        const pid = parseInt(readFileSync(pidPath, "utf8").trim(), 10);
-        if (pid > 0) {
-          try {
-            process.kill(pid, 0);
-            onReady();
-            return;
-          } catch {}
-        }
+        unlinkSync(sockPath);
+      } catch {}
+      try {
+        unlinkSync(meshPidPath());
       } catch {}
     }
+    if (this.stopped) return;
 
-    // Spawn sidecar (detached — survives pi exit)
-    const zenohConfig: Record<string, unknown> = {};
-    if (config?.mode) zenohConfig.mode = config.mode;
-    if (config?.endpoints) zenohConfig.connect = { endpoints: config.endpoints };
-    if (config?.scouting !== undefined) {
-      zenohConfig.scouting = { multicast: { enabled: config.scouting } };
-    }
-    const configArg = JSON.stringify(zenohConfig);
-
-    const child = spawn(binPath, [configArg], {
-      detached: true,
-      stdio: "ignore",
-    });
+    // (Re)spawn re-reads ~/.pi/mesh-config.json so endpoint/mode/scouting
+    // changes take effect on every (re)start (kal-0suu3dur).
+    const configArg = this._sidecarConfigArg();
+    const child = spawn(binPath, [configArg], { detached: true, stdio: "ignore" });
     child.unref(); // Don't keep pi alive for the sidecar
 
-    // Wait for socket to appear
-    let attempts = 0;
-    const waitForSocket = setInterval(() => {
-      attempts++;
-      if (existsSync(sockPath)) {
-        clearInterval(waitForSocket);
-        onReady();
-      } else if (attempts > 50) {
-        // 5 seconds
-        clearInterval(waitForSocket);
-        console.warn("[pi-mesh] sidecar socket not ready after 5s");
-      }
-    }, 100);
+    const outcome = await this._awaitSidecarReady(child);
+    if (this.stopped) return;
+    if (outcome === "ready") {
+      this._resetRepairRetry();
+      this._flushReadyWaiters();
+      return;
+    }
+
+    // The spawned candidate exited before becoming ready. If a peer session's
+    // sidecar is already serving, we are done; otherwise the child's exit
+    // event demanded a fresh repair — paced and unbounded (no give-up).
+    if ((await probeSidecarSocket(sockPath)) === "serving") {
+      this._resetRepairRetry();
+      this._flushReadyWaiters();
+      return;
+    }
+    if (this.stopped) return;
+    const delay = this._armRepairRetry();
+    console.warn(`[pi-mesh] sidecar candidate exited before ready — retrying repair in ${delay}ms`);
   }
 
-  private _connectSocket(sockPath: string, cwd: string): void {
-    this.sock = createConnection(sockPath);
-    this.sock.on("data", (chunk: Buffer) => this._onData(chunk));
-    this.sock.on("error", (err) => {
-      console.warn(`[pi-mesh] socket error: ${err.message}`);
-      this.isSocketReady = false;
-      this.channelWildcardSubbed = false;
-      this.sock = null;
+  /**
+   * Wait for the spawned sidecar to become serving. Two events settle this:
+   * a successful connect probe, or the child's exit/spawn-error event. Probe
+   * attempts are paced with capped backoff — a scheduler for the retry the
+   * previous probe's error event demanded; nothing is abandoned by a clock
+   * (kal-9g0w8pof).
+   */
+  private _awaitSidecarReady(child: ChildProcess): Promise<"ready" | "exited" | "stopped"> {
+    return new Promise((resolvePromise) => {
+      let settled = false;
+      let probeTimer: ReturnType<typeof setTimeout> | null = null;
+      let delay = REPAIR_RETRY_BASE_MS;
+      const onExit = () => settle("exited");
+      const onSpawnError = (err: Error) => {
+        console.warn(`[pi-mesh] sidecar spawn failed: ${err.message}`);
+        settle("exited");
+      };
+      child.once("exit", onExit);
+      child.once("error", onSpawnError);
+      const settle = (result: "ready" | "exited" | "stopped") => {
+        if (settled) return;
+        settled = true;
+        if (probeTimer) {
+          clearTimeout(probeTimer);
+          probeTimer = null;
+        }
+        child.off("exit", onExit);
+        child.off("error", onSpawnError);
+        resolvePromise(result);
+      };
+      const probe = async (): Promise<void> => {
+        if (settled) return;
+        if (this.stopped) {
+          settle("stopped");
+          return;
+        }
+        const verdict = await probeSidecarSocket(this.sockPath ?? meshSocketPath());
+        if (settled) return;
+        if (verdict === "serving") {
+          settle("ready");
+          return;
+        }
+        probeTimer = setTimeout(() => {
+          void probe();
+        }, delay);
+        delay = Math.min(delay * 2, REPAIR_RETRY_MAX_MS);
+      };
+      void probe();
     });
-    this.sock.on("close", () => {
-      this.isSocketReady = false;
-      this.channelWildcardSubbed = false;
-      this.sock = null;
+  }
+
+  private _flushReadyWaiters(): void {
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    if (this.stopped) return;
+    for (const waiter of waiters) {
+      try {
+        waiter();
+      } catch (e) {
+        console.warn("[pi-mesh] ready waiter failed:", e);
+      }
+    }
+  }
+
+  private _resetRepairRetry(): void {
+    this.repairRetryDelayMs = REPAIR_RETRY_BASE_MS;
+  }
+
+  /**
+   * Schedule the next event-demanded repair/reconnect attempt. Pacing is
+   * capped backoff — a scheduler for the retry an event requested, never a
+   * deadline or give-up (kal-9g0w8pof).
+   */
+  private _armRepairRetry(): number {
+    const delay = this.repairRetryDelayMs;
+    this.repairRetryDelayMs = Math.min(this.repairRetryDelayMs * 2, REPAIR_RETRY_MAX_MS);
+    if (this.repairRetryTimer) clearTimeout(this.repairRetryTimer);
+    this.repairRetryTimer = setTimeout(() => {
+      this.repairRetryTimer = null;
+      if (!this.stopped) void this._runEnsure();
+    }, delay);
+    return delay;
+  }
+
+  /**
+   * The zenoh argv for a sidecar (re)spawn. Re-reads ~/.pi/mesh-config.json
+   * on every call so endpoint/mode/scouting changes take effect on every
+   * (re)start (kal-0suu3dur). An invalid config degrades to the sidecar's
+   * own defaults with a warning instead of wedging the mesh.
+   */
+  private _sidecarConfigArg(): string {
+    let machineConfig: MachineMeshConfigV1;
+    try {
+      // HOME-rooted, like the sock/pid paths (os.homedir() is not a
+      // reliable view of the session's HOME).
+      machineConfig = loadMachineMeshConfig(machineMeshConfigPath(meshHomeDir()));
+    } catch (e) {
+      console.warn("[pi-mesh] mesh-config.json is invalid — spawning sidecar with default config:", e);
+      machineConfig = DEFAULT_MACHINE_MESH_CONFIG;
+    }
+    const config = toMeshConfig(machineConfig);
+    const zenohConfig: Record<string, unknown> = {};
+    if (config.mode) zenohConfig.mode = config.mode;
+    if (config.endpoints) zenohConfig.connect = { endpoints: config.endpoints };
+    if (config.scouting !== undefined) {
+      zenohConfig.scouting = { multicast: { enabled: config.scouting } };
+    }
+    return JSON.stringify(zenohConfig);
+  }
+
+  private _connectSocket(): void {
+    if (this.stopped || !this.sockPath) return;
+    if (this.sock) return; // a connect is already in flight
+    const sock = createConnection(this.sockPath);
+    this.sock = sock;
+    sock.on("data", (chunk: Buffer) => this._onData(chunk));
+    sock.on("error", (err) => {
+      console.warn(`[pi-mesh] socket error: ${err.message}`);
+      this._handleSocketLost(sock);
+    });
+    sock.on("close", () => {
+      this._handleSocketLost(sock);
     });
 
     this._startStalePeerEviction();
   }
 
+  /**
+   * A connection was lost (kernel close/error event) — rejoin (kal-0suu3dur):
+   * make sure the singleton is serving (re-spawn it if it died — its OS lock
+   * keeps it a singleton), then connect again. Event-driven and unbounded:
+   * no attempt counters, no wall-clock abandonment (kal-9g0w8pof).
+   *
+   * A new connection gets a fresh client_id; the "ready" handler
+   * re-establishes every subscription, and the durable-id subscription keeps
+   * this session addressable across the client_id churn.
+   */
+  private _handleSocketLost(sock: Socket): void {
+    if (this.sock !== sock) return; // stale event from an already-replaced socket
+    const reachedReady = this.isSocketReady;
+    this.isSocketReady = false;
+    this.channelWildcardSubbed = false;
+    this.sock = null;
+    this._rejectPendingRequests("mesh connection lost — reconnecting");
+    if (this.stopped) return;
+    if (reachedReady) {
+      // The session was live; the close event demanded an immediate rejoin.
+      this._ensureSidecar(() => this._connectSocket());
+    } else {
+      // The connection never reached "ready" — a failing connect cycle. Queue
+      // the reconnect and pace the next attempt (a scheduler for an
+      // event-demanded retry; no give-up).
+      this.readyWaiters.push(() => this._connectSocket());
+      const delay = this._armRepairRetry();
+      console.warn(`[pi-mesh] connection lost before ready — retrying in ${delay}ms`);
+    }
+  }
+
+  /**
+   * In-flight ask/tell/askWithReceipt requests can never be answered on a
+   * dead connection — reject them so callers fail fast instead of hanging
+   * until their own timeout.
+   */
+  private _rejectPendingRequests(reason: string): void {
+    const error = new Error(reason);
+    for (const pending of this.pendingGets.values()) {
+      try {
+        pending.reject(error);
+      } catch {}
+    }
+    this.pendingGets.clear();
+    for (const pending of this.pendingAskReceipts.values()) {
+      try {
+        pending.reject(error);
+      } catch {}
+    }
+    this.pendingAskReceipts.clear();
+    for (const pending of this.pendingTellReceipts.values()) {
+      try {
+        pending.reject(error);
+      } catch {}
+    }
+    this.pendingTellReceipts.clear();
+  }
+
   stop(): void {
+    this.stopped = true;
+    if (this.repairRetryTimer) {
+      clearTimeout(this.repairRetryTimer);
+      this.repairRetryTimer = null;
+    }
+    this.readyWaiters = [];
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -286,15 +670,7 @@ export class PiMesh {
     this.isSocketReady = false;
     this.channelWildcardSubbed = false;
     this.myClientId = "";
-    this.pendingGets.clear();
-    for (const pending of this.pendingAskReceipts.values()) {
-      pending.reject(new Error("mesh stopped before ask receipt arrived"));
-    }
-    this.pendingAskReceipts.clear();
-    for (const pending of this.pendingTellReceipts.values()) {
-      pending.reject(new Error("mesh stopped before delivery receipt arrived"));
-    }
-    this.pendingTellReceipts.clear();
+    this._rejectPendingRequests("mesh stopped");
   }
 
   setName(name: string | undefined): void {
@@ -842,6 +1218,7 @@ export class PiMesh {
   }
 
   private _startHeartbeat(clientId: string, cwd: string): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = setInterval(() => this._announce(clientId, cwd), this.announceIntervalMs);
   }
 
@@ -852,6 +1229,7 @@ export class PiMesh {
   }
 
   private _startStalePeerEviction(): void {
+    if (this.stalePeerTimer) clearInterval(this.stalePeerTimer);
     this.stalePeerTimer = setInterval(() => {
       const cutoff = Date.now() - 90_000;
       for (const [id, peer] of this.peerMap) {
@@ -1941,20 +2319,10 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
     try {
       const name = pi.getSessionName?.() ?? undefined;
-      // Cross-machine federation: PI_MESH_ENDPOINTS (comma-separated
-      // tcp/<host>:<port> Zenoh endpoints, e.g. the ex63 tailnet router)
-      // makes the sidecar connect to remote mesh peers beyond mDNS.
-      const endpoints = (process.env.PI_MESH_ENDPOINTS ?? "")
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-      mesh.start(
-        binPath,
-        sessionId,
-        ctx.cwd,
-        { mode: "peer", scouting: true, ...(endpoints.length > 0 ? { endpoints } : {}) },
-        name,
-      );
+      // Sidecar (re)spawn re-reads ~/.pi/mesh-config.json itself (kal-0suu3dur);
+      // loading it here would be dead weight, and an unguarded throw would
+      // wedge mesh startup on a malformed file.
+      mesh.start(binPath, sessionId, ctx.cwd, undefined, name);
 
       // Resolve identity once sidecar is ready (tentatively — peer list may be empty)
       mesh.on("ready", () => {

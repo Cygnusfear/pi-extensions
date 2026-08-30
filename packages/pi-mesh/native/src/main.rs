@@ -10,9 +10,17 @@
 //!   - All sessions connect via unix socket
 //!   - Sidecar stays alive until last client disconnects (+ grace period)
 //!   - Or until explicit shutdown
+//!
+//! Single instance (kal-kbu1f9xy): the bind phase is serialized by a
+//! process-shared advisory OS lock (flock) on ~/.pi/mesh.start.lock. The
+//! kernel releases the lock when the holder dies, so there is no stale-lock
+//! state to resolve, no timeout, and no elapsed-time winner. A candidate
+//! re-checks the live pid/socket only AFTER acquiring the lock and publishes
+//! pidfile/socket BEFORE releasing it.
 
 use std::{
     collections::HashMap,
+    os::fd::AsRawFd,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
@@ -72,17 +80,68 @@ fn pid_path() -> PathBuf {
     PathBuf::from(home).join(".pi").join("mesh.pid")
 }
 
-fn is_sidecar_running() -> bool {
-    let pid_file = pid_path();
-    if let Ok(contents) = std::fs::read_to_string(&pid_file) {
-        if let Ok(pid) = contents.trim().parse::<i32>() {
-            // Check if process is alive
-            unsafe { libc::kill(pid, 0) == 0 }
-        } else {
-            false
-        }
-    } else {
-        false
+fn lock_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(home).join(".pi").join("mesh.start.lock")
+}
+
+/// The pid recorded in the pidfile, if the file exists and parses.
+fn read_pidfile_holder() -> Option<i32> {
+    let contents = std::fs::read_to_string(pid_path()).ok()?;
+    contents.trim().parse::<i32>().ok()
+}
+
+/// Authoritative serving check: the pidfile's process is alive AND the socket
+/// actually accepts connections. File-existence checks alone misread a
+/// SIGKILLed sidecar's stale mesh.sock (plus a reused pid) as a live
+/// singleton — the stale-state blind spot behind the kal-0suu3dur incidents.
+fn sidecar_is_serving() -> bool {
+    let Some(pid) = read_pidfile_holder() else {
+        return false;
+    };
+    if unsafe { libc::kill(pid, 0) != 0 } {
+        return false;
+    }
+    std::os::unix::net::UnixStream::connect(socket_path()).is_ok()
+}
+
+/// OS advisory lock guarding the bind phase (kal-kbu1f9xy). Held across
+/// [re-check -> bind -> publish]; dropped explicitly at the publish boundary.
+/// The kernel releases it if the holder dies — waiting candidates block on a
+/// kernel event, never on a clock.
+struct StartLock {
+    file: std::fs::File,
+}
+
+fn acquire_start_lock() -> StartLock {
+    std::fs::create_dir_all(lock_path().parent().unwrap()).ok();
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path())
+        .unwrap_or_else(|e| {
+            eprintln!("pi-mesh: cannot open start lock {}: {e}", lock_path().display());
+            std::process::exit(1);
+        });
+    // Blocking flock: waits on the kernel until a prior candidate's bind
+    // phase completes. No timeout, no elapsed-time winner.
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if rc != 0 {
+        eprintln!(
+            "pi-mesh: flock on {}: {}",
+            lock_path().display(),
+            std::io::Error::last_os_error()
+        );
+        std::process::exit(1);
+    }
+    StartLock { file }
+}
+
+impl Drop for StartLock {
+    fn drop(&mut self) {
+        // Explicit unlock; the kernel would release it on fd close anyway.
+        // Holding the File is what keeps the lock held.
+        unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
@@ -98,14 +157,22 @@ fn cleanup_files() {
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+/// What happened to this startup candidate — decides whether main may touch
+/// the socket/pidfile (only a candidate that published owns them).
+#[derive(PartialEq)]
+enum CandidateOutcome {
+    /// Another sidecar is already serving — left its files alone.
+    ServingElsewhere,
+    /// We published and served until graceful shutdown — clean up our files.
+    Served,
+    /// We bailed before publishing — stale state is ours to clean.
+    Failed,
+}
+
 fn main() {
-    // If sidecar is already running, just exit silently
-    if is_sidecar_running() {
-        // Verify the socket is actually connectable
-        if socket_path().exists() {
-            std::process::exit(0);
-        }
-        // Socket gone but pid alive — stale state, clean up and continue
+    // Fast path: a sidecar is already serving — exit without touching the lock.
+    if sidecar_is_serving() {
+        std::process::exit(0);
     }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -114,52 +181,88 @@ fn main() {
         .build()
         .expect("tokio runtime");
 
-    rt.block_on(run());
-    cleanup_files();
+    let outcome = rt.block_on(async {
+        // Parse config from argv[1] if provided, otherwise default.
+        let config_str = std::env::args().nth(1).unwrap_or_default();
+        let config = if config_str.is_empty() {
+            zenoh::Config::default()
+        } else {
+            zenoh::Config::from_json5(&config_str).unwrap_or_else(|e| {
+                eprintln!("pi-mesh: bad config: {e}");
+                zenoh::Config::default()
+            })
+        };
+
+        // Serialize startup across concurrent candidates (kal-kbu1f9xy):
+        // one candidate at a time, blocking on the kernel until the previous
+        // candidate publishes (or dies — the kernel releases the lock).
+        let lock = acquire_start_lock();
+
+        // Authoritative re-check UNDER the lock: a candidate that blocked
+        // here may now be looking at a freshly published sidecar.
+        if sidecar_is_serving() {
+            drop(lock);
+            return CandidateOutcome::ServingElsewhere;
+        }
+
+        // Broken recorded holder: the pidfile's process is alive but not
+        // serving (a stale orphan or a crashed-in-flight singleton instance).
+        // The nuke directive applies (kal-0suu3dur): kill the recorded holder,
+        // then re-publish.
+        if let Some(holder) = read_pidfile_holder() {
+            if unsafe { libc::kill(holder, 0) == 0 } {
+                unsafe { libc::kill(holder, libc::SIGKILL) };
+                eprintln!("pi-mesh: killed broken singleton holder pid {holder} before rebind");
+            }
+        }
+
+        // Publish this candidate's pid BEFORE the slow zenoh open: while it
+        // is starting, the pidfile announces the candidate's existence, so
+        // concurrent sessions' repair paths wait on it instead of publishing
+        // over it. (cleanup_files removes it if we bail before serving.)
+        write_pidfile();
+
+        let session = match zenoh::open(config).await {
+            Ok(s) => Arc::new(s),
+            Err(e) => {
+                eprintln!("pi-mesh: zenoh open failed: {e}");
+                return CandidateOutcome::Failed;
+            }
+        };
+        let zid = session.zid().to_string();
+
+        // Publish phase under the lock: stale socket removed, socket bound —
+        // while the lock is held no other candidate can unlink/rebind.
+        let sock_path = socket_path();
+        let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::create_dir_all(sock_path.parent().unwrap());
+
+        let listener = match UnixListener::bind(&sock_path) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("pi-mesh: bind {}: {e}", sock_path.display());
+                return CandidateOutcome::Failed;
+            }
+        };
+        eprintln!(
+            "pi-mesh: listening on {} (zid={})",
+            sock_path.display(),
+            zid
+        );
+        // Publish complete — release the lock. Late candidates now see a live
+        // pid + connectable socket and exit.
+        drop(lock);
+
+        run_serve(listener, zid, session).await;
+        CandidateOutcome::Served
+    });
+
+    if outcome != CandidateOutcome::ServingElsewhere {
+        cleanup_files();
+    }
 }
 
-async fn run() {
-    // Parse config from argv[1] if provided, otherwise default
-    let config_str = std::env::args().nth(1).unwrap_or_default();
-    let config = if config_str.is_empty() {
-        zenoh::Config::default()
-    } else {
-        zenoh::Config::from_json5(&config_str).unwrap_or_else(|e| {
-            eprintln!("pi-mesh: bad config: {e}");
-            zenoh::Config::default()
-        })
-    };
-
-    let session = match zenoh::open(config).await {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            eprintln!("pi-mesh: zenoh open failed: {e}");
-            return;
-        }
-    };
-
-    let zid = session.zid().to_string();
-
-    // Clean up stale socket
-    let sock_path = socket_path();
-    let _ = std::fs::remove_file(&sock_path);
-    let _ = std::fs::create_dir_all(sock_path.parent().unwrap());
-
-    let listener = match UnixListener::bind(&sock_path) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("pi-mesh: bind {}: {e}", sock_path.display());
-            return;
-        }
-    };
-
-    write_pidfile();
-    eprintln!(
-        "pi-mesh: listening on {} (zid={})",
-        sock_path.display(),
-        zid
-    );
-
+async fn run_serve(listener: UnixListener, zid: String, session: Arc<zenoh::Session>) {
     // Internal channels
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel::<InternalEvent>();
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<ClientCommand>();

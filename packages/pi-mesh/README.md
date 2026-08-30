@@ -158,25 +158,25 @@ This produces `target/release/pi-mesh` (or `pi-mesh.exe` on Windows). The TypeSc
 
 ## Configuration
 
-Mesh behavior is configurable via environment variables:
+Every session reads the same machine transport authority from `~/.pi/mesh-config.json` before it starts or joins the singleton sidecar. A missing file uses local peer discovery. A present file is bounded and strict: malformed JSON, unknown fields, duplicate endpoints, or invalid values fail startup instead of silently creating an isolated mesh. `PI_MESH_ENDPOINTS` is not consulted.
+
+```json
+{
+  "schemaVersion": 1,
+  "mode": "peer",
+  "endpoints": ["tcp/100.126.107.62:7447"],
+  "scouting": true
+}
+```
+
+`mode` is `peer`, `client`, or `router`; `endpoints` contains at most 32 unique Zenoh endpoints; and `scouting` explicitly controls multicast discovery. The first session that spawns the machine sidecar supplies this config. Changing it therefore requires an intentional sidecar restart; later sessions never mutate a running sidecar.
+
+Other local behavior uses these environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PI_MESH_AMBIENT_CHAT_BATCH_MS` | `750` | Milliseconds to batch ambient channel messages |
-| `HOME` | — | Socket path: `~/.pi/mesh.sock` |
-
-### Mesh Config (Zenoh)
-
-The mesh config object controls transport behavior:
-
-```ts
-interface MeshConfig {
-  mode?: "peer" | "client" | "router";
-  endpoints?: string[];       // Tailscale IPs for cross-machine
-  scouting?: boolean;         // mDNS discovery (default: true)
-  announceIntervalMs?: number; // Peer announcement frequency
-}
-```
+| `HOME` | system home | Socket, PID, and machine-config directory under `~/.pi` |
 
 ## Setup
 
