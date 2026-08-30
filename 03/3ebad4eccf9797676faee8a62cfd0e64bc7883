@@ -1,0 +1,102 @@
+packages/pi-mesh/package.json
+  s_f0bf700fd7f493::t_bd09dc4c32065a 3
+packages/pi-mesh/extension/pi-mesh.ts
+  s_c22e1c0b9372aa::t_06f175f497a1af 355,570,572-578,580,582-583,589-645
+  s_c22e1c0b9372aa::t_965d78cdddc356 357
+  s_c22e1c0b9372aa::t_24e7f02ce9f4ea 349-350,352-354
+  s_c22e1c0b9372aa::t_445ad2db8d1a61 1221
+  s_c22e1c0b9372aa::t_209330b9e4af33 18
+  s_c22e1c0b9372aa::t_ff7869d7987e27 2322-2325
+  s_c22e1c0b9372aa::t_1730fd78a15c93 152-178,189-190,193,196-200,213-246,265-267,273,275-276,278-284,287-290,292-293
+  s_c22e1c0b9372aa::t_2a61bed30358ed 285-286,291
+  s_c22e1c0b9372aa::t_16ae5662d15371 20
+  s_c22e1c0b9372aa::t_d4007544738327 191,194-195
+  s_c22e1c0b9372aa::t_41a5fd51ddb84f 648-653,673
+  s_c22e1c0b9372aa::t_513530d78e8ada 86-88,90-92
+  s_c22e1c0b9372aa::t_2290371f6663c2 192,201-204,210-212
+  s_c22e1c0b9372aa::t_3b3dc279bc6eda 400-403,405-406,414
+  s_c22e1c0b9372aa::t_f9b0f3180d5a2b 179-188,205-209
+  s_c22e1c0b9372aa::t_f2bf893d3f4aaf 247-264,294
+  s_c22e1c0b9372aa::t_d1300b1149e087 89
+  s_c22e1c0b9372aa::t_420833823a4ce3 358-382,385-388,390-399,416-421,433,435-455,457-460,462-509,511,513-521,523-543,546-554,558-569
+  s_c22e1c0b9372aa::t_1e5fe29706d865 268-272,274,277
+  s_c22e1c0b9372aa::t_5e1408c6f50c2b 404,407-413,415,422-425,427-430
+  s_c22e1c0b9372aa::t_533b894d2a4a0d 555-557
+  s_c22e1c0b9372aa::t_c18bf9d67d565e 332-338
+  s_c22e1c0b9372aa::t_0f8a3fae3d8453 1232
+  s_c22e1c0b9372aa::t_2f7239a7515304 23
+  s_c22e1c0b9372aa::t_5e39a86a50bbd7 295
+  s_c22e1c0b9372aa::t_3706af363e4d5a 356
+  s_c22e1c0b9372aa::t_e5c4fc09e2e45b 571
+  s_c22e1c0b9372aa::t_d63cc2ed5ca2ea 646
+packages/pi-mesh/README.md
+  s_f0bf700fd7f493::t_37ec3ac84a2b92 161-174,179
+packages/pi-mesh/native/build.sh
+  s_c22e1c0b9372aa::t_accfa2ce5e34ce 32,34-36,38
+  s_c22e1c0b9372aa::t_aaf83989e4e4a6 23-30,33,37,39-41
+  s_c22e1c0b9372aa::t_cd02219977756a 31
+packages/pi-mesh/extension/machine-mesh-config.ts
+  s_f0bf700fd7f493::t_131b4436c51787 1-77,79
+  s_f0bf700fd7f493::t_eaed995e0458ee 78
+packages/pi-mesh/extension/machine-mesh-config.test.ts
+  s_f0bf700fd7f493::t_c2b769ec8823c6 36
+  s_f0bf700fd7f493::t_a44e7cf6b1f0d7 1-35,37-73
+packages/pi-mesh/native/src/main.rs
+  s_c22e1c0b9372aa::t_061be4befee126 23
+  s_c22e1c0b9372aa::t_bfa26e4ecf3f92 138,160-161,163-171,173-175,184,186-187,189-194,199-205,208-216,233,236-238,240-263,265
+  s_c22e1c0b9372aa::t_3b71ea9ab98d81 162
+  s_c22e1c0b9372aa::t_99f7931339b78f 185,196-198,219-223,225-232,234-235
+  s_c22e1c0b9372aa::t_8a424ad4154047 13-19
+  s_c22e1c0b9372aa::t_f884590e6ee321 140-144
+  s_c22e1c0b9372aa::t_5bdf608d235827 83-137
+  s_c22e1c0b9372aa::t_38d46d38c45e6a 139
+  s_c22e1c0b9372aa::t_1a11e3597138ec 217
+packages/pi-mesh/extension/fake-sidecar.ts
+  s_c22e1c0b9372aa::t_a449f94f6b50d8 1-70,72,75-78,80-101,109-148,153-208
+  s_c22e1c0b9372aa::t_dbe12f1e93f1ef 102-108
+  s_c22e1c0b9372aa::t_c7f7772dbffa70 71,73-74,79
+  s_c22e1c0b9372aa::t_3344d043173c2e 149-152
+packages/pi-mesh/extension/pi-mesh.native-singleton.test.ts
+  s_c22e1c0b9372aa::t_591e7b51a09903 78,85-88,90-92
+  s_c22e1c0b9372aa::t_54926f2b6e0b91 53-60,67-70
+  s_c22e1c0b9372aa::t_e2c660bc17d48c 111-113,119,121
+  s_c22e1c0b9372aa::t_81a0f94c8c92b3 77,80-81,89
+  s_c22e1c0b9372aa::t_8857b2cc4665d2 212,214
+  s_c22e1c0b9372aa::t_56609418a77206 223-224,226,228
+  s_c22e1c0b9372aa::t_ec0b9fd8a3a2a2 74
+  s_c22e1c0b9372aa::t_09c26a694d6b24 244-245
+  s_c22e1c0b9372aa::t_1852983337e332 1-52,61-66,71-73,75-76,79,82-84,93-110,114-118,120,122-189,191-192,194-196,199-211,213,215-222,225,227,229-243,246-247
+  s_c22e1c0b9372aa::t_df07553619829a 190,193,197-198
+packages/pi-mesh/extension/pi-mesh.sidecar-lifecycle.test.ts
+  s_c22e1c0b9372aa::t_cda4ecc625195b 123,126-127,135
+  s_c22e1c0b9372aa::t_902898ce4f226d 407-411
+  s_c22e1c0b9372aa::t_1df9197fcff82c 3
+  s_c22e1c0b9372aa::t_e95bfd3153c9c8 124,131-134,136-138
+  s_c22e1c0b9372aa::t_9def14e76541b2 120
+  s_c22e1c0b9372aa::t_48aac256595299 1-2,4-35,37-44,46-119,121-122,125,128-130,139-406,412-425
+  s_c22e1c0b9372aa::t_96bef3ab325b86 36,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "033ebad4eccf9797676faee8a62cfd0e64bc7883",
+  "prompts": {},
+  "sessions": {
+    "s_c22e1c0b9372aa": {
+      "agent_id": {
+        "tool": "Jill Cosmonaut Roman",
+        "id": "01a04e7c-0127-761a-b700-c31a82a59120",
+        "model": "anthropic/claude-opus-4-8"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_f0bf700fd7f493": {
+      "agent_id": {
+        "tool": "Margaret Void Maudlin",
+        "id": "019fd729-0494-7cbf-bfb4-433a8e85bef3",
+        "model": "openai-codex/gpt-5.6-sol"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
