@@ -1,0 +1,21 @@
+packages/default-prompt/prompts/default.md
+  s_a3efbc17f3ec70::t_7d99c0341a03f8 27-30
+packages/default-prompt/prompts/default-manual.md
+  s_a3efbc17f3ec70::t_7d99c0341a03f8 372-375,559
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "ccb61c24cf95bbd88110161828e060aad0e04459",
+  "prompts": {},
+  "sessions": {
+    "s_a3efbc17f3ec70": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "827a7187-2eb6-4408-9611-c46b0fa802b3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
