@@ -90,8 +90,16 @@ export function rtkSplitTee(compacted: string): { compacted: string; raw: string
 }
 // ──────────────────────────────────────────────────────────────────────────────────
 
+const flagHint = (tool: "rg" | "fd", message: string): string => {
+	if (!/unrecognized flag|unknown option|unexpected argument/i.test(message)) return message;
+	const common = tool === "rg"
+		? "Common rg flags: -n (line numbers), -l (files only), -C N (context), -e 'pat' (pattern), --glob '*.ts', -i (ignore case). GNU-style -2 is NOT valid — use -C 2."
+		: "Common fd flags: -e ext (extension), -t f|d (type), -d N (max depth), -E pat (exclude), -g (glob). Numeric-only flags like -5 are NOT valid.";
+	return message + " — " + common;
+};
+
 export function createToolBindings(ctx: SandboxContext): Record<string, unknown> {
-  const { cwd, images, signal, sessionManager, model, modelRegistry } = ctx;
+  const { cwd, images, signal, sessionManager, model, modelRegistry, codeModeManual } = ctx;
   const turndown = new TurndownService({
     headingStyle: "atx",
     hr: "---",
@@ -1140,6 +1148,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       return (result.stdout || "").trim().split("\n").filter(Boolean);
     },
 
+
     rg: async ({ args, cwd: explicitCwd, follow = true }: { args: string; cwd?: string; follow?: boolean }) => {
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const parsedArgs = splitShellArgs(args);
@@ -1155,13 +1164,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         signal,
       });
       if (result.error) {
-        throw new Error(`rg error: ${result.error.message}`);
+        throw new Error(`rg error: ${flagHint("rg", result.error.message)}`);
       }
       // Never return stderr as content. With --no-messages, anything left on stderr is a
       // genuine pattern/syntax error — surface it only when there is no match output.
       const out = result.stdout || "";
       const err = (result.stderr || "").trim();
-      if (!out && err) throw new Error(`rg error: ${err}`);
+      if (!out && err) throw new Error(`rg error: ${flagHint("rg", err)}`);
       return out;
     },
 
@@ -1176,13 +1185,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         signal,
       });
       if (result.error) {
-        throw new Error(`fd error: ${result.error.message}`);
+        throw new Error(`fd error: ${flagHint("fd", result.error.message)}`);
       }
       // Never return stderr as content (fd is quiet on benign traversal — it does not
       // error on broken symlinks). Surface a genuine error only when there is no output.
       const out = result.stdout || "";
       const err = (result.stderr || "").trim();
-      if (!out && err) throw new Error(`fd error: ${err}`);
+      if (!out && err) throw new Error(`fd error: ${flagHint("fd", err)}`);
       return out;
     },
 
@@ -1489,7 +1498,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     // =====================================================================
 
     man: async (name: string): Promise<string> => {
-      return formatManPage(name);
+      return formatManPage(name, codeModeManual);
     },
   };
 

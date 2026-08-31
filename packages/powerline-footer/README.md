@@ -57,7 +57,7 @@ Activates automatically. Toggle and configure with:
 |----|---------|-------------|
 | `pi` | π / 🅿️ | Pi icon/branding |
 | `model` | ◈ claude-sonnet-4-6 | Current model name |
-| `thinking` | 🧠 med | Live thinking level (off/min/low/med/high/xhigh) |
+| `thinking` | 🧠 med | Live Pi provider-native thinking level (off/min/low/med/high/xhigh) |
 | `path` | 📁 powerline-footer | Working directory (basename, abbreviated, or full) |
 | `git` | ⎇ main +2 *1 | Branch name with staged/unstaged/untracked counts |
 | `token_in` | in: 45.2k | Input tokens used |
@@ -105,6 +105,8 @@ Each preset can fine-tune segments via `segmentOptions`:
 | `ascii` | > < | Fallback for basic terminals |
 
 ## Thinking Level Display
+
+The brain segment shows Pi's live provider-native thinking level when it is enabled. Native thinking is hidden when it is off.
 
 | Level | Display | Effect |
 |-------|---------|--------|
@@ -201,7 +203,7 @@ POWERLINE_NERD_FONTS=0    # Force ASCII fallback
 
 ## Architecture
 
-- **Incremental stats** — usage cache tracks position in session events, only processes new entries. Survives context checkouts via full recomputation.
+- **Incremental stats** — each extension instance owns its usage cache. The cache tracks the processed branch boundary ID, processes appended entries in O(delta), and fully recomputes after session or branch divergence, including equal-length branches.
 - **Responsive layout** — segments fit top bar first, overflow to secondary row. Cached per render cycle (50ms TTL) for consistency between editor and widget.
 - **Git status** — delegated to pi's `FooterDataProvider`, no subprocess spawning. Reactively re-renders on branch change.
 - **Welcome overlay** — rendered as centered overlay on startup with gradient logo, model info, and keyboard shortcuts. Auto-dismisses after 30s.

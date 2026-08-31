@@ -185,6 +185,28 @@ describe("pi-maestri concrete-file launcher", () => {
 		});
 	}
 
+	test("host restart argv adopts the active concrete session without stale-map injection", () => {
+		const home = freshHome();
+		const stale = sessionFile(home, "stale-session");
+		symlinkSync(stale, mapPath(home));
+		const active = sessionFile(home, "active-session");
+		const hostRestartArgv = ["--model", "x", "--session", active];
+		const launch = runWrapper(
+			home,
+			{ MAESTRI_TERMINAL_ID: TERMINAL },
+			hostRestartArgv,
+		);
+		expect(launch).toMatchObject({
+			code: 0,
+			args: hostRestartArgv,
+			mode: "adopt",
+			pinned: "1",
+			piInvoked: true,
+		});
+		expect(launch.args).not.toContain(stale);
+		cleanup(home);
+	});
+
 	test("--no-session has priority and is deliberately disabled", () => {
 		const home = freshHome();
 		const launch = runWrapper(home, { MAESTRI_TERMINAL_ID: TERMINAL }, [

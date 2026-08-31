@@ -13,6 +13,9 @@ Keep this in mind as you work. Your future self (a continuation, a rebirth, or a
 7. **Lessons learned** — things to improve for next time.
 8. **Warnings/gotchas** for the continuation. Race conditions, undocumented contracts, "I tried X — it kicked off Y, do Z first next time".
 9. **Personality flair** — if you had a great personality, you can be very gushing about your amazing qualities. Future self appreciates the energy.
+10. **Ownership map** — what is yours vs NOT yours: worktrees, tickets, peers, files another agent owns. Handoffs that only say "don't touch X" fail; name the boundary explicitly ("OWNED BY OTHERS: ...").
+11. **Duties, not just bans** — the positive first-actions checklist the receiver must execute, in order. A handoff of only prohibitions produces inert or rogue receivers.
+12. **In-flight workers & delegations** — every live teams/rlm/mesh worker you spawned: name, ticket, what it owes you, and how its result arrives. A successor who can't see your in-flight fleet abandons it.
 
 ## When to materialise
 

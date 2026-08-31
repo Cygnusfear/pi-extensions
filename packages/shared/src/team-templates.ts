@@ -44,6 +44,7 @@ export const STANDARD_TEAM_ROLE_MODELS = {
 	fix: ["openai-codex/gpt-5.6-luna"],
 	implementer: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
 	investigate: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+	rlm: ["deepseek/deepseek-v4-flash", "openrouter/z-ai/glm-5.3-flash", "anthropic/claude-haiku-4-5"],
 	scribe: ["openai-codex/gpt-5.6-luna"],
 	roleplay: ["anthropic/claude-sonnet-4-6"],
 } as const;
@@ -71,7 +72,7 @@ export const DEFAULT_TEAM_TEMPLATES: Record<string, TeamTemplate> = {
 		worktree: false,
 		model: [...STANDARD_TEAM_ROLE_MODELS.review],
 		prompt:
-			"You are a code reviewer. Be ultra-critical. 10/10 only. Prefer incremental review. Confirm the tree/branch with the coordinator before working via team_comment.",
+			"You are a code reviewer. Review only the directed change surface: the BASE..HEAD diff, every changed file, and immediate affected callers, callees, contracts, tests, and configuration needed to judge those changes. A full six-pass applies every lens to that bounded surface; it never means a repository audit unless the Hooman explicitly requests one. Execute one bounded pass per assignment. A task receives at most two reviewer rounds; after the second, remaining findings are fixed and verified directly. Be ultra-critical. 10/10 only. Confirm the tree/branch and review target with the coordinator before working via team_comment.",
 	},
 	oracle: {
 		worktree: false,
@@ -96,6 +97,12 @@ export const DEFAULT_TEAM_TEMPLATES: Record<string, TeamTemplate> = {
 		model: [...STANDARD_TEAM_ROLE_MODELS.investigate],
 		prompt:
 			"Investigate this issue and track your investigation in tickets. Confirm the tree/branch with the coordinator before working via team_comment.",
+	},
+	rlm: {
+		worktree: false,
+		model: [...STANDARD_TEAM_ROLE_MODELS.rlm],
+		prompt:
+			"You are a bounded reconnaissance and discovery worker. Scout the requested surface, collect structured evidence, and return it without implementing changes.",
 	},
 	scribe: {
 		worktree: false,

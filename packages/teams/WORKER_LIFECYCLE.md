@@ -61,6 +61,10 @@ A worker announces its durable mesh identity with `worker.hello`; that route can
 
 Repeated inactivity warnings are canonical `stuck` facts. Each cooldown uses its own persisted cooldown index, deterministic event ID, wake, and branch-local delivery acknowledgement.
 
+Teams tracks liveness and meaningful progress separately. The legacy liveness observation still requires stale heartbeat and process telemetry. Independently, `PI_TEAMS_OUTPUT_SILENCE_THRESHOLD_MS` defaults to exactly ten minutes: when no meaningful worker session output arrives for that interval, Teams persists an `output_silence` stuck fact and triggers a coordinator follow-up turn even if JSONL heartbeats continue or a child command is still alive. The wake says to investigate immediately and includes current-command/last-output context. Heartbeats, `worker.hello`, phase telemetry, and process-table activity never reset this clock; real session messages/tool results, worker comments, ticket notes, and terminal declarations do.
+
+Output-silence facts are observations, not outcomes. They never kill or retry a worker, settle an attempt, close a ticket, run cleanup, or alter routing/status. Replay and cooldown delivery use the same canonical stuck-fact pipeline, so coordinator restarts cannot lose the warning or duplicate an acknowledged event. Recent meaningful activity is reconstructed with a resumable backward scan. Each five-second poll reads a bounded byte slice, but recovery continues across polls until it finds meaningful output, crosses the ten-minute cutoff, or reaches trusted history; there is no total-byte cutoff that can manufacture silence. After recovery, a bounded forward cursor consumes only appended complete JSONL records. Partial or malformed timestamp-free records keep progress unknown and suppress output-silence facts until the record completes or trustworthy history is recovered. Future-dated records are rejected.
+
 PID checks combine liveness with process birth. A reused PID is treated as the original attempt's death, not as a living worker.
 
 ## Declared finish

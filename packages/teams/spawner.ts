@@ -565,6 +565,12 @@ export function resumeWorker(
 	handle.terminalSummary = undefined;
 	handle.lastActivityAt = now;
 	handle.lastProcessActivityAt = now;
+	handle.lastOutputAt = now;
+	handle.lastOutputLabel = undefined;
+	handle.lastSessionMtimeMs = undefined;
+	handle.sessionActivityScanState = undefined;
+	handle.meaningfulActivityKnown = undefined;
+	handle.lastStuckWarningAt = undefined;
 	handle.attempts = handle.attempts ?? [];
 	handle.attempts.push({
 		workerId: handle.workerId,

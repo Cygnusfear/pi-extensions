@@ -114,6 +114,7 @@ See [WORKER_LIFECYCLE.md](./WORKER_LIFECYCLE.md) for full details.
 - Workers **never** guess the coordinator's identity — it's injected at spawn time
 - Process exit and ticket state never imply success; exit code zero without `team_finish` is a missing-finish warning
 - Finish is persisted in the worker session before transport and acknowledged only after the coordinator fact append
+- **10-minute output-silence SLA**: if a running worker produces no meaningful session output for 10 minutes, Teams persists a `stuck` observation and wakes the coordinator with an imperative investigation message. JSONL heartbeats, `worker.hello`, phase telemetry, and live child processes do not reset or suppress this deadline. Worker comments, ticket notes, terminal declarations, and real session messages/tool results do reset it. The wake never kills, retries, settles, closes, or changes worker status. Recovery is resumable and byte-bounded per poll (not total-byte capped); partial/malformed records keep progress unknown, and future-dated records are rejected. Override the threshold with `PI_TEAMS_OUTPUT_SILENCE_THRESHOLD_MS` (minimum 30 seconds).
 
 ### Review handoff links for completed work
 
@@ -283,7 +284,7 @@ type PollEvent =
   | { type: "completed"; worker: WorkerHandle; result: string }
   | { type: "warning"; worker: WorkerHandle; reason: string }
   | { type: "failed"; worker: WorkerHandle; reason: string }
-  | { type: "stuck"; worker: WorkerHandle; idleSeconds: number }
+  | { type: "stuck"; worker: WorkerHandle; idleSeconds: number; cause: "liveness" | "output_silence" }
   | { type: "comment"; worker: WorkerHandle; comment: string }
   | { type: "alive"; worker: WorkerHandle };
 ```

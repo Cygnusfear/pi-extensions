@@ -1,4 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 
 // ── Cached process table ─────────────────────────────────────────────────
 // Instead of each worker spawning its own `ps -ax`, we cache the parsed
@@ -70,15 +72,22 @@ export interface WorkerProcessSnapshot {
 export interface IdleStateInput {
   now?: number;
   thresholdMs: number;
+  outputSilenceThresholdMs: number;
   hasActiveChildProcess: boolean;
   lastHeartbeatAt: number;
   lastProcessActivityAt: number;
+  /** Last meaningful agent/session output. Heartbeats and process activity are excluded. */
+  lastOutputAt: number;
 }
 
 export interface IdleState {
+  /** Legacy liveness warning: both heartbeat and process activity are stale. */
   shouldWarnStuck: boolean;
+  /** Progress warning: meaningful output is stale, regardless of liveness telemetry. */
+  shouldWarnOutputSilence: boolean;
   heartbeatIdleMs: number;
   processIdleMs: number;
+  outputIdleMs: number;
 }
 
 export interface RuntimeSummaryInput {
@@ -89,6 +98,316 @@ export interface RuntimeSummaryInput {
   startedAt?: number;
   lastOutputAt?: number;
   lastOutputLabel?: string;
+}
+
+const MEANINGFUL_SESSION_ENTRY_TYPES = new Set(["message", "custom_message"]);
+export const DEFAULT_SESSION_ACTIVITY_SCAN_BUDGET_BYTES = 256 * 1024;
+const DEFAULT_SESSION_METADATA_PREFIX_BYTES = 16 * 1024;
+
+export interface MeaningfulSessionActivity {
+  timestampMs: number;
+  label: string;
+}
+
+export type SessionActivityScanState =
+  | {
+      phase: "recovering_tail";
+      snapshotSize: number;
+      cursor: number;
+    }
+  | {
+      phase: "recovering_lines";
+      snapshotSize: number;
+      cursor: number;
+      lineEnd: number;
+      forwardCommittedOffset: number;
+      forwardScanOffset: number;
+      sawValidTimestamp: boolean;
+      sawMalformedRecord: boolean;
+    }
+  | {
+      phase: "following";
+      committedOffset: number;
+      scanOffset: number;
+      baselineTrusted: boolean;
+    };
+
+export interface SessionActivityScanOptions {
+  now: number;
+  cutoffMs: number;
+  budgetBytes?: number;
+  metadataPrefixBytes?: number;
+}
+
+export interface SessionActivityScanResult {
+  state: SessionActivityScanState;
+  activity?: MeaningfulSessionActivity;
+  /** False while unseen/partial bytes could still contain recent meaningful output. */
+  progressKnown: boolean;
+  /** Test/telemetry evidence that each invocation performs bounded synchronous I/O. */
+  bytesRead: number;
+}
+
+function meaningfulActivityLabel(entry: Record<string, unknown>): string {
+  if (entry.type === "message" && entry.message && typeof entry.message === "object") {
+    const message = entry.message as Record<string, unknown>;
+    if (message.role === "toolResult" && typeof message.toolName === "string") return message.toolName;
+    if (message.role === "assistant") return "response";
+    if (message.role === "user") return "prompt";
+    return String(message.role ?? "message");
+  }
+  if (entry.type === "custom_message" && typeof entry.customType === "string") return entry.customType;
+  return "activity";
+}
+
+function extractJsonString(prefix: string, key: string): string | undefined {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`"${escapedKey}"\\s*:\\s*("(?:\\\\.|[^"\\\\])*")`).exec(prefix);
+  if (!match?.[1]) return undefined;
+  try { return JSON.parse(match[1]); }
+  catch { return undefined; }
+}
+
+interface SessionRecordMetadata {
+  timestampMs?: number;
+  activity?: MeaningfulSessionActivity;
+  malformed: boolean;
+  future: boolean;
+}
+
+function inspectSessionRecord(
+  fd: number,
+  start: number,
+  end: number,
+  now: number,
+  metadataPrefixBytes: number,
+  direct?: Buffer,
+): { metadata: SessionRecordMetadata; bytesRead: number } {
+  if (end <= start) return { metadata: { malformed: false, future: false }, bytesRead: 0 };
+  const recordLength = end - start;
+  let bytesRead = 0;
+  let entry: Record<string, unknown> | undefined;
+  let type: string | undefined;
+  let timestamp: string | undefined;
+  let label = "activity";
+
+  if (direct && direct.length === recordLength) {
+    try { entry = safeJsonParse<Record<string, unknown>>(direct.toString("utf8")); }
+    catch { return { metadata: { malformed: true, future: false }, bytesRead }; }
+  } else {
+    const prefixLength = Math.min(recordLength, metadataPrefixBytes);
+    const prefixBuffer = Buffer.allocUnsafe(prefixLength);
+    fs.readSync(fd, prefixBuffer, 0, prefixLength, start);
+    bytesRead += prefixLength;
+    const prefix = prefixBuffer.toString("utf8");
+    if (prefixLength === recordLength) {
+      try { entry = safeJsonParse<Record<string, unknown>>(prefix); }
+      catch { return { metadata: { malformed: true, future: false }, bytesRead }; }
+    } else {
+      type = extractJsonString(prefix, "type");
+      timestamp = extractJsonString(prefix, "timestamp");
+      const role = extractJsonString(prefix, "role");
+      const toolName = extractJsonString(prefix, "toolName");
+      const customType = extractJsonString(prefix, "customType");
+      if (type === "message") label = role === "toolResult" && toolName ? toolName : role === "assistant" ? "response" : role === "user" ? "prompt" : role ?? "message";
+      else if (type === "custom_message") label = customType ?? "custom_message";
+      if (!type || !timestamp) return { metadata: { malformed: true, future: false }, bytesRead };
+    }
+  }
+
+  if (entry) {
+    type = typeof entry.type === "string" ? entry.type : undefined;
+    timestamp = typeof entry.timestamp === "string" ? entry.timestamp : undefined;
+    label = meaningfulActivityLabel(entry);
+  }
+  const timestampMs = timestamp ? new Date(timestamp).getTime() : Number.NaN;
+  if (!type || !Number.isFinite(timestampMs)) return { metadata: { malformed: true, future: false }, bytesRead };
+  if (timestampMs > now) return { metadata: { timestampMs, malformed: false, future: true }, bytesRead };
+  const activity = MEANINGFUL_SESSION_ENTRY_TYPES.has(type) ? { timestampMs, label } : undefined;
+  return { metadata: { timestampMs, activity, malformed: false, future: false }, bytesRead };
+}
+
+type RecoveringTailScanState = Extract<SessionActivityScanState, { phase: "recovering_tail" }>;
+
+function initialScanState(size: number): RecoveringTailScanState {
+  return { phase: "recovering_tail", snapshotSize: size, cursor: size };
+}
+
+/**
+ * Advance meaningful-session discovery by at most one bounded I/O slice.
+ * Recovery walks backward until it finds recent output or crosses the time
+ * cutoff. Following mode consumes appended bytes incrementally and never
+ * advances the committed line boundary past an incomplete JSONL record.
+ */
+export function scanMeaningfulSessionActivity(
+  sessionFile: string,
+  prior: SessionActivityScanState | undefined,
+  options: SessionActivityScanOptions,
+): SessionActivityScanResult {
+  const budgetBytes = Math.max(1024, Math.floor(options.budgetBytes ?? DEFAULT_SESSION_ACTIVITY_SCAN_BUDGET_BYTES));
+  const metadataPrefixBytes = Math.max(1024, Math.floor(options.metadataPrefixBytes ?? DEFAULT_SESSION_METADATA_PREFIX_BYTES));
+  let fd: number | undefined;
+  let bytesRead = 0;
+  try {
+    const size = fs.statSync(sessionFile).size;
+    let state = prior ?? initialScanState(size);
+    if (
+      (state.phase === "following" && (size < state.committedOffset || size < state.scanOffset))
+      || (state.phase !== "following" && size < state.snapshotSize)
+    ) state = initialScanState(size);
+
+    fd = fs.openSync(sessionFile, "r");
+
+    if (state.phase === "recovering_tail") {
+      // Include bytes appended while tail recovery was pending. A newly completed
+      // line should become visible immediately rather than preserving an old EOF.
+      if (size > state.snapshotSize) state = initialScanState(size);
+      if (state.cursor === 0) {
+        const following: SessionActivityScanState = { phase: "following", committedOffset: 0, scanOffset: state.snapshotSize, baselineTrusted: state.snapshotSize === 0 };
+        return { state: following, progressKnown: state.snapshotSize === 0, bytesRead };
+      }
+      const length = Math.min(budgetBytes, state.cursor);
+      const start = state.cursor - length;
+      const buffer = Buffer.allocUnsafe(length);
+      fs.readSync(fd, buffer, 0, length, start);
+      bytesRead += length;
+      const newline = buffer.lastIndexOf(0x0a);
+      if (newline < 0) {
+        const next: SessionActivityScanState = { ...state, cursor: start };
+        if (start > 0) return { state: next, progressKnown: false, bytesRead };
+        const following: SessionActivityScanState = { phase: "following", committedOffset: 0, scanOffset: state.snapshotSize, baselineTrusted: false };
+        return { state: following, progressKnown: false, bytesRead };
+      }
+      const newlineOffset = start + newline;
+      const next: SessionActivityScanState = {
+        phase: "recovering_lines",
+        snapshotSize: state.snapshotSize,
+        cursor: newlineOffset,
+        lineEnd: newlineOffset,
+        forwardCommittedOffset: newlineOffset + 1,
+        forwardScanOffset: state.snapshotSize,
+        sawValidTimestamp: false,
+        sawMalformedRecord: false,
+      };
+      return { state: next, progressKnown: false, bytesRead };
+    }
+
+    if (state.phase === "recovering_lines") {
+      if (state.cursor === 0) {
+        let sawValidTimestamp = state.sawValidTimestamp;
+        let sawMalformedRecord = state.sawMalformedRecord;
+        let activity: MeaningfulSessionActivity | undefined;
+        if (state.lineEnd > 0) {
+          const inspected = inspectSessionRecord(fd, 0, state.lineEnd, options.now, metadataPrefixBytes);
+          bytesRead += inspected.bytesRead;
+          sawMalformedRecord ||= inspected.metadata.malformed;
+          if (inspected.metadata.timestampMs !== undefined && !inspected.metadata.future) sawValidTimestamp = true;
+          if (inspected.metadata.activity && !inspected.metadata.future && inspected.metadata.activity.timestampMs >= options.cutoffMs) activity = inspected.metadata.activity;
+        }
+        const baselineTrusted = Boolean(activity) || sawValidTimestamp || !sawMalformedRecord;
+        const following: SessionActivityScanState = {
+          phase: "following",
+          committedOffset: state.forwardCommittedOffset,
+          scanOffset: state.forwardScanOffset,
+          baselineTrusted,
+        };
+        const caughtUp = following.scanOffset === size && following.committedOffset === size;
+        return { state: following, activity, progressKnown: baselineTrusted && caughtUp, bytesRead };
+      }
+
+      const length = Math.min(budgetBytes, state.cursor);
+      const start = state.cursor - length;
+      const buffer = Buffer.allocUnsafe(length);
+      fs.readSync(fd, buffer, 0, length, start);
+      bytesRead += length;
+      let lineEnd = state.lineEnd;
+      let sawValidTimestamp = state.sawValidTimestamp;
+      let sawMalformedRecord = state.sawMalformedRecord;
+
+      for (let index = buffer.length - 1; index >= 0; index--) {
+        if (buffer[index] !== 0x0a) continue;
+        const newlineOffset = start + index;
+        const recordStart = newlineOffset + 1;
+        const direct = recordStart >= start && lineEnd <= start + buffer.length
+          ? buffer.subarray(recordStart - start, lineEnd - start)
+          : undefined;
+        const inspected = inspectSessionRecord(fd, recordStart, lineEnd, options.now, metadataPrefixBytes, direct);
+        bytesRead += inspected.bytesRead;
+        sawMalformedRecord ||= inspected.metadata.malformed;
+        if (inspected.metadata.timestampMs !== undefined && !inspected.metadata.future) sawValidTimestamp = true;
+        if (inspected.metadata.activity && !inspected.metadata.future && inspected.metadata.activity.timestampMs >= options.cutoffMs) {
+          const following: SessionActivityScanState = {
+            phase: "following",
+            committedOffset: state.forwardCommittedOffset,
+            scanOffset: state.forwardScanOffset,
+            baselineTrusted: true,
+          };
+          const caughtUp = following.scanOffset === size && following.committedOffset === size;
+          return { state: following, activity: inspected.metadata.activity, progressKnown: caughtUp, bytesRead };
+        }
+        if (inspected.metadata.timestampMs !== undefined && !inspected.metadata.future && inspected.metadata.timestampMs < options.cutoffMs) {
+          const following: SessionActivityScanState = {
+            phase: "following",
+            committedOffset: state.forwardCommittedOffset,
+            scanOffset: state.forwardScanOffset,
+            baselineTrusted: true,
+          };
+          const caughtUp = following.scanOffset === size && following.committedOffset === size;
+          return { state: following, progressKnown: caughtUp, bytesRead };
+        }
+        lineEnd = newlineOffset;
+      }
+
+      const next: SessionActivityScanState = {
+        ...state,
+        cursor: start,
+        lineEnd,
+        sawValidTimestamp,
+        sawMalformedRecord,
+      };
+      return { state: next, progressKnown: false, bytesRead };
+    }
+
+    // Following mode: consume only one bounded slice of appended bytes. The
+    // scan cursor may advance through a partial record, but committedOffset does
+    // not move until its newline arrives.
+    if (state.scanOffset >= size) {
+      const progressKnown = state.baselineTrusted && state.committedOffset === size;
+      return { state, progressKnown, bytesRead };
+    }
+    const length = Math.min(budgetBytes, size - state.scanOffset);
+    const buffer = Buffer.allocUnsafe(length);
+    fs.readSync(fd, buffer, 0, length, state.scanOffset);
+    bytesRead += length;
+    let committedOffset = state.committedOffset;
+    let baselineTrusted = state.baselineTrusted;
+    let latestActivity: MeaningfulSessionActivity | undefined;
+
+    for (let index = 0; index < buffer.length; index++) {
+      if (buffer[index] !== 0x0a) continue;
+      const newlineOffset = state.scanOffset + index;
+      const direct = committedOffset >= state.scanOffset
+        ? buffer.subarray(committedOffset - state.scanOffset, index)
+        : undefined;
+      const inspected = inspectSessionRecord(fd, committedOffset, newlineOffset, options.now, metadataPrefixBytes, direct);
+      bytesRead += inspected.bytesRead;
+      if (inspected.metadata.activity && !inspected.metadata.future && inspected.metadata.activity.timestampMs >= options.cutoffMs) {
+        latestActivity = inspected.metadata.activity;
+        baselineTrusted = true;
+      }
+      committedOffset = newlineOffset + 1;
+    }
+
+    const scanOffset = state.scanOffset + length;
+    const next: SessionActivityScanState = { phase: "following", committedOffset, scanOffset, baselineTrusted };
+    const progressKnown = baselineTrusted && scanOffset === size && committedOffset === size;
+    return { state: next, activity: latestActivity, progressKnown, bytesRead };
+  } catch {
+    const fallback = prior ?? { phase: "recovering_tail" as const, snapshotSize: 0, cursor: 0 };
+    return { state: fallback, progressKnown: false, bytesRead };
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+  }
 }
 
 export function parseElapsedSeconds(raw: string): number {
@@ -252,16 +571,20 @@ export function evaluateIdleState(input: IdleStateInput): IdleState {
   const now = input.now ?? Date.now();
   const heartbeatIdleMs = Math.max(0, now - input.lastHeartbeatAt);
   const processIdleMs = Math.max(0, now - input.lastProcessActivityAt);
+  const outputIdleMs = Math.max(0, now - input.lastOutputAt);
 
   const shouldWarnStuck =
     !input.hasActiveChildProcess &&
     heartbeatIdleMs >= input.thresholdMs &&
     processIdleMs >= input.thresholdMs;
+  const shouldWarnOutputSilence = outputIdleMs >= input.outputSilenceThresholdMs;
 
   return {
     shouldWarnStuck,
+    shouldWarnOutputSilence,
     heartbeatIdleMs,
     processIdleMs,
+    outputIdleMs,
   };
 }
 

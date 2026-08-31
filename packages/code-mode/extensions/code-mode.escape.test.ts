@@ -71,6 +71,7 @@ function makePi(): MockPi {
 	return pi;
 }
 
+
 function sorted(names: string[]): string[] {
 	return [...names].sort();
 }
@@ -127,9 +128,10 @@ describe("execute_code escape-sync side effects (pe-tk4s V16)", () => {
 		const executeCode = pi.tools.get("execute_code");
 		expect(executeCode).toBeDefined();
 
-		await executeCode.execute("tc1", { code: "$.__escaped = true;" }, new AbortController().signal, undefined, makeExecuteCtx());
+		await executeCode.execute("tc1", { thinking: "Enable escape mode.", code: "$.__escaped = true;" }, new AbortController().signal, undefined, makeExecuteCtx());
+		await new Promise((resolve) => setTimeout(resolve, 0));
 		pi.setActiveToolsCalls.length = 0;
-		await executeCode.execute("tc2", { code: "console.log('sync');" }, new AbortController().signal, undefined, makeExecuteCtx());
+		await executeCode.execute("tc2", { thinking: "Verify synchronized tool state.", code: "console.log('sync');" }, new AbortController().signal, undefined, makeExecuteCtx());
 
 		expect(pi.setActiveToolsCalls).toContainEqual(["execute_code", "context_tag", "read", "bash", "grep"]);
 	});
@@ -140,9 +142,9 @@ describe("execute_code escape-sync side effects (pe-tk4s V16)", () => {
 		const executeCode = pi.tools.get("execute_code");
 
 		await pi.commands.get("escape_code_mode").handler(undefined, { ui: { notify: () => {} } });
-		await executeCode.execute("tc1", { code: "$.__escaped = false;" }, new AbortController().signal, undefined, makeExecuteCtx());
+		await executeCode.execute("tc1", { thinking: "Disable escape mode.", code: "$.__escaped = false;" }, new AbortController().signal, undefined, makeExecuteCtx());
 		pi.setActiveToolsCalls.length = 0;
-		await executeCode.execute("tc2", { code: "console.log('sync');" }, new AbortController().signal, undefined, makeExecuteCtx());
+		await executeCode.execute("tc2", { thinking: "Verify synchronized tool state.", code: "console.log('sync');" }, new AbortController().signal, undefined, makeExecuteCtx());
 
 		expect(pi.setActiveToolsCalls).toContainEqual(["execute_code", "context_tag"]);
 	});

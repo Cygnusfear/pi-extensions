@@ -136,6 +136,18 @@ function replyResult(outcome: AssistantOutcome): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	const restartCapablePi = pi as ExtensionAPI & {
+		registerRestartLauncher?: (executable: string) => void;
+	};
+	const terminalId = process.env[MAESTRI_TERMINAL_ID_ENV];
+	if (
+		terminalId &&
+		isValidTerminalId(terminalId) &&
+		typeof restartCapablePi.registerRestartLauncher === "function"
+	) {
+		restartCapablePi.registerRestartLauncher(WRAPPER_PATH);
+	}
+
 	// Consume wrapper ownership before a user command can spawn descendants.
 	// The mode remains process-local; nested bare Pi processes cannot inherit it.
 	const pinLaunchMode: PinLaunchMode = consumeProcessLaunchMode();
@@ -231,7 +243,7 @@ export default function (pi: ExtensionAPI) {
 		unmanagedWarningShown = true;
 		const message =
 			"This Pi was started directly inside Maestri, not through pi-maestri. " +
-			"Maestri restart will not resume this process; launch the normal patched Pi preset or run pi-maestri.";
+			"Session continuity is not protected until restart_runtime re-enters through pi-maestri.";
 		console.error(`[maestri-pi-bridge] ${message}`);
 		ctx.ui.notify(message, "warning");
 	};

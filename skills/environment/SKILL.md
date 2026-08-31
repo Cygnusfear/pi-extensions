@@ -330,7 +330,7 @@ Safety net: a default sync `execute_code` that's still running after 60s **auto-
 If the WHOLE block is long (cold build + deploy + bounce, multi-step monitoring), fire the whole `execute_code` async:
 
 ```json
-{ "tool": "execute_code", "args": { "code": "...long pipeline...", "async": true } }
+{ "tool": "execute_code", "args": { "thinking": "Run the long pipeline and verify its completion output.", "code": "...long pipeline...", "async": true } }
 ```
 
 You get a jobId back instantly; the result delivers as a follow-up turn.
@@ -390,7 +390,7 @@ Destructive git commands (`push --force`, `reset --hard`, writing to `.git/`) ar
 | Read files | `Read({ path })` in execute_code |
 | Short shell command | `Bash({ command })` — 30s default, NEVER raise timeout past ~60s |
 | Long shell command | `bashBgStart({ command }).timeout(ms)` or `.each(cb).then(cb)` — never bare `await` for >30s |
-| Long WHOLE block | `execute_code({ code, async: true })` — returns jobId, result delivered as follow-up turn |
+| Long WHOLE block | `execute_code({ thinking: "Run the long pipeline and verify completion output.", code: "<long pipeline>", async: true })` — returns jobId, result delivered as follow-up turn |
 | Sync execute_code stuck >60s | Auto-promoted: stub returned with jobId, result delivers as follow-up turn |
 | Inspect / kill an IN-FLIGHT async exec | direct tools `execute_code_async_list` and `execute_code_async_kill` — bypass the mutex |
 | Inspect / kill AFTER an async exec delivered | sandbox fns `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` — needs an execute_code call |

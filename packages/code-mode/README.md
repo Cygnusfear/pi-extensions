@@ -17,7 +17,8 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 
 ## Features
 
-- **Single `execute_code` tool** — replaces 30+ individual tool registrations with one entry point
+- **Primary `execute_code` tool** — replaces 30+ individual operational tool registrations with one entry point
+- **Recorded action rationale** — every execution carries a required same-call rationale without forcing another provider turn
 - **Persistent `$` store** — variables survive across calls for the whole session. No time limit, no eviction — nothing is silently dropped. JSON-serializable vars also survive `reload_runtime` / pi restart-with-resume via a session-scoped disk snapshot (promises/functions are recreated, not restored).
 - **Auto-persist** — top-level `const`, `let`, `var`, and `function` declarations are automatically copied to `$` at the end of each call
 - **Session API** — `session.messages()`, `session.tokens()`, `session.save()`, `session.load()`, `session.squash()` for programmatic context management
@@ -31,6 +32,12 @@ Without code-mode, every file read, grep, bash command, or edit is a separate LL
 - **Shiki syntax highlighting** — code preview in TUI uses the same highlighter as the core editor
 - **Tool exclusivity** — sandbox-only tools (bash, read, write, edit, grep, etc.) can't be called directly by the LLM
 - **Git safety** — destructive git commands and `.git` writes ask for confirmation first
+
+## Recorded action rationale
+
+Every `execute_code` call requires a non-empty `thinking` argument that explains what the code should do, why the action is correct, and what output will confirm it. This rationale is generated in the same tool call as the code; code-mode does not force isolated thinking turns or extra provider generations.
+
+No `console.log()` bridge is required. Tool-call arguments are ordinary generated tokens, and the TypeBox schema declares `thinking` before `code`. Recorded rationale is durable session data and may appear in the TUI, exports, ouija, or later provider context. Never include secrets, credentials, access tokens, private keys, or raw secret-bearing output.
 
 ## The `$` persistent store
 
@@ -104,7 +111,7 @@ By default `execute_code` is synchronous from the agent's perspective: the tool 
 
 ```js
 // LLM-side tool call
-{ tool: "execute_code", args: { code: "<long work>", async: true } }
+{ tool: "execute_code", args: { thinking: "Run the long job and verify its final output.", code: "<long work>", async: true } }
 ```
 
 What you get back instantly:
@@ -463,7 +470,7 @@ When code-mode is active, these tools are **sandbox-only** (blocked from direct 
 
 bash, read, write, edit, grep, find, ls, apply_patch, hash_read, hash_edit, web_search_brave, code_search_brave, context7_resolve, context7_docs, recall, memory_*, fff_*, WebFetch, get_current_time, tldr_*
 
-These remain as **direct LLM tools**: execute_code, context_*, start_supervision, init/run/log_experiment, editor_*, mesh_*, git-ai, hotseat_*
+These remain as **direct LLM tools**: execute_code, done, context_*, start_supervision, init/run/log_experiment, editor_*, mesh_*, git-ai, hotseat_*
 
 **Available in both direct tools AND sandbox:** bash_bg_* (as `bashBgStart`, etc.)
 

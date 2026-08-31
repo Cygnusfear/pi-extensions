@@ -103,7 +103,9 @@ describe("buildRebirthWakeMessage", () => {
     const msg = buildRebirthWakeMessage(marker);
     expect(msg.content).toContain("Read your TPV");
     expect(msg.content).toContain("Identify");
-    expect(msg.content).toContain("Check the mesh");
+    expect(msg.content).toContain("Check state");
+    expect(msg.content).toContain("ORIENTATION");
+    expect(msg.content).toContain("ouija");
     expect(msg.content).toContain("continue the work");
   });
 

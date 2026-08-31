@@ -1,19 +1,23 @@
 import { runAgentLoop, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, streamSimple, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "@sinclair/typebox";
 import { createCodeModeSession, executeInSession } from "@pi-extensions/code-mode/session-factory";
+import { budgetSuffix } from "./budget";
 import { combineSignals } from "./combine-signals";
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_ITERATIONS } from "./constants";
 import { disposeSub } from "./dispose";
 import { createRlmHandle } from "./handle";
 import { assistantToolCalls, summarizeAssistantMessage, type RlmProgressMonitor } from "./progress";
-import { buildSystemPrompt } from "./prompts";
+import { buildSystemPrompt, getCodeModeManual } from "./prompts";
 import { buildRlmReturn } from "./return-injection";
 import { isRlmReturnSignal } from "./return-signal";
 import type { RlmDeps, RlmOptions, RlmResult, RlmState } from "./types";
 import { resolveModel, validateOptions } from "./validate";
 import { classifyProviderLimit } from "@pi-extensions/shared/provider-limits";
 import type { ProviderLimitNotice } from "@pi-extensions/shared/alert-provenance";
+
+const DEFAULT_MODEL_ROLE = "rlm";
 
 class RlmResolvedSignal extends Error {
 	constructor() {
@@ -84,6 +88,7 @@ function buildExecuteCodeTool(params: {
 	rlmWithReturn: unknown;
 	state: RlmState;
 	monitor?: RlmProgressMonitor;
+	maxIterations: number;
 }): AgentTool<any, any> {
 	return {
 		name: "execute_code",
@@ -101,12 +106,13 @@ function buildExecuteCodeTool(params: {
 					cwd: params.deps.cwd,
 					model: params.modelRef,
 					modelRegistry: params.deps.modelRegistry,
+					codeModeManual: getCodeModeManual(),
 					hydrateBareGlobals: false,
 					injectSessionApi: false,
 					injectConsoleWake: false,
 					injectRunbookRun: false,
 					errorMode: "rethrow",
-					allowedTools: new Set(params.opts.tools),
+					allowedTools: new Set([...params.opts.tools, "man"]),
 					extraBindings: { rlm: params.rlmWithReturn },
 					agentGitIdentity: identity ? { ...identity, model: params.modelRef.provider + "/" + params.modelRef.id } : undefined,
 				});
@@ -131,7 +137,7 @@ function buildExecuteCodeTool(params: {
 				params.state.disposed = true;
 				return { content: [{ type: "text", text: stdout || "rlm.return called" }], details: { returned: true, stdout } };
 			}
-			return { content: [{ type: "text", text: stdout || "(no output)" }], details: { stdout } };
+			return { content: [{ type: "text", text: (stdout || "(no output)") + budgetSuffix(params.state, params.opts, params.maxIterations) }], details: { stdout } };
 		},
 	};
 }
@@ -159,8 +165,17 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 	const combined = combineSignals([deps.signal, opts.signal, state.disposeAbort.signal].filter(Boolean) as AbortSignal[]);
 	if (combined.aborted) throw abortError(combined);
 
-	const [p, id] = opts.model ? resolveModel(opts.model) : [deps.parentModel.provider, deps.parentModel.id];
-	monitor?.update({ status: "running", model: p + "/" + id, maxIterations: opts.maxIterations ?? DEFAULT_MAX_ITERATIONS }, "start");
+	const selected = opts.model ? undefined : deps.resolveModelRole(DEFAULT_MODEL_ROLE);
+	if (!opts.model && !selected) {
+		throw new Error(
+			`rlm: no healthy available model configured for role '${DEFAULT_MODEL_ROLE}'`,
+		);
+	}
+	const [p, id] = opts.model
+		? resolveModel(opts.model)
+		: [selected!.provider, selected!.id];
+	const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+	monitor?.update({ status: "running", model: p + "/" + id, maxIterations }, "start");
 	const model = deps.modelRegistry.find(p, id);
 	if (!model) throw new Error("rlm: unknown model '" + (opts.model ?? p + "/" + id) + "'");
 	const auth = await deps.modelRegistry.getApiKeyAndHeaders(model);
@@ -172,9 +187,7 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 		: ((subOpts: RlmOptions) => createRlmHandle(deps, subOpts, depth + 1));
 	const rlmWithReturn = Object.assign((subOpts: RlmOptions) => rlmCallable(subOpts), { return: buildRlmReturn(state) });
 	const effectiveOpts: RlmOptions = { ...opts, tools: opts.tools.filter((tool) => tool !== "rlm") };
-	const executeCodeTool = buildExecuteCodeTool({ subSession, combined, deps, opts: effectiveOpts, modelRef: { provider: p, id }, rlmWithReturn, state, monitor });
-
-	const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+	const executeCodeTool = buildExecuteCodeTool({ subSession, combined, deps, opts: effectiveOpts, modelRef: { provider: p, id }, rlmWithReturn, state, monitor, maxIterations });
 	let turns = 0;
 	let terminalError: Error | null = null;
 	const messages: AgentMessage[] = [{ role: "user", content: [{ type: "text", text: opts.task }], timestamp: Date.now() } as any];
@@ -225,6 +238,7 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 			}
 			if (event.type === "turn_end") {
 				turns++;
+				state.turns = turns;
 				monitor?.update({ iteration: turns, usage: { ...state.usage } }, "step");
 				if (state.fatalError) throw state.fatalError;
 				if (state.resolved) throw new RlmResolvedSignal();

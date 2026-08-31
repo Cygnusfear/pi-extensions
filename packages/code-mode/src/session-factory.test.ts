@@ -645,6 +645,27 @@ describe("executeInSession — session squash continuation hook", () => {
 
 
 describe("executeInSession — Read missing files", () => {
+	test("hard-wait guard rejects await sleep over 5s with the correct idiom", async () => {
+		const session = createCodeModeSession();
+		const result = await executeInSession(session, "await sleep(30000);", { cwd: process.cwd(), signal: new AbortController().signal });
+		expect(result.error).toContain("Hard-wait rejected");
+		expect(result.error).toContain("console.wake");
+	});
+
+	test("hard-wait guard rejects shell sleep but allows short waits and condition polls", async () => {
+		const session = createCodeModeSession();
+		const bad = await executeInSession(session, "await Bash({ command: 'sleep 60' });", { cwd: process.cwd(), signal: new AbortController().signal });
+		expect(bad.error).toContain("Hard-wait rejected");
+		const ok = await executeInSession(session, "await sleep(50); console.log('short-ok');", { cwd: process.cwd(), signal: new AbortController().signal });
+		expect(ok.output).toContain("short-ok");
+	});
+
+	test("Buffer is available inside the sandbox (phantom-global class removed)", async () => {
+		const session = createCodeModeSession();
+		const result = await executeInSession(session, "console.log(Buffer.from('ok').toString('base64'))", { cwd: process.cwd(), signal: new AbortController().signal });
+		expect(result.output).toContain("b2s=");
+	});
+
 	test("Read missing file reports clear error and optional=true returns null", async () => {
 		const sess = createCodeModeSession();
 		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "read-missing-"));

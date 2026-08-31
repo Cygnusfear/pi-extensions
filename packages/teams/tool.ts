@@ -489,7 +489,7 @@ export function registerTeamsTool(pi: ExtensionAPI, leader: TeamLeader) {
     description: `Coordinate a team of worker agents.
 
 Actions:
-- delegate: Create tickets and spawn workers. Provide "tasks" array with { text, assignee?, model?, template?, hasTools? }.
+- delegate: Create tickets and spawn workers. Provide "tasks" array — each item MUST be { text, assignee?, model?, template?, hasTools? } — the field is "text", NOT title/body/name. Example: tasks: [{ text: "Fix the bug", assignee: "fixer" }].
   Each worker can use a different model via "provider/model-id" (use examples from ${"`"}prompts/default.md${"`"}).
   Use template to apply a preset from ~/.pi/agent/team-templates.json (e.g. "review", "oracle", "fix", "implementer").
   Templates set model, worktree, and additional prompt. Explicit params override template values.

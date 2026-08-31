@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { TeamLeader } from "./leader.ts";
 import { TeamsSubscription, buildPredicate } from "./subscription.ts";
 import type { WorkerHandle } from "./types.js";
@@ -264,12 +265,50 @@ describe("TeamLeader runtime and transport integration", () => {
 	});
 
 
+	test("restart recovery preserves a partial unicode message until it completes", () => {
+		const { leader } = makeHarness();
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "teams-restart-partial-"));
+		try {
+			const file = path.join(dir, "worker.jsonl");
+			const now = Date.now();
+			const heartbeat = JSON.stringify({ type: "heartbeat", timestamp: new Date(now - 2000).toISOString() });
+			const messageTimestamp = now - 1000;
+			const message = Buffer.from(JSON.stringify({
+				type: "message",
+				timestamp: new Date(messageTimestamp).toISOString(),
+				message: { role: "assistant", content: "分析".repeat(2000) },
+			}));
+			const split = Math.floor(message.length / 2);
+			fs.writeFileSync(file, Buffer.concat([Buffer.from(heartbeat + "\n"), message.subarray(0, split)]));
+			const worker = makeWorker({
+				name: "restart-partial",
+				sessionDir: dir,
+				sessionFile: file,
+				spawnedAt: now - 20 * 60 * 1000,
+				lastOutputAt: now - 20 * 60 * 1000,
+			});
+
+			for (let step = 0; step < 4; step++) leader.refreshSessionActivity(worker, now);
+			expect(worker.meaningfulActivityKnown).toBe(false);
+			expect(worker.lastOutputAt).toBe(now - 20 * 60 * 1000);
+
+			fs.appendFileSync(file, Buffer.concat([message.subarray(split), Buffer.from("\n")]));
+			leader.refreshSessionActivity(worker, now);
+			expect(worker.meaningfulActivityKnown).toBe(true);
+			expect(worker.lastOutputAt).toBe(messageTimestamp);
+			expect(worker.lastOutputLabel).toBe("response");
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("mesh direct message handler turns status() phase events into teams.on PollEvents", () => {
 		const { leader } = makeHarness();
 		const observed: any[] = [];
 		leader.notifyLLM = (event: any) => observed.push(event);
 		leader.renderWidget = () => {};
-		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1" }));
+		const lastMeaningfulOutputAt = Date.now() - 10 * 60 * 1000;
+		leader.workers.set("worker-1", makeWorker({ workerInstanceId: "attempt-1", lastOutputAt: lastMeaningfulOutputAt }));
 		const mesh = {
 			on: () => {},
 			off: () => {},
@@ -302,6 +341,7 @@ describe("TeamLeader runtime and transport integration", () => {
 		expect(observed).toHaveLength(1);
 		expect(observed[0]).toMatchObject({ type: "phase", phase: { payload: { stage: "implementing" } } });
 		expect(leader.getWorker("worker-1")?.durableMeshId).toBe("durable-1");
+		expect(leader.getWorker("worker-1")?.lastOutputAt).toBe(lastMeaningfulOutputAt);
 	});
 
 	// ── Regression: LIVE worker→leader tells arrive WRAPPED in a mesh:tell envelope ──

@@ -39,8 +39,9 @@ describe("loadTeamTemplates", () => {
 		const m = await freshModule();
 		const t = m.loadTeamTemplates();
 		expect(Object.keys(t)).toContain("review");
-		expect(Object.keys(t).length).toBeGreaterThanOrEqual(7);
+		expect(Object.keys(t).length).toBeGreaterThanOrEqual(8);
 		expect(t).toBe(m.DEFAULT_TEAM_TEMPLATES);
+		expect(t.review.prompt).toContain("directed change surface");
 		expect(m.loadRoleModels("review")).toEqual([
 			"openai-codex/gpt-5.6-terra",
 			"kimi-coding/k3",
@@ -55,6 +56,7 @@ describe("loadTeamTemplates", () => {
 			fix: ["openai-codex/gpt-5.6-luna"],
 			implementer: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
 			investigate: ["kimi-coding/k3", "openai-codex/gpt-5.6-terra"],
+			rlm: ["deepseek/deepseek-v4-flash", "openrouter/z-ai/glm-5.3-flash", "anthropic/claude-haiku-4-5"],
 			scribe: ["openai-codex/gpt-5.6-luna"],
 			roleplay: ["anthropic/claude-sonnet-4-6"],
 		};

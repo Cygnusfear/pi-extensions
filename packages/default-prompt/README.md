@@ -9,6 +9,7 @@ Additive system prompt layering — loads a global default prompt and an optiona
 - **Both layers are additive** — they append to the base system prompt, never replace it
 - **Frontmatter stripping** — YAML frontmatter is automatically removed before injection
 - **Hot-reload with caching** — files are stat-checked on each turn; only re-read when mtime changes
+- **Recorded action rationale** — the bundled prompt requires concise, secret-free `execute_code.thinking` rationale in the same action call without forcing extra provider generations
 
 ## Agent review links
 

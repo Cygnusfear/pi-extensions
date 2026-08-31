@@ -193,26 +193,22 @@ const gitSegment: StatusLineSegment = {
 const thinkingSegment: StatusLineSegment = {
   id: "thinking",
   render(ctx) {
-    const level = ctx.thinkingLevel || "off";
+    const nativeLevel = ctx.thinkingLevel || "off";
+    if (nativeLevel === "off") return { content: "", visible: false };
 
-    // Text label for each level
     const levelText: Record<string, string> = {
-      off: "off",
       minimal: "min",
       low: "balls",
       medium: "med",
       high: "high",
       xhigh: "ultrathink",
     };
-    const label = levelText[level] || level;
-    const content = `🧠 ${label}`;
+    const content = `🧠 ${levelText[nativeLevel] || nativeLevel}`;
 
-    // Use rainbow effect for high/xhigh (like Claude Code ultrathink)
-    if (level === "high" || level === "xhigh") {
+    if (nativeLevel === "high" || nativeLevel === "xhigh") {
       return { content: rainbow(content), visible: true };
     }
 
-    // Use thinking color for lower levels
     return { content: color(ctx, "thinking", content), visible: true };
   },
 };
@@ -437,7 +433,7 @@ const extensionStatusesSegment: StatusLineSegment = {
     // Join compact statuses with a separator
     // Notification-style statuses (starting with "[") are shown above the editor instead
     const parts: string[] = [];
-    for (const value of statuses.values()) {
+    for (const [key, value] of statuses) {
       if (value && !value.trimStart().startsWith("[")) {
         parts.push(value);
       }

@@ -223,7 +223,7 @@ For team workers the same pattern becomes zero-polling via `teams.on`:
 await teams.delegate([
   { text: "Implement the feature", assignee: "impl" },
   { text: "Write tests", assignee: "tests" },
-  { text: "Review everything", assignee: "review" },
+  { text: "Review the implementation change surface", assignee: "review" },
 ]);
 
 // Race their terminal outcomes — whichever arrives first wakes the coordinator.
@@ -264,6 +264,7 @@ This is what coding assistance should feel like."
 
 ```json
 { "tool": "execute_code", "args": {
+  "thinking": "Run the build/deploy pipeline and verify its completion output.",
   "code": "const built = await bashBgStart({ command: 'cargo build --release' }).timeout(900_000);\nawait Bash({ command: 'spacetime publish gso', timeout: 120 });\nawait Bash({ command: './run.sh bounce' });\nconsole.log('bounce complete:', built.status);",
   "async": true
 } }

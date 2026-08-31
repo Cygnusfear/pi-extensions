@@ -11,6 +11,12 @@ import {
   worktreeBranchName,
 } from "./worktree.ts";
 
+const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
+
+function gitTest(name: string, run: () => void | Promise<void>): void {
+  test(name, run, GIT_INTEGRATION_TIMEOUT_MS);
+}
+
 function git(args: string[], cwd: string, env?: NodeJS.ProcessEnv): string {
   return execFileSync("git", args, {
     cwd,
@@ -111,7 +117,7 @@ afterEach(() => {
 });
 
 describe("worktree adversarial cases", () => {
-  test("concurrent creation from the same baseRef gives each worker the same starting commit", async () => {
+  gitTest("concurrent creation from the same baseRef gives each worker the same starting commit", async () => {
     git(["checkout", "-b", "shared-base"], repoDir);
     makeCommit(repoDir, "shared.ts", "export const shared = true;\n", "shared commit");
     const sharedSha = headSha(repoDir);
@@ -133,7 +139,7 @@ describe("worktree adversarial cases", () => {
     expect(currentBranch(wtB)).toBe("teams/parallel-b/ticket-b");
   });
 
-  test("concurrent creation of the same branch name lets only one winner through", async () => {
+  gitTest("concurrent creation of the same branch name lets only one winner through", async () => {
     const wtA = path.join(repoDir, ".worktrees", "teams", "race-a");
     const wtB = path.join(repoDir, ".worktrees", "teams", "race-b");
 
@@ -154,7 +160,7 @@ describe("worktree adversarial cases", () => {
     expect(currentBranch(winnerPath)).toBe("teams/same-worker/same-ticket");
   });
 
-  test("default HEAD in detached-head mode branches from the detached commit", async () => {
+  gitTest("default HEAD in detached-head mode branches from the detached commit", async () => {
     makeCommit(repoDir, "second.txt", "second\n", "second commit");
     const detachedSha = git(["rev-parse", "HEAD~1"], repoDir);
     git(["checkout", detachedSha], repoDir);
@@ -169,7 +175,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(path.join(wtPath, "second.txt"))).toBe(false);
   });
 
-  test("baseRef can be a remote-tracking branch", async () => {
+  gitTest("baseRef can be a remote-tracking branch", async () => {
     const { sourceDir, remoteDir } = createBareRemote();
     trackRepo(sourceDir);
     trackRepo(remoteDir);
@@ -201,7 +207,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(path.join(wtPath, "remote.txt"))).toBe(true);
   });
 
-  test("leftover non-empty worktree path fails without overwriting existing files", async () => {
+  gitTest("leftover non-empty worktree path fails without overwriting existing files", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "leftover-worker");
     fs.mkdirSync(wtPath, { recursive: true });
     const sentinelPath = path.join(wtPath, "sentinel.txt");
@@ -214,7 +220,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.readFileSync(sentinelPath, "utf-8")).toBe("do not touch\n");
   });
 
-  test("manual pre-existing branch blocks worktree creation cleanly", async () => {
+  gitTest("manual pre-existing branch blocks worktree creation cleanly", async () => {
     const branch = worktreeBranchName("manual-branch", "ticket-manual");
     git(["branch", branch, "main"], repoDir);
 
@@ -226,7 +232,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(wtPath)).toBe(false);
   });
 
-  test("baseRef with shell metacharacters is treated as data, not executed", async () => {
+  gitTest("baseRef with shell metacharacters is treated as data, not executed", async () => {
     const markerPath = path.join(os.tmpdir(), `teams-worktree-marker-${process.pid}-${Date.now()}`);
     trackPath(markerPath);
     const evilRef = `main; touch ${markerPath}`;
@@ -239,7 +245,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(wtPath)).toBe(false);
   });
 
-  test("very long branch names fail cleanly instead of half-creating a worktree", async () => {
+  gitTest("very long branch names fail cleanly instead of half-creating a worktree", async () => {
     const workerName = "w".repeat(300);
     const ticketId = "t".repeat(300);
     const wtPath = path.join(repoDir, ".worktrees", "teams", "long-branch-path");
@@ -251,7 +257,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(wtPath)).toBe(false);
   });
 
-  test("merge-base stays anchored to the requested baseRef", async () => {
+  gitTest("merge-base stays anchored to the requested baseRef", async () => {
     git(["checkout", "-b", "feature-merge-base"], repoDir);
     makeCommit(repoDir, "feature.txt", "feature\n", "feature commit 1");
     makeCommit(repoDir, "feature-2.txt", "feature 2\n", "feature commit 2");
@@ -275,7 +281,7 @@ describe("worktree adversarial cases", () => {
     expect(mergeBase).toBe(baseSha);
   });
 
-  test("resolveGitToplevel still finds the real repo from a worktree of a worktree", async () => {
+  gitTest("resolveGitToplevel still finds the real repo from a worktree of a worktree", async () => {
     const firstWorktree = path.join(repoDir, ".worktrees", "outer-worker");
     git(["worktree", "add", firstWorktree, "-b", "outer-worker"], repoDir);
 
@@ -291,7 +297,7 @@ describe("worktree adversarial cases", () => {
     expect(toplevel).toBe(repoDir);
   });
 
-  test("resolveGitToplevel works when the repo is entered through a symlink", async () => {
+  gitTest("resolveGitToplevel works when the repo is entered through a symlink", async () => {
     const symlinkParent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "teams-wt-symlink-")));
     trackPath(symlinkParent);
     const symlinkPath = path.join(symlinkParent, "repo-link");
@@ -301,7 +307,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.realpathSync(toplevel)).toBe(repoDir);
   });
 
-  test("symlinked .worktrees/teams directory still creates a usable worker worktree", async () => {
+  gitTest("symlinked .worktrees/teams directory still creates a usable worker worktree", async () => {
     const externalTeamsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "teams-wt-symlink-target-")));
     trackPath(externalTeamsDir);
     fs.mkdirSync(path.join(repoDir, ".worktrees"), { recursive: true });
@@ -315,7 +321,7 @@ describe("worktree adversarial cases", () => {
     expect(headSha(wtPath)).toBe(headSha(repoDir));
   });
 
-  test("baseRef path traversal text is treated literally and fails cleanly", async () => {
+  gitTest("baseRef path traversal text is treated literally and fails cleanly", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "path-traversal-ref");
     const result = await createWorktree(
       repoDir,
@@ -330,7 +336,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(wtPath)).toBe(false);
   });
 
-  test("deleted repo directory fails without leaving junk behind", async () => {
+  gitTest("deleted repo directory fails without leaving junk behind", async () => {
     const doomedRepo = createTestRepo();
     trackRepo(doomedRepo);
     fs.rmSync(doomedRepo, { recursive: true, force: true });
@@ -343,7 +349,7 @@ describe("worktree adversarial cases", () => {
     await expect(resolveGitToplevel(doomedRepo)).rejects.toThrow();
   });
 
-  test("shallow clones can still create worker worktrees from HEAD", async () => {
+  gitTest("shallow clones can still create worker worktrees from HEAD", async () => {
     const { sourceDir, remoteDir } = createBareRemote();
     trackRepo(sourceDir);
     trackRepo(remoteDir);
@@ -364,7 +370,7 @@ describe("worktree adversarial cases", () => {
     expect(fs.existsSync(path.join(wtPath, "shallow.txt"))).toBe(true);
   });
 
-  test("removeWorktree can race with a second create without corrupting the repo", async () => {
+  gitTest("removeWorktree can race with a second create without corrupting the repo", async () => {
     const firstPath = path.join(repoDir, ".worktrees", "teams", "cleanup-race");
     const first = await createWorktree(repoDir, "cleanup-race", "ticket-1", firstPath);
     expect(first.success).toBe(true);

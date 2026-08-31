@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Fixed
+- Thinking level now prefers Pi's live native-thinking getter over cached session fallback, so a cached `off` value cannot mask an active level.
+- Incremental usage and thinking state now reset on session replacement and recompute when the active branch diverges, including equal-length branch navigation.
 - Context percentage now shows unknown (`?`) immediately after compaction when pi reports post-compaction usage as unknown, instead of falling back to the last pre-compaction assistant usage.
 
 ## [0.2.23] - 2026-02-06

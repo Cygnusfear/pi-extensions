@@ -6,7 +6,8 @@
   "pi": { "extensions": ["./index.ts"] },
   "dependencies": {
     "@pi-extensions/shared": "*",
-    "@pi-extensions/code-mode": "*"
+    "@pi-extensions/code-mode": "*",
+    "@pi-extensions/model-router": "*"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",

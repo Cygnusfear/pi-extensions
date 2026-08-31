@@ -16,6 +16,7 @@ import {
 } from "../shared/src/session-view.ts";
 import {
   evaluateIdleState,
+  scanMeaningfulSessionActivity,
   formatRuntimeSummary,
   isReusedWorkerPid,
   sampleWorkerProcessSnapshot,
@@ -38,6 +39,7 @@ import {
   ACTIVITY_POLL_INTERVAL_MS,
   DONE_GRACE_MS,
   NOTIFY_BATCH_WINDOW_MS,
+  OUTPUT_SILENCE_THRESHOLD_MS,
   RESUMABLE_WINDOW_MS,
   STUCK_THRESHOLD_MS,
   STUCK_WARNING_COOLDOWN_MS,
@@ -54,9 +56,6 @@ import { executeDurableEffect, pendingEffects } from "./v2/effects.ts";
 import { createLeaderPersistedAckEnvelope } from "./v2/mesh-adapter.ts";
 import { createWorktree, resolveGitToplevel, workerWorktreePath } from "./worktree.js";
 
-/** Entry types that represent real agent work (talking, tool use). */
-const REAL_ACTIVITY_TYPES = new Set(["message", "custom_message"]);
-
 const ambientChatBatchMsRaw = Number(process.env.PI_TEAMS_AMBIENT_CHAT_BATCH_MS ?? "750");
 const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientChatBatchMsRaw >= 0
   ? Math.floor(ambientChatBatchMsRaw)
@@ -65,94 +64,18 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
 /** Mesh "message" event payload — direct tells. */
 type MessageHandler = (inbound: InboundMeshMessage) => void;
 
-interface RealActivity {
-  timestampMs: number;
-  label: string;
-}
-
 interface WorkerExitAssessment {
   /** The worker's DECLARED terminal status (team_finish → durable mesh finish → handle). */
   explicitTerminal?: "done" | "quit";
   /** A ticket note explicitly signalling an abnormal exit (EXITED:/FAILED:) forces failure —
    *  a defensive net; the retired heartbeat-based forced-shutdown input is gone. */
   forcedExit: boolean;
-  /** Process exited 0 — `pi -p` prints a clean turn end as exit 0, error/abort as non-zero. */
+  /** Process exited 0 — pi -p prints a clean turn end as exit 0, error/abort as non-zero. */
   cleanExit: boolean;
   ticketClosed: boolean;
   outputMeaningful: boolean;
   classification: "success" | "warning" | "failure";
   reason?: string;
-}
-
-
-/**
- * Derive a short human label from a session entry.
- * Examples: "rg", "bash", "response", "prompt", "context-inject"
- */
-function labelFromEntry(entry: Record<string, unknown>): string {
-  if (entry.type === "message" && entry.message && typeof entry.message === "object") {
-    const msg = entry.message as Record<string, unknown>;
-    if (msg.role === "toolResult" && typeof msg.toolName === "string") {
-      return msg.toolName;
-    }
-    if (msg.role === "assistant") return "response";
-    if (msg.role === "user") return "prompt";
-    return String(msg.role ?? "message");
-  }
-  if (entry.type === "custom_message" && typeof entry.customType === "string") {
-    return entry.customType;
-  }
-  return "activity";
-}
-
-/**
- * Read the session JSONL from the end and return the timestamp + label of the
- * last entry that represents real agent activity — a message or custom_message.
- * Skips heartbeats, metadata changes, and other bookkeeping entries.
- *
- * Reads the tail of the file (last 8KB) to avoid loading multi-MB session files.
- */
-function findLastRealActivity(sessionFile: string): RealActivity | undefined {
-  const TAIL_BYTES = 8192;
-  let tail: string;
-  try {
-    const stat = fs.statSync(sessionFile);
-    const size = stat.size;
-    if (size === 0) return undefined;
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
-    const fd = fs.openSync(sessionFile, "r");
-    try {
-      fs.readSync(fd, buf, 0, buf.length, start);
-    } finally {
-      fs.closeSync(fd);
-    }
-    tail = buf.toString("utf8");
-  } catch {
-    return undefined;
-  }
-
-  // Split into lines, walk backwards
-  const lines = tail.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      const entry = safeJsonParse<Record<string, any>>(line);
-      if (!REAL_ACTIVITY_TYPES.has(entry.type)) continue;
-      // Use the entry's own timestamp (ISO string) — more accurate than file mtime
-      if (entry.timestamp) {
-        const ms = new Date(entry.timestamp).getTime();
-        if (Number.isFinite(ms)) {
-          return { timestampMs: ms, label: labelFromEntry(entry) };
-        }
-      }
-    } catch {
-      // Partial line from mid-read or corrupt — skip
-      continue;
-    }
-  }
-  return undefined;
 }
 
 function readDiagnosticLog(sessionDir: string, fileName: string, label: string): string {
@@ -1648,8 +1571,6 @@ export class TeamLeader {
     }
     this.bindWorkerRoute(worker, routeId, peerNickname);
     worker.lastActivityAt = Date.now();
-    worker.lastOutputAt = Date.now();
-    worker.lastOutputLabel = `phase:${event.payload.stage}`;
 
     this.notifyLLM({ type: "phase", worker: { ...worker }, phase: event });
 	  this.renderWidget();
@@ -2770,11 +2691,12 @@ export class TeamLeader {
     }
   }
 
-  private refreshSessionActivity(worker: WorkerHandle) {
+  private refreshSessionActivity(worker: WorkerHandle, now: number) {
     // Resolve the actual session file on first call — pi names files
     // as `${timestamp}_${sessionId}.jsonl`, not the hardcoded `session.jsonl`
     // from spawner.ts.
     if (!fs.existsSync(worker.sessionFile)) {
+      worker.meaningfulActivityKnown = false;
       try {
         const files = fs.readdirSync(worker.sessionDir)
           .filter(f => f.endsWith(".jsonl"))
@@ -2799,24 +2721,25 @@ export class TeamLeader {
       const stat = fs.statSync(worker.sessionFile);
       const mtimeMs = stat.mtimeMs;
       if (!Number.isFinite(mtimeMs)) return;
-      // File hasn't changed since last check — skip the read
-      if (worker.lastSessionMtimeMs && mtimeMs <= worker.lastSessionMtimeMs) return;
-      worker.lastSessionMtimeMs = mtimeMs;
+      if (!worker.lastSessionMtimeMs || mtimeMs > worker.lastSessionMtimeMs) {
+        worker.lastSessionMtimeMs = mtimeMs;
+        // Heartbeats are liveness only; they never become meaningful progress.
+        worker.lastActivityAt = Math.max(worker.lastActivityAt, mtimeMs);
+      }
 
-      // Always update lastActivityAt from file mtime (includes heartbeats — good for stuck detection)
-      worker.lastActivityAt = Math.max(worker.lastActivityAt, mtimeMs);
-
-      // For lastOutputAt, find the last real agent activity (message/tool use),
-      // ignoring heartbeat entries that fire every 5s and make workers look perpetually active.
-      const lastReal = findLastRealActivity(worker.sessionFile);
-      if (lastReal) {
-        if (lastReal.timestampMs > (worker.lastOutputAt ?? 0)) {
-          worker.lastOutputAt = lastReal.timestampMs;
-          worker.lastOutputLabel = lastReal.label;
-        }
+      const scan = scanMeaningfulSessionActivity(worker.sessionFile, worker.sessionActivityScanState, {
+        now,
+        cutoffMs: now - OUTPUT_SILENCE_THRESHOLD_MS,
+      });
+      worker.sessionActivityScanState = scan.state;
+      worker.meaningfulActivityKnown = scan.progressKnown;
+      if (scan.activity && scan.activity.timestampMs <= now && scan.activity.timestampMs > (worker.lastOutputAt ?? 0)) {
+        worker.lastOutputAt = scan.activity.timestampMs;
+        worker.lastOutputLabel = scan.activity.label;
       }
     } catch {
-      // Session file may not exist yet.
+      // Unknown scan state must never manufacture an output-silence fact.
+      worker.meaningfulActivityKnown = false;
     }
   }
 
@@ -2827,7 +2750,11 @@ export class TeamLeader {
     }
 
     const now = Date.now();
-    this.refreshSessionActivity(worker);
+    this.refreshSessionActivity(worker, now);
+    if (worker.lastOutputAt !== undefined && worker.lastOutputAt > now) {
+      worker.lastOutputAt = Math.min(worker.spawnedAt, now);
+      worker.lastOutputLabel = undefined;
+    }
     void this.handleTicketChange(worker);
 
     const snapshot = await sampleWorkerProcessSnapshotAsync(worker.pid);
@@ -2854,16 +2781,24 @@ export class TeamLeader {
     const idle = evaluateIdleState({
       now,
       thresholdMs: STUCK_THRESHOLD_MS,
+      outputSilenceThresholdMs: OUTPUT_SILENCE_THRESHOLD_MS,
       hasActiveChildProcess: snapshot.hasActiveChildProcess,
       lastHeartbeatAt: worker.lastActivityAt,
       lastProcessActivityAt: worker.lastProcessActivityAt,
+      lastOutputAt: worker.lastOutputAt ?? worker.spawnedAt,
     });
 
-    if (idle.shouldWarnStuck) {
+    const shouldWarnOutputSilence = worker.meaningfulActivityKnown === true && idle.shouldWarnOutputSilence;
+    const shouldWarn = shouldWarnOutputSilence || idle.shouldWarnStuck;
+    if (shouldWarn) {
       const cooldownExpired =
         !worker.lastStuckWarningAt || now - worker.lastStuckWarningAt >= STUCK_WARNING_COOLDOWN_MS;
       if (cooldownExpired) {
         const first = !worker.lastStuckWarningAt;
+        const cause = shouldWarnOutputSilence ? "output_silence" as const : "liveness" as const;
+        const idleSeconds = Math.floor((cause === "output_silence"
+          ? idle.outputIdleMs
+          : Math.min(idle.heartbeatIdleMs, idle.processIdleMs)) / 1000);
         worker.lastStuckWarningAt = now;
 		const identity = this.identityFor(worker);
 		const cooldownIndex = this.lifecycleStore?.attempt(worker.workerInstanceId)?.stuckCount ?? 0;
@@ -2871,18 +2806,28 @@ export class TeamLeader {
 		this.appendLifecycleFact({
 		  schemaVersion: 4, ...identity, eventId, kind: "stuck", sourceLeaderEpoch: this.leaderEpoch,
 		  occurredAt: now,
-		  payload: { cooldownIndex, idleSeconds: Math.floor(Math.min(idle.heartbeatIdleMs, idle.processIdleMs) / 1000) },
+		  payload: {
+            cooldownIndex,
+            idleSeconds,
+            cause,
+            ...(worker.currentCommand ? { command: worker.currentCommand } : {}),
+            ...(worker.currentCommandElapsedSeconds !== undefined ? { commandElapsedSeconds: worker.currentCommandElapsedSeconds } : {}),
+            activeChildProcessCount: worker.activeChildProcessCount,
+            ...(worker.lastOutputAt !== undefined ? { lastOutputAt: worker.lastOutputAt } : {}),
+            ...(worker.lastOutputLabel ? { lastOutputLabel: worker.lastOutputLabel } : {}),
+          },
 		});
         this.notifyLLM({
           type: "stuck",
           worker: { ...worker },
-          idleSeconds: Math.floor(Math.min(idle.heartbeatIdleMs, idle.processIdleMs) / 1000),
+          idleSeconds,
+          cause,
           first,
 		  lifecycleEventId: eventId,
 		  attemptId: worker.workerInstanceId,
         });
       }
-    } else {
+    } else if (worker.meaningfulActivityKnown === true) {
       worker.lastStuckWarningAt = undefined;
     }
 
@@ -3403,7 +3348,9 @@ function formatPollEvent(event: PollEvent): string {
         lastOutputAt: event.worker.lastOutputAt,
         lastOutputLabel: event.worker.lastOutputLabel,
       });
-      return `${ICONS.warn} ${tag}:\nstuck ${event.idleSeconds}s idle · ${summary}`;
+      return event.cause === "output_silence"
+        ? `${ICONS.warn} ${tag}:\nP0: no meaningful worker output for ${event.idleSeconds}s. Investigate now; do not continue waiting blindly. · ${summary}`
+        : `${ICONS.warn} ${tag}:\nstuck ${event.idleSeconds}s idle · ${summary}`;
     }
     case "comment":
       return `${ICONS.comment} ${tag}:\n${event.comment}`;

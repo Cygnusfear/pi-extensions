@@ -49,12 +49,35 @@
  * host the fields are simply absent and we degrade to the fixed fallback.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { requestStage, getActiveStage } from "../../shared/src/stage-control.ts";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { fireNotification } from "../../shared/src/desktop-notify.ts";
+import {
+	createProviderKeyRecoveryGate,
+	isQuotaLimitError as isQuotaLimit,
+	isRateLimitError as isRateLimit,
+} from "../../shared/src/provider-limits.ts";
+import { getPrimaryRateLimitDelayMs } from "../../shared/src/provider-reset.ts";
 import { relayProviderLimitNotice } from "../../shared/src/relay-to-hooman.ts";
-import { isRateLimitError as isRateLimit, isQuotaLimitError as isQuotaLimit } from "../../shared/src/provider-limits.ts";
-import { currentAlertSessionIdentity, teamsLauncherProvenance, type MeshIdentitySource, type ProviderLimitNoticeKind } from "../../shared/src/alert-provenance.ts";
+import {
+	getActiveStage,
+	requestStage,
+} from "../../shared/src/stage-control.ts";
+
+export {
+	getPrimaryRateLimitDelayMs,
+	parseAnthropicResetDelayMs,
+	parseRetryAfterMs,
+} from "../../shared/src/provider-reset.ts";
+
+import {
+	currentAlertSessionIdentity,
+	type MeshIdentitySource,
+	type ProviderLimitNoticeKind,
+	teamsLauncherProvenance,
+} from "../../shared/src/alert-provenance.ts";
 export { isRateLimit, isQuotaLimit };
 
 /**
@@ -109,9 +132,18 @@ interface TurnEndEvent {
  * to bridge these events the handlers simply never fire (no runtime error).
  */
 type RetryAwareOn = {
-	(event: "auto_retry_start", handler: (e: AutoRetryStartEvent, ctx: ExtensionContext) => void): void;
-	(event: "auto_retry_end", handler: (e: AutoRetryEndEvent, ctx: ExtensionContext) => void): void;
-	(event: "turn_end", handler: (e: TurnEndEvent, ctx: ExtensionContext) => void): void;
+	(
+		event: "auto_retry_start",
+		handler: (e: AutoRetryStartEvent, ctx: ExtensionContext) => void,
+	): void;
+	(
+		event: "auto_retry_end",
+		handler: (e: AutoRetryEndEvent, ctx: ExtensionContext) => void,
+	): void;
+	(
+		event: "turn_end",
+		handler: (e: TurnEndEvent, ctx: ExtensionContext) => void,
+	): void;
 };
 
 // ---------------------------------------------------------------------------
@@ -121,14 +153,6 @@ type RetryAwareOn = {
 /** Legacy fixed self-continue schedule (ms) — the fallback when no provider
  *  reset metadata is available. Exported for tests + compatibility. */
 export const CONTINUE_DELAYS_MS = [30_000, 60_000, 120_000] as const;
-
-/** Anthropic reset headers, in RFC 3339 format (absolute reset timestamp). */
-const ANTHROPIC_RESET_HEADERS = [
-	"anthropic-ratelimit-requests-reset",
-	"anthropic-ratelimit-tokens-reset",
-	"anthropic-ratelimit-input-tokens-reset",
-	"anthropic-ratelimit-output-tokens-reset",
-] as const;
 
 /** Small buffer added on top of a header-derived delay so we don't retry the
  *  exact instant the window reopens (the provider's estimate can be optimistic
@@ -157,64 +181,6 @@ const JITTER_MS = 5_000;
 const RATE_LIMITED_STAGE = "rate-limited";
 /** Stage to fall back to if we somehow can't read the prior stage. */
 const FALLBACK_STAGE = "implementing";
-
-/**
- * Parse the HTTP `retry-after` family into a delay in ms.
- *
- * Precedence (per the rate-limit-recovery spec): `retry-after` first, then
- * `retry-after-ms`. `retry-after` is either integer seconds (Anthropic 429s)
- * or an HTTP-date (RFC 1123). Returns >= 0, or `undefined` when neither header
- * is present or parseable.
- */
-export function parseRetryAfterMs(headers: Record<string, string> | undefined, now: number = Date.now()): number | undefined {
-	if (!headers) return undefined;
-	const retryAfter = headers["retry-after"];
-	if (retryAfter) {
-		if (/^\d+$/.test(retryAfter)) return Math.max(0, Number(retryAfter) * 1000);
-		const parsed = Date.parse(retryAfter);
-		if (!Number.isNaN(parsed)) return Math.max(0, parsed - now);
-	}
-	const retryAfterMs = headers["retry-after-ms"];
-	if (retryAfterMs && /^\d+$/.test(retryAfterMs)) return Math.max(0, Number(retryAfterMs));
-	return undefined;
-}
-
-/**
- * Parse Anthropic's `anthropic-ratelimit-*-reset` headers (RFC 3339 absolute
- * timestamps) into a delay in ms. Returns the LATEST reset across the present
- * headers (the most restrictive bucket that still needs to replenish), clamped
- * to >= 0, or `undefined` when none are present or parseable.
- */
-export function parseAnthropicResetDelayMs(
-	headers: Record<string, string> | undefined,
-	now: number = Date.now(),
-): number | undefined {
-	if (!headers) return undefined;
-	let maxDelay = -Infinity;
-	for (const header of ANTHROPIC_RESET_HEADERS) {
-		const value = headers[header];
-		if (!value) continue;
-		const parsed = Date.parse(value);
-		if (Number.isNaN(parsed)) continue;
-		const delay = parsed - now;
-		if (delay > maxDelay) maxDelay = delay;
-	}
-	return maxDelay === -Infinity ? undefined : Math.max(0, maxDelay);
-}
-
-/**
- * The single best header-derived "safe to retry" delay, in ms.
- *
- * Precedence: `retry-after` family → Anthropic reset timestamps. Returns
- * `undefined` when the provider surfaced no usable reset information.
- */
-export function getPrimaryRateLimitDelayMs(
-	providerError: ProviderErrorMeta | undefined,
-	now: number = Date.now(),
-): number | undefined {
-	if (!providerError?.headers) return undefined;
-	return parseRetryAfterMs(providerError.headers, now) ?? parseAnthropicResetDelayMs(providerError.headers, now);
-}
 
 export interface RecoveryScheduleOptions {
 	/** Clock injection for deterministic tests. */
@@ -265,7 +231,9 @@ export function getRateLimitRecoveryDelaysMs(
 	// The auto-wake horizon depends on the episode kind: a transient TPM storm
 	// should never ask for more than an hour, but a quota / usage window (e.g. the
 	// 5-hour rolling limit) legitimately needs hours.
-	const maxDelayMs = options.maxDelayMs ?? (mode === "quota" ? MAX_QUOTA_DELAY_MS : MAX_TRANSIENT_DELAY_MS);
+	const maxDelayMs =
+		options.maxDelayMs ??
+		(mode === "quota" ? MAX_QUOTA_DELAY_MS : MAX_TRANSIENT_DELAY_MS);
 	const jitterMs = options.jitterMs ?? JITTER_MS;
 	const rng = options.rng ?? Math.random;
 
@@ -289,7 +257,6 @@ export function getRateLimitRecoveryDelaysMs(
 	);
 }
 
-
 /** Human-readable hint for a delay in ms ("in 62s", "in 4.0m", "in 3.5h"). */
 function describeDelay(ms: number): string {
 	if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
@@ -297,7 +264,32 @@ function describeDelay(ms: number): string {
 	return `${(ms / (60 * 60_000)).toFixed(1)}h`;
 }
 
-export default function rateLimitRecovery(pi: ExtensionAPI): void {
+export interface RateLimitRecoveryDependencies {
+	setTimeout?: typeof setTimeout;
+	clearTimeout?: typeof clearTimeout;
+	fireNotification?: typeof fireNotification;
+	relayProviderLimitNotice?: typeof relayProviderLimitNotice;
+}
+
+export default function rateLimitRecovery(
+	pi: ExtensionAPI,
+	dependencies: RateLimitRecoveryDependencies = {},
+): void {
+	const scheduleTimeout = (
+		callback: () => void,
+		delay: number,
+	): ReturnType<typeof setTimeout> =>
+		dependencies.setTimeout
+			? dependencies.setTimeout(callback, delay)
+			: setTimeout(callback, delay);
+	const cancelTimeout = (timer: ReturnType<typeof setTimeout>): void => {
+		if (dependencies.clearTimeout) dependencies.clearTimeout(timer);
+		else clearTimeout(timer);
+	};
+	const notifyDesktop = dependencies.fireNotification ?? fireNotification;
+	const relayLimitNotice =
+		dependencies.relayProviderLimitNotice ?? relayProviderLimitNotice;
+	const providerKeyRecovery = createProviderKeyRecoveryGate(pi.events);
 	let ctx: ExtensionContext | null = null;
 	// True while we are in a rate-limit episode (tab shows 🚓).
 	let active = false;
@@ -311,9 +303,12 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	let timers: ReturnType<typeof setTimeout>[] = [];
 	// Cardinality guard: exactly one Telegram-bound structured notice per active episode.
 	let episodeNotified = false;
+	// A rejected host enqueue is reported once per episode even when several
+	// bounded backstop timers were armed.
+	let enqueueRejectionNotified = false;
 
 	const clearTimers = (): void => {
-		for (const t of timers) clearTimeout(t);
+		for (const t of timers) cancelTimeout(t);
 		timers = [];
 	};
 
@@ -323,11 +318,18 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	/** Build + relay a structured provider-limit notice with trusted provenance.
 	 *  Launcher (Teams coordinator) is resolved from spawn facts / live mesh only;
 	 *  the alert text is never parsed for ancestry. */
-	const notifyProviderLimit = (kind: ProviderLimitNoticeKind, detail?: string): void => {
+	const notifyProviderLimit = (
+		kind: ProviderLimitNoticeKind,
+		detail?: string,
+	): void => {
 		const mesh = (globalThis as { __piMesh?: MeshIdentitySource }).__piMesh;
-		const failed = currentAlertSessionIdentity(ctx?.sessionManager, mesh, process.env);
+		const failed = currentAlertSessionIdentity(
+			ctx?.sessionManager,
+			mesh,
+			process.env,
+		);
 		const launcher = teamsLauncherProvenance(process.env, mesh);
-		relayProviderLimitNotice({
+		relayLimitNotice({
 			kind,
 			model: modelName(),
 			operation: "agent",
@@ -338,7 +340,10 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 	};
 
 	/** Preserve scheduling/desktop signals while emitting at most one structured relay per episode. */
-	const notifyEpisode = (kind: ProviderLimitNoticeKind, detail?: string): void => {
+	const notifyEpisode = (
+		kind: ProviderLimitNoticeKind,
+		detail?: string,
+	): void => {
 		if (episodeNotified) return;
 		episodeNotified = true;
 		notifyProviderLimit(kind, detail);
@@ -356,6 +361,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 			const cur = getActiveStage();
 			priorStage = cur && cur !== RATE_LIMITED_STAGE ? cur : FALLBACK_STAGE;
 			episodeNotified = false;
+			enqueueRejectionNotified = false;
 			notifyEpisode("rate_limited", "pi is retrying.");
 		}
 		requestStage(RATE_LIMITED_STAGE);
@@ -374,7 +380,9 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 		// earlier in the episode (e.g. auto_retry_start) so a host that only emits
 		// providerError on the start event still schedules from real headers.
 		const effectiveProviderError = providerError ?? episodeProviderError;
-		const delays = getRateLimitRecoveryDelaysMs(effectiveProviderError, { mode });
+		const delays = getRateLimitRecoveryDelaysMs(effectiveProviderError, {
+			mode,
+		});
 
 		if (delays.length === 0) {
 			// No schedule to arm — either there is no reset metadata, or the
@@ -386,37 +394,67 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 					"🚓 Quota / usage window reached and no provider reset time is known. This session needs a manual wake.",
 					"warning",
 				);
-			} catch { /* stale ctx — non-fatal */ }
-			fireNotification({
+			} catch {
+				/* stale ctx — non-fatal */
+			}
+			notifyDesktop({
 				title: "🚓 Manual wake needed",
 				body: "Rate limit with no schedulable reset time (none known, or beyond the auto-wake horizon). Resume by hand.",
 			});
-			notifyEpisode("manual_wake", "no known reset time — needs a manual wake or switch to another model.");
+			notifyEpisode(
+				"manual_wake",
+				"no known reset time — needs a manual wake or switch to another model.",
+			);
 			return;
 		}
 
 		const first = delays[0];
-		fireNotification({
-			title: mode === "quota" ? "🚓 Quota window — auto-resume scheduled" : "🚓 Rate limited",
+		notifyDesktop({
+			title:
+				mode === "quota"
+					? "🚓 Quota window — auto-resume scheduled"
+					: "🚓 Rate limited",
 			body:
 				mode === "quota"
 					? `Usage window hit. Auto-resuming in ${describeDelay(first)} (provider reset).`
 					: `Provider TPM storm — auto-resuming in ${describeDelay(first)}${delays.length > 1 ? ` then ${describeDelay(delays[delays.length - 1] - first)} later` : ""}.`,
 		});
 
-		notifyEpisode(mode === "quota" ? "quota" : "rate_limited", "auto-resuming in " + describeDelay(first) + ".");
+		notifyEpisode(
+			mode === "quota" ? "quota" : "rate_limited",
+			"auto-resuming in " + describeDelay(first) + ".",
+		);
+		const reportEnqueueRejection = (error: unknown): void => {
+			if (!active || enqueueRejectionNotified) return;
+			enqueueRejectionNotified = true;
+			const detail = error instanceof Error ? error.message : String(error);
+			try {
+				ctx?.ui?.notify?.(
+					`🚓 Automatic recovery enqueue was rejected: ${detail}. This session needs a manual wake.`,
+					"warning",
+				);
+			} catch {
+				/* stale ctx — desktop notification remains available */
+			}
+			notifyDesktop({
+				title: "🚓 Automatic recovery was rejected",
+				body: "The host rejected the scheduled continue. Resume this session manually.",
+			});
+		};
 		delays.forEach((delay, i) => {
-			const t = setTimeout(() => {
+			const t = scheduleTimeout(() => {
 				// Still throttled when this fires — nudge the agent to retry.
 				if (!active) return;
 				try {
-					pi.sendUserMessage("continue", { deliverAs: "followUp" });
-				} catch {
-					/* idle send may race; non-fatal */
+					void Promise.resolve(
+						pi.sendUserMessage("continue", { deliverAs: "followUp" }),
+					).catch(reportEnqueueRejection);
+				} catch (error) {
+					reportEnqueueRejection(error);
 				}
 				// After the last attempt, if we're still here the session is stuck.
 				if (i === delays.length - 1) {
-					const t2 = setTimeout(() => {
+					const t2 = scheduleTimeout(() => {
 						if (!active) return;
 						// ctx may be stale after a reload/session replacement during a long
 						// quota window; guard the UI notify. Desktop notify always fires.
@@ -425,12 +463,17 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 								`🚓 Still rate-limited after ${describeDelay(delay)} of auto-retries — this session may be stuck.`,
 								"warning",
 							);
-						} catch { /* stale ctx — non-fatal, desktop notify still fires */ }
-						fireNotification({
+						} catch {
+							/* stale ctx — non-fatal, desktop notify still fires */
+						}
+						notifyDesktop({
 							title: "🚓 Session may be dead",
 							body: `Still rate-limited after ${describeDelay(delay)} of auto-resumes. Needs attention.`,
 						});
-						notifyEpisode("stuck", "still rate-limited after auto-resumes — consider switching to another model.");
+						notifyEpisode(
+							"stuck",
+							"still rate-limited after auto-resumes — consider switching to another model.",
+						);
 					}, 5_000);
 					timers.push(t2);
 				}
@@ -446,6 +489,7 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 		// The episode already emitted its one structured relay; recovery remains a local UI transition.
 		scheduled = false;
 		episodeProviderError = undefined;
+		enqueueRejectionNotified = false;
 		clearTimers();
 		requestStage(priorStage ?? FALLBACK_STAGE);
 		priorStage = null;
@@ -457,55 +501,88 @@ export default function rateLimitRecovery(pi: ExtensionAPI): void {
 		ctx = c;
 	});
 
+	function unlessProviderKeyClaimed(
+		event: object,
+		context: ExtensionContext,
+		action: () => void,
+	): void {
+		const claim = providerKeyRecovery.claim(event, context);
+		if (typeof claim === "boolean") {
+			if (!claim) action();
+			return;
+		}
+		void claim.then(
+			(handled) => {
+				if (!handled) action();
+			},
+			() => action(),
+		);
+	}
+
 	// A retry began. If it's a rate limit, show 🚓 immediately (early signal) and
 	// capture the provider error metadata, but don't schedule self-continues yet
 	// — the built-in retries may still recover.
-	onRetry("auto_retry_start", (event) => {
-		if (isRateLimit(event.errorMessage)) enterRateLimited(event.providerError);
+	onRetry("auto_retry_start", (event, context) => {
+		unlessProviderKeyClaimed(event, context, () => {
+			if (isRateLimit(event.errorMessage))
+				enterRateLimited(event.providerError);
+		});
 	});
 
 	// A retry sequence ended.
-	onRetry("auto_retry_end", (event) => {
-		if (event.success) {
-			// Built-in retry recovered the turn — clear 🚓.
-			recover();
-			return;
-		}
-		// Retries exhausted. If it was a rate limit, hold 🚓 and arm the
-		// header-aware self-continue schedule to outlast the TPM window.
-		if (isRateLimit(event.finalError)) {
-			enterRateLimited(event.providerError);
-			scheduleContinues(event.providerError, "transient");
-		}
+	onRetry("auto_retry_end", (event, context) => {
+		unlessProviderKeyClaimed(event, context, () => {
+			if (event.success) {
+				// Built-in retry recovered the turn — clear 🚓.
+				recover();
+				return;
+			}
+			// Retries exhausted. If it was a rate limit, hold 🚓 and arm the
+			// header-aware self-continue schedule to outlast the TPM window.
+			if (isRateLimit(event.finalError)) {
+				enterRateLimited(event.providerError);
+				scheduleContinues(event.providerError, "transient");
+			}
+		});
 	});
 
 	// A turn completed. Used both to detect recovery (a real assistant reply
 	// clears any episode) AND to detect Case B: a NON-retryable quota / usage
 	// window error that pi's built-in retry deliberately did not retry.
-	onRetry("turn_end", (event) => {
-		const message = event.message ?? {};
-		if (message.stopReason !== "error") {
-			// Non-error turn → the provider answered; any rate-limit episode is over.
-			recover();
-			return;
-		}
-		// Error turn.
-		if (active) {
-			// A Case A (transient) episode is in progress; auto_retry_end already
-			// armed the schedule. Don't double-schedule.
-			return;
-		}
-		// Not already in an episode. Only the QUOTA / usage-window case is handled
-		// here: those are non-retryable, so pi emits no auto_retry_* for them —
-		// turn_end is the only signal. A plain TRANSIENT rate limit is NOT handled
-		// here even if it reaches turn_end un-retried: pi emits turn_end during
-		// agent.prompt(), BEFORE _handlePostAgentRun decides to retry, so scheduling
-		// transient here would arm self-continues while pi's built-in backoff is
-		// still running (and for a small retry-after, fire a spurious continue
-		// mid-retry). Transient recovery stays exclusively on the auto_retry path.
-		if (isQuotaLimit(message.errorMessage)) {
-			enterRateLimited(message.providerError);
-			scheduleContinues(message.providerError, "quota");
-		}
+	onRetry("turn_end", (event, context) => {
+		unlessProviderKeyClaimed(event, context, () => {
+			const message = event.message ?? {};
+			if (message.stopReason !== "error") {
+				// Non-error turn → the provider answered; any rate-limit episode is over.
+				recover();
+				return;
+			}
+			// Error turn.
+			if (active) {
+				// A Case A (transient) episode is in progress; auto_retry_end already
+				// armed the schedule. Don't double-schedule.
+				return;
+			}
+			// Not already in an episode. Only the QUOTA / usage-window case is handled
+			// here: those are non-retryable, so pi emits no auto_retry_* for them —
+			// turn_end is the only signal. A plain TRANSIENT rate limit is NOT handled
+			// here even if it reaches turn_end un-retried: pi emits turn_end during
+			// agent.prompt(), BEFORE _handlePostAgentRun decides to retry, so scheduling
+			// transient here would arm self-continues while pi's built-in backoff is
+			// still running (and for a small retry-after, fire a spurious continue
+			// mid-retry). Transient recovery stays exclusively on the auto_retry path.
+			if (isQuotaLimit(message.errorMessage)) {
+				enterRateLimited(message.providerError);
+				scheduleContinues(message.providerError, "quota");
+			}
+		});
+	});
+
+	pi.on("session_shutdown", () => {
+		providerKeyRecovery.dispose();
+		clearTimers();
+		active = false;
+		scheduled = false;
+		enqueueRejectionNotified = false;
 	});
 }

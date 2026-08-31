@@ -10,6 +10,10 @@
       "./extensions/model-router.ts"
     ]
   },
+  "exports": {
+    "./router": "./src/router.ts",
+    "./types": "./src/types.ts"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "@sinclair/typebox": "*"

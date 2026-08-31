@@ -31,6 +31,7 @@ export function validateOptions(opts: RlmOptions, deps: RlmDeps): void {
 		const [p, id] = resolveModel(opts.model);
 		if (!deps.modelRegistry.find(p, id)) throw new Error("rlm: unknown model '" + opts.model + "'");
 	}
+	if (opts.maxInputTokens !== undefined && (!Number.isInteger(opts.maxInputTokens) || opts.maxInputTokens < 1000)) throw new Error("rlm: maxInputTokens must be an integer >= 1000");
 	if (opts.maxIterations !== undefined && (!Number.isInteger(opts.maxIterations) || opts.maxIterations < 1 || opts.maxIterations > MAX_ALLOWED_ITERATIONS)) throw new Error("rlm: maxIterations must be in [1, " + MAX_ALLOWED_ITERATIONS + "]");
 	if (opts.maxDepth !== undefined && (!Number.isInteger(opts.maxDepth) || opts.maxDepth < 1 || opts.maxDepth > 5)) throw new Error("rlm: maxDepth must be in [1, 5]");
 }

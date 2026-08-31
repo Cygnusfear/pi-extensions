@@ -28,6 +28,16 @@ import {
   renameBranch,
 } from "./worktree.ts";
 
+const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
+
+function gitTest(
+  name: string,
+  run: () => void | Promise<void>,
+  timeoutMs = GIT_INTEGRATION_TIMEOUT_MS,
+): void {
+  test(name, run, timeoutMs);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function git(args: string[], cwd: string): string {
@@ -104,26 +114,26 @@ afterEach(() => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("resolveGitToplevel", () => {
-  test("returns repo root when called from repo root", async () => {
+  gitTest("returns repo root when called from repo root", async () => {
     const toplevel = await resolveGitToplevel(repoDir);
     expect(toplevel).toBe(repoDir);
   });
 
-  test("returns repo root when called from a subdirectory", async () => {
+  gitTest("returns repo root when called from a subdirectory", async () => {
     const subdir = path.join(repoDir, "src", "deep");
     fs.mkdirSync(subdir, { recursive: true });
     const toplevel = await resolveGitToplevel(subdir);
     expect(toplevel).toBe(repoDir);
   });
 
-  test("returns repo root when called from inside a worktree", async () => {
+  gitTest("returns repo root when called from inside a worktree", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "feature-a");
     createManualWorktree(repoDir, wtPath, "feature-a");
     const toplevel = await resolveGitToplevel(wtPath);
     expect(toplevel).toBe(repoDir);
   });
 
-  test("returns repo root from a subdirectory inside a worktree", async () => {
+  gitTest("returns repo root from a subdirectory inside a worktree", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "feature-b");
     createManualWorktree(repoDir, wtPath, "feature-b");
     const subdir = path.join(wtPath, "src");
@@ -132,7 +142,7 @@ describe("resolveGitToplevel", () => {
     expect(toplevel).toBe(repoDir);
   });
 
-  test("returns repo root from a worktree outside the repo tree", async () => {
+  gitTest("returns repo root from a worktree outside the repo tree", async () => {
     const externalWtPath = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "teams-wt-external-")));
     cleanupPaths.push(externalWtPath);
     fs.rmSync(externalWtPath, { recursive: true }); // git worktree add needs a non-existing path
@@ -147,12 +157,12 @@ describe("resolveGitToplevel", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("workerWorktreePath", () => {
-  test("places worktree under .worktrees/teams/<timestamp>-<name>", () => {
+  gitTest("places worktree under .worktrees/teams/<timestamp>-<name>", () => {
     const p = workerWorktreePath("/Projects/repo", "impl-auth", 1776720000000);
     expect(p).toBe("/Projects/repo/.worktrees/teams/1776720000000-impl-auth");
   });
 
-  test("uses toplevel, not worktree path", () => {
+  gitTest("uses toplevel, not worktree path", () => {
     // If someone accidentally passed a worktree path, the result would be nested.
     // The caller should pass the resolved toplevel.
     const toplevel = "/Projects/repo";
@@ -161,7 +171,7 @@ describe("workerWorktreePath", () => {
     expect(p).not.toContain(".worktrees/.worktrees"); // no nesting
   });
 
-  test("same worker name gets different paths when timestamps differ", () => {
+  gitTest("same worker name gets different paths when timestamps differ", () => {
     const a = workerWorktreePath("/Projects/repo", "impl-gpt54", 1776720000000);
     const b = workerWorktreePath("/Projects/repo", "impl-gpt54", 1776720001000);
     expect(a).toBe("/Projects/repo/.worktrees/teams/1776720000000-impl-gpt54");
@@ -175,7 +185,7 @@ describe("workerWorktreePath", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("createWorktree — default HEAD", () => {
-  test("branches from HEAD of the repo when no baseRef given", async () => {
+  gitTest("branches from HEAD of the repo when no baseRef given", async () => {
     const mainSha = headSha(repoDir);
     const wtPath = path.join(repoDir, ".worktrees", "teams", "worker-1");
 
@@ -188,7 +198,7 @@ describe("createWorktree — default HEAD", () => {
     expect(workerSha).toBe(mainSha);
   });
 
-  test("uses correct branch naming convention", async () => {
+  gitTest("uses correct branch naming convention", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "impl-auth");
     const result = await createWorktree(repoDir, "impl-auth", "mai-xyz1", wtPath);
 
@@ -196,7 +206,7 @@ describe("createWorktree — default HEAD", () => {
     expect(currentBranch(wtPath)).toBe("teams/impl-auth/mai-xyz1");
   });
 
-  test("reconciles the exact already-created worktree as idempotent success", async () => {
+  gitTest("reconciles the exact already-created worktree as idempotent success", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "reconcile");
     const first = await createWorktree(repoDir, "reconcile", "ticket-reconcile", wtPath);
     const second = await createWorktree(repoDir, "reconcile", "ticket-reconcile", wtPath);
@@ -213,7 +223,7 @@ describe("createWorktree — default HEAD", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("createWorktree — explicit baseRef", () => {
-  test("branches from a named branch, not HEAD", async () => {
+  gitTest("branches from a named branch, not HEAD", async () => {
     // Create a feature branch with extra commits
     git(["checkout", "-b", "feature-x"], repoDir);
     makeCommit(repoDir, "feature.ts", "export const x = 1;", "feature commit");
@@ -237,7 +247,7 @@ describe("createWorktree — explicit baseRef", () => {
     expect(fs.existsSync(path.join(wtPath, "feature.ts"))).toBe(true);
   });
 
-  test("branches from a SHA", async () => {
+  gitTest("branches from a SHA", async () => {
     makeCommit(repoDir, "second.txt", "second", "second commit");
     const secondSha = headSha(repoDir);
     makeCommit(repoDir, "third.txt", "third", "third commit");
@@ -255,7 +265,7 @@ describe("createWorktree — explicit baseRef", () => {
     expect(fs.existsSync(path.join(wtPath, "second.txt"))).toBe(true);
   });
 
-  test("branches from a tag", async () => {
+  gitTest("branches from a tag", async () => {
     makeCommit(repoDir, "tagged.txt", "tagged", "tagged commit");
     const taggedSha = headSha(repoDir);
     git(["tag", "v1.0.0"], repoDir);
@@ -269,7 +279,7 @@ describe("createWorktree — explicit baseRef", () => {
     expect(fs.existsSync(path.join(wtPath, "after-tag.txt"))).toBe(false);
   });
 
-  test("fails gracefully with invalid baseRef", async () => {
+  gitTest("fails gracefully with invalid baseRef", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "worker-bad");
     const result = await createWorktree(repoDir, "worker-bad", "ticket-4", wtPath, "nonexistent-branch");
 
@@ -285,7 +295,7 @@ describe("createWorktree — explicit baseRef", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("production scenario: coordinator in worktree, workers branch correctly", () => {
-  test("without baseRef, worker gets main (THE BUG)", async () => {
+  gitTest("without baseRef, worker gets main (THE BUG)", async () => {
     // Setup: create a worktree with divergent content
     const cleanroomPath = path.join(repoDir, ".worktrees", "cleanroom");
     createManualWorktree(repoDir, cleanroomPath, "cleanroom");
@@ -305,7 +315,7 @@ describe("production scenario: coordinator in worktree, workers branch correctly
     expect(fs.existsSync(path.join(wtPath, "cleanroom-only.ts"))).toBe(false); // missing!
   });
 
-  test("with baseRef, worker gets the right branch (THE FIX)", async () => {
+  gitTest("with baseRef, worker gets the right branch (THE FIX)", async () => {
     // Same setup
     const cleanroomPath = path.join(repoDir, ".worktrees", "cleanroom-fix");
     createManualWorktree(repoDir, cleanroomPath, "cleanroom-fix");
@@ -323,7 +333,7 @@ describe("production scenario: coordinator in worktree, workers branch correctly
     expect(fs.existsSync(path.join(wtPath, "cleanroom-only.ts"))).toBe(true); // has the file!
   });
 
-  test("full flow: resolve toplevel from worktree, then create worker worktree", async () => {
+  gitTest("full flow: resolve toplevel from worktree, then create worker worktree", async () => {
     // This simulates: pi launched from inside a worktree
     const cleanroomPath = path.join(repoDir, ".worktrees", "cleanroom-full");
     createManualWorktree(repoDir, cleanroomPath, "cleanroom-full");
@@ -357,7 +367,7 @@ describe("production scenario: coordinator in worktree, workers branch correctly
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("multiple workers", () => {
-  test("multiple workers can branch from the same baseRef", async () => {
+  gitTest("multiple workers can branch from the same baseRef", async () => {
     git(["checkout", "-b", "shared-base"], repoDir);
     makeCommit(repoDir, "shared.ts", "shared", "shared commit");
     const sharedSha = headSha(repoDir);
@@ -382,7 +392,7 @@ describe("multiple workers", () => {
     expect(branches).toContain("teams/worker-c/ticket-worker-c");
   });
 
-  test("workers can diverge independently after branching", async () => {
+  gitTest("workers can diverge independently after branching", async () => {
     git(["checkout", "-b", "base-branch"], repoDir);
     makeCommit(repoDir, "base.ts", "base", "base commit");
     git(["checkout", "main"], repoDir);
@@ -400,7 +410,7 @@ describe("multiple workers", () => {
     expect(fs.existsSync(path.join(wtA, "b-only.ts"))).toBe(false);
     expect(fs.existsSync(path.join(wtB, "b-only.ts"))).toBe(true);
     expect(fs.existsSync(path.join(wtB, "a-only.ts"))).toBe(false);
-  });
+  }, 30_000);
 });
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -408,7 +418,7 @@ describe("multiple workers", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("branchHasNewCommits", () => {
-  test("returns false when branch is at same commit as HEAD", async () => {
+  gitTest("returns false when branch is at same commit as HEAD", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "same-head");
     await createWorktree(repoDir, "same-head", "t-1", wtPath);
     const branch = worktreeBranchName("same-head", "t-1");
@@ -417,7 +427,7 @@ describe("branchHasNewCommits", () => {
     expect(has).toBe(false);
   });
 
-  test("returns true when branch has new commits", async () => {
+  gitTest("returns true when branch has new commits", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "has-work");
     await createWorktree(repoDir, "has-work", "t-2", wtPath);
     makeCommit(wtPath, "work.ts", "work", "worker did something");
@@ -433,7 +443,7 @@ describe("branchHasNewCommits", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("autoCommitWorktreeChanges", () => {
-  test("commits dirty files in the worktree", async () => {
+  gitTest("commits dirty files in the worktree", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "dirty");
     await createWorktree(repoDir, "dirty", "t-3", wtPath);
 
@@ -449,7 +459,7 @@ describe("autoCommitWorktreeChanges", () => {
     expect(after).toBe("");
   });
 
-  test("returns false when worktree is clean", async () => {
+  gitTest("returns false when worktree is clean", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "clean");
     await createWorktree(repoDir, "clean", "t-4", wtPath);
 
@@ -463,7 +473,7 @@ describe("autoCommitWorktreeChanges", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("removeWorktree", () => {
-  test("removes worktree and deletes branch", async () => {
+  gitTest("removes worktree and deletes branch", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "to-remove");
     await createWorktree(repoDir, "to-remove", "t-5", wtPath);
     const branch = worktreeBranchName("to-remove", "t-5");
@@ -475,7 +485,7 @@ describe("removeWorktree", () => {
     expect(branches).not.toContain(branch);
   });
 
-  test("removes worktree but keeps branch when requested", async () => {
+  gitTest("removes worktree but keeps branch when requested", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "keep-branch");
     await createWorktree(repoDir, "keep-branch", "t-6", wtPath);
     makeCommit(wtPath, "keep.ts", "keep", "keep commit");
@@ -490,7 +500,7 @@ describe("removeWorktree", () => {
 });
 
 describe("renameBranch", () => {
-  test("renames a branch to .done suffix", async () => {
+  gitTest("renames a branch to .done suffix", async () => {
     const wtPath = path.join(repoDir, ".worktrees", "teams", "rename-me");
     await createWorktree(repoDir, "rename-me", "t-7", wtPath);
     makeCommit(wtPath, "done.ts", "done", "done commit");
@@ -513,7 +523,7 @@ describe("renameBranch", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("edge cases", () => {
-  test("worktree path containing special characters in ticket id", async () => {
+  gitTest("worktree path containing special characters in ticket id", async () => {
     // Worker names and ticket IDs should be slug-safe, but the path may
     // end up in a directory tree with spaces (e.g. user's home dir).
     // Git handles this fine — the branch name is what matters.
@@ -524,7 +534,7 @@ describe("edge cases", () => {
     expect(currentBranch(wtPath)).toBe("teams/worker-special/mai-z8x9");
   });
 
-  test("creating worktree when .worktrees/teams/ does not exist yet", async () => {
+  gitTest("creating worktree when .worktrees/teams/ does not exist yet", async () => {
     // Fresh repo — no .worktrees dir at all
     const wtPath = path.join(repoDir, ".worktrees", "teams", "first-ever");
     const result = await createWorktree(repoDir, "first-ever", "t-9", wtPath);
@@ -532,7 +542,7 @@ describe("edge cases", () => {
     expect(fs.existsSync(wtPath)).toBe(true);
   });
 
-  test("cannot create two worktrees with the same branch name", async () => {
+  gitTest("cannot create two worktrees with the same branch name", async () => {
     const wt1 = path.join(repoDir, ".worktrees", "teams", "dup-1");
     const wt2 = path.join(repoDir, ".worktrees", "teams", "dup-2");
 
@@ -544,7 +554,7 @@ describe("edge cases", () => {
     expect(r2.success).toBe(false);
   });
 
-  test("baseRef to a branch that is already checked out elsewhere still works", async () => {
+  gitTest("baseRef to a branch that is already checked out elsewhere still works", async () => {
     // main is checked out at repoDir. Can we branch FROM main explicitly?
     // git worktree add with a new branch name from an existing ref should work
     const wtPath = path.join(repoDir, ".worktrees", "teams", "from-main");
@@ -553,7 +563,7 @@ describe("edge cases", () => {
     expect(headSha(wtPath)).toBe(headSha(repoDir));
   });
 
-  test("resolveGitToplevel handles macOS /private/tmp symlink", async () => {
+  gitTest("resolveGitToplevel handles macOS /private/tmp symlink", async () => {
     // On macOS, /tmp is a symlink to /private/tmp. Git may return either form.
     // Our function should return a consistent, real path.
     const toplevel = await resolveGitToplevel(repoDir);
@@ -570,7 +580,7 @@ describe("edge cases", () => {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("integration: simulated leader.delegate() flow", () => {
-  test("leader at repo root, agent working in worktree, worker branches correctly", async () => {
+  gitTest("leader at repo root, agent working in worktree, worker branches correctly", async () => {
     // 1. User creates a worktree for their feature
     const featureWt = path.join(repoDir, ".worktrees", "my-feature");
     createManualWorktree(repoDir, featureWt, "my-feature");
@@ -610,9 +620,9 @@ describe("integration: simulated leader.delegate() flow", () => {
     // 9. Merge worker's branch into the feature branch
     git(["merge", `${branch}.done`, "--no-edit"], featureWt);
     expect(fs.existsSync(path.join(featureWt, "impl.ts"))).toBe(true);
-  });
+  }, 30_000);
 
-  test("leader inside worktree, worker branches correctly (no nesting)", async () => {
+  gitTest("leader inside worktree, worker branches correctly (no nesting)", async () => {
     // 1. User creates a worktree
     const featureWt = path.join(repoDir, ".worktrees", "deep-feature");
     createManualWorktree(repoDir, featureWt, "deep-feature");

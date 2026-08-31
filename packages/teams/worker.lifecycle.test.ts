@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -70,14 +70,6 @@ function installAckingMesh(tells: Array<{ id: string; payload: any }> = []) {
 }
 
 async function importRunWorker() {
-	mock.module("@pi-extensions/pi-mesh/extension/pi-mesh.js", () => ({
-		PiMesh: class {
-			start() {}
-			tell() {}
-			stop() {}
-			self() { return { id: "mesh-self" }; }
-		},
-	}));
 	const mod = await import(`./worker.ts?test=${Date.now()}-${Math.random()}`);
 	return mod.runWorker;
 }

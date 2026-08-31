@@ -5,6 +5,9 @@
   <key>Label</key><string>com.piextensions.mesh-telegram-bridge</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/etc/profiles/per-user/alexander/bin/with-secret</string>
+    <string>OPENROUTER_API_KEY=fleet-openrouter-key</string>
+    <string>--</string>
     <string>/Users/alexander/.bun/bin/bun</string>
     <string>run</string>
     <string>src/index.ts</string>

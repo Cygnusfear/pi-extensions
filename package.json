@@ -9,12 +9,13 @@
     "list": "bun pm ls"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.74.1",
-    "@earendil-works/pi-ai": "0.74.1",
-    "@earendil-works/pi-coding-agent": "0.74.1",
-    "@earendil-works/pi-tui": "0.74.1",
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@earendil-works/pi-tui": "0.80.10",
     "@sinclair/typebox": "^0.34.41",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "typebox": "1.1.38"
   },
   "pi": {
     "extensions": [
@@ -39,12 +40,13 @@
       "./packages/lock-mode/extensions/lock-mode.ts",
       "./packages/mid-mortem/extensions/mid-mortem.ts",
       "./packages/model-hints/extensions/model-hints.ts",
-    "./packages/model-router/extensions/model-router.ts",
+      "./packages/model-router/extensions/model-router.ts",
       "./packages/model-shortcuts/extensions/model-shortcuts.ts",
       "./packages/mesh-model-control/extensions/mesh-model-control.ts",
       "./packages/notify/extensions/notify.ts",
       "./packages/powerline-footer/index.ts",
       "./packages/session-tab-title/extensions/session-tab-title.ts",
+      "./packages/provider-key-router/extensions/provider-key-router.ts",
       "./packages/rate-limit-recovery/extensions/rate-limit-recovery.ts",
       "./packages/skills/extensions/skills.ts",
       "./packages/nested-skills/extensions/nested-skills.ts",
@@ -57,8 +59,6 @@
       "./packages/maestri-bridge/extension/maestri-bridge.ts",
       "./packages/pi-mesh/extension/pi-mesh.ts",
       "./packages/git-ai/extensions/git-ai.ts",
-      "./packages/zai-key-rotate/extensions/zai-key-rotate.ts",
-      "./packages/kimi-key-rotate/extensions/kimi-key-rotate.ts",
       "./packages/supervisor/src/index.ts",
       "./packages/runbooks/extensions/runbooks.ts",
       "./packages/reload/extensions/reload.ts",

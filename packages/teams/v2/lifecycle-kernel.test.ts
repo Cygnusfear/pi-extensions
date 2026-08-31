@@ -37,6 +37,7 @@ import { attemptPreservePolicy, attemptStatus, type AttemptIdentity, type JsonVa
 
 const SESSION = "session-1";
 const TEAM = "team-1";
+const GIT_INTEGRATION_TIMEOUT_MS = 30_000;
 
 function id(attemptId = "attempt-1", workerId = "worker-1", sessionId = SESSION): AttemptIdentity {
 	return { coordinatorSessionId: sessionId, teamId: TEAM, workerId, attemptId };
@@ -373,7 +374,7 @@ describe("session-native Teams lifecycle graduation matrix", () => {
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true });
 		}
-	});
+	}, GIT_INTEGRATION_TIMEOUT_MS);
 
 	test("17 roster eviction cannot erase reducer history or pending delivery", () => {
 		const store = new LifecycleRuntimeStore(SESSION, terminalFacts().map((item) => entry(item)));

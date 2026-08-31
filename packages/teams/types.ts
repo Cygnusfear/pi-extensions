@@ -1,6 +1,8 @@
 
 import type { SessionPhaseEvent } from "@pi-extensions/shared/session-phase-event";
 import type { WorkerSessionMode } from "./v2/protocol.ts";
+import type { StuckCause } from "./v2/state.ts";
+import type { SessionActivityScanState } from "./activity.ts";
 
 export interface WorkerAttempt {
 	workerId: string;
@@ -32,9 +34,14 @@ export interface WorkerHandle {
 	spawnedAt: number;
 	lastActivityAt: number;
 	lastProcessActivityAt: number;
+	/** Last meaningful agent/session output; excludes heartbeats, hello, phase, and process telemetry. */
 	lastOutputAt?: number;
 	lastOutputLabel?: string;
 	lastSessionMtimeMs?: number;
+	/** Runtime-only bounded scanner checkpoint; reconstructible from the session JSONL. */
+	sessionActivityScanState?: SessionActivityScanState;
+	/** True only when recovery is complete and no partial/backlogged record can hide progress. */
+	meaningfulActivityKnown?: boolean;
 	hasActiveChildProcess: boolean;
 	activeChildProcessCount: number;
 	currentCommand?: string;
@@ -116,7 +123,7 @@ export type PollEvent = (
 	| { type: "completed"; worker: WorkerHandle; result: string }
 	| { type: "warning"; worker: WorkerHandle; reason: string }
 	| { type: "failed"; worker: WorkerHandle; reason: string }
-	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number; first?: boolean }
+	| { type: "stuck"; worker: WorkerHandle; idleSeconds: number; cause: StuckCause; first?: boolean }
 	| { type: "comment"; worker: WorkerHandle; comment: string }
 	| { type: "phase"; worker: WorkerHandle; phase: SessionPhaseEvent }
 	| { type: "alive"; worker: WorkerHandle }
@@ -134,6 +141,13 @@ export const STUCK_THRESHOLD_MS =
 	Number.isFinite(stuckThresholdMs) && stuckThresholdMs >= 30_000
 		? Math.floor(stuckThresholdMs)
 		: 5 * 60 * 1000;
+
+const outputSilenceThresholdMs = Number(process.env.PI_TEAMS_OUTPUT_SILENCE_THRESHOLD_MS ?? `600000`);
+/** Maximum meaningful-output silence before the coordinator is durably woken to investigate. */
+export const OUTPUT_SILENCE_THRESHOLD_MS =
+	Number.isFinite(outputSilenceThresholdMs) && outputSilenceThresholdMs >= 30_000
+		? Math.floor(outputSilenceThresholdMs)
+		: 10 * 60 * 1000;
 
 /** Grace period after agent_end before auto-closing ticket. Gives coordinator time to follow up. */
 const gracePeriodMs = Number(process.env.PI_TEAMS_GRACE_PERIOD_MS ?? "120000");

@@ -157,7 +157,7 @@ console.log("Review link:", review.terminalLink);
 
 Prefer `review.terminalLink` in terminal output because Ghostty opens normal HTTP links reliably. `review.vscodeLink` is the raw VS Code URI fallback, and `review.link` is the shorter human-facing `mai://review/<token>` form. The helper stores the full payload under `~/.maitake/review-handoffs/<token>.json`, so the chat output stays short and does not break when the harness wraps lines.
 
-When RE-reviewing- always default to an incremental review first, find problems fast, fix fast, and repeat fast.
+When re-reviewing, use one incremental round over the fix delta and cumulative change surface. A task receives at most two reviewer rounds total. After round two, fix every remaining finding and verify directly; never dispatch a third reviewer or widen into a repository audit.
 
 <!-- prompt-manual: shell | Shell execution and bounded output -->
 ## Shell commands — DON'T freeze the TUI
@@ -216,13 +216,14 @@ console.log("dev pid:", dev.pid);
 await dev.stop();
 ```
 
-### When the WHOLE block is long: `execute_code({ code, async: true })`
+### When the WHOLE block is long: `execute_code({ thinking: "Run the long pipeline and verify completion output.", code: "<long pipeline>", async: true })`
 
 If the whole execute_code block — not just one shell command — would freeze the TUI for minutes (cold builds, multi-step deploys, monitoring loops), fire it asynchronously instead. The tool returns immediately with a jobId; the result delivers as a follow-up turn when done.
 
 ```js
 // LLM-side tool call
 { tool: "execute_code", args: {
+  thinking: "Run the long build/deploy pipeline and verify completion output.",
   code: `
     const built = await bashBgStart({ command: "cargo build --release" }).timeout(900_000);
     const published = await Bash({ command: "spacetime publish gso", timeout: 120 });

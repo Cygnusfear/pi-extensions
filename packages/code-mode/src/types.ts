@@ -1,17 +1,25 @@
 // Shared interfaces for code-mode modules
 
+import type { CodeModeManual } from "./code-mode-manual";
+
 /**
  * Context passed into createToolBindings — cwd + accumulated images from readImage()
  */
 export interface SandboxContext {
   cwd: string;
   images: Array<{ data: string; mimeType: string }>;
+  /** Optional per-session manual override for isolated sandboxes such as RLM. */
+  codeModeManual?: CodeModeManual;
   /** Current model — used by image-prepare to size attachments to the request budget */
   model?: { provider: string; id: string };
   /** Model registry — resolves model compat (e.g. maxRequestBodyBytes) for image budgeting */
   modelRegistry?: unknown;
   /** Optional UI confirm dialog — when available, git-safety shows interactive prompt */
-  confirmFn?: (title: string, body: string) => Promise<boolean>;
+  confirmFn?: (
+		title: string,
+		body: string,
+		opts?: { signal?: AbortSignal; timeout?: number },
+	) => Promise<boolean>;
   /** Optional log function — writes to sandbox console output */
   logFn?: (msg: string) => void;
   /** Optional abort signal — when provided, sandbox tools check it and abort early */

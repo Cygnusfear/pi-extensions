@@ -1,40 +1,42 @@
 {
-  "name": "@pi-extensions/code-mode",
-  "version": "0.0.1",
-  "type": "module",
-  "keywords": [
-    "pi-package"
-  ],
-  "pi": {
-    "extensions": [
-      "./extensions/code-mode.ts"
-    ]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "@earendil-works/pi-tui": "*",
-    "@sinclair/typebox": "*"
-  },
-  "dependencies": {
-    "@pi-extensions/fff": "*",
-    "@pi-extensions/runbooks": "*",
-    "@pi-extensions/shared": "*",
-    "@pi-extensions/tldr-code": "*",
-    "turndown": "*",
-    "@silvia-odwyer/photon-node": "0.3.4"
-  },
-  "files": [
-    "extensions",
-    "src"
-  ],
-  "exports": {
-    ".": "./extensions/code-mode.ts",
-    "./session-factory": "./src/session-factory.ts",
-    "./sandbox-tools": "./src/sandbox-tools.ts",
-    "./types": "./src/types.ts"
-  },
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "bunx --bun tsc --noEmit --target esnext --module esnext --moduleResolution bundler --jsx preserve --strict --skipLibCheck extensions/code-mode.ts src/session-factory.ts"
-  }
+	"name": "@pi-extensions/code-mode",
+	"version": "0.0.1",
+	"type": "module",
+	"keywords": [
+		"pi-package"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/code-mode.ts"
+		]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": ">=0.74.0",
+		"@earendil-works/pi-tui": "*",
+		"@sinclair/typebox": "*"
+	},
+	"dependencies": {
+		"@pi-extensions/fff": "*",
+		"@pi-extensions/runbooks": "*",
+		"@pi-extensions/shared": "*",
+		"@pi-extensions/tldr-code": "*",
+		"turndown": "*",
+		"@silvia-odwyer/photon-node": "0.3.4",
+		"@pi-extensions/code-mode-runtime": "*"
+	},
+	"files": [
+		"extensions",
+		"src"
+	],
+	"exports": {
+		".": "./extensions/code-mode.ts",
+		"./session-factory": "./src/session-factory.ts",
+		"./manual": "./src/code-mode-manual.ts",
+		"./sandbox-tools": "./src/sandbox-tools.ts",
+		"./types": "./src/types.ts"
+	},
+	"scripts": {
+		"test": "bun test",
+		"typecheck": "bunx --bun tsc --noEmit --target esnext --module esnext --moduleResolution bundler --jsx preserve --strict --skipLibCheck extensions/code-mode.ts src/session-factory.ts"
+	}
 }

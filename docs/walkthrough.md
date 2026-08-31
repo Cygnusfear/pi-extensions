@@ -101,6 +101,7 @@ No polling by a human. No keeping the terminal open. **The agent monitors itself
 
 ```json
 { "tool": "execute_code", "args": {
+  "thinking": "Run the build/deploy pipeline and verify its completion output.",
   "code": "const built = await bashBgStart({ command: 'cargo build --release' }).timeout(900_000);\nawait Bash({ command: 'spacetime publish gso', timeout: 120 });\nawait Bash({ command: './run.sh bounce' });\nconsole.log('bounce complete');",
   "async": true
 } }

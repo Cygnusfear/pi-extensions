@@ -262,6 +262,20 @@ export function markHealthy(id: string): boolean {
 	return true;
 }
 
+/** Clear stale liveness for every model owned by providers whose credential changed. */
+export function markProvidersHealthy(providerIds: readonly string[]): number {
+	const store = loadLiveness();
+	const prefixes = providerIds.map((provider) => `${provider.toLowerCase()}/`);
+	let removed = 0;
+	for (const id of Object.keys(store)) {
+		if (!prefixes.some((prefix) => id.startsWith(prefix))) continue;
+		delete store[id];
+		removed++;
+	}
+	if (removed > 0) saveLiveness(store);
+	return removed;
+}
+
 /** Get all current liveness entries (excluding expired). */
 export function getLiveness(): LivenessEntry[] {
 	const store = loadLiveness();

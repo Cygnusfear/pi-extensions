@@ -13,6 +13,11 @@ let ctx: ExtensionContext | null = null;
 
 const STATUS_KEY = "supervisor";
 
+// Sent on every auto-continue. The completion clause lets the agent end the
+// loop itself once there is genuinely nothing left to do.
+const CONTINUE_MESSAGE =
+  "[SUPERVISOR] continue, go. If all work is complete and nothing remains, disable the supervisor (supervise(false) in code_mode or /supervise off) so this loop stops.";
+
 function updateStatus() {
   if (!ctx) return;
   ctx.ui.setStatus(STATUS_KEY, enabled ? "🤖 auto" : undefined);
@@ -32,11 +37,22 @@ export default function (pi: ExtensionAPI) {
     return enabled ? "Auto-continue enabled" : "Auto-continue disabled";
   });
 
-  // Auto-continue on idle
-  pi.on("agent_end", async () => {
+  // Auto-continue on idle.
+  // deliverAs: "followUp" queues the nudge if a turn is already running (e.g. a
+  // wake or another extension started one between agent_end and this call)
+  // instead of throwing "Agent is already processing".
+  pi.on("agent_end", () => {
     if (!enabled) return;
-    await new Promise(r => setTimeout(r, 500));
-    pi.sendUserMessage("[SUPERVISOR] continue, go");
+    // Promise.resolve().then() absorbs both a synchronous throw (the runtime
+    // typings declare sendUserMessage(): void) and a returned rejection.
+    void Promise.resolve()
+      .then(() => pi.sendUserMessage(CONTINUE_MESSAGE, { deliverAs: "followUp" }))
+      .catch((err: unknown) => {
+        ctx?.ui.notify?.(
+          `[supervisor] failed to queue continue: ${err instanceof Error ? err.message : String(err)}`,
+          "warning",
+        );
+      });
   });
 
   // Chat command

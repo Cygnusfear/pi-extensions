@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { runGuardedConfirm } from "./guarded-confirm.ts";
+import { DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS, runGuardedConfirm } from "./guarded-confirm.ts";
 import { __resetForTests, pendingConfirmCount, getPendingConfirms } from "./pending-interactions.ts";
 
 describe("runGuardedConfirm", () => {
@@ -109,9 +109,32 @@ describe("runGuardedConfirm", () => {
 			},
 		);
 		expect(confirmFn).toHaveBeenCalledTimes(1);
-		expect(confirmFn.mock.calls[0]).toEqual([
-			"⚠️ Destructive git operation",
-			"Force push detected.\n\nAllow?",
-		]);
+		expect(confirmFn.mock.calls[0][0]).toBe("⚠️ Destructive git operation");
+		expect(confirmFn.mock.calls[0][1]).toBe("Force push detected.\n\nAllow?");
+		expect(confirmFn.mock.calls[0][2]?.timeout).toBe(DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS);
+	});
+
+	it("passes operation signal and default timeout into the dialog", async () => {
+		const ac = new AbortController();
+		let seen: { signal?: AbortSignal; timeout?: number } | undefined;
+		const { approved } = await runGuardedConfirm(
+			{
+				signal: ac.signal,
+				confirmFn: async (_t, _b, opts) => { seen = opts; return true; },
+			},
+			{ source: "git-safety", tool: "bash", reason: "x", title: "t", body: "b" },
+		);
+		expect(approved).toBe(true);
+		expect(seen?.signal).toBe(ac.signal);
+		expect(seen?.timeout).toBe(DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS);
+	});
+
+	it("timeoutMs override wins over the default", async () => {
+		let seen: { signal?: AbortSignal; timeout?: number } | undefined;
+		await runGuardedConfirm(
+			{ confirmFn: async (_t, _b, opts) => { seen = opts; return false; } },
+			{ source: "git-safety", tool: "bash", reason: "x", title: "t", body: "b", timeoutMs: 1234 },
+		);
+		expect(seen?.timeout).toBe(1234);
 	});
 });

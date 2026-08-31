@@ -95,9 +95,18 @@ export interface ProcessExitedPayload {
 	signal?: string;
 }
 
+export type StuckCause = "liveness" | "output_silence";
+
 export interface StuckPayload {
 	cooldownIndex: number;
 	idleSeconds: number;
+	/** Missing on historical v4 facts; reducers interpret absence as legacy liveness. */
+	cause?: StuckCause;
+	command?: string;
+	commandElapsedSeconds?: number;
+	activeChildProcessCount?: number;
+	lastOutputAt?: number;
+	lastOutputLabel?: string;
 }
 
 export interface DeclarationPayload {

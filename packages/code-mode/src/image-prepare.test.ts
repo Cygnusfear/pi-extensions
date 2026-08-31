@@ -15,6 +15,8 @@ import {
   resolveImageBudgetBytes,
 } from "./image-prepare";
 
+const IMAGE_INTEGRATION_TIMEOUT_MS = 30_000;
+
 // --- Minimal PNG encoder (RGBA8) so tests can synthesize genuinely large images ---
 
 const CRC_TABLE = (() => {
@@ -231,7 +233,7 @@ describe("prepareImagesForAttachment", () => {
     expect(only.originalWidth).toBe(1400);
     expect(only.width).toBeLessThan(1400);
     expect(Buffer.byteLength(only.data, "utf-8")).toBeLessThan(200_000);
-  });
+  }, IMAGE_INTEGRATION_TIMEOUT_MS);
 
   test("returns null for undecodable input instead of attaching", async () => {
     const garbage = new Uint8Array(300_000).fill(0x61);

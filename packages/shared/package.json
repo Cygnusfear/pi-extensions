@@ -1,47 +1,48 @@
 {
-  "name": "@pi-extensions/shared",
-  "version": "0.0.1",
-  "type": "module",
-  "exports": {
-    "./sandbox-registry": "./src/sandbox-registry.ts",
-    "./alert-provenance": "./src/alert-provenance.ts",
-    "./provider-limits": "./src/provider-limits.ts",
-    "./relay-to-hooman": "./src/relay-to-hooman.ts",
-    "./edit-hooks": "./src/edit-hooks.ts",
-    "./git-guards": "./src/git-guards.ts",
-    "./process-guards": "./src/process-guards.ts",
-    "./model-utils": "./src/model-utils.ts",
-    "./safe-json": "./src/safe-json.ts",
-    "./team-templates": "./src/team-templates.ts",
-    "./session-activity-summary": "./src/session-activity-summary.ts",
-    "./session-nickname": "./src/session-nickname.ts",
-    "./tts": "./src/tts.ts",
-    "./provider-errors": "./src/provider-errors.ts",
-    "./transcription": "./src/transcription.ts",
-    "./session-view": "./src/session-view.ts",
-    "./tool-ui-utils": "./src/tool-ui-utils.ts",
-    "./tui-diff-renderer": "./src/tui-diff-renderer.ts",
-    "./tool-availability": "./src/tool-availability.ts",
-    "./mai-binary": "./src/mai-binary.ts",
-    "./tui-safe": "./src/tui-safe.ts",
-    "./shared-prompts": "./src/shared-prompts.ts",
-    "./desktop-notify": "./src/desktop-notify.ts",
-    "./pending-interactions": "./src/pending-interactions.ts",
-    "./guarded-confirm": "./src/guarded-confirm.ts",
-    "./stage-control": "./src/stage-control.ts",
-    "./session-phase-event": "./src/session-phase-event.ts",
-    "./revive-descriptor": "./src/revive-descriptor.ts"
-  },
-  "dependencies": {
-    "diff": "^8.0.4",
-    "jsonrepair": "^3.13.2",
-    "shiki": "^4.0.2"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*"
-  },
-  "files": [
-    "prompts",
-    "src"
-  ]
+	"name": "@pi-extensions/shared",
+	"version": "0.0.1",
+	"type": "module",
+	"exports": {
+		"./sandbox-registry": "./src/sandbox-registry.ts",
+		"./alert-provenance": "./src/alert-provenance.ts",
+		"./provider-limits": "./src/provider-limits.ts",
+		"./relay-to-hooman": "./src/relay-to-hooman.ts",
+		"./edit-hooks": "./src/edit-hooks.ts",
+		"./git-guards": "./src/git-guards.ts",
+		"./process-guards": "./src/process-guards.ts",
+		"./model-utils": "./src/model-utils.ts",
+		"./safe-json": "./src/safe-json.ts",
+		"./team-templates": "./src/team-templates.ts",
+		"./session-activity-summary": "./src/session-activity-summary.ts",
+		"./session-nickname": "./src/session-nickname.ts",
+		"./tts": "./src/tts.ts",
+		"./provider-errors": "./src/provider-errors.ts",
+		"./transcription": "./src/transcription.ts",
+		"./session-view": "./src/session-view.ts",
+		"./tool-ui-utils": "./src/tool-ui-utils.ts",
+		"./tui-diff-renderer": "./src/tui-diff-renderer.ts",
+		"./tool-availability": "./src/tool-availability.ts",
+		"./mai-binary": "./src/mai-binary.ts",
+		"./tui-safe": "./src/tui-safe.ts",
+		"./shared-prompts": "./src/shared-prompts.ts",
+		"./desktop-notify": "./src/desktop-notify.ts",
+		"./pending-interactions": "./src/pending-interactions.ts",
+		"./guarded-confirm": "./src/guarded-confirm.ts",
+		"./stage-control": "./src/stage-control.ts",
+		"./session-phase-event": "./src/session-phase-event.ts",
+		"./revive-descriptor": "./src/revive-descriptor.ts"
+	},
+	"dependencies": {
+		"diff": "^8.0.4",
+		"jsonrepair": "^3.13.2",
+		"shiki": "^4.0.2",
+		"@pi-extensions/transcription-runtime": "*"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*"
+	},
+	"files": [
+		"prompts",
+		"src"
+	]
 }

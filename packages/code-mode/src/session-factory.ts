@@ -19,6 +19,7 @@ import vm from "node:vm";
 import { Buffer } from "node:buffer";
 import * as acorn from "acorn";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { CodeModeManual } from "./code-mode-manual";
 import { createPersistentStore } from "./persistent-store";
 import {
 	SQUASH_HANDOFF_MAX_BYTES,
@@ -122,6 +123,10 @@ export function createCodeModeSession(opts?: CreateSessionOptions): CodeModeSess
 		setTimeout: globalThis.setTimeout.bind(globalThis),
 		clearTimeout: globalThis.clearTimeout.bind(globalThis),
 
+		// Buffer — pure-JS binary helper from Node. Agents reach for it constantly
+		// (training-data habit); injecting it removes a whole ReferenceError class.
+		Buffer,
+
 		// Process — env, platform, pid are static; cwd is updated per-execution by executeInSession.
 		process: {
 			env: globalThis.process.env,
@@ -169,6 +174,8 @@ export interface ExecutionDeps {
 
 	// ── Optional host fields (mirroring current toolCtx exactly) ────────────────
 	sessionManager?: any;
+	/** Per-session manual override; avoids isolated sandboxes depending on parent module state. */
+	codeModeManual?: CodeModeManual;
 	/** Live context usage for the active model; null tokens = unknown (post-compaction). */
 	getContextUsage?: () => SandboxContextUsage | undefined;
 	/**
@@ -179,7 +186,11 @@ export interface ExecutionDeps {
 	getModel?: () => { provider: string; id: string } | undefined;
 	/** Delegates to host pi.setModel. Resolves false when the target lacks configured auth. */
 	setModel?: (model: unknown) => Promise<boolean>;
-	confirmFn?: (title: string, body: string) => Promise<boolean>;
+	confirmFn?: (
+		title: string,
+		body: string,
+		opts?: { signal?: AbortSignal; timeout?: number },
+	) => Promise<boolean>;
 	compact?: (options?: any) => void;
 	setLabel?: (entryId: string, label: string | undefined) => void;
 	navigateTree?: (targetId: string, options?: any) => Promise<any>;
@@ -996,6 +1007,7 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 	const rawBindings = createToolBindings({
 		cwd: deps.cwd,
 		images: session.images,
+		codeModeManual: deps.codeModeManual,
 		model: deps.model,
 		modelRegistry: deps.modelRegistry,
 		confirmFn: deps.confirmFn,
@@ -1068,6 +1080,70 @@ function hydrateBareGlobals(session: CodeModeSession): void {
  * is the wrapped line minus 1. Returns null when no in-script frame is present
  * (native throws with no stack, or errors from inside tool bindings).
  */
+
+// ── Hard-wait guard (parse-time) ─────────────────────────────────────────────
+// Preventative quota fix: a long `await sleep(N)` pins the per-session VM mutex
+// and reads as a frozen session; the async/wake patterns are strictly better.
+// Rejected BEFORE execution so the error itself teaches the correct idiom.
+// Condition-polling inside one call (short sleeps in a loop awaiting a state
+// change) costs no provider turns and stays allowed; only long hard waits and
+// shell `sleep N` (N>5s) are rejected.
+const HARD_WAIT_MAX_SLEEP_MS = 5000;
+const HARD_WAIT_GUIDANCE =
+	"Await events, not elapsed time: arm async work (execute_code { async: true }), a background promise with console.wake(...), teams.on(...).timeout(ms), or bashBgStart. Short waits up to 5s are fine.";
+
+function staticStringProp(node: unknown, names: string[]): string | undefined {
+	const n = node as Record<string, unknown> | undefined;
+	if (!n || n.type !== "ObjectExpression") return undefined;
+	for (const prop of (n.properties as unknown[]) ?? []) {
+		const pr = prop as Record<string, unknown>;
+		if (pr.type !== "Property") continue;
+		const key = pr.key as Record<string, unknown> | undefined;
+		const name = key?.type === "Identifier" ? (key.name as string) : key?.type === "Literal" ? String(key.value) : undefined;
+		if (!name || !names.includes(name)) continue;
+		const value = pr.value as Record<string, unknown> | undefined;
+		if (value?.type === "Literal" && typeof value.value === "string") return value.value;
+	}
+	return undefined;
+}
+
+function findHardWait(node: unknown): string | null {
+	if (!node || typeof node !== "object") return null;
+	if (Array.isArray(node)) {
+		for (const item of node) {
+			const hit = findHardWait(item);
+			if (hit) return hit;
+		}
+		return null;
+	}
+	const n = node as Record<string, unknown>;
+	if (n.type === "CallExpression") {
+		const callee = n.callee as Record<string, unknown> | undefined;
+		const args = (n.arguments as unknown[]) ?? [];
+		if (callee?.type === "Identifier" && callee.name === "sleep") {
+			const first = args[0] as Record<string, unknown> | undefined;
+			if (first?.type === "Literal" && typeof first.value === "number" && first.value > HARD_WAIT_MAX_SLEEP_MS) {
+				return `await sleep(${first.value}) — sleeps over 5s pin the session and read as a freeze. ${HARD_WAIT_GUIDANCE}`;
+			}
+		}
+		if (callee?.type === "Identifier" && (callee.name === "Bash" || callee.name === "bashBgStart")) {
+			const first = args[0] as Record<string, unknown> | undefined;
+			const cmd = (first?.type === "Literal" && typeof first.value === "string" ? first.value : undefined) ??
+				staticStringProp(first, ["command", "cmd"]);
+			const m = cmd?.match(/\bsleep\s+(\d+(?:\.\d+)?)/);
+			if (m && Number(m[1]) > 5) {
+				return `shell "sleep ${m[1]}" — ${HARD_WAIT_GUIDANCE}`;
+			}
+		}
+	}
+	for (const key of Object.keys(n)) {
+		if (key === "type" || key === "start" || key === "end" || key === "loc" || key === "range") continue;
+		const hit = findHardWait(n[key]);
+		if (hit) return hit;
+	}
+	return null;
+}
+
 function extractUserCodeLine(err: unknown): number | null {
 	const stack = (err as { stack?: unknown })?.stack;
 	if (typeof stack !== "string") return null;
@@ -1100,8 +1176,9 @@ export async function executeInSession(
 		.join("\n");
 	const wrapped = "(async () => {\n" + code + "\n" + autoPersistSuffix + "\n})()";
 
+	let parsedAst: unknown;
 	try {
-		acorn.parse(wrapped, { ecmaVersion: "latest" });
+		parsedAst = acorn.parse(wrapped, { ecmaVersion: "latest" });
 	} catch (parseErr) {
 		const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
 		if (errorMode === "rethrow") throw parseErr instanceof Error ? parseErr : new Error(parseMsg);
@@ -1114,6 +1191,17 @@ export async function executeInSession(
 				"",
 			]),
 			error: parseMsg,
+			duration: Date.now() - start,
+		};
+	}
+
+	const hardWait = findHardWait(parsedAst);
+	if (hardWait) {
+		const msg = "⛔ Hard-wait rejected: " + hardWait;
+		if (errorMode === "rethrow") throw new Error(msg);
+		return {
+			output: buildOutput(warnings, [msg]),
+			error: msg,
 			duration: Date.now() - start,
 		};
 	}

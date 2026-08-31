@@ -17,6 +17,12 @@ Model IDs were hardcoded in ~10 playbook files, the default system prompt, and t
       "openai-codex/gpt-5.6-terra",
       "kimi-coding/k3"
     ]
+  },
+  "rlm": {
+    "model": [
+      "deepseek/deepseek-v4-flash",
+      "anthropic/claude-haiku-4-5"
+    ]
   }
 }
 ```
@@ -29,6 +35,12 @@ Model IDs were hardcoded in ~10 playbook files, the default system prompt, and t
 5. Return resolved + skipped lists.
 
 The router **never** reorders. It **never** upgrades to "latest per family". The list is a hand-curated contract.
+
+## Role consumers
+
+- Teams consumes the full template: model list, worktree policy, prompt, and freeform flag.
+- RLM consumes the ordered `rlm.model` list when the caller omits `RlmOptions.model`. DeepSeek Flash is the cheap first line for reconnaissance and repository scouting. A concrete `model` option is a deliberate override for reasoning-heavy work.
+- If the `rlm` role has no healthy available candidate, RLM fails closed. It never inherits the parent agent's frontier model.
 
 **Liveness store:** `~/.pi/agent/model-liveness.json` — workers mark models unhealthy on 429/auth errors. Entries auto-expire after 30 min (configurable TTL).
 
@@ -165,4 +177,5 @@ await modelRouter.markUnhealthy({ id: "kimi-coding/k3", reason: "rate_limited" }
 ## Files
 
 - `~/.pi/agent/team-templates.json` — role definitions (source of truth)
+- `src/router.ts` / package export `@pi-extensions/model-router/router` — shared runtime resolver used by extensions such as RLM
 - `~/.pi/agent/model-liveness.json` — runtime health state (auto-managed)

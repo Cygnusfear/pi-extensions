@@ -127,10 +127,50 @@ export function getSandboxFnNames(): string[] {
  * invoked once with `ctx` so each in-block invocation of the resulting fn shares the
  * same closure. Non-contextual entries return their constant fn unchanged.
  */
+/**
+ * Dual-name aliases: direct LLM tools (mesh_tell, execute_code_async_list, …)
+ * and their execute_code counterparts (mesh.tell, executeCodeAsyncList, …)
+ * historically had DIFFERENT names, so agents constantly guessed the wrong
+ * one and burned recovery turns on ReferenceErrors. An alias binds the exact
+ * direct-tool name to the same implementation — one capability, one name,
+ * conflation impossible. Aliases resolve lazily per call so a namespace
+ * registered later still binds; a missing target simply yields no alias.
+ */
+const SANDBOX_ALIASES: Record<string, string> = {
+	mesh_tell: "mesh.tell",
+	mesh_broadcast: "mesh.broadcast",
+	mesh_peers: "mesh",
+	mesh_view: "mesh.view",
+	mesh_interrupt: "mesh.interrupt",
+	mesh_inbox: "mesh.inbox",
+	mesh_join_channel: "mesh.joinChannel",
+	mesh_leave_channel: "mesh.leaveChannel",
+	mesh_chat: "mesh.chat",
+	webfetch: "WebFetch",
+	execute_code_async_list: "executeCodeAsyncList",
+	execute_code_async_kill: "executeCodeAsyncKill",
+};
+
+function applyAliases(out: Record<string, SandboxFn>): void {
+	for (const [alias, target] of Object.entries(SANDBOX_ALIASES)) {
+		if (alias in out) continue;
+		const dot = target.indexOf(".");
+		if (dot < 0) {
+			// Dotless target: bind the registered fn itself (e.g. mesh_peers → mesh).
+			if (typeof out[target] === "function") out[alias] = out[target];
+			continue;
+		}
+		const namespace = out[target.slice(0, dot)] as unknown as Record<string, unknown> | undefined;
+		const fn = namespace?.[target.slice(dot + 1)];
+		if (typeof fn === "function") out[alias] = fn as SandboxFn;
+	}
+}
+
 export function getSandboxFnsForCall(ctx: SandboxCallContext): Record<string, SandboxFn> {
 	const out: Record<string, SandboxFn> = {};
 	for (const [name, entry] of getRegistry()) {
 		out[name] = entry.factory(ctx);
 	}
+	applyAliases(out);
 	return out;
 }

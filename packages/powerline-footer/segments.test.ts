@@ -99,3 +99,24 @@ describe("powerline zmx session segment", () => {
 		}
 	});
 });
+
+describe("powerline thinking segment", () => {
+
+	test("uses the normal native indicator when native thinking is on", () => {
+		const rendered = renderSegment("thinking", makeContext({
+			thinkingLevel: "medium",
+		}));
+		expect(rendered.visible).toBe(true);
+		expect(rendered.content).toContain("🧠 med");
+		expect(rendered.content).not.toContain("max");
+	});
+
+	test("hides the indicator when native thinking is off", () => {
+		expect(renderSegment("thinking", makeContext({ thinkingLevel: "off" }))).toEqual({
+			content: "",
+			visible: false,
+		});
+	});
+
+
+});

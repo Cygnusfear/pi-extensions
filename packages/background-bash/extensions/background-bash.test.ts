@@ -450,17 +450,43 @@ describe("BashBgHandle — .each() chain composition", () => {
 	});
 
 	it(".unsubscribe() removes line listeners but does NOT kill the child", async () => {
-		const { manager } = await makeManager();
-		const handle = makeHandle(manager, "sh -c 'echo first; sleep 0.05; echo second'");
+		const { manager, logRoot } = await makeManager();
+		const releasePath = path.join(logRoot, "release-second-line");
+		const handle = makeHandle(
+			manager,
+			`echo first; while [ ! -f ${JSON.stringify(releasePath)} ]; do sleep 0.01; done; echo second`,
+		);
 		const received: string[] = [];
-		handle.each((line) => received.push(line));
-		await new Promise((r) => setTimeout(r, 30));
-		handle.unsubscribe();
-		const r = await handle.wait();
-		expect(r.status).toBe("exited");
-		expect(received).toContain("first");
-		expect(received).not.toContain("second");
-	});
+		let firstLineTimer: ReturnType<typeof setTimeout> | undefined;
+		let resolveFirstLine: (() => void) | undefined;
+		const firstLine = new Promise<void>((resolve, reject) => {
+			resolveFirstLine = resolve;
+			firstLineTimer = setTimeout(
+				() => reject(new Error("Timed out waiting for the first child line")),
+				10_000,
+			);
+		});
+		handle.each((line) => {
+			received.push(line);
+			if (line === "first") {
+				if (firstLineTimer) clearTimeout(firstLineTimer);
+				resolveFirstLine?.();
+			}
+		});
+		try {
+			await firstLine;
+			handle.unsubscribe();
+			await fs.writeFile(releasePath, "release\n");
+			const r = await handle.wait();
+			expect(r.status).toBe("exited");
+			expect(received).toContain("first");
+			expect(received).not.toContain("second");
+		} finally {
+			if (firstLineTimer) clearTimeout(firstLineTimer);
+			await fs.writeFile(releasePath, "release\n").catch(() => {});
+			if (handle.status === "running") await handle.stop("SIGKILL");
+		}
+	}, 30_000);
 });
 
 

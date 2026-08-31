@@ -5,12 +5,21 @@ import {
 } from "@pi-extensions/shared/sandbox-registry";
 import { relayProviderLimitNotice } from "@pi-extensions/shared/relay-to-hooman";
 import { teamsLauncherProvenance, type ProviderLimitNotice } from "@pi-extensions/shared/alert-provenance";
+import { resolve } from "@pi-extensions/model-router/router";
 import { cancelAllRlmHandles, createRlmHandle } from "./src/handle";
 import type { RlmDeps, RlmHandle, RlmOptions } from "./src/types";
 
 type RlmSandboxFn = (opts: RlmOptions) => RlmHandle;
 
 export function buildDeps(ctx: SandboxCallContext): RlmDeps {
+	const resolveModelRole = (role: string) => {
+		const result = resolve(
+			{ getAvailable: () => ctx.modelRegistry.getAvailable() },
+			{ role, count: 1, dedupProviders: false },
+		);
+		const selected = result.resolved[0];
+		return selected ? { provider: selected.provider, id: selected.modelId } : undefined;
+	};
 	const notifyProviderLimit = (notice: ProviderLimitNotice): void => {
 		// An RLM running inside a Teams worker inherits that worker's spawn facts;
 		// resolve the coordinator from the trusted environment, never from task text.
@@ -20,7 +29,7 @@ export function buildDeps(ctx: SandboxCallContext): RlmDeps {
 	return {
 		signal: ctx.signal,
 		cwd: ctx.cwd,
-		parentModel: ctx.model,
+		resolveModelRole,
 		modelRegistry: ctx.modelRegistry,
 		sendMessage: ctx.sendMessage,
 		sendUserMessage: ctx.sendUserMessage,

@@ -13,7 +13,7 @@ function deps(overrides: Record<string, unknown> = {}) {
 	return {
 		signal: ac.signal,
 		cwd: repoRoot,
-		parentModel: model,
+		resolveModelRole: () => model,
 		modelRegistry: {
 			find: (p: string, id: string) => ({ provider: p, id }),
 			getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key", headers: { h: "v" } }),

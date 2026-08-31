@@ -34,21 +34,35 @@ let config: PowerlineConfig = {
 // can be thousands for a 1M-context session), we track where we left off
 // and only process new events.  If the branch shrinks (context checkout),
 // we recompute from scratch.
-interface UsageCache {
+export interface UsageCache {
   length: number;
+  boundaryEntryId: string | undefined;
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   cost: number;
   lastAssistant: AssistantMessage | undefined;
-  thinkingLevel: string;
+  thinkingLevel: string | undefined;
 }
 
-const _usageCache: UsageCache = {
-  length: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0,
-  lastAssistant: undefined, thinkingLevel: "off",
-};
+export function createUsageCache(): UsageCache {
+  return {
+    length: 0,
+    boundaryEntryId: undefined,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+    lastAssistant: undefined,
+    thinkingLevel: undefined,
+  };
+}
+
+export function resetUsageCache(cache: UsageCache): void {
+  Object.assign(cache, createUsageCache());
+}
 
 function isStaleExtensionContextError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -66,44 +80,44 @@ function safeContextRead<T>(read: () => T, fallback: T): T {
   }
 }
 
-function computeUsageIncremental(sessionEvents: any[]): UsageCache {
+export function resolveThinkingLevel(
+  liveThinkingLevel: string | undefined,
+  sessionThinkingLevel: string | undefined,
+): string {
+  return liveThinkingLevel ?? sessionThinkingLevel ?? "off";
+}
+
+export function computeUsageIncremental(sessionEvents: any[], cache: UsageCache): UsageCache {
   const len = sessionEvents.length;
+  const cachedBoundaryStillMatches =
+    cache.length === 0 || sessionEvents[cache.length - 1]?.id === cache.boundaryEntryId;
 
-  // Branch shrank (context checkout) — full recompute
-  if (len < _usageCache.length) {
-    _usageCache.length = 0;
-    _usageCache.input = 0;
-    _usageCache.output = 0;
-    _usageCache.cacheRead = 0;
-    _usageCache.cacheWrite = 0;
-    _usageCache.cost = 0;
-    _usageCache.lastAssistant = undefined;
-    _usageCache.thinkingLevel = "off";
+  if (len < cache.length || !cachedBoundaryStillMatches) {
+    resetUsageCache(cache);
   }
 
-  // Nothing new — fast path
-  if (len === _usageCache.length) return _usageCache;
+  if (len === cache.length) return cache;
 
-  // Only iterate new events
-  for (let i = _usageCache.length; i < len; i++) {
-    const e = sessionEvents[i];
-    if (e.type === "thinking_level_change" && e.thinkingLevel) {
-      _usageCache.thinkingLevel = e.thinkingLevel;
+  for (let i = cache.length; i < len; i++) {
+    const event = sessionEvents[i];
+    if (event.type === "thinking_level_change" && event.thinkingLevel) {
+      cache.thinkingLevel = event.thinkingLevel;
     }
-    if (e.type === "message" && e.message?.role === "assistant") {
-      const m = e.message as AssistantMessage;
-      if (m.stopReason === "error" || m.stopReason === "aborted") continue;
-      _usageCache.input += m.usage.input;
-      _usageCache.output += m.usage.output;
-      _usageCache.cacheRead += m.usage.cacheRead;
-      _usageCache.cacheWrite += m.usage.cacheWrite;
-      _usageCache.cost += m.usage.cost.total;
-      _usageCache.lastAssistant = m;
+    if (event.type === "message" && event.message?.role === "assistant") {
+      const message = event.message as AssistantMessage;
+      if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+      cache.input += message.usage.input;
+      cache.output += message.usage.output;
+      cache.cacheRead += message.usage.cacheRead;
+      cache.cacheWrite += message.usage.cacheWrite;
+      cache.cost += message.usage.cost.total;
+      cache.lastAssistant = message;
     }
   }
 
-  _usageCache.length = len;
-  return _usageCache;
+  cache.length = len;
+  cache.boundaryEntryId = sessionEvents[len - 1]?.id;
+  return cache;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -200,6 +214,7 @@ function computeResponsiveLayout(
 // ═══════════════════════════════════════════════════════════════════════════
 
 export default function powerlineFooter(pi: ExtensionAPI) {
+  const usageCache = createUsageCache();
   let enabled = true;
   let sessionStartTime = Date.now();
   let currentCtx: any = null;
@@ -215,6 +230,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
   // Track session start
   pi.on("session_start", async (_event, ctx) => {
+    resetUsageCache(usageCache);
     sessionStartTime = Date.now();
     currentCtx = ctx;
     lastLayoutResult = null;
@@ -305,7 +321,7 @@ export default function powerlineFooter(pi: ExtensionAPI) {
     // Build usage stats and get thinking level from session — incremental.
     // Only iterates events added since the last render, not the entire history.
     const sessionEvents = safeContextRead(() => ctx?.sessionManager?.getBranch?.() ?? [], [] as any[]);
-    const usage = computeUsageIncremental(sessionEvents);
+    const usage = computeUsageIncremental(sessionEvents, usageCache);
     const { input, output, cacheRead, cacheWrite, cost, lastAssistant } = usage;
     const thinkingLevelFromSession = usage.thinkingLevel;
 
@@ -362,7 +378,10 @@ export default function powerlineFooter(pi: ExtensionAPI) {
 
     return {
       model,
-      thinkingLevel: thinkingLevelFromSession || safeContextRead(() => getThinkingLevelFn?.() || "off", "off"),
+      thinkingLevel: resolveThinkingLevel(
+        safeContextRead(() => getThinkingLevelFn?.(), undefined),
+        thinkingLevelFromSession,
+      ),
       sessionId,
       sessionName: pi.getSessionName(),
       usageStats: { input, output, cacheRead, cacheWrite, cost },

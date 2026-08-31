@@ -21,11 +21,11 @@ Without this, the agent has to wait for every command to complete before doing a
 | Medium, 30s–10min, exits | `bashBgStart` + deadline | `await bashBgStart({ command }).timeout(600_000)` |
 | Long, eventually exits | `bashBgStart` + react | `bashBgStart({ command }).each(cb).then(r => console.wake(...))` |
 | Never exits (dev, watcher, daemon) | `bashBgStart` no await | `const dev = bashBgStart({ command });` ... `await dev.stop()` |
-| The WHOLE block is heavy (cold build + deploy + bounce) | `execute_code({ async: true })` | Returns jobId instantly; result delivers as a follow-up turn. TUI stays interactive. |
+| The WHOLE block is heavy (cold build + deploy + bounce) | `execute_code({ thinking: "Run the long pipeline and verify completion output.", code: "<long pipeline>", async: true })` | Returns jobId instantly; result delivers as a follow-up turn. TUI stays interactive. |
 
 **Rules:**
 - `execute_code` has no default timeout. `await Bash({ ..., timeout: 3600 })` freezes the TUI for an hour. `await bashBgStart({ command: "npm run dev" })` freezes the TUI forever (handle is thenable, waits for child exit, dev server never exits). If a command might run longer than 30s or might never exit, use `bashBgStart` with `.timeout(ms)` or `.then(cb)` — never a bare await.
-- If the WHOLE block is long (cold cargo build + spacetime publish + bounce), the right shape isn't `bashBgStart` per command — it's `execute_code({ async: true })` for the whole block. The tool returns instantly; the work runs in the background; the result delivers as a follow-up turn. Inspect or kill in-flight async jobs with the direct tools `execute_code_async_list` / `execute_code_async_kill`.
+- If the WHOLE block is long (cold cargo build + spacetime publish + bounce), the right shape isn't `bashBgStart` per command — it's `execute_code({ thinking: "Run the long pipeline and verify completion output.", code: "<long pipeline>", async: true })` for the whole block. The tool returns instantly; the work runs in the background; the result delivers as a follow-up turn. Inspect or kill in-flight async jobs with the direct tools `execute_code_async_list` / `execute_code_async_kill`.
 
 ## Features
 

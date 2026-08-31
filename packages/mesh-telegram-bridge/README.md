@@ -52,6 +52,8 @@ FISH_AUDIO_API_KEY=...        # enables Fish Audio TTS
 FISH_AUDIO_VOICE_ID=...       # one global Fish model for every Telegram TTS reply
 ```
 
+Transcription credentials do **not** belong in `config.env`. The launchd service injects the dedicated Fleet key just in time with `with-secret OPENROUTER_API_KEY=fleet-openrouter-key -- ...`; the value remains in RBW and only the bridge child process receives it.
+
 ## Run
 
 ```bash
@@ -69,4 +71,4 @@ The bot must have **privacy mode OFF** (or be a group admin) to read plain messa
 
 ## Voice transcription
 
-Voice notes use the first configured provider in this order: OpenAI (`OPENAI_API_KEY`, `whisper-1`), Groq (`GROQ_API_KEY`, `whisper-large-v3`), Z.AI (`ZAI_API_KEY`, `glm-asr-2512`), then the legacy OpenRouter (`OPENROUTER_API_KEY`, `whisper-1`) path. Missing keys skip a provider. If every configured provider fails, the bridge reports each provider's status/code instead of returning only one HTTP status.
+Voice notes use the first configured provider in this order: OpenAI (`OPENAI_API_KEY`, `whisper-1`), Groq (`GROQ_API_KEY`, `whisper-large-v3`), Z.AI (`ZAI_API_KEY`, `glm-asr-2512`), then OpenRouter (`OPENROUTER_API_KEY`, `whisper-1`). The checked-in launchd definition selects the dedicated RBW-backed Fleet OpenRouter credential without placing it in the plist or bridge config file. Missing keys skip a provider. If every configured provider fails, the bridge reports each provider's status/code instead of returning only one HTTP status.

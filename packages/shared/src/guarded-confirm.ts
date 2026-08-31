@@ -36,7 +36,13 @@ export interface GuardedConfirmCtx {
 	 * ExtensionContext, or pass the existing `ctx.confirmFn` from
 	 * code-mode's sandbox tools — both shapes work.
 	 */
-	confirmFn?: (title: string, body: string) => Promise<boolean>;
+	confirmFn?: (
+		title: string,
+		body: string,
+		opts?: { signal?: AbortSignal; timeout?: number },
+	) => Promise<boolean>;
+	/** Optional operation abort signal — bound into the dialog so it closes when the guarded operation dies. */
+	signal?: AbortSignal;
 	/**
 	 * Optional approval-log sink. Called ONCE on approve with the full
 	 * "✅ Hooman approved …" message. Sandbox callers wire this to their
@@ -58,7 +64,12 @@ export interface GuardedConfirmInput extends PendingConfirmMeta {
 	 * "applyPatch X" in the log vs "applyPatch targets X" in the error).
 	 */
 	approvalSummary?: string;
+	/** Dialog timeout override (ms). Defaults to DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS. */
+	timeoutMs?: number;
 }
+
+/** Dialogs auto-dismiss (fail-closed) after this long — a stale popup can never gate a session for hours. */
+export const DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface GuardedConfirmResult {
 	approved: boolean;
@@ -90,7 +101,10 @@ export async function runGuardedConfirm(
 		body: input.reason,
 	});
 	try {
-		const approved = await ctx.confirmFn(input.title, input.body);
+		const approved = await ctx.confirmFn(input.title, input.body, {
+			signal: ctx.signal,
+			timeout: input.timeoutMs ?? DEFAULT_GUARDED_CONFIRM_TIMEOUT_MS,
+		});
 		if (approved) {
 			ctx.logFn?.(`✅ Hooman approved ${input.approvalSummary ?? input.reason} [OK]`);
 		}

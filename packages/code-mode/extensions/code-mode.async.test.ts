@@ -88,6 +88,18 @@ function makePi(): MockPi {
 	return pi;
 }
 
+function registerCodeMode(pi: MockPi, teamsWorker = false): void {
+	codeModeExt(pi as any, { isTeamsWorker: () => teamsWorker });
+	const executeCode = pi.tools.get("execute_code");
+	const execute = executeCode.execute.bind(executeCode);
+	executeCode.execute = (toolCallId: string, params: any, ...rest: any[]) =>
+		execute(
+			toolCallId,
+			{ thinking: "Test rationale.", ...params },
+			...rest,
+		);
+}
+
 function makeExecuteCtx() {
 	return {
 		cwd: process.cwd(),
@@ -110,7 +122,7 @@ async function flushBackground(ms = 50): Promise<void> {
 describe("execute_code { async: true }", () => {
 	test("hard-caps an oversized synchronous result before returning it", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		const result = await executeCode.execute(
@@ -137,7 +149,7 @@ describe("execute_code { async: true }", () => {
 
 	test("returns immediately with a jobId and 'started' text", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 		expect(executeCode).toBeDefined();
 
@@ -155,6 +167,7 @@ describe("execute_code { async: true }", () => {
 		expect(elapsed).toBeLessThan(100);
 		expect(result.details.jobId).toMatch(/^exec-/);
 		expect(result.details.asyncStatus).toBe("running");
+		expect(result.details.thinking).toBe("Test rationale.");
 		const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
 		expect(text).toContain("async execute_code started");
 		expect(text).toContain(result.details.jobId);
@@ -175,7 +188,7 @@ describe("execute_code { async: true }", () => {
 
 	test("error during async work delivers a 'failed' follow-up", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		const result = await executeCode.execute(
@@ -198,7 +211,7 @@ describe("execute_code { async: true }", () => {
 
 	test("hard-caps the persisted async follow-up and saves its complete output", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		await executeCode.execute(
@@ -231,7 +244,7 @@ describe("execute_code { async: true }", () => {
 
 	test("a SYNC execute_code after an in-flight ASYNC one waits for it (mutex)", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		// Fire async that sleeps 250ms then sets $.flag = 1
@@ -264,7 +277,7 @@ describe("execute_code { async: true }", () => {
 
 	test("a second ASYNC call after an in-flight ASYNC one waits for it (mutex)", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		const t0 = Date.now();
@@ -304,7 +317,7 @@ describe("execute_code { async: true }", () => {
 
 	test("executeCodeAsyncList reflects pending jobs from within a sync execute_code", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 
 		await executeCode.execute(
@@ -329,7 +342,7 @@ describe("execute_code { async: true }", () => {
 		// Find the jobId from the started text the first call returned. We didn't
 		// capture it above; redo so we have it.
 		const pi2 = makePi();
-		codeModeExt(pi2 as any);
+		registerCodeMode(pi2);
 		const exec2 = pi2.tools.get("execute_code");
 		const started = await exec2.execute(
 			"tc-list-2",
@@ -365,7 +378,7 @@ describe("execute_code { async: true }", () => {
 describe("execute_code_async_list / execute_code_async_kill (direct tools)", () => {
 	test("execute_code_async_list returns pending jobs WITHOUT waiting on the mutex", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 		const listTool = pi.tools.get("execute_code_async_list");
 		expect(listTool).toBeDefined();
@@ -400,7 +413,7 @@ describe("execute_code_async_list / execute_code_async_kill (direct tools)", () 
 
 	test("execute_code_async_kill aborts a pending job and returns killed=true", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const executeCode = pi.tools.get("execute_code");
 		const killTool = pi.tools.get("execute_code_async_kill");
 		expect(killTool).toBeDefined();
@@ -440,7 +453,7 @@ describe("execute_code_async_list / execute_code_async_kill (direct tools)", () 
 
 	test("execute_code_async_kill returns killed=false for an unknown jobId", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		registerCodeMode(pi);
 		const killTool = pi.tools.get("execute_code_async_kill");
 
 		const result = await killTool.execute(
@@ -462,7 +475,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "300";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 			const result = await executeCode.execute(
 				"tc-promote-fast",
@@ -489,7 +502,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 
 			const t0 = Date.now();
@@ -508,6 +521,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 			expect(elapsed).toBeLessThan(500);
 			expect(result.details.jobId).toMatch(/^exec-/);
 			expect(result.details.asyncStatus).toBe("running");
+			expect(result.details.thinking).toBe("Test rationale.");
 			const stub = result.content.find((c: any) => c.type === "text")?.text ?? "";
 			expect(stub).toContain("auto-promoted to async");
 			expect(stub).toContain(result.details.jobId);
@@ -533,7 +547,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		let fullOutputPath: string | undefined;
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 
 			const promoted = await executeCode.execute(
@@ -570,7 +584,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 			const listTool = pi.tools.get("execute_code_async_list");
 
@@ -606,7 +620,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 			const killTool = pi.tools.get("execute_code_async_kill");
 
@@ -645,7 +659,7 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "200";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 
 			// Promote a job that runs 500ms (will be promoted at 200ms, finishes at 500ms).
@@ -675,11 +689,64 @@ describe("execute_code auto-promote (TUI-freeze safety net)", () => {
 		}
 	});
 
+	test("a NEVER-settling promoted job no longer deadlocks the next execute_code (grace auto-abort)", async () => {
+		// Regression for the deadlock where a relaunched daemon (e.g. `bun run dev`)
+		// launched as sync work auto-promotes at 60s but never settles, pinning
+		// pendingExecution to its never-resolving syncMutex and freezing every later
+		// execute_code on `await pendingExecution`. The hard-grace auto-abort must
+		// fire, abort the hung job, settle its mutex, and free the gate.
+		process.env.PI_CODE_MODE_PROMOTE_MS = "100"; // promote at 100ms, grace = 1000ms
+		try {
+			const pi = makePi();
+			registerCodeMode(pi);
+			const executeCode = pi.tools.get("execute_code");
+
+			// Promote a job whose body never settles.
+			const promoted = await executeCode.execute(
+				"tc-promote-never",
+				{ code: "await new Promise(() => {});" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			expect(promoted.details.jobId).toMatch(/^exec-/);
+			expect(promoted.details.asyncStatus).toBe("running");
+
+			// The next execute_code would deadlock for ~ever pre-fix. Post-fix it
+			// waits only until the grace timer aborts the hung job, then proceeds.
+			const t0 = Date.now();
+			const next = await executeCode.execute(
+				"tc-promote-never-2",
+				{ code: "console.log('recovered=', true);" },
+				new AbortController().signal,
+				undefined,
+				makeExecuteCtx(),
+			);
+			const elapsed = Date.now() - t0;
+
+			const text = next.content.find((c: any) => c.type === "text")?.text ?? "";
+			expect(text).toContain("recovered= true");
+			// Waited for the grace abort (100ms promote × 10 factor = 1000ms), not forever.
+			expect(elapsed).toBeGreaterThanOrEqual(500);
+			expect(elapsed).toBeLessThan(3000);
+
+			// The hung job delivered an aborted follow-up.
+			await flushBackground(100);
+			const followUp = pi.sentMessages.find(
+				(m) => m.customType === "async-execute-code-result",
+			);
+			expect(followUp).toBeDefined();
+			expect(followUp?.content.toLowerCase()).toMatch(/aborted|failed/);
+		} finally {
+			delete process.env.PI_CODE_MODE_PROMOTE_MS;
+		}
+	});
+
 	test("explicit { async: true } bypasses the race (no promotion threshold delay)", async () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "5000";
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 
 			const t0 = Date.now();
@@ -723,7 +790,7 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 		__resetForTests();
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 
 			// Simulate the popup opening BEFORE the code runs (real-world: the
@@ -782,7 +849,7 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 		expect(pendingConfirmCount()).toBe(0);
 		try {
 			const pi = makePi();
-			codeModeExt(pi as any);
+			registerCodeMode(pi);
 			const executeCode = pi.tools.get("execute_code");
 			const result = await executeCode.execute(
 				"tc-no-blocked",
@@ -803,6 +870,7 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 	});
 	test("Teams workers keep a slow synchronous execute_code in the same turn", async () => {
 		process.env.PI_CODE_MODE_PROMOTE_MS = "50";
+		const previousTeamsWorker = process.env.PI_TEAMS_WORKER;
 		process.env.PI_TEAMS_WORKER = "1";
 		try {
 			const pi = makePi();
@@ -822,7 +890,8 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 			expect(text).not.toContain("auto-promoted");
 		} finally {
 			delete process.env.PI_CODE_MODE_PROMOTE_MS;
-			delete process.env.PI_TEAMS_WORKER;
+			if (previousTeamsWorker === undefined) delete process.env.PI_TEAMS_WORKER;
+			else process.env.PI_TEAMS_WORKER = previousTeamsWorker;
 		}
 	});
 

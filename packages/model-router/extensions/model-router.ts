@@ -8,24 +8,29 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+	PROVIDER_KEY_CHANGED_CHANNEL,
+	type ProviderKeyChanged,
+} from "@pi-extensions/shared/provider-limits";
+import {
 	registerContextualSandboxFn,
 	type SandboxCallContext,
 	type SandboxContextUsage,
 } from "@pi-extensions/shared/sandbox-registry";
-import {
-	resolve,
-	markUnhealthy,
-	markHealthy,
-	getLiveness,
-	clearLiveness,
-	loadAllRoles,
-	checkModelHealth,
-	livenessExpiry,
-	type ResolverContext,
-	type MarkUnhealthyOptions,
-} from "../src/router.js";
 import { observeAssistantMessage } from "../src/observe.js";
-import type { ResolveResult, LivenessEntry } from "../src/types.js";
+import {
+	checkModelHealth,
+	clearLiveness,
+	getLiveness,
+	livenessExpiry,
+	loadAllRoles,
+	type MarkUnhealthyOptions,
+	markHealthy,
+	markProvidersHealthy,
+	markUnhealthy,
+	type ResolverContext,
+	resolve,
+} from "../src/router.js";
+import type { LivenessEntry, ResolveResult } from "../src/types.js";
 
 // ── Agent self-serve model pair (pe-dvdys6os; research pe-na057klm) ───────────
 //
@@ -103,7 +108,10 @@ export interface ModelSwitchFailure {
 	limit?: number;
 }
 
-export type ModelSwitchResult = ModelSwitchSuccess | ModelSwitchNoop | ModelSwitchFailure;
+export type ModelSwitchResult =
+	| ModelSwitchSuccess
+	| ModelSwitchNoop
+	| ModelSwitchFailure;
 
 export interface ModelNamespace {
 	/** Calling the namespace directly is shorthand for model.current(). */
@@ -150,7 +158,9 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		const live = readLiveModel();
 		if (!live) return null;
 		const full = ctx.modelRegistry.find(live.provider, live.id);
-		return full?.contextWindow ?? ctx.getContextUsage?.()?.contextWindow ?? null;
+		return (
+			full?.contextWindow ?? ctx.getContextUsage?.()?.contextWindow ?? null
+		);
 	};
 
 	const current = async (): Promise<ModelCurrentResult> => {
@@ -174,7 +184,9 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		//    this seam; that is an infrastructure fact, so we throw.
 		const setModel = ctx.setModel;
 		if (!setModel) {
-			throw new Error("model.switch: host does not expose setModel (pi host too old for agent self-serve switching)");
+			throw new Error(
+				"model.switch: host does not expose setModel (pi host too old for agent self-serve switching)",
+			);
 		}
 
 		// Exact "provider/model" only — trim, split on the first "/", no fuzzy/alias.
@@ -184,13 +196,17 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		const modelId = slash > 0 ? target.slice(slash + 1) : "";
 
 		// 2. Resolve against the registry (exact match, same semantics as ModelRegistry.find).
-		const model = provider && modelId ? ctx.modelRegistry.find(provider, modelId) : undefined;
+		const model =
+			provider && modelId
+				? ctx.modelRegistry.find(provider, modelId)
+				: undefined;
 		if (!model) {
 			return {
 				ok: false,
 				code: "not_found",
 				target,
-				reason: 'expected exact "provider/model" present in the model registry (no fuzzy/alias matching)',
+				reason:
+					'expected exact "provider/model" present in the model registry (no fuzzy/alias matching)',
 			};
 		}
 		const to = model.provider + "/" + model.id;
@@ -207,7 +223,12 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 			ctx.modelRegistry.hasConfiguredAuth(model) ||
 			ctx.modelRegistry.getAvailable().some((m) => sameModelIdentity(m, model));
 		if (!authed) {
-			return { ok: false, code: "unavailable", target: to, reason: "no configured auth for target model" };
+			return {
+				ok: false,
+				code: "unavailable",
+				target: to,
+				reason: "no configured auth for target model",
+			};
 		}
 
 		// 5. Health: model-router liveness policy (separate from core auth).
@@ -218,7 +239,9 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 				code: "unhealthy",
 				target: to,
 				reason: health.entry?.reason ?? "unknown",
-				expires: health.entry ? (livenessExpiry(health.entry)?.toISOString() ?? "unknown") : "unknown",
+				expires: health.entry
+					? (livenessExpiry(health.entry)?.toISOString() ?? "unknown")
+					: "unknown",
 			};
 		}
 
@@ -226,7 +249,12 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		const reserve = MODEL_SWITCH_RESERVE_TOKENS;
 		const window = model.contextWindow;
 		if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) {
-			return { ok: false, code: "invalid_window", target: to, contextWindow: typeof window === "number" ? window : null };
+			return {
+				ok: false,
+				code: "invalid_window",
+				target: to,
+				contextWindow: typeof window === "number" ? window : null,
+			};
 		}
 		const limit = window - reserve;
 		// Re-read usage immediately before the mutation (inside the serialized chain).
@@ -235,7 +263,13 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		let admission: "known" | "unknown-nonshrinking";
 		if (tokens !== null) {
 			if (tokens > limit) {
-				return { ok: false, code: "needs_compaction", target: to, tokens, limit };
+				return {
+					ok: false,
+					code: "needs_compaction",
+					target: to,
+					tokens,
+					limit,
+				};
 			}
 			admission = "known";
 		} else {
@@ -247,7 +281,8 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 					ok: false,
 					code: "context_unknown",
 					target: to,
-					reason: "context tokens unknown (post-compaction) and target window is not provably non-shrinking",
+					reason:
+						"context tokens unknown (post-compaction) and target window is not provably non-shrinking",
 				};
 			}
 			admission = "unknown-nonshrinking";
@@ -256,7 +291,12 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		// 8. Mutate. pi.setModel persists model_change + default and awaits model_select.
 		const ok = await setModel(model);
 		if (!ok) {
-			return { ok: false, code: "auth_failed", target: to, reason: "host setModel rejected the model (auth check failed)" };
+			return {
+				ok: false,
+				code: "auth_failed",
+				target: to,
+				reason: "host setModel rejected the model (auth check failed)",
+			};
 		}
 		return {
 			ok: true,
@@ -271,9 +311,17 @@ export function createModelNamespace(ctx: SandboxCallContext): ModelNamespace {
 		};
 	};
 
-	const switchModel = (params: { target: string }): Promise<ModelSwitchResult> => {
-		if (!params || typeof params.target !== "string" || params.target.trim() === "") {
-			throw new TypeError('model.switch requires { target: "provider/model" } — exact string, no aliases');
+	const switchModel = (params: {
+		target: string;
+	}): Promise<ModelSwitchResult> => {
+		if (
+			!params ||
+			typeof params.target !== "string" ||
+			params.target.trim() === ""
+		) {
+			throw new TypeError(
+				'model.switch requires { target: "provider/model" } — exact string, no aliases',
+			);
 		}
 		return serializeModelSwitch(() => switchImpl(params.target));
 	};
@@ -294,7 +342,9 @@ function makeResolverContext(ctx: any): ResolverContext {
 
 function formatResolveResult(result: ResolveResult): string {
 	const lines: string[] = [];
-	lines.push(`Role: ${result.role} (requested ${result.count}, resolved ${result.resolved.length})`);
+	lines.push(
+		`Role: ${result.role} (requested ${result.count}, resolved ${result.resolved.length})`,
+	);
 	for (const m of result.resolved) {
 		lines.push(`  ✓ ${m.id}`);
 	}
@@ -308,6 +358,20 @@ function formatResolveResult(result: ResolveResult): string {
 }
 
 export default function (pi: ExtensionAPI) {
+	const disposeProviderKeyChanged = pi.events?.on(
+		PROVIDER_KEY_CHANGED_CHANNEL,
+		(data) => {
+			if (!data || typeof data !== "object") return;
+			const providerIds = (data as Partial<ProviderKeyChanged>).providerIds;
+			if (
+				!Array.isArray(providerIds) ||
+				providerIds.some((id) => typeof id !== "string")
+			)
+				return;
+			markProvidersHealthy(providerIds);
+		},
+	);
+
 	// ── System prompt injection ──────────────────────────────────────────
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -325,7 +389,7 @@ export default function (pi: ExtensionAPI) {
 		for (const [role, models] of Object.entries(roles)) {
 			const resolved = resolve(resolverCtx, { role, count: 3 });
 			if (resolved.resolved.length === 0) continue;
-			const ids = resolved.resolved.map(m => m.id).join(", ");
+			const ids = resolved.resolved.map((m) => m.id).join(", ");
 			lines.push(`- ${role} → ${ids}`);
 		}
 
@@ -335,23 +399,41 @@ export default function (pi: ExtensionAPI) {
 		const flagged = getLiveness();
 		lines.push("## Model availability (BLOCKING)");
 		if (flagged.length > 0) {
-			lines.push("These models are FLAGGED UNAVAILABLE — they rate-limited and will fail again if used:");
+			lines.push(
+				"These models are FLAGGED UNAVAILABLE — they rate-limited and will fail again if used:",
+			);
 			for (const entry of flagged) {
 				const expiry = livenessExpiry(entry)?.toISOString() ?? "unknown";
-				lines.push(`- ✗ ${entry.id} — ${entry.reason} (flagged ${entry.markedAt}, expires ${expiry})`);
+				lines.push(
+					`- ✗ ${entry.id} — ${entry.reason} (flagged ${entry.markedAt}, expires ${expiry})`,
+				);
 			}
 		} else {
 			lines.push("No models are currently flagged unavailable.");
 		}
 		lines.push("");
-		lines.push("HARD RULES — violating them burns money on guaranteed failures:");
-		lines.push("- NEVER delegate, pin, or switch to a flagged model. It WILL fail again.");
-		lines.push("- Before pinning ANY literal model, check it: `await modelRouter.isAvailable(\"provider/model\")`.");
-		lines.push("- If ANY model call fails on you with a rate-limit/quota error, flag it immediately: `await modelRouter.markUnhealthy({ id: \"provider/model\", reason: \"rate_limited\" })`. You owe the swarm that signal.");
-		lines.push("- Prefer template roles over literal model pins — the router skips flagged models automatically.");
+		lines.push(
+			"HARD RULES — violating them burns money on guaranteed failures:",
+		);
+		lines.push(
+			"- NEVER delegate, pin, or switch to a flagged model. It WILL fail again.",
+		);
+		lines.push(
+			'- Before pinning ANY literal model, check it: `await modelRouter.isAvailable("provider/model")`.',
+		);
+		lines.push(
+			'- If ANY model call fails on you with a rate-limit/quota error, flag it immediately: `await modelRouter.markUnhealthy({ id: "provider/model", reason: "rate_limited" })`. You owe the swarm that signal.',
+		);
+		lines.push(
+			"- Prefer template roles over literal model pins — the router skips flagged models automatically.",
+		);
 		lines.push("");
-		lines.push("In code-mode: `const result = await modelRouter.resolve({ role: 'review', count: 3 });`");
-		lines.push("In teams delegate: use `template: 'review'` — the leader resolves the model via the router.");
+		lines.push(
+			"In code-mode: `const result = await modelRouter.resolve({ role: 'review', count: 3 });`",
+		);
+		lines.push(
+			"In teams delegate: use `template: 'review'` — the leader resolves the model via the router.",
+		);
 
 		return { systemPrompt: event.systemPrompt + lines.join("\n") };
 	});
@@ -359,7 +441,9 @@ export default function (pi: ExtensionAPI) {
 	// ── Rate-limit liveness: flag on failure, heal on success ────────────────
 
 	pi.on("message_end", async (event) => {
-		observeAssistantMessage(event.message as Parameters<typeof observeAssistantMessage>[0]);
+		observeAssistantMessage(
+			event.message as Parameters<typeof observeAssistantMessage>[0],
+		);
 	});
 
 	// ── Sandbox callable ─────────────────────────────────────────────────
@@ -372,7 +456,11 @@ export default function (pi: ExtensionAPI) {
 	registerContextualSandboxFn("modelRouter", (ctx) => {
 		const resolverCtx = makeResolverContext(ctx);
 
-		const fn = async (params: { role: string; count?: number; dedupProviders?: boolean }) => {
+		const fn = async (params: {
+			role: string;
+			count?: number;
+			dedupProviders?: boolean;
+		}) => {
 			const result = resolve(resolverCtx, params);
 			return result;
 		};
@@ -390,16 +478,24 @@ export default function (pi: ExtensionAPI) {
 		(fn as any).isAvailable = async (id: string) => {
 			const normalized = id.toLowerCase();
 			const availableModels = resolverCtx.getAvailable();
-			const bareId = normalized.includes("/") ? normalized.slice(normalized.indexOf("/") + 1) : normalized;
+			const bareId = normalized.includes("/")
+				? normalized.slice(normalized.indexOf("/") + 1)
+				: normalized;
 			const hasKey = availableModels.some(
-				(m) => `${m.provider}/${m.id}`.toLowerCase() === normalized || m.id.toLowerCase() === bareId,
+				(m) =>
+					`${m.provider}/${m.id}`.toLowerCase() === normalized ||
+					m.id.toLowerCase() === bareId,
 			);
 			const health = checkModelHealth(normalized);
 			const reasons: string[] = [];
 			if (!hasKey) reasons.push("no_api_key");
 			if (!health.healthy) {
-				const expiry = health.entry ? (livenessExpiry(health.entry)?.toISOString() ?? "unknown") : "unknown";
-				reasons.push(`unhealthy: ${health.entry?.reason ?? "unknown"} (expires ${expiry})`);
+				const expiry = health.entry
+					? (livenessExpiry(health.entry)?.toISOString() ?? "unknown")
+					: "unknown";
+				reasons.push(
+					`unhealthy: ${health.entry?.reason ?? "unknown"} (expires ${expiry})`,
+				);
 			}
 			return { id, available: hasKey && health.healthy, reasons };
 		};
@@ -418,5 +514,9 @@ export default function (pi: ExtensionAPI) {
 		};
 
 		return fn;
+	});
+
+	pi.on("session_shutdown", () => {
+		disposeProviderKeyChanged?.();
 	});
 }

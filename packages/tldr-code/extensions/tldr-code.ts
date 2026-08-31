@@ -19,8 +19,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";

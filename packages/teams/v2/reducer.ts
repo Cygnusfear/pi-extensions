@@ -254,7 +254,19 @@ function applyAcceptedFact(state: LifecycleProjection, fact: LifecycleFact): voi
 		case "stuck": {
 			const payload = fact.payload as unknown as StuckPayload;
 			attempt.stuckCount = Math.max(attempt.stuckCount, payload.cooldownIndex + 1);
-			state.actionableEvents.set(fact.eventId, actionable(fact, attempt, "stuck", `stuck ${payload.idleSeconds}s idle`));
+			const cause = payload.cause ?? "liveness";
+			const childCount = payload.activeChildProcessCount !== undefined
+				? ` ${payload.activeChildProcessCount} active child process${payload.activeChildProcessCount === 1 ? "" : "es"}.`
+				: "";
+			const command = payload.command ? ` Current command: ${payload.command}${payload.commandElapsedSeconds !== undefined ? ` (${payload.commandElapsedSeconds}s)` : ""}.` : "";
+			const lastOutputAt = payload.lastOutputAt !== undefined && Number.isFinite(payload.lastOutputAt)
+				? ` at ${new Date(payload.lastOutputAt).toISOString()}`
+				: "";
+			const lastOutput = payload.lastOutputLabel ? ` Last output: ${payload.lastOutputLabel}${lastOutputAt}.` : "";
+			const summary = cause === "output_silence"
+				? `P0: no meaningful worker output for ${payload.idleSeconds}s. Investigate now; do not continue waiting blindly.${command}${childCount}${lastOutput}`
+				: `stuck ${payload.idleSeconds}s idle`;
+			state.actionableEvents.set(fact.eventId, actionable(fact, attempt, "stuck", summary));
 			break;
 		}
 		case "outcome_corrected":

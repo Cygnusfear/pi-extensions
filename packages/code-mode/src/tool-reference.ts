@@ -212,9 +212,9 @@ export const TOOL_ALIASES: Record<string, string> = {
 	logExperiment: "log_experiment",
 };
 
-export function formatManPage(name: string): string {
-	const manualPage =
-		codeModeManual && formatCodeModeManualPage(codeModeManual, name);
+export function formatManPage(name: string, manualOverride?: CodeModeManual): string {
+	const manual = manualOverride ?? codeModeManual;
+	const manualPage = manual && formatCodeModeManualPage(manual, name);
 	if (manualPage) return manualPage;
 
 	const resolvedName = TOOL_ALIASES[name] || name;

@@ -206,3 +206,21 @@ describe("default-prompt Mesh Telegram media instructions", () => {
 		expect(text).toContain("Mesh receipt as Telegram/Hooman confirmation");
 	});
 });
+
+describe("default-prompt recorded action rationale contract", () => {
+	test("keeps same-call rationale without forced checkpoint generations", async () => {
+		const result = await captureSystemPromptResult(
+			{ systemPrompt: "BASE" },
+			{ cwd: "/tmp" },
+		);
+		const text = result?.systemPrompt ?? "";
+		expect(text).toContain("execute_code.thinking");
+		expect(text).toContain("same-call rationale");
+		expect(text).toContain("Never include secrets");
+		expect(text).toContain("call direct `done` alone");
+		expect(text).not.toContain("[THINKING STATE]");
+		expect(text).not.toContain("/think status");
+		expect(text).not.toContain("requestedEffort");
+		expect(text).not.toContain("assess + analyze");
+	});
+});

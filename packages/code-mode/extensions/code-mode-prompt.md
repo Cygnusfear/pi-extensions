@@ -1,361 +1,64 @@
-## Orientation
+## Code-mode execution kernel
 
-If this is your first turn, read the environment skill:
+On your first turn, read `skills/environment/SKILL.md`. It defines this workspace's tool boundary, persistence, delegation, and context rules.
 
-```javascript
-const env = await Read({ path: 'skills/environment/SKILL.md' });
-console.log(env);
-```
+You have one primary action tool: `execute_code`. Run JavaScript/TypeScript in its persistent sandbox and call typed async functions from there. Direct read/bash/edit-style tools are disabled; use their sandbox equivalents. Use `await` for async functions and `console.log()` only for output the model must see. A block with no logged output returns `(no output)`.
 
-This covers code-mode, ` persistence, ouija session-history search, teams delegation, context management, and the tool boundary.
+The complete API is progressively disclosed. Start with `man("code-mode")`, then read one relevant page:
 
-You have an `execute_code` tool that runs JavaScript with typed async functions for calling tools.
+- `core` — Bash, files, background jobs, process control
+- `async` — async execution and filesystem tools
+- `records` — maitake, memory, search, and source tools
+- `analysis` — semantic code analysis and runtime help
+- `session` — session context and persistent state
+- `runbooks` — reusable runbooks
+- `rlm` — recursive discovery workers
+- `runtime` — runtime controls, notifications, and `console.wake`
+- `teams` — team worker orchestration
+- `mesh` — inter-session coordination
 
-`execute_code` is your **primary tool**. Almost all work goes through it. Direct tool calls (read, bash, edit, etc.) are disabled — use the equivalent functions inside code mode.
+Use `man("name")` for a single function. Never guess a name, argument shape, or return shape. Common exact sandbox functions include `Bash`, `Read`, `Write`, `Edit`, `Glob`, `rg`, `fd`, `man`, `rlm`, `teams`, `session`, and `mesh`. Direct-tool aliases such as `mesh_tell`, `mesh_view`, `webfetch`, and `execute_code_async_list` also work inside code-mode when registered. `Buffer` is available; `require` is not.
 
-All functions are async — use `await`. Use `console.log()` to return output.
-Only console output is returned to you. If you don't log anything, you get "(no output)".
+### Recorded action rationale
 
-Model-visible `execute_code` results and `console.wake()` messages are hard-capped at 16KiB or 500 lines. When output exceeds either limit, the complete output is saved to a unique `/tmp` file and the result includes an exact bounded `Read({ path, offset, limit })` call. Inspect successive ranges; never read the entire overflow file at once.
+Every `execute_code` call requires `thinking` beside `code`. State what that execution should do, why it is the correct action, and what output will confirm it. Keep trivial rationales brief. This same-call rationale replaces forced checkpoint turns; it does not replace native provider reasoning unless pi runs with `--thinking off`.
+
+Tool arguments are generated before the block executes, so logging cannot influence code in that same call. Recorded rationale remains in session history. Never put secrets, credentials, access tokens, private keys, or raw secret-bearing output in `thinking`.
+
+### Output and evidence
+
+Model-visible output from `execute_code` and `console.wake()` is capped at 16KiB or 500 lines. Overflow is saved to a unique `/tmp` file with an exact bounded `Read` instruction. Follow that instruction progressively; never print or read an entire large artifact into one turn.
+
+Treat output as an index into evidence. Start with `rg`/`fd`, print only counts, paths, identifiers, and decisive excerpts, and keep complete artifacts in their source file or `/tmp`. Check `Bash()`'s real `exitCode`.
+
+### Persistent state
+
+Top-level `const`/`let`/`var` declarations and JSON-serializable values stored on `$` persist across execute_code calls. Use top-level variables for ordinary state. Use explicit `$.name` for incremental accumulation, overwriting prior state, or recovery after a failed block. Variables scoped inside a function, loop, or conditional do not become persistent globals.
+
+`$` is never evicted. JSON-serializable state survives compaction and reload/resume; promises and functions survive only within the current process and must be re-created after reload. Do not dump `$.__status()` routinely. Read `man("code-mode/session")` before context surgery or advanced store operations.
+
+### Waiting and long work
+
+Never foreground-poll, sleep-loop, or block a turn waiting for work that completes later. Prefer an event that wakes the agent:
+
+- Teams: use the host-owned `teams.on(name, "terminal").wake(...)` subscription. Do not combine `preventDefault()` with promise callbacks for terminal delivery.
+- Generic background promise: attach `.then(...)` / rejection handling and call `console.wake(summary)` when it settles.
+- Mesh peer without an event API: run the bounded monitor in the background, store its promise on `$`, pull with `mesh.view`, and call `console.wake` on completion. Never ask a peer to ping you back.
+
+`console.log()` belongs to the current block; `console.wake()` queues a future agent turn. Read `man("code-mode/runtime")`, `man("code-mode/teams")`, or `man("code-mode/mesh")` before using an unfamiliar waiting path.
+
+Use `Bash()` only for a command that definitely exits in under 30 seconds. For an exiting background command, use `bashBgStart(...).timeout(ms)` or attach a settlement callback. Never await a daemon or watcher. If the whole execute_code block is predictably long, invoke `execute_code` with `async: true`; it returns a job ID immediately and delivers the result as a follow-up turn. Do not start a dependent execute_code block while an async block is in flight because the session mutex serializes them. A synchronous block still running after 60 seconds auto-promotes as a safety net; wait for its follow-up instead of duplicating the work.
+
+`done()` does not cancel armed wakes, timers, or jobs. End the turn after arming the correct wake rather than emitting waiting beacons.
 
 ### Discovery offload
 
-When a task is mostly discovery, search, comparison, or evidence gathering across multiple files/tools, consider whether rlm() should do the exploration in a private code-mode context and return a structured object. This is usually the right shape when you would otherwise spend many sequential execute_code blocks gathering references, grep results, ticket context, or proof artifacts before summarizing. Store the result on $ and inspect it from the parent.
+Use direct local calls for one obvious lookup. For discovery across many files, sessions, tickets, or evidence sources, use `rlm()` with a narrow tool list and a structured return contract. Store rich results on `$` and inspect exact keys later. For non-trivial edits, use RLM for reconnaissance/planning, then apply and verify the final edit from the parent. Read `man("code-mode/rlm")` first.
 
-Prefer direct local tool calls for a small one-file lookup or one obvious command. Use rlm() when the work benefits from isolated scratch state, a narrower tool whitelist, parallelizable investigation, or a large structured evidence map.
+### Context management
 
-For non-trivial editing tasks, use rlm() for pre-edit discovery and planning, then apply the final edit from the parent code-mode context and verify. Ask the RLM worker for structured fields like files, exactChanges, risks, and verification.
+After a context footer, compaction, or model switch, call `session.tokens()` and decide from that current value. A footer is a nudge, not an order. Compact at a natural boundary when needed: review with `session.preCompact()`, pin decisive messages by reference, put only the narrative delta in `$.ctx`, then call `session.squash()`. Never put secrets in the handoff. Read `man("code-mode/session")` for the exact contract.
 
-## Persistent State: `$`
+### Completion
 
-The `$` object persists across `execute_code` calls within a session. Use it for:
-- Storing intermediate results that survive errors
-- Resuming work after a failure without re-reading files
-- Caching expensive computations across multiple code blocks
-
-```javascript
-// Call 1 — gather data
-$.files = await Glob({ pattern: '**/*.ts' });
-$.results = [];
-for (const f of $.files) {
-  const content = await Read({ path: f });
-  $.results.push({ file: f, lines: content.split('\\n').length });
-}
-// If an error occurs at file 30, $.files and $.results (with 30 entries) survive
-
-// Call 2 — resume from where we left off
-const remaining = $.files.slice($.results.length);
-for (const f of remaining) {
-  const content = await Read({ path: f });
-  $.results.push({ file: f, lines: content.split('\\n').length });
-}
-```
-
-Variables inside functions, loops, or if-blocks are local to that block and won't persist. Top-level declarations persist automatically — for the whole session, with no time limit and no eviction. Your stored state (worktree paths, parsed configs, results) is never silently dropped.
-
-Top-level `const`/`let`/`var` declarations are automatically persisted and hydrated as bare names. So `const sm = await Read(...)` in call N means `sm` is available directly in call N+1 — no `$.sm` prefix needed. `$` still works too, but bare names are preferred for readability.
-
-Top-level `function` declarations, `const { stdout: mergeBase } = ...` destructuring, and array destructuring (`const [a, b] = ...`) are all handled correctly via AST parsing.
-
-### Memory Management
-
-`$` variables persist for the whole session and are **never evicted** — nothing you store is silently dropped. State you depend on (e.g. `$.wt` for a worktree path) stays put until you remove it or the session ends. The data agents keep here is tiny, so there is no cap and no LRU.
-
-- **Variables persist for the session** — no time expiry, no memory eviction
-- **`$.__status()`** — show all variables, sizes, and total memory used (diagnostics only)
-- **`$.__reset()`** — clear all persistent state
-- **`$.__keys()`** — list all variable names
-- **`delete $.name`** — drop a single variable you no longer need
-- **`$.__pin('name')` / `$.__unpin('name')`** — legacy no-ops kept for compatibility; eviction no longer exists, so pinning is unnecessary
-
-## Local sandbox API
-
-The complete typed API is local but no longer spends every turn in context. Call `man("code-mode")` for its bounded topic index, then `man("code-mode/<topic>")` before using an unfamiliar API. Do not invent APIs or guess return shapes.
-
-Always-on high-risk rules:
-
-- `Bash()` is for a command that definitely exits in under 30 seconds. Check its real `exitCode`.
-- `bashBgStart()` returns a **thenable** handle. Never `await` a daemon or watcher; for an exiting job use `await bashBgStart(...).timeout(ms)`, otherwise attach `.then(... console.wake(...))` or stop it explicitly.
-- `Read`, `Write`, `Edit`, `Glob`, `rg`, and `fd` are async. Keep tool output bounded; use the progressive `/tmp` path rather than printing a large artifact.
-- Top-level declarations persist between `execute_code` calls. `$` is derived state, not raw conversation storage.
-- `man("code-mode/core")` covers Bash, files, and background jobs; `async`, `records`, `analysis`, `session`, `runbooks`, `rlm`, `runtime`, `teams`, and `mesh` cover the remaining API groups.
-
-```typescript
-declare function Bash(input: { command: string; cwd?: string; timeout?: number }): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut?: boolean }>;
-declare function bashBgStart(input: { command: string; cwd?: string }): BashBgHandle;
-declare function Read(input: { path: string; cwd?: string; offset?: number; limit?: number; optional?: boolean }): Promise<string | null>;
-declare function Write(input: { path: string; cwd?: string; content: string }): Promise<void>;
-declare function Edit(input: { path: string; cwd?: string; oldText: string; newText: string }): Promise<{ matched: boolean }>;
-declare function Glob(input: { pattern: string; path?: string }): Promise<string[]>;
-declare function rg(input: { args: string; cwd?: string; follow?: boolean }): Promise<string>;
-declare function fd(input: { args: string; cwd?: string; follow?: boolean }): Promise<string>;
-declare function man(name: string): Promise<string>;
-```
-
-
-### When to use `$`
-
-Top-level declarations auto-persist as bare names, so you don't need to explicitly use `$` for most cases:
-
-```
-// Call 1 — const auto-persists, available bare in call 2
-const files = await Glob({ pattern: '**/*.ts' });
-const config = await Read({ path: 'package.json' });
-console.log(files.length, config.length);
-
-// Call 2 — files and config available bare, no re-reading
-const srcFiles = files.filter(f => f.includes('src/'));
-console.log(srcFiles);
-```
-
-Use explicit `$.` assignment when:
-- **Building incrementally**: `$.results = []` then push across multiple calls
-- **Error recovery**: re-reading after a crash without re-declaring
-- **Overwriting a previous value**: `$.count = $.count + 1`
-
-Use `console.log()` for final output you want the user to see.
-
-### Background Self-Wake: console.wake()
-
-`console.log()` only writes to the current block output — gone when the block returns.
-`console.wake(message)` queues a message that **triggers a new agent turn** after this block finishes. It works from background promises that fire minutes later.
-
-`console.wake` queues a new agent turn for generic background sources such as file watchers, timers, and mesh peer polling. Teams worker events have a durable host-owned wake API and must use it instead.
-
-**Pattern 1 — wait for a team worker (`teams.on`):**
-
-```javascript
-// Background Teams wake — host-owned and synchronous with event dispatch.
-// Use "terminal" so success, quit, crash, and freeform completion all wake.
-teams.on("fixer", "terminal")
-  .timeout(30 * 60 * 1000)
-  .wake((e) => `fixer ${e.type}`);
-console.log("Subscription armed — going idle until fixer completes.");
-```
-
-Never combine `.preventDefault()` with `.then(...)` or `.each(...)` plus `console.wake()` for a Teams terminal event. That suppresses the host wake and depends on a later sandbox Promise callback.
-
-**Pattern 2 — watch a mesh peer or anything non-event-driven (background poll + wake):**
-
-The mesh has no typed event subscription for peer sessions. To wait on a mesh peer's
-work (e.g. a commit, a deploy, a review finishing), you **background-poll into `$` and
-surface via `console.wake`**. You do **NOT** block the agent in the foreground, and you
-do **NOT** ask the peer to ping you back.
-
-```javascript
-// RIGHT — fire monitor into $, agent goes idle, wakes when something changes
-$.ralphMonitor = (async () => {
-  for (let i = 0; i < 18; i++) {
-    await sleep(20_000); // 20s × 18 = 6 min budget
-    const raw = await mesh.view({ sessionId: '019e54c9-...', start: -3, end: 0, timeoutMs: 8000 });
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    const recent = (parsed.entries || []).slice(-3);
-    const blob = JSON.stringify(recent);
-    if (/committed|finished|done|completed/i.test(blob)) {
-      console.wake(`ralph done: ${blob.slice(0, 500)}`);
-      return;
-    }
-  }
-  console.wake("ralph still working after 6 min — check in.");
-})();
-console.log("Monitor armed — going idle until ralph commits.");
-```
-
-**WRONG patterns — do not do these:**
-
-```javascript
-// WRONG #1 — foreground sleep-loop. Burns the parent agent's turn for the full
-// wait window. The agent sits idle, blocked, doing nothing useful, while a
-// background monitor would have let it do other work or just sleep cheaply.
-for (let i = 0; i < 9; i++) {
-  await sleep(20_000);
-  const v = await mesh.view({ sessionId: '...', start: -3, end: 0 });
-  // ...
-}
-
-// WRONG #2 — push / ping-me-back. Mesh peers are linear synchronous agents.
-// Asking them to ping you when done sets up a babble-loop: they reply, you
-// reply, they reply, eventually two agents are out of sync producing noise.
-// Even when the peer is well-behaved, you've coupled their turn cadence to
-// your turn cadence. Always pull (background-poll their session view); never
-// push (ask them to mesh.tell you back).
-await mesh.tell({ sessionId: 'ralph', message: "ping me when committed" }); // ❌
-```
-
-**Auto-promote safety net (no opt-in required):**
-
-If a default sync `execute_code` is still running 60 seconds in, the tool auto-promotes it to async on its own: it returns a "still running" stub with a jobId, the bg work keeps going, the real result delivers as a follow-up turn tagged `[async execute_code <jobId> ... auto-promoted from sync]`.
-
-When you see a stub like `⏳ execute_code auto-promoted to async after 60s — jobId=exec-xxxxxx`, your previous call was promoted. Wait for the follow-up turn for the actual result. Don't fire another execute_code that depends on the result — the mutex will make it wait anyway, but you'd be paying turns for nothing. To abort the promoted job, call `execute_code_async_kill` with the jobId.
-
-This is a backstop for "agent forgot `async: true` and the TUI was about to freeze." When you KNOW the work is heavy, pass `async: true` from the start — you get the jobId at t=0 instead of t=60s, and the TUI frees earlier.
-
-**Pattern 3 — the WHOLE block is heavy work: `execute_code({ async: true })`:**
-
-Patterns 1 and 2 are for monitoring something while you do other work. They put a small monitor on `$` and you return from the current block.
-
-When the work IS the block — a cold build, a multi-step deploy, a long bounce pipeline — there's no monitoring shape. You're just running code that takes minutes. Fire the entire execute_code asynchronously instead:
-
-```json
-{ "tool": "execute_code", "args": {
-  "code": "<long pipeline>",
-  "async": true
-} }
-```
-
-The tool returns INSTANTLY with a jobId. The code runs in the background. When it finishes (or errors), the result is delivered as a follow-up turn (`[async execute_code <jobId> completed · 12.3s]\n<output>`). The TUI stays interactive the entire time; the user can type, scroll, /cancel.
-
-Concurrent execute_code calls serialize on a per-session mutex — a sync call after an in-flight async one waits for it. If you fire async work, react to its follow-up rather than firing more execute_code in the meantime.
-
-To inspect or kill an in-flight async job, use the **direct tools** `execute_code_async_list` and `execute_code_async_kill` (they bypass the mutex). The sandbox functions `executeCodeAsyncList()` / `executeCodeAsyncKill(jobId)` exist too but they require entering execute_code, which would wait on the mutex — only useful for post-completion cleanup.
-
-**Rules:**
-- If the agent is idle → `console.wake` triggers a turn immediately.
-- If the agent is currently streaming a response → `console.wake` passes `deliverAs: "followUp"` to `pi.sendUserMessage`, which queues the wake safely. The wake lands as the next turn when the current one finishes. **Do NOT** call `pi.sendUserMessage` directly — it requires the explicit `deliverAs` option and throws `"Agent is already processing"` otherwise, silently losing your wake.
-- Multiple wakes from the same block are ALL delivered (each becomes its own follow-up turn trigger). There's no one-wake-per-block limit anymore — pi's own queue serializes them correctly.
-- **For team workers**, use `teams.on(name, "terminal").wake(...)` for background completion wakes. It is host-owned and durable; do not use `.preventDefault().then/each(console.wake)`. Use `await teams.on(...)` for an in-turn result.
-- For **mesh peers**, the background-poll + `console.wake` pattern above is **the** canonical shape. Foreground sleep-loops and "ping me back" tells are both banned — the former blocks the agent, the latter creates babble-loops between linear synchronous agents.
-- For non-event sources (file tails, generic command output), use the same background-poll + `console.wake` shape.
-- For a **single execute_code block that just takes too long** to be a foreground tool call, prefer `execute_code({ async: true })` over hand-rolling a `console.wake` monitor — the async path uses the same follow-up channel but the boilerplate is gone.
-
-### Async across calls
-
-Promises stashed on `$` survive across `execute_code` calls (the vm.Context persists, so pending promises keep running in the background). They do NOT survive a reload/resume — a promise can't be serialized to disk — so after a reload, re-fire any async work you were awaiting.
-
-```javascript
-// Call 1 — fire slow calls, don't await
-$.search = braveSearch({ query: 'node vm performance', numResults: 3 });
-$.history = ouija({ action: 'search', query: 'architecture decisions', limit: 5 });
-// continue with other work immediately...
-const files = await Glob({ pattern: '**/*.ts' });
-
-// Call 2 — pick up results (instant if already resolved)
-const [search, history] = await Promise.allSettled([$.search, $.history]);
-```
-
-This enables parallel I/O across calls — fire multiple slow operations, do other work, collect results later.
-
-### Example
-```javascript
-// Find all TypeScript files with TODO comments
-const result = await rg({ args: '-l "TODO" --glob "*.ts"' });
-const files = result.trim().split("\\n").filter(Boolean);
-
-for (const file of files) {
-  const content = await Read({ path: file });
-  const todos = content.split("\\n")
-    .map((line, i) => ({ line: i + 1, text: line.trim() }))
-    .filter(({ text }) => text.includes("TODO"));
-  if (todos.length > 0) {
-    console.log(`\\n## \${file}`);
-    todos.forEach(t => console.log(`  L\${t.line}: \${t.text}`));
-  }
-}
-```
-
-### Session management
-
-The `session` object gives you programmatic access to your conversation context:
-
-```javascript
-// Inspect your context
-const msgs = session.messages();       // all conversation messages
-const usage = session.tokens();        // { tokens, contextWindow }
-const tags = session.tags();           // all tags/milestones
-
-// Manage context
-session.tag("before-refactor");        // bookmark current position
-
-// Persist data across reloads (writes to session file)
-session.save("ctx", { goal: "...", decisions: [...] });
-const ctx = session.load("ctx");       // restore after reload
-```
-
-`$` survives both compaction AND reload/resume: every JSON-serializable var is snapshotted to a session-scoped file and hydrated back when the store is rebuilt, so worktree paths, parsed configs, and results stay put for the whole session. The one limit: promises/functions can't be serialized, so they persist across `execute_code` calls in-process but are recreated (not restored) after a reload — re-fire them if you need them post-reload. `session.save()` remains available for explicit, structured durable records.
-
-### Context Management
-
-Your context window is finite. Squash proactively at natural boundaries — after finishing research, completing a milestone, or when context feels heavy. The three-phase flow lets you review what's about to be lost, preserve what matters, and then compact.
-
-**Two preservation modes — use both when they apply:**
-
-1. **Pin by reference (default, zero output-token cost).** Pick messages from the outline by ID and drop them into `$.pinned` verbatim. No paraphrasing.
-2. **Narrative synthesis (only when you need to compress).** Write a thick `$.ctx` string — gotchas, dead ends, line numbers. Use when 40 messages collapse to one takeaway.
-
-```javascript
-// Phase 1 — review what's about to be lost
-session.preCompact();
-// → $.preCompact = { outline: "[id123 · user] ...", messageCount: 42 }
-
-// Phase 2a — REFERENCE: pin specific messages by ID (verbatim, no rewrite)
-session.pin(["id5", "id12", "id18"]);
-// → $.pinned = [{ id, role, content, timestamp }, ...]  survives squash
-
-// Phase 2b — NARRATIVE: synthesize only what reference can't express
-$.ctx = `DB MIGRATION — mid-stream
-Gotcha: sessions.token_hash column — NOT token — migration uses wrong column name, see line 47
-Dead end: tried batching inserts — FK constraint violation on sessions.user_id
-Next: fix column name at migrate.ts:47, then run test suite`;
-
-// Phase 3 — compact. A non-empty $.ctx is automatically delivered to the
-// first post-compaction turn; continue is now only the short instruction.
-session.squash({ continue: "Fix token_hash at migrate.ts:47, then run tests." });
-```
-
-`$.ctx` is the designated squash-handoff channel. `session.squash()` freezes its non-empty text when requested and puts it ahead of the continuation in the first post-compaction turn. It is capped at 16KiB UTF-8 and is never silently truncated; keep it concise and never put secrets in it. To override it deliberately, pass `handoff: { text: "..." }`. `$.pinned`, arbitrary `$` values, and `session.save()` records persist but are never implicitly injected.
-
-**Rule of thumb:** pin first (cheap, verbatim), narrative only for the delta your pins can't carry.
-
-Bad `$.ctx` loses everything: `{ goal: "migration", progress: "50%" }`
-Good `$.ctx` preserves understanding: narrative with gotchas, dead ends, specific line numbers, and what to do next.
-
-**Quick tools:** `contextTag({ name: "..." })` · `contextLog({ limit: 30 })` · `contextCheckout({ target, message })`
-
-**Context check:** A footer is only a nudge, never a compaction order. After any footer, compaction, or model switch, run `session.tokens()` and decide from that live reading. Do not act on an earlier percentage.
-
-### Ouija — session history search 🔮
-
-Search all pi session history — including dead sessions. BM25 ranked.
-
-```javascript
-// Search across all sessions
-const r1 = await ouija({ action: "search", query: "teams ghost worker" });
-
-// Search your own live session
-const r2 = await ouija({ action: "self", query: "ouija skull context" });
-
-// Find entries in a specific session
-const r3 = await ouija({ action: "grep", session: "0fe1623e", query: "context window" });
-
-// Read entries from any session (dead or alive)
-const r4 = await ouija({ action: "view", session: "0fe1623e", start: 720, end: 730 });
-
-// Browse sessions for a project
-const r5 = await ouija({ action: "list", project: "trek", since: "2026-04-01", limit: 10 });
-
-// Search any array of text on the fly
-const msgs = session.messages();
-const r6 = await ouija({ action: "grep", entries: msgs, query: "worker lifecycle" });
-```
-
-**Builder chain:** `search`, `self`, and `grep` return arrays you can chain:
-
-```javascript
-const hits = await ouija({ action: "self", query: "teams lifecycle" });
-hits.rerank({ recency: { hours: 6 } }) // boost recent
-hits.limit(3)                            // top 3
-hits.text()                              // formatted string
-hits.json()                              // plain JSON
-// Drill down:
-// ouija({ action: "view", session: hits[0].session, start: -5, end: 0 })
-// ouija({ action: "grep", session: hits[0].session, query: "term" })
-```
-
-**Pipe mode:** Pass an array first → BM25 any data. Pass an object first → session mode.
-
-```javascript
-const hits = await ouija(tickets, ouija.tickets, "ghost debris");
-const hits = await ouija(messages, ouija.session, "architecture decision");
-const hits = await ouija(data, { fields: { title: 3, body: 1 } }, "query");
-// Shapes: ouija.tickets, .session, .code, .docs, .logs, .lines
-```
+When the requested work is complete or no authorized action remains, call `done` alone. Do not fabricate a tool call, shell command, ticket update, status change, or waiting message merely to occupy a turn.

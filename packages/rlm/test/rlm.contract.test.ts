@@ -16,7 +16,7 @@ function deps(overrides: Record<string, unknown> = {}) {
 	return {
 		signal: ac.signal,
 		cwd: repoRoot,
-		parentModel: model,
+		resolveModelRole: () => model,
 		modelRegistry: {
 			find: (p: string, id: string) => (p === "missing" ? undefined : { provider: p, id }),
 			getApiKeyAndHeaders: async (m: any) => m.provider === "noauth" ? { ok: false } : { ok: true, apiKey: "key", headers: { h: "v" } },
@@ -130,7 +130,14 @@ describe("rlm contract", () => {
 		const result = await runRlm(deps(), { task: "allow", tools: ["Bash"] }, 0);
 		expect(String(result.stdout)).toContain("hi");
 	});
-	test("7c runbookRun is rejected because RLM disables runbook injection", async () => { await expectReject(runRlm(deps(), { task: "runbook", tools: ["runbookRun"] }, 0), "unknown tool 'runbookRun'"); });
+	test("7c man is always available as read-only documentation without widening capabilities", async () => {
+		queue(js("const index = await man('code-mode'); rlm.return({hasCore:index.includes('code-mode/core'), readType:typeof Read});"));
+		await expect(runRlm(deps(), { task: "docs", tools: [] }, 0)).resolves.toMatchObject({
+			hasCore: true,
+			readType: "undefined",
+		});
+	});
+	test("7d runbookRun is rejected because RLM disables runbook injection", async () => { await expectReject(runRlm(deps(), { task: "runbook", tools: ["runbookRun"] }, 0), "unknown tool 'runbookRun'"); });
 	test("8 whitelist namespace allows mai + rlm but rejects the mai.ticket sub-method", async () => {
 		queue(js("rlm.return({kind: typeof mai.ticket});"));
 		await expect(runRlm(deps(), { task: "mai", tools: ["mai"] }, 0)).resolves.toMatchObject({ kind: "function" });
@@ -229,7 +236,54 @@ describe("rlm contract", () => {
 	});
 	test("21 non-aborted stopReason passes through", async () => { setComplete(() => resp(js("rlm.return({n:1});"), { input: 2, output: 3 }, "max_tokens")); await expect(runRlm(deps(), { task: "stop", tools: [] }, 0)).resolves.toMatchObject({ n: 1 }); });
 	test("22 cwd is passed to sub tool bindings", async () => { queue(js("const pkg = await Read({path:'package.json'}); rlm.return({hasWorkspaces: pkg.includes('\\\"workspaces\\\"')});")); await expect(runRlm(deps(), { task: "cwd", tools: ["Read"] }, 0)).resolves.toMatchObject({ hasWorkspaces: true }); });
-	test("23 model auth failure rejects", async () => { await expectReject(runRlm(deps({ parentModel: { provider: "noauth", id: "x" } }), { task: "auth", tools: [] }, 0), "no API key for model"); });
+	test("23 model auth failure rejects", async () => { await expectReject(runRlm(deps({ resolveModelRole: () => ({ provider: "noauth", id: "x" }) }), { task: "auth", tools: [] }, 0), "no API key for model"); });
+
+	test("23b omitted model resolves the central rlm role", async () => {
+		const roles: string[] = [];
+		queue(js("rlm.return({ok:true});"));
+		const result = await runRlm(deps({
+			resolveModelRole: (role: string) => {
+				roles.push(role);
+				return { provider: "cheap", id: "flash" };
+			},
+		}), { task: "routed", tools: [] }, 0);
+		expect(roles).toEqual(["rlm"]);
+		expect(result.__rlm_usage?.model).toBe("cheap/flash");
+	});
+
+	test("23c explicit model overrides the central rlm role", async () => {
+		queue(js("rlm.return({ok:true});"));
+		const result = await runRlm(deps({
+			resolveModelRole: () => { throw new Error("role resolver must not run"); },
+		}), { task: "explicit", tools: [], model: "premium/reasoner" }, 0);
+		expect(result.__rlm_usage?.model).toBe("premium/reasoner");
+	});
+
+	test("23d missing rlm role candidate fails closed before model execution", async () => {
+		setComplete(() => { throw new Error("model must not run"); });
+		await expectReject(
+			runRlm(deps({ resolveModelRole: () => undefined }), { task: "no candidate", tools: [] }, 0),
+			"no healthy available model configured for role 'rlm'",
+		);
+	});
+
+	test("23e nested RLM calls reuse the central rlm role", async () => {
+		const roles: string[] = [];
+		let calls = 0;
+		setComplete(() => {
+			calls++;
+			if (calls === 1) return resp(js("const child = await rlm({task:'child', tools:[]}); rlm.return({child});"));
+			return resp(js("rlm.return({ok:true});"));
+		});
+		const result = await runRlm(deps({
+			resolveModelRole: (role: string) => {
+				roles.push(role);
+				return model;
+			},
+		}), { task: "parent", tools: ["rlm"] }, 0);
+		expect(result).toMatchObject({ child: { ok: true } });
+		expect(roles).toEqual(["rlm", "rlm"]);
+	});
 
 	test("24 handle inspect/on exposes identity, progress, and final usage", async () => {
 		let release!: (text: string) => void;

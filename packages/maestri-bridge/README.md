@@ -107,3 +107,7 @@ This package targets Pi coding-agent `>=0.80.10` (`agent_settled`, session lifec
 - `bin/pi-maestri` — transparent protected launcher.
 - `bin/maestri-pin-install` — install, recovery, harvest, patch, and audit CLI.
 - `test/` — Bun unit, subprocess, race, and boundary tests.
+
+## Runtime restart
+
+Inside a canonical Maestri terminal, the bridge registers the installed `pi-maestri` wrapper as Pi's restart launcher. `restart_runtime` therefore re-enters through the wrapper, adopts the current concrete `--session` file, and restores terminal ownership even when the original Pi was launched directly. Outside Maestri, Pi keeps its normal restart executable. `pi` and `pi-maestri` remain separate commands; no shell alias is installed.

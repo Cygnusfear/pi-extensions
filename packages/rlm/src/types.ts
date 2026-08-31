@@ -8,10 +8,13 @@ export type RlmCompleteFn = (model: Model<any>, request: Context, auth?: Provide
 export interface RlmOptions {
 	task: string;
 	tools: string[];
+	/** Deliberate concrete-model override. When omitted, the central `rlm` role is resolved at call time. */
 	model?: string;
 	/** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
 	identity?: string | { name?: string; email?: string };
 	maxIterations?: number;
+	/** Input-token ceiling: once state.usage.input reaches this, every tool result carries a forced-return directive. */
+	maxInputTokens?: number;
 	maxDepth?: number;
 	/** Optional runtime schema guard: rlm.return() result must contain every listed top-level key. */
 	requiredKeys?: string[];
@@ -43,6 +46,8 @@ export interface RlmSnapshot {
 	iteration: number;
 	maxIterations?: number;
 	usage: { input: number; output: number };
+	/** Agent turns consumed so far (set at each turn_end; used by the budget countdown). */
+	turns?: number;
 	lastAssistantSummary?: string;
 	lastToolCall?: RlmToolCallSummary;
 	toolHistory: RlmToolCallSummary[];
@@ -67,10 +72,18 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
 	unsubscribe(): void;
 }
 
+export interface RlmModelRef {
+	provider: string;
+	id: string;
+}
+
+export type RlmRoleResolver = (role: string) => RlmModelRef | undefined;
+
 export interface RlmDeps {
 	signal: AbortSignal;
 	cwd: string;
-	parentModel: { provider: string; id: string };
+	/** Resolve one healthy, available model from a centrally configured role. */
+	resolveModelRole: RlmRoleResolver;
 	modelRegistry: ModelRegistry;
 	completeFn?: RlmCompleteFn;
 	sendMessage?: (msg: unknown, opts?: unknown) => void;
@@ -84,6 +97,8 @@ export interface RlmDeps {
 export interface RlmState {
 	resolved: boolean;
 	value: RlmResult | undefined;
+	/** Agent turns consumed so far; used by the budget countdown. */
+	turns?: number;
 	disposed: boolean;
 	disposeAbort: AbortController;
 	timeoutHandle: ReturnType<typeof setTimeout> | null;

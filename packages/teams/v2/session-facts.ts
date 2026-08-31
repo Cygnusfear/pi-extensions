@@ -220,7 +220,13 @@ function validLifecyclePayload(kind: LifecycleFactKind, value: JsonValue): boole
 			return Number.isInteger(payload.cooldownIndex)
 				&& (payload.cooldownIndex as number) >= 0
 				&& finiteNumber(payload.idleSeconds)
-				&& payload.idleSeconds >= 0;
+				&& payload.idleSeconds >= 0
+				&& (payload.cause === undefined || payload.cause === "liveness" || payload.cause === "output_silence")
+				&& (payload.command === undefined || typeof payload.command === "string")
+				&& (payload.commandElapsedSeconds === undefined || (finiteNumber(payload.commandElapsedSeconds) && payload.commandElapsedSeconds >= 0))
+				&& (payload.activeChildProcessCount === undefined || (Number.isInteger(payload.activeChildProcessCount) && (payload.activeChildProcessCount as number) >= 0))
+				&& (payload.lastOutputAt === undefined || (finiteNumber(payload.lastOutputAt) && payload.lastOutputAt >= 0))
+				&& (payload.lastOutputLabel === undefined || typeof payload.lastOutputLabel === "string");
 		case "declaration_done":
 		case "declaration_quit":
 			return typeof payload.summary === "string";

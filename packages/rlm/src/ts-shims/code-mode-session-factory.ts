@@ -51,6 +51,7 @@ export function executeInSession(
 		cwd: string;
 		model: { provider: string; id: string };
 		modelRegistry: unknown;
+		codeModeManual?: unknown;
 		hydrateBareGlobals?: boolean;
 		injectSessionApi?: boolean;
 		injectConsoleWake?: boolean;

@@ -6,6 +6,7 @@ import {
 	resolve,
 	markUnhealthy,
 	markHealthy,
+	markProvidersHealthy,
 	getLiveness,
 	clearLiveness,
 	loadAllRoles,
@@ -215,6 +216,15 @@ describe("liveness", () => {
 		expect(markHealthy("anthropic/claude-opus-4-7")).toBe(true);
 		expect(getLiveness()).toHaveLength(0);
 	});
+
+	test("markProvidersHealthy clears every model for changed providers only", () => {
+		markUnhealthy({ id: "qwencloud/qwen3.8-max", reason: "rate_limited" });
+		markUnhealthy({ id: "qwencloud/qwen3.7-plus", reason: "rate_limited" });
+		markUnhealthy({ id: "anthropic/claude-opus-4-7", reason: "rate_limited" });
+		expect(markProvidersHealthy(["qwencloud"])).toBe(2);
+		expect(getLiveness().map((entry) => entry.id)).toEqual(["anthropic/claude-opus-4-7"]);
+	});
+
 
 	test("clearLiveness removes all entries", () => {
 		markUnhealthy({ id: "a/b", reason: "test" });

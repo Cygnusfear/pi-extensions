@@ -32,6 +32,7 @@ interface Harness {
 	execCalls: string[];
 	ctx: any;
 	home: string;
+	restartLaunchers: string[];
 }
 
 async function loadBridge(
@@ -40,6 +41,7 @@ async function loadBridge(
 	sendUserMessageImpl?: (text: string) => unknown,
 	setup?: (home: string) => void,
 	resetProcessOwnership = true,
+	restartLauncherRegistration = true,
 ): Promise<Harness> {
 	const execFor = typeof exec === "function" ? exec : () => exec;
 	const home = mkdtempSync(join(tmpdir(), "pi-maestri-bridge-test-"));
@@ -66,6 +68,7 @@ async function loadBridge(
 	const sent: string[] = [];
 	const tools = new Map<string, any>();
 	const execCalls: string[] = [];
+	const restartLaunchers: string[] = [];
 	const pi = {
 		on: (event: string, handler: any) => handlers.set(event, handler),
 		registerTool: (tool: any) => tools.set(tool.name, tool),
@@ -85,6 +88,12 @@ async function loadBridge(
 			if (args[0] === "list") return { code: 0, stdout: LIST_OUTPUT };
 			return execFor(args);
 		},
+		...(restartLauncherRegistration
+			? {
+					registerRestartLauncher: (executable: string) =>
+						restartLaunchers.push(executable),
+				}
+			: {}),
 	};
 
 	const mod = await import(
@@ -115,7 +124,16 @@ async function loadBridge(
 			getSessionFile: () => sessionFile,
 		},
 	};
-	return { handlers, audits, sent, tools, execCalls, ctx, home };
+	return {
+		handlers,
+		audits,
+		sent,
+		tools,
+		execCalls,
+		ctx,
+		home,
+		restartLaunchers,
+	};
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -140,6 +158,48 @@ function signedRequest(task: string, id?: string): string {
 }
 
 describe("session_start concrete-file pinning", () => {
+	test("canonical Maestri terminals register the installed restart wrapper", async () => {
+		const h = track(await loadBridge({ killed: true } as ExecOutcome));
+		expect(h.restartLaunchers).toEqual([
+			join(h.home, ".pi", "agent", "bin", "pi-maestri"),
+		]);
+	});
+
+	test("older hosts without restart-launcher registration still load the bridge", async () => {
+		const h = track(
+			await loadBridge(
+				{ killed: true } as ExecOutcome,
+				true,
+				undefined,
+				undefined,
+				true,
+				false,
+			),
+		);
+		expect(h.restartLaunchers).toEqual([]);
+	});
+
+	test("invalid Maestri terminal identities cannot override restart", async () => {
+		const h = track(
+			await loadBridge({ killed: true } as ExecOutcome, true, undefined, () => {
+				process.env.MAESTRI_TERMINAL_ID = "not-a-uuid";
+			}),
+		);
+		expect(h.restartLaunchers).toEqual([]);
+	});
+
+	test("non-Maestri processes do not override Pi's restart executable", async () => {
+		const h = track(
+			await loadBridge(
+				{ killed: true } as ExecOutcome,
+				true,
+				undefined,
+				() => delete process.env.MAESTRI_TERMINAL_ID,
+			),
+		);
+		expect(h.restartLaunchers).toEqual([]);
+	});
+
 	test("managed startup records authoritative id + file as v2", async () => {
 		process.env.PI_MAESTRI_PIN_MODE = "resume";
 		process.env.PI_MAESTRI_PINNED = "1";

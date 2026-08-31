@@ -138,3 +138,28 @@ describe("contextual sandbox-fn registry", () => {
 		expect(names).not.toContain(NAMESPACE + "tmp2");
 	});
 });
+
+describe("dual-name aliases", () => {
+	test("binds direct-tool names to the same implementations", async () => {
+		const { registerSandboxFn, getSandboxFnsForCall } = await import("./sandbox-registry.ts");
+		const mesh: any = async () => "peers";
+		mesh.tell = async () => "told";
+		mesh.inbox = () => [];
+		registerSandboxFn("mesh", mesh);
+		registerSandboxFn("WebFetch", async () => "fetched");
+		registerSandboxFn("executeCodeAsyncList", async () => "jobs");
+		const fns = getSandboxFnsForCall({} as any);
+		expect(await (fns.mesh_tell as any)()).toBe("told");
+		expect(await (fns.mesh_peers as any)()).toBe("peers");
+		expect(await (fns.webfetch as any)()).toBe("fetched");
+		expect(await (fns.execute_code_async_list as any)()).toBe("jobs");
+		expect(fns.mesh_inbox).toBe(mesh.inbox);
+	});
+
+	test("skips aliases whose target is absent (no phantom names)", async () => {
+		const { getSandboxFnsForCall } = await import("./sandbox-registry.ts");
+		const fns = getSandboxFnsForCall({} as any);
+		// mesh namespace not registered in this test process order → no aliases
+		expect("nonexistent_alias" in fns).toBe(false);
+	});
+});

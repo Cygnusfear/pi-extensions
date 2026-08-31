@@ -215,12 +215,84 @@ describe("stuck events wake on every warning", () => {
 			const eventId = createLeaderEventId(identity, "stuck", `stuck:${cooldownIndex}`, { cooldownIndex });
 			l.appendLifecycleFact({
 				schemaVersion: 4, ...identity, eventId, kind: "stuck", occurredAt: Date.now(),
-				payload: { cooldownIndex, idleSeconds },
+				payload: { cooldownIndex, idleSeconds, cause: "liveness" },
 			});
-			l.notifyLLM({ type: "stuck", worker: { ...worker }, idleSeconds, first: cooldownIndex === 0, lifecycleEventId: eventId, attemptId: worker.workerInstanceId });
+			l.notifyLLM({ type: "stuck", worker: { ...worker }, idleSeconds, cause: "liveness", first: cooldownIndex === 0, lifecycleEventId: eventId, attemptId: worker.workerInstanceId });
 			await settle();
 		}
 		expect(sent).toHaveLength(2);
 		expect(sent.every((message) => message.triggerTurn)).toBe(true);
 	});
+});
+
+
+describe("output-silence P0 delivery", () => {
+  test("persists an actionable nonterminal fact and wakes the coordinator to investigate now", async () => {
+    const { leader, sent } = makeLeader();
+    const worker = makeWorker("silent-review", {
+      status: "running",
+      hasActiveChildProcess: true,
+      activeChildProcessCount: 1,
+      currentCommand: "find",
+      currentCommandElapsedSeconds: 600,
+      lastOutputAt: Date.now() - 600_000,
+      lastOutputLabel: "response",
+    });
+    registerWorker(leader, worker);
+    const l = leader as any;
+    const identity = { coordinatorSessionId: "finish-leader-session", teamId: TEAM_ID, workerId: worker.workerId, attemptId: worker.workerInstanceId };
+    const eventId = createLeaderEventId(identity, "stuck", "stuck:0", { cooldownIndex: 0 });
+    l.appendLifecycleFact({
+      schemaVersion: 4,
+      ...identity,
+      eventId,
+      kind: "stuck",
+      occurredAt: Date.now(),
+      payload: {
+        cooldownIndex: 0,
+        idleSeconds: 600,
+        cause: "output_silence",
+        command: "find",
+        commandElapsedSeconds: 600,
+        activeChildProcessCount: 1,
+        lastOutputAt: worker.lastOutputAt,
+        lastOutputLabel: "response",
+      },
+    });
+    l.notifyLLM({
+      type: "stuck",
+      worker: { ...worker },
+      idleSeconds: 600,
+      cause: "output_silence",
+      first: true,
+      lifecycleEventId: eventId,
+      attemptId: worker.workerInstanceId,
+    });
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.triggerTurn).toBe(true);
+    expect(sent[0]?.content).toContain("P0: no meaningful worker output for 600s");
+    expect(sent[0]?.content).toContain("Investigate now; do not continue waiting blindly");
+    expect(sent[0]?.content).toContain("Current command: find (600s)");
+    expect(sent[0]?.content).toContain("1 active child process");
+    expect(sent[0]?.content).toContain("Last output: response at ");
+    expect(worker.status).toBe("running");
+    expect((leader as any).lifecycleStore.attempt(worker.workerInstanceId).assessment).toBeNull();
+    expect((leader as any).lifecycleStore.attempt(worker.workerInstanceId).declaration).toBeNull();
+  });
+
+  test("historical stuck facts without a cause remain valid legacy liveness events", async () => {
+    const { leader, sent } = makeLeader();
+    const worker = makeWorker("legacy-stuck");
+    registerWorker(leader, worker);
+    const l = leader as any;
+    const identity = { coordinatorSessionId: "finish-leader-session", teamId: TEAM_ID, workerId: worker.workerId, attemptId: worker.workerInstanceId };
+    const eventId = createLeaderEventId(identity, "stuck", "stuck:0", { cooldownIndex: 0 });
+    l.appendLifecycleFact({ schemaVersion: 4, ...identity, eventId, kind: "stuck", occurredAt: Date.now(), payload: { cooldownIndex: 0, idleSeconds: 300 } });
+    l.notifyLLM({ type: "stuck", worker: { ...worker }, idleSeconds: 300, cause: "liveness", first: true, lifecycleEventId: eventId, attemptId: worker.workerInstanceId });
+    await settle();
+    expect(sent[0]?.content).toContain("stuck 300s idle");
+    expect(sent[0]?.content).not.toContain("P0:");
+  });
 });

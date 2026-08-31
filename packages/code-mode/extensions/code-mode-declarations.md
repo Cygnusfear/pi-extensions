@@ -274,7 +274,7 @@ declare function bashBgList(): Promise<Array<{ id: string; pid: number; status: 
 // Async execute_code job management
 // =====================================================================
 //
-// When the host fires `execute_code({ code, async: true })`, the tool
+// When the host fires `execute_code({ thinking: "Run the long pipeline and verify completion output.", code: "<long pipeline>", async: true })`, the tool
 // returns immediately with a jobId. The result is delivered later as a
 // follow-up turn (same channel as console.wake). These two primitives
 // let an agent inspect or kill the pending jobs from inside any execute_code
@@ -1091,10 +1091,13 @@ declare const runbookDelete: typeof runbook.delete;
 export interface RlmOptions {
   task: string;
   tools: string[];
+  /** Deliberate concrete-model override. When omitted, the central cheap `rlm` role is resolved at call time. */
   model?: string;
   /** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
   identity?: string | { name?: string; email?: string };
   maxIterations?: number;
+  /** Input-token ceiling: once reached, every tool result directs the worker to return its best partial result. */
+  maxInputTokens?: number;
   maxDepth?: number;
   /** Optional runtime schema guard: rlm.return() result must contain every listed top-level key. */
   requiredKeys?: string[];
@@ -1127,6 +1130,7 @@ export interface RlmSnapshot {
   iteration: number;
   maxIterations?: number;
   usage: { input: number; output: number };
+  turns?: number;
   lastAssistantSummary?: string;
   lastToolCall?: RlmToolCallSummary;
   toolHistory: RlmToolCallSummary[];
@@ -1151,7 +1155,14 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
 
 /**
  * rlm runs a small in-process LLM loop with a private code-mode $ store and a caller-chosen tool whitelist.
- * The sub-agent must finish by calling rlm.return({...}). The returned value can be a large JSON-cloneable
+ * When model is omitted, rlm resolves the centrally configured `rlm` role, whose first line is a cheap
+ * reconnaissance model. Set model only as a deliberate override for reasoning-heavy work; rlm never inherits
+ * the parent session's frontier model. The sub-agent must finish by calling rlm.return({...}).
+ * Every RLM also receives `man` as a read-only documentation capability, even when it is not listed in tools.
+ * Its initial prompt contains only declarations for the allowed surface; detailed and runtime-registered schemas
+ * are resolved on demand with `man("name")` or `man("code-mode/<topic>")`. Documentation visibility never
+ * grants an executable capability outside the caller's whitelist, and nested RLMs use the same policy.
+ * The returned value can be a large JSON-cloneable
  * object, so callers can keep rich ref-graphs cheaply on their own $ store. Canonical caller pattern:
  *
  *   $.rlm = $.rlm ?? {};
@@ -1209,9 +1220,13 @@ declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
  * @example
  * // Fire-and-forget monitor that wakes the agent when done. Do NOT await this promise;
  * // stashing it on $ lets this execute_code block return so the harness is not blocked.
+ * // For a teams worker, prefer the typed event instead of any polling:
+ * teams.on("my-worker", "terminal").timeout(30 * 60 * 1000).wake(e => `worker ${e.type}`);
+ * // Generic case: ONE bounded condition-poll inside a background promise is fine
+ * // (it costs no provider turns); re-issuing status checks across turns is not.
  * $.monitor = (async () => {
  *   for (let i = 0; i < 20; i++) {
- *     await sleep(240000); // 4 minutes
+ *     await sleep(60000); // short bounded waits inside ONE promise only
  *     const status = await mesh.view({ sessionId: 'my-worker', start: -2, end: 0 });
  *     if (status.includes('completed')) {
  *       console.wake("Worker finished! Check results.");
@@ -1220,11 +1235,24 @@ declare const rlm: ((opts: RlmOptions) => RlmHandle) & {
  *   }
  *   console.wake("Monitor timed out — worker never completed.");
  * })();
- * console.log("Monitor started — will wake me when the worker finishes.");
+ * console.log("Monitor armed — I will be woken. I can call done() now; the wake survives it.");
  */
 declare namespace console {
   function wake(...args: unknown[]): void;
 }
+
+/**
+ * Dual-name aliases — direct-tool names work inside execute_code under their EXACT
+ * names: mesh_tell, mesh_view, mesh_inbox, mesh_peers, mesh_chat, mesh_interrupt,
+ * mesh_broadcast, mesh_join_channel, mesh_leave_channel, webfetch (= WebFetch),
+ * execute_code_async_list (= executeCodeAsyncList), execute_code_async_kill
+ * (= executeCodeAsyncKill). The mesh.* namespace and these aliases are the SAME
+ * implementations — one capability, one name.
+ *
+ * Buffer (Node's binary helper) is available globally. require() is NOT — every
+ * capability is pre-injected; never write import/require in the sandbox.
+ */
+declare const Buffer: typeof import("node:buffer").Buffer;
 
 /**
  * Subset of Node.js process object - env vars, cwd, platform info.
