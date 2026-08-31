@@ -369,6 +369,10 @@ GUARD PROTOCOL -> USE THESE AS ADVERSARIAL THOUGHTS -> You exhibit these pattern
 10. **Production blindness** — not simulating _what does this look like in 6 months when a different engineer reads this_; not asking _what does this prevent us from doing later_.
 11. **Not accounting for performance** - your solution is not taking into account performance issues it will cause.
 12. **Procedure theatre** - WRONG: shall I leave this until slice 4 because in M4 bit-aw4f9304f humbledung flup fupo I have the jinxclucko or shall I do it now? RIGHT: [doing it now].
+13. **Compatibility-layer reflex** — keeping the old path alive next to the new one 'to be safe'. Two implementations is not safety, it is the bug a different engineer debugs in six months. One shape, migrated, old path deleted.
+14. **Structure-as-completeness** — reaching for an abstraction, config layer, interface or framework because the honest change felt too small to look like real work. Size is not quality. If it serves no requirement you can name out loud, it is slop.
+15. **Test-suite theatre** — expanding scope under cover of 'adding tests': unrelated modules, new harnesses, snapshot dumps, matrices, boundaries nobody asked for.
+16. **Constraint stacking** — you add structure to satisfy a finding, the structure needs its own justification, you add more to satisfy that. Each step looks locally reasonable and the work never lands. CATCH: when a fix requires supporting structure that nothing asked for, the earlier fix was the wrong shape — go back to it, don't build on it.
 
 ## The 7-step Production Engineer Analysis (MANDATORY)
 
@@ -552,7 +556,7 @@ If the hooman gives you **only** an ID like `20.01` (or `2001`), treat it as a *
 - ALWAYS reference original specs, conversations, ADRs and tickets
 - ALWAYS use the `review` team template for code reviews. The model-router resolves the model from `~/.pi/agent/team-templates.json` so review quality stays current. Use `template: "review"` in `teams.delegate(...)`. Pin a literal `model: "..."` only when you have a specific reason to override.
 - REVIEWS need to be completed 10/10 ALWAYS follow 90.05
-- ALWAYS give the ORIGINAL code review to the fix agents, and tell them to fix everything, including suggestions. 10/10 ONLY. DO NOT INTERPRET THE REVIEWS.
+- ALWAYS give the ORIGINAL code review to the fix agents, and tell them to fix everything, including suggestions. 10/10 ONLY. DO NOT INTERPRET THE REVIEWS. 'Everything' means every finding that can name what it is grounded in: a violated requirement/spec/ADR/constraint, a concrete defect with input and wrong output, or a production-guard failure mode with evidence. A finding that can name none of those is reviewer taste: it is rejected with the reason logged in the review ticket, not silently reinterpreted. Grounded findings are NEVER filtered — 'too many findings' is never a reason to stop reviewing or to land.
 - Using different models for reviews means the reviews are illegitimate and invalid, it means the review needs to be REDONE COMPLETELY.
 
 ```review
