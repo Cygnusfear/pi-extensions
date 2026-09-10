@@ -170,6 +170,107 @@ describe("executeInSession — error modes", () => {
 		expect(result.output).not.toContain("$ store:");
 	});
 
+	test("syntax error positions are remapped from the wrapped buffer to the submitted code", async () => {
+		const sess = createCodeModeSession();
+		// The fault is on submitted line 3. acorn parses a wrapped buffer whose
+		// opener occupies line 1, so the raw position is line 4: the reported
+		// position must be corrected to the code the caller actually wrote.
+		const code = [
+			"const a = 1;",
+			"const b = 2;",
+			"const s = `hello `world` bye`;",
+			"console.log(s);",
+		].join("\n");
+		const result = await executeInSession(
+			sess,
+			code,
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.output).toContain("Syntax error");
+		expect(result.output).toContain("line 3");
+		expect(result.output).not.toContain("(4:");
+		// The offending submitted line is echoed with a caret under the column.
+		expect(result.output).toContain("`hello `world` bye`");
+		expect(result.output).toContain("  const s = `hello `world` bye`;\n" + " ".repeat(20) + "^");
+		expect(result.error).toContain("line 3");
+		expect(result.output).toContain("Your $ store was NOT affected");
+	});
+
+	test("unterminated template literals are located at the opening backtick", async () => {
+		const sess = createCodeModeSession();
+		const code = ["const a = 1;", "const b = 2;", "const s = `hello ;"].join("\n");
+		const result = await executeInSession(
+			sess,
+			code,
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.output).toContain("Unterminated template");
+		expect(result.output).toContain("line 3");
+		expect(result.output).not.toContain("(4:");
+	});
+
+	test("positions outside the submitted code region are not remapped", async () => {
+		const sess = createCodeModeSession();
+		// An unclosed block makes acorn fail on the generated wrapper tail rather
+		// than in the submitted code, so there is no user line to point at.
+		// Relabelling it would send the author to a line they never wrote.
+		const result = await executeInSession(
+			sess,
+			"if (true) {",
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.output).toContain("Syntax error");
+		expect(result.output).not.toContain("line ");
+	});
+
+	test("a very long offending line is windowed instead of echoed in full", async () => {
+		const sess = createCodeModeSession();
+		const filler = "a".repeat(300);
+		const result = await executeInSession(
+			sess,
+			"const " + filler + " = ;",
+			makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+				skipToolInjection: true,
+				bindings: {},
+			}),
+		);
+
+		expect(result.output).toContain("Syntax error");
+		expect(result.output).toContain("line 1");
+		// The echo is windowed around the reported column and marked, so one long
+		// line cannot dominate model-visible output.
+		expect(result.output).toContain("…");
+		expect(result.output).not.toContain(filler);
+	});
+
 	test("runtime SyntaxError (JSON.parse) is a runtime error, not a code syntax error", async () => {
 		const sess = createCodeModeSession();
 		(sess.store.proxy as any).survivor = "keep-me";

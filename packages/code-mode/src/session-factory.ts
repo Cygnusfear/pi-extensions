@@ -1153,6 +1153,60 @@ function extractUserCodeLine(err: unknown): number | null {
 	return Number.isFinite(userLine) && userLine >= 1 ? userLine : null;
 }
 
+/** acorn appends " (line:column)" to its messages; the position is re-derived from `loc`. */
+const ACORN_POSITION_SUFFIX = / \(\d+:\d+\)$/;
+
+/** Bound the echoed source line so one long line cannot dominate tool output. */
+const SYNTAX_SNIPPET_MAX_WIDTH = 160;
+
+/**
+ * Rewrite an acorn syntax error so its position refers to the caller's submitted
+ * code instead of the wrapped buffer acorn actually parsed.
+ *
+ * Only the line is offset: the wrapper prefix is whole lines, so the column is
+ * already correct. A position outside the submitted region - the wrapper opener
+ * or the auto-persist suffix - is returned untouched, because remapping it would
+ * name a line the caller never wrote.
+ */
+function describeSyntaxError(
+	parseErr: unknown,
+	code: string,
+	wrapperOpenerLines: number,
+): { message: string; snippet: string[] } {
+	const rawMessage = parseErr instanceof Error ? parseErr.message : String(parseErr);
+	const loc = (parseErr as { loc?: { line?: unknown; column?: unknown } } | null)?.loc;
+	const line = typeof loc?.line === "number" ? loc.line : undefined;
+	const column = typeof loc?.column === "number" ? loc.column : undefined;
+	if (line === undefined || column === undefined) return { message: rawMessage, snippet: [] };
+
+	const codeLines = code.split("\n");
+	const codeLine = line - wrapperOpenerLines;
+	if (codeLine < 1 || codeLine > codeLines.length) return { message: rawMessage, snippet: [] };
+
+	// Wording stays acorn's; only the position is replaced, and it comes from `loc`
+	// rather than from the message text.
+	const message = `${rawMessage.replace(ACORN_POSITION_SUFFIX, "")} (line ${codeLine}, column ${column})`;
+	return { message, snippet: formatSyntaxSnippet(codeLines[codeLine - 1] ?? "", column) };
+}
+
+/** Echo the offending submitted line with a caret under the reported column. */
+function formatSyntaxSnippet(lineText: string, column: number): string[] {
+	// Tabs expand one-for-one, so indices stay valid without re-deriving the column.
+	const expanded = lineText.replace(/\t/g, " ");
+	const caretIndex = Math.min(Math.max(column, 0), expanded.length);
+	const start =
+		expanded.length > SYNTAX_SNIPPET_MAX_WIDTH
+			? Math.max(
+					0,
+					Math.min(caretIndex - Math.floor(SYNTAX_SNIPPET_MAX_WIDTH / 2), expanded.length - SYNTAX_SNIPPET_MAX_WIDTH),
+				)
+			: 0;
+	const visible = expanded.slice(start, start + SYNTAX_SNIPPET_MAX_WIDTH);
+	const leading = start > 0 ? "…" : "";
+	const trailing = start + visible.length < expanded.length ? "…" : "";
+	return [`  ${leading}${visible}${trailing}`, `  ${" ".repeat(leading.length + (caretIndex - start))}^`];
+}
+
 export async function executeInSession(
 	session: CodeModeSession,
 	code: string,
@@ -1174,17 +1228,24 @@ export async function executeInSession(
 	const autoPersistSuffix = autoPersistNames
 		.map((n) => "$." + n + " = typeof " + n + " !== \"undefined\" ? " + n + " : $." + n + ";")
 		.join("\n");
-	const wrapped = "(async () => {\n" + code + "\n" + autoPersistSuffix + "\n})()";
+	// acorn parses this wrapped buffer, so every position it reports refers to it.
+	// Keep the opener named: the correction below derives its line offset from it.
+	const wrapperOpener = "(async () => {";
+	const wrapped = wrapperOpener + "\n" + code + "\n" + autoPersistSuffix + "\n})()";
+	const wrapperOpenerLines = wrapperOpener.split("\n").length;
 
 	let parsedAst: unknown;
 	try {
 		parsedAst = acorn.parse(wrapped, { ecmaVersion: "latest" });
 	} catch (parseErr) {
-		const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-		if (errorMode === "rethrow") throw parseErr instanceof Error ? parseErr : new Error(parseMsg);
+		const rawParseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+		if (errorMode === "rethrow") throw parseErr instanceof Error ? parseErr : new Error(rawParseMsg);
+		const syntax = describeSyntaxError(parseErr, code, wrapperOpenerLines);
+		const parseMsg = syntax.message;
 		return {
 			output: buildOutput(warnings, [
 				"\u26a0\ufe0f Syntax error: " + parseMsg,
+				...syntax.snippet,
 				"",
 				"Your $ store was NOT affected. Fix the syntax and retry.",
 				"Run console.log($.__status()) only if you need store details.",
