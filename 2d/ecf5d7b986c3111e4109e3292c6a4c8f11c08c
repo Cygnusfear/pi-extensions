@@ -1,0 +1,22 @@
+packages/code-mode/src/session-factory.test.ts
+  s_06a9e986aa412b::t_259c0c2382f978 202,248-271
+  s_06a9e986aa412b::t_32d0f10afe12f2 173-201,203-247,272-273
+packages/code-mode/src/session-factory.ts
+  s_06a9e986aa412b::t_a65dd251a60901 1156-1209,1231-1235,1241-1244,1248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2decf5d7b986c3111e4109e3292c6a4c8f11c08c",
+  "prompts": {},
+  "sessions": {
+    "s_06a9e986aa412b": {
+      "agent_id": {
+        "tool": "Enrico Mars Mavalvala",
+        "id": "a9f74595-e2bb-41bc-8cef-e5b5508dd996",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": null
+    }
+  }
+}
