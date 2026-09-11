@@ -299,8 +299,25 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   // Class-aware creators: pick the right epistemic class so notes land in the
   // right surface. constraint/warn = KNOWLEDGE (born active, mai.rules()),
   // artifact = RECORD (born closed). Never file a rule or a record as a ticket.
+  /**
+   * Sandbox callers are LLM-written JavaScript, so the TypeScript signature is
+   * not enforcement. Passing an object where a positional title belongs used to
+   * reach the CLI as the string "[object Object]", silently creating a note with
+   * a garbage title and no body. Fail loudly instead, and name the shape that the
+   * caller probably meant.
+   */
+  function requireNoteTitle(verb: string, title: unknown): string {
+    if (typeof title === "string" && title.trim() !== "") return title;
+    const received = title === null ? "null" : Array.isArray(title) ? "an array" : typeof title;
+    throw new Error(
+      `mai.${verb}: title must be a non-empty string, but received ${received}. ` +
+        `Call it as mai.${verb}("My title", { body: "...", tags: "a,b" }) - ` +
+        `the title is a positional string, not a { title, body } object.`,
+    );
+  }
+
   mai.constraint = async (title, opts) => {
-    const args = ["constraint", title];
+    const args = ["constraint", requireNoteTitle("constraint", title)];
     if (opts?.body) args.push("-d", opts.body);
     if (opts?.tags) args.push("-l", opts.tags);
     if (opts?.target) args.push("--target", opts.target);
@@ -310,7 +327,7 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   };
 
   mai.artifact = async (title, opts) => {
-    const args = ["artifact", title];
+    const args = ["artifact", requireNoteTitle("artifact", title)];
     if (opts?.body) args.push("-d", opts.body);
     if (opts?.tags) args.push("-l", opts.tags);
     const r = await maiRun(args, maiResolveDir(opts?.cwd));

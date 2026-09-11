@@ -99,6 +99,28 @@ describe("maiCall exact argv transport", () => {
     ).rejects.toThrow("either argv or legacy args");
   });
 
+  test("rejects a non-string title instead of sending [object Object] to mai", async () => {
+    const tools = createToolBindings({ cwd: "/tmp", images: [] }) as {
+      mai: {
+        artifact: (title: unknown, opts?: unknown) => Promise<unknown>;
+        constraint: (title: unknown, opts?: unknown) => Promise<unknown>;
+      };
+    };
+
+    // The object form is the mistake that used to reach the CLI as the string
+    // "[object Object]", silently creating a note with a garbage title and no body.
+    await expect(tools.mai.artifact({ title: "Handoff", body: "x", tags: "a" })).rejects.toThrow(
+      "title must be a non-empty string",
+    );
+    await expect(tools.mai.constraint({ title: "Rule", body: "y" })).rejects.toThrow(
+      "title must be a non-empty string",
+    );
+    await expect(tools.mai.artifact("")).rejects.toThrow("title must be a non-empty string");
+    await expect(tools.mai.artifact(null)).rejects.toThrow("title must be a non-empty string");
+    // The error must name the shape the caller probably meant, so the next attempt succeeds.
+    await expect(tools.mai.artifact({ title: "Handoff" })).rejects.toThrow("positional string");
+  });
+
   test("retains the existing combined stdout and exit-code contract", async () => {
     const { call } = createHarness({ stdout: "out\n", stderr: "warn\n", status: null });
 
