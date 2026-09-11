@@ -1,0 +1,21 @@
+packages/code-mode/src/mai-call.test.ts
+  s_06a9e986aa412b::t_6079360de90333 102-123
+packages/code-mode/src/sandbox-tools.ts
+  s_06a9e986aa412b::t_4273b66f190c0b 302-318,320,330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a776ff11b77a18dca8673ee75e5e9eebac759c8",
+  "prompts": {},
+  "sessions": {
+    "s_06a9e986aa412b": {
+      "agent_id": {
+        "tool": "Enrico Mars Mavalvala",
+        "id": "a9f74595-e2bb-41bc-8cef-e5b5508dd996",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
