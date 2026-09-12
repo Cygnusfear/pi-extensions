@@ -27,6 +27,17 @@ export function surfacedDeliveryPath(durableId: string): string {
 	return join(homedir(), ".pi", "mesh", `surfaced-${durableId}.json`);
 }
 
+/**
+ * Say it once per distinct message. A failing guard retries every delivery, and a
+ * wall of identical warnings would hide the very failure it reports.
+ */
+const warned = new Set<string>();
+function warnOnce(message: string): void {
+	if (warned.has(message)) return;
+	warned.add(message);
+	console.warn(`[pi-mesh] surfaced-delivery guard: ${message}`);
+}
+
 export interface SurfacedDeliveryGuard {
 	/** True when this delivery was already surfaced, so it must not be shown again. */
 	has(deliveryId: string): boolean;
@@ -58,8 +69,10 @@ export function createSurfacedDeliveryGuard(
 			const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
 			if (!Array.isArray(parsed)) return;
 			for (const id of parsed) if (typeof id === "string" && id) ids.add(id);
-		} catch {
-			// An unreadable history only costs duplicate suppression, never correctness.
+		} catch (error) {
+			// An unreadable history costs duplicate suppression, never correctness - but a
+			// guard that fails QUIETLY is how you report success into a void, so say it.
+			warnOnce(`could not read surfaced-delivery history: ${(error as Error)?.message ?? error}`);
 		}
 	};
 
@@ -71,7 +84,12 @@ export function createSurfacedDeliveryGuard(
 			const temporaryPath = `${path}.tmp.${process.pid}`;
 			writeFileSync(temporaryPath, JSON.stringify([...ids]), { encoding: "utf8", mode: 0o600 });
 			renameSync(temporaryPath, path);
-		} catch {}
+		} catch (error) {
+			// Not fatal (an in-memory guard still suppresses within this run) but never
+			// silent: a persistence failure is exactly what makes cross-restart
+			// duplicates look random.
+			warnOnce(`could not persist surfaced-delivery history: ${(error as Error)?.message ?? error}`);
+		}
 	};
 
 	return {
