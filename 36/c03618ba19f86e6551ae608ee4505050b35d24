@@ -1,0 +1,14 @@
+packages/explain/extensions/explain.ts
+  h_59730e3e3c55ed 13,427-431
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "36c03618ba19f86e6551ae608ee4505050b35d24",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
