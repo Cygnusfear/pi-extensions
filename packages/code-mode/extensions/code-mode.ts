@@ -1183,14 +1183,10 @@ export default function (
 				}
 
 				const bgWork = (async () => {
-					const result = await executeInSession(
-						sess,
-						params.code,
-						buildDeps(bgAbort.signal),
-					);
+					const result = await executeAndPublishContext(bgAbort.signal);
 					// Build the follow-up message body. Same shape as a sync result, plus
 					// a jobId tag so the agent can correlate.
-					const body = buildResultText(result.output, result.error);
+					const body = withAfkContactBanner(buildResultText(result.output, result.error));
 					const status = result.error ? "failed" : "completed";
 					const durStr =
 						result.duration < 1000
@@ -1341,7 +1337,7 @@ export default function (
 				const jobId = nextAsyncJobId();
 				syncPromise
 					.then((result) => {
-						const body = buildResultText(result.output, result.error);
+						const body = withAfkContactBanner(buildResultText(result.output, result.error));
 						const status = result.error ? "failed" : "completed";
 						const durStr =
 							result.duration < 1000
