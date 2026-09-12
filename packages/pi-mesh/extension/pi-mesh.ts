@@ -6,6 +6,7 @@
  * If the sidecar isn't running, we spawn it on demand.
  */
 
+import { createSurfacedDeliveryGuard } from "./inbound-dedup.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import {
@@ -1758,6 +1759,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     }
   };
   const activeTellMailbox = new ActiveInboundTellMailbox();
+  // Redelivery guard: ack a duplicate so the sender stops retrying, but never
+  // render the same delivery twice (see inbound-dedup.ts).
+  const surfacedDeliveries = createSurfacedDeliveryGuard();
   const pendingAsks: Array<{
     requestId: number;
     senderLabel: string;
@@ -2358,6 +2362,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Idle → deliver immediately.
       mesh.on("message", (inbound) => {
         const { message: msg, deliveryId, ackRequested, preempt, originalFrom } = inbound;
+        // Already surfaced: this is a redelivery (sender retry or mailbox replay).
+        // Ack it so the retry stops, render nothing - the human saw it once.
+        if (deliveryId && surfacedDeliveries.has(deliveryId)) {
+          if (originalFrom && ackRequested) {
+            mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"));
+          }
+          return;
+        }
+        if (deliveryId) surfacedDeliveries.remember(deliveryId);
         if (isTeamsLifecyclePayload(msg.payload)) return;
         // Control-plane: a mesh:control tell is a harness command (setModel, …),
         // not conversation. Route it to its handler and never surface to the LLM.
