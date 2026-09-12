@@ -2192,9 +2192,17 @@ export default function piMeshExtension(pi: ExtensionAPI) {
               ack,
             });
           }
-          const deliveryId = createDeliveryId();
-          const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
-          return JSON.stringify({ sent: false, sessionId: params.sessionId, ack });
+          // Same rule as the mesh_tell tool, which this duplicates: a nickname that
+          // matched nothing is genuinely unresolvable, while an explicit address is
+          // routable because its topic is deterministic. Both copies must change
+          // together - extracting them is owed work, not done here.
+          if (isExplicitMeshAddress(params.sessionId)) {
+            resolved = params.sessionId;
+          } else {
+            const deliveryId = createDeliveryId();
+            const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+            return JSON.stringify({ sent: false, sessionId: params.sessionId, ack });
+          }
         }
         if (mode === "none") {
           mesh.tell(resolved, params.message);
