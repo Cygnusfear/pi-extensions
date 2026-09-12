@@ -1,0 +1,16 @@
+packages/mesh-telegram-bridge/src/mesh-client.test.ts
+  h_59730e3e3c55ed 1-181
+packages/mesh-telegram-bridge/src/mesh-client.ts
+  h_59730e3e3c55ed 256-267,274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e8fb827b58204b2511ab28c6bcd568f2e99dee43",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
