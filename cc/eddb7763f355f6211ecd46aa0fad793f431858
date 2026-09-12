@@ -1,0 +1,14 @@
+packages/code-mode/extensions/code-mode.ts
+  h_59730e3e3c55ed 1186,1189,1340
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cceddb7763f355f6211ecd46aa0fad793f431858",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
