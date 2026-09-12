@@ -2452,18 +2452,10 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           aborted = plan.abortFirst && !!currentCtx;
           if (aborted) currentCtx?.abort();
         }
-        const banner =
-          plan.action === "preempt-abort"
-            ? aborted
-              ? "🛑 MESH INTERRUPT (abort — your in-flight operation was cancelled)\n"
-              : "🛑 MESH INTERRUPT (abort — nothing was in flight to cancel; read this now)\n"
-            : plan.action === "preempt-steer"
-              ? "⚠️ MESH INTERRUPT (steer — jumped the queue)\n"
-              : "";
         // Append a bottom signature so an agent who only reads the END of the
         // message still sees the real mesh sender (see default-prompt identity
-        // block + inbound-format.ts). The interrupt banner leads when preempting.
-        const content = `${banner}${formatInboundTellContent(MI, senderLabel, payloadText, msg.timestamp)}`;
+        // block + inbound-format.ts).
+        const content = formatInboundTellContent(MI, senderLabel, payloadText, msg.timestamp);
         const details = {
           from: msg.from,
           senderLabel,
