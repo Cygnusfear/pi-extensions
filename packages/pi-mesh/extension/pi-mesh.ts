@@ -6,7 +6,7 @@
  * If the sidecar isn't running, we spawn it on demand.
  */
 
-import { createSurfacedDeliveryGuard } from "./inbound-dedup.ts";
+import { createSurfacedDeliveryGuard, surfacedDeliveryPath } from "./inbound-dedup.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import {
@@ -1761,7 +1761,14 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const activeTellMailbox = new ActiveInboundTellMailbox();
   // Redelivery guard: ack a duplicate so the sender stops retrying, but never
   // render the same delivery twice (see inbound-dedup.ts).
-  const surfacedDeliveries = createSurfacedDeliveryGuard();
+  const surfacedDeliveries = createSurfacedDeliveryGuard({
+    // Persisted per durable id: the replay that duplicates mail happens on the
+    // restart, which is exactly when an in-memory set would be empty.
+    path: () => {
+      const durableId = mesh.getIdentity()?.id;
+      return durableId ? surfacedDeliveryPath(durableId) : undefined;
+    },
+  });
   const pendingAsks: Array<{
     requestId: number;
     senderLabel: string;
@@ -2049,10 +2056,17 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         }
       }
 
-      if (drained.length > 0) {
+      // A tell surfaced live in a previous incarnation can still be sitting in the
+      // mailbox, and the revive drain is where it came back a second time - seen by
+      // several agents, not just this one. Same guard as the live path, which is why
+      // it has to persist across the restart that triggers the replay.
+      const fresh = drained.filter((d) => !(d.deliveryId && surfacedDeliveries.has(d.deliveryId)));
+      for (const d of fresh) if (d.deliveryId) surfacedDeliveries.remember(d.deliveryId);
+
+      if (fresh.length > 0) {
         const blob = formatReviveDrainBatch(
           MI,
-          drained.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText, sentAt: d.sentAt })),
+          fresh.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText, sentAt: d.sentAt })),
         );
         pi.sendMessage(
           {
@@ -2060,7 +2074,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             content: blob,
             display: true,
             details: {
-              count: drained.length,
+              count: fresh.length,
               tells: drained.map((d) => ({
                 from: d.fromId,
                 senderLabel: d.senderLabel,

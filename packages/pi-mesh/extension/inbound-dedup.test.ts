@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createSurfacedDeliveryGuard } from "./inbound-dedup.ts";
 
 describe("surfaced delivery guard", () => {
@@ -34,5 +37,33 @@ describe("surfaced delivery guard", () => {
 		guard.remember("y");
 		expect(guard.size()).toBe(2);
 		expect(guard.has("x")).toBe(true);
+	});
+
+	describe("across a restart", () => {
+		test("surfaced ids survive, because the replay happens on the restart", () => {
+			const path = join(mkdtempSync(join(tmpdir(), "surfaced-")), "surfaced.json");
+			const before = createSurfacedDeliveryGuard({ path: () => path });
+			before.remember("delivery-1");
+
+			// A restarted session builds a fresh guard with empty memory over the same file.
+			const afterRestart = createSurfacedDeliveryGuard({ path: () => path });
+			expect(afterRestart.has("delivery-1")).toBe(true);
+			expect(afterRestart.has("never-seen")).toBe(false);
+		});
+
+		test("stays in memory when no path is available", () => {
+			const guard = createSurfacedDeliveryGuard({ path: () => undefined });
+			guard.remember("x");
+			expect(guard.has("x")).toBe(true);
+		});
+
+		test("an unreadable history costs only suppressions, never correctness", () => {
+			const path = join(mkdtempSync(join(tmpdir(), "surfaced-bad-")), "surfaced.json");
+			writeFileSync(path, "{ not json");
+			const guard = createSurfacedDeliveryGuard({ path: () => path });
+			expect(guard.has("anything")).toBe(false);
+			guard.remember("anything");
+			expect(guard.has("anything")).toBe(true);
+		});
 	});
 });
