@@ -1792,7 +1792,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   /** An explicit mesh address - a durable id or a client id (both UUID shaped).
    *  Unlike a nickname it needs no peer-map entry to be reachable: the topic is
    *  deterministic and the receiver subscribes to it. */
-  const isExplicitMeshAddress = (rawSessionId: string): boolean =>
+  const isExplicitMeshAddress = (rawSessionId: unknown): boolean =>
+    typeof rawSessionId === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSessionId.trim());
 
   // /agent <name> <message> — message a mesh peer by name (native mesh command).
