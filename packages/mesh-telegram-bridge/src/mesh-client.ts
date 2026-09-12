@@ -219,7 +219,13 @@ export class MeshClient extends EventEmitter {
 			const { message, deliveryId, ackRequested, originalFrom } = unwrapInboundTell(m);
 			const fromClientId = originalFrom ?? message.from ?? m.from;
 			if (fromClientId === this.clientId) return;
-			const peer = this.peers.get(fromClientId);
+			// A peer may identify itself by its DURABLE mesh id rather than the
+			// per-connection client id (pi-mesh does). The peer map is keyed by client id,
+			// so a durable-id sender used to miss the lookup, be treated as an
+			// "unannounced client", wait out the topic timeout and have its tell DROPPED -
+			// while the sender was told 'delivered'. Fall back to matching the durable id.
+			const peer = this.peers.get(fromClientId)
+				?? [...this.peers.values()].find((p) => p.meshId === fromClientId);
 			// The receipt is NOT sent here. Acking on receipt told the sender
 			// "delivered" before the bridge had decided whether it could route the tell
 			// at all - so a dropped message looked successful. The bridge acks via
