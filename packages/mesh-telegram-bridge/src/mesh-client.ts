@@ -253,12 +253,28 @@ export class MeshClient extends EventEmitter {
 		this.sendTellPayload(target, payload);
 	}
 
+	/**
+	 * Every tell this bridge sends is the hooman speaking, so it goes out as an
+	 * interrupt at the ABORT level (pi-mesh: action "preempt-abort",
+	 * abortFirst=agentBusy, deliverAs "followUp", triggerTurn).
+	 *
+	 * abort is deliberate, not an oversight: the hooman wants to be able to STOP a
+	 * running agent, so the receiver cancels its in-flight operation before the
+	 * message lands. That cost is real - a build, a test run or a git commit can be
+	 * cut off mid-flight - and it is a choice the hooman owns. pi-mesh aborts only
+	 * when the receiver is actually busy, and /mesh deafen still protects a receiver
+	 * that explicitly opted out.
+	 *
+	 * Control-plane tells route to a handler before pi-mesh consults the plan, so
+	 * stamping them costs nothing and keeps one choke point instead of two.
+	 */
 	private sendTellPayload(target: ReplyTarget, payload: Record<string, unknown>): void {
 		const route = target.meshId ?? target.clientId;
 		const tellEnvelope: MeshTellEnvelope = {
 			kind: "mesh:tell",
 			deliveryId: createDeliveryId(),
 			from: this.clientId,
+			preempt: "abort",
 			payload,
 			timestamp: Date.now(),
 		};
