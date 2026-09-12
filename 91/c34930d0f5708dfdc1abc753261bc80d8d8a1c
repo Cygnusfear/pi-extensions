@@ -1,0 +1,19 @@
+packages/pi-mesh/extension/inbound-dedup.ts
+  s_ad3e634404fe30::t_4bebb72b52f0eb 30-40,72-75,87-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "91c34930d0f5708dfdc1abc753261bc80d8d8a1c",
+  "prompts": {},
+  "sessions": {
+    "s_ad3e634404fe30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29c8db99-5569-49dc-a949-ea09ebcc7313",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
