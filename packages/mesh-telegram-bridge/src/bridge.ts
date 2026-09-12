@@ -23,6 +23,7 @@ import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir } from "node:os";
+import { writeAfkState } from "@pi-extensions/shared/afk";
 
 /** When the group is a forum, broadcasts (agent channel-posts + your plain messages) land here. */
 const BROADCAST_TOPIC_NAME = "📢 Broadcast";
@@ -131,7 +132,8 @@ export class Bridge {
 			},
 			onError: (chatId, messageIds, error) => console.warn(`[bridge] retention deleteMessages failed in chat ${chatId} for ${messageIds.length} message(s):`, error.message),
 		});
-		if (this.afk.on) console.log("[bridge] loaded Telegram contact reminder: on (" + this.afk.message + ")");
+		this.publishAfkState(); // republish on start so consumers never read a stale flag
+		if (this.afk.on) console.log("[bridge] AFK on (" + this.afk.message + ") - contact banner published");
 		if (this.voice.on) console.log("[bridge] loaded voice mode: on" + (this.tts ? "" : " (TTS not configured)"));
 		console.log(`[bridge] loaded state: ${state.agentTopics.length} agent topics, ${this.retention.size() + this.legacyMsgToAgent.size} reaction routes, broadcast=${this.broadcastTopicId}`);
 	}
@@ -169,6 +171,16 @@ export class Bridge {
 		});
 	}
 
+	/** Mirror the AFK flag into the small published file consumers read (shared/afk).
+	 *  The bridge's own state.json stays the source of truth; this is a projection. */
+	private publishAfkState(): void {
+		writeAfkState(
+			this.afk.on
+				? { on: true, message: this.afk.message, since: this.afk.since }
+				: { on: false },
+		);
+	}
+
 	/** /afk [on|off|status] [note] — hooman is away. Toggles the contact BANNER agents see
 	 *  in code-mode output; forwarding to Telegram happens either way. */
 	private async handleAfkCommand(text: string, ctx: Context): Promise<void> {
@@ -181,6 +193,7 @@ export class Bridge {
 		if (sub === "off") {
 			this.afk = { on: false, message: "", since: 0 };
 			this.saveState();
+			this.publishAfkState();
 			void ctx.reply("✅ AFK off — banner hidden. Forwarding continues.").catch(() => {});
 			console.log("[bridge] Telegram contact reminder off");
 			return;
@@ -190,6 +203,7 @@ export class Bridge {
 		const message = msgParts.join(" ").trim() || "Telegram contact reminder";
 		this.afk = { on: true, message, since: Date.now() };
 		this.saveState();
+		this.publishAfkState();
 		void ctx.reply("✅ AFK on — agents now show the Telegram contact banner. Forwarding continues.").catch(() => {});
 		console.log("[bridge] Telegram contact reminder on (" + message + ")");
 	}

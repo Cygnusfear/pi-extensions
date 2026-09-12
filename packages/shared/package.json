@@ -7,6 +7,7 @@
 		"./alert-provenance": "./src/alert-provenance.ts",
 		"./provider-limits": "./src/provider-limits.ts",
 		"./relay-to-hooman": "./src/relay-to-hooman.ts",
+		"./afk": "./src/afk.ts",
 		"./edit-hooks": "./src/edit-hooks.ts",
 		"./git-guards": "./src/git-guards.ts",
 		"./process-guards": "./src/process-guards.ts",

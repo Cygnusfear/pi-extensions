@@ -8,6 +8,7 @@
  * Inspired by: https://blog.cloudflare.com/code-mode/
  */
 
+import { withAfkContactBanner } from "@pi-extensions/shared/afk";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -1439,9 +1440,11 @@ export default function (
 			// winner.kind === "result" — normal sync return path.
 			if (pendingExecution === syncMutex) pendingExecution = null;
 			const { output, error, duration } = winner.r;
-			const text = formatProgressiveOutput(buildResultText(output, error), {
-				filePrefix: "pi-codemode",
-			}).text;
+			const text = withAfkContactBanner(
+				formatProgressiveOutput(buildResultText(output, error), {
+					filePrefix: "pi-codemode",
+				}).text,
+			);
 			const lineCount = text.split("\n").length;
 			// Include any images stashed by readImage()
 			const imageContent = getSession().images.map((img) => ({
