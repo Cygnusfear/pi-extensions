@@ -19,6 +19,7 @@ describe("afk contact flag", () => {
 		writeAfkState({ on: true, message: "at lunch", since: 123 });
 		expect(readAfkState()).toEqual({ on: true, message: "at lunch", since: 123 });
 		expect(withAfkContactBanner("output")).toBe("output\n\n" + AFK_CONTACT_BANNER);
+		expect(AFK_CONTACT_BANNER.startsWith("📞 afk | ")).toBe(true);
 	});
 
 	test("an OFF flag hides the banner", () => {
