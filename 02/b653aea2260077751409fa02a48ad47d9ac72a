@@ -1,0 +1,16 @@
+packages/shared/src/afk.test.ts
+  h_59730e3e3c55ed 22
+packages/shared/src/afk.ts
+  h_59730e3e3c55ed 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "02b653aea2260077751409fa02a48ad47d9ac72a",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
