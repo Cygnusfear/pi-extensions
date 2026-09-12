@@ -10,6 +10,7 @@
  * The working model gets a short confirmation — no parroting.
  */
 
+import { relayToHooman } from "../../shared/src/relay-to-hooman.ts";
 import { complete, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, getMarkdownTheme, serializeConversation } from "@earendil-works/pi-coding-agent";
@@ -423,6 +424,11 @@ export default function (pi: ExtensionAPI) {
             contextTokensEstimate,
           },
         });
+
+        // The Hooman asked for explain to ALWAYS forward to Telegram - not only while
+        // AFK, and not only when an agent remembers to mesh.tell. Fire-and-forget: the
+        // relay no-ops when the mesh or the bridge config is unavailable.
+        relayToHooman(explained);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         ctx.ui.notify(`Rephrase failed: ${errorMsg}`, "error");
