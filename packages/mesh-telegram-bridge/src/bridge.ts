@@ -370,16 +370,25 @@ export class Bridge {
 
 	// ── mesh → telegram ────────────────────────────────────────────────
 	private async onMeshTell(t: InboundTell): Promise<void> {
-		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${(t.text ?? "").slice(0, 60)}`); return; }
+		// Receipts are sent HERE, not by the mesh client on receipt: only this method
+		// knows whether the tell could be delivered. Acking earlier told the sender
+		// "delivered" for a message that was then dropped - the sender had no way to
+		// tell a delivered message from a lost one.
+		const receipt = (phase: "delivered" | "undeliverable"): void => {
+			if (t.deliveryId && t.ackRequested) this.mesh.ackTell(t.fromClientId, t.deliveryId, phase);
+		};
+		if (this.chatId == null) { console.warn(`[bridge] no chat id yet — dropping tell from ${t.nickname}: ${(t.text ?? "").slice(0, 60)}`); receipt("undeliverable"); return; }
 		const topic = this.forumMode ? await this.ensureAgentTopic(t) : null;
 		if (this.forumMode && topic === null) {
 			console.warn(`[bridge] dropping tell from ${t.nickname}: no durable forum route was established`);
+			receipt("undeliverable");
 			return;
 		}
 		const chatId = this.chatId;
 		if (chatId == null) return;
 		if (t.reaction) await this.setHoomanReaction(t.reaction, topic);
 		const thread = topic != null ? { message_thread_id: topic } : {};
+		let posted = true;
 		try {
 			if (t.text && t.text.trim()) {
 				for (const chunk of this.chunkText(`👤 ${t.nickname}`, t.text)) {
@@ -390,7 +399,11 @@ export class Bridge {
 			}
 			if (this.voice.on && t.text && t.text.trim()) await this.sendVoiceFor(chatId, t.text, thread, t);
 			await this.uploadAttachment(chatId, t, topic);
-		} catch (e) { console.error("[bridge] tg send failed:", (e as Error).message); }
+		} catch (e) {
+			console.error("[bridge] tg send failed:", (e as Error).message);
+			posted = false;
+		}
+		receipt(posted ? "delivered" : "undeliverable");
 	}
 
 	private async onMeshChannel(c: InboundChannel): Promise<void> {

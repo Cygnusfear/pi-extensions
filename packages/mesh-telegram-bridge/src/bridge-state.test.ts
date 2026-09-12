@@ -369,6 +369,75 @@ test("a forum tell without an established durable topic never falls back to the 
 });
 
 
+test("an unroutable tell is acked undeliverable, never delivered", async () => {
+	const acks: Array<{ senderId: string; deliveryId: string; phase: string }> = [];
+	const bridge = Object.create(Bridge.prototype) as {
+		chatId: number;
+		forumMode: boolean;
+		mesh: { ackTell: (senderId: string, deliveryId: string, phase: string) => void };
+		ensureAgentTopic: () => Promise<number | null>;
+		onMeshTell: (tell: unknown) => Promise<void>;
+	};
+	bridge.chatId = -100_1;
+	bridge.forumMode = true;
+	bridge.ensureAgentTopic = async () => null;
+	bridge.mesh = { ackTell: (senderId, deliveryId, phase) => acks.push({ senderId, deliveryId, phase }) };
+
+	await bridge.onMeshTell({
+		fromClientId: "unannounced",
+		nickname: "Nova",
+		text: "hello",
+		deliveryId: "delivery-1",
+		ackRequested: "delivered",
+	});
+
+	// The drop stays a drop (see the no-fallback test above) - but the sender is no
+	// longer told the message arrived. That lie is what hid a lost tell all night.
+	expect(acks).toEqual([{ senderId: "unannounced", deliveryId: "delivery-1", phase: "undeliverable" }]);
+});
+
+test("a routed tell is acked delivered only AFTER it is posted", async () => {
+	const order: string[] = [];
+	const bridge = Object.create(Bridge.prototype) as {
+		chatId: number;
+		forumMode: boolean;
+		voice: { on: boolean };
+		replyTargets: Map<number, unknown>;
+		trimTargets: () => void;
+		trackSent: () => void;
+		sendText: () => Promise<{ message_id: number }>;
+		uploadAttachment: () => Promise<void>;
+		mesh: { ackTell: (senderId: string, deliveryId: string, phase: string) => void };
+		onMeshTell: (tell: unknown) => Promise<void>;
+	};
+	bridge.chatId = -100_1;
+	bridge.forumMode = false; // no topic required; posting goes straight to the chat
+	bridge.voice = { on: false };
+	bridge.replyTargets = new Map();
+	bridge.trimTargets = () => {};
+	bridge.trackSent = () => {};
+	bridge.uploadAttachment = async () => {};
+	bridge.sendText = async () => {
+		order.push("post");
+		return { message_id: 1 };
+	};
+	bridge.mesh = {
+		ackTell: (_senderId, _deliveryId, phase) => {
+			order.push("ack:" + phase);
+		},
+	};
+
+	await bridge.onMeshTell({
+		fromClientId: "announced",
+		nickname: "Nova",
+		text: "hello",
+		deliveryId: "delivery-2",
+		ackRequested: "delivered",
+	});
+
+	expect(order).toEqual(["post", "ack:delivered"]);
+});
+
 test("stopping the bridge resolves and clears pending unannounced topic waits", async () => {
 	const bridge = Object.create(Bridge.prototype) as {
 		pendingTopicPeers: Map<unknown, unknown>;

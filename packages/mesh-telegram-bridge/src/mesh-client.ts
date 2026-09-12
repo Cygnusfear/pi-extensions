@@ -14,6 +14,8 @@ import type {
 	AnnouncePayload,
 	ChannelMessage,
 	PeerInfo,
+	MeshTellReceiptPhase,
+	MeshTellReceiptWaitForPhase,
 } from "@pi-extensions/pi-mesh/types";
 import { displayPayload, projectAgentPayload } from "./format.ts";
 
@@ -31,6 +33,8 @@ export interface InboundTell {
 	sessionName?: string;
 	/** present ⇒ the sender asked for a delivery receipt; we ack it */
 	deliveryId?: string;
+	/** Phase the sender is waiting for; the ACK phase is decided after routing. */
+	ackRequested?: MeshTellReceiptWaitForPhase;
 }
 export interface InboundChannel {
 	fromClientId: string;
@@ -216,19 +220,10 @@ export class MeshClient extends EventEmitter {
 			const fromClientId = originalFrom ?? message.from ?? m.from;
 			if (fromClientId === this.clientId) return;
 			const peer = this.peers.get(fromClientId);
-			// Honest ack: the sender's mesh.tell receipt resolves to "delivered".
-			if (deliveryId && ackRequested) {
-				// The ack must be wrapped in a MeshMessage envelope (mirrors
-				// PiMesh.sendTellReceipt) so the sender's inbound handler recognises
-				// msg.payload as a mesh:tell:ack and resolves its delivery receipt.
-				const ackEnvelope: MeshMessage = {
-					from: this.clientId,
-					topic: `session/${fromClientId}`,
-					payload: buildTellReceiptAck(deliveryId, this.clientId, "delivered"),
-					timestamp: Date.now(),
-				};
-				this.publish(`pi/mesh/session/${fromClientId}`, ackEnvelope);
-			}
+			// The receipt is NOT sent here. Acking on receipt told the sender
+			// "delivered" before the bridge had decided whether it could route the tell
+			// at all - so a dropped message looked successful. The bridge acks via
+			// ackTell() once it knows: delivered when posted, undeliverable when not.
 			const projectedPayload = projectAgentPayload(message.payload);
 			this.emit("tell", {
 				fromClientId,
@@ -237,9 +232,33 @@ export class MeshClient extends EventEmitter {
 				...projectedPayload,
 				sessionName: peer?.name,
 				deliveryId,
+				ackRequested,
 			} satisfies InboundTell);
 			return;
 		}
+	}
+
+	/**
+	 * Publish a tell receipt to the sender. Called by the bridge AFTER it knows whether
+	 * the tell could be delivered: an ack sent on receipt claims success for a message
+	 * that may then be dropped, which is exactly the silent failure this replaces.
+	 *
+	 * The envelope must be wrapped in a MeshMessage (mirrors PiMesh.sendTellReceipt) so
+	 * the sender's inbound handler recognises it as mesh:tell:ack and resolves its wait.
+	 */
+	ackTell(
+		senderId: string,
+		deliveryId: string,
+		phase: MeshTellReceiptPhase,
+		extras?: { receiverBusy?: boolean; receiverDeafened?: boolean },
+	): void {
+		const ackEnvelope: MeshMessage = {
+			from: this.clientId,
+			topic: `session/${senderId}`,
+			payload: buildTellReceiptAck(deliveryId, this.clientId, phase, extras),
+			timestamp: Date.now(),
+		};
+		this.publish(`pi/mesh/session/${senderId}`, ackEnvelope);
 	}
 
 	/** Direct mesh tell to a specific agent — durable-id routed when known. */
