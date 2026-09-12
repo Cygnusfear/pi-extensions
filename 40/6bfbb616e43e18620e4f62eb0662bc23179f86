@@ -1,0 +1,54 @@
+packages/pi-mesh/extension/inbound-format.ts
+  s_06a9e986aa412b::t_bb854e907c14c5 16-22,34,36,41-46,50,52,54-55,60,70,80,88-89,105-108,132,136
+  s_06a9e986aa412b::t_92e3f48181f206 35,37-40,47-49,51,53,62,72,82,109,133
+packages/pi-mesh/extension/active-inbound-mailbox.ts
+  s_06a9e986aa412b::t_0e9848b07e71e0 12-15
+  s_06a9e986aa412b::t_387a7705a64619 48
+  s_06a9e986aa412b::t_94b22568af3be6 26
+packages/pi-mesh/extension/inbound-format.test.ts
+  s_06a9e986aa412b::t_5d751bdb1551ea 130-187
+packages/pi-mesh/extension/pi-mesh.ts
+  s_06a9e986aa412b::t_0ea7b9c75317f4 2745-2750
+  s_06a9e986aa412b::t_6a5c796d3ce75d 2437
+  s_06a9e986aa412b::t_88b3027b8c4f2f 84
+  s_06a9e986aa412b::t_a244360fee45e7 2501
+  s_06a9e986aa412b::t_a845c580ec80d3 1736
+  s_06a9e986aa412b::t_8003d1390d4978 1915-1916
+  s_06a9e986aa412b::t_3d2a04f2ed0e58 2549
+  s_06a9e986aa412b::t_37fb12f6b32da3 1114
+  s_06a9e986aa412b::t_2bc3b167ff2e4e 1947,1949
+  s_06a9e986aa412b::t_03ebcb309675e0 2044
+  s_06a9e986aa412b::t_6f8241297a56b7 1768
+  s_06a9e986aa412b::t_e38d4077c3f8c5 2466
+  s_06a9e986aa412b::t_866e87700c4d43 2504
+  s_06a9e986aa412b::t_9fb5a7931494e7 2574
+packages/pi-mesh/extension/types.ts
+  s_06a9e986aa412b::t_80cbef7cfb3487 127-129
+packages/pi-mesh/extension/ask-queue.test.ts
+  s_06a9e986aa412b::t_3d5f57fa4895f8 3-5
+  s_06a9e986aa412b::t_936d9f9a07e04d 30-43
+  s_06a9e986aa412b::t_61484e4a96c3e1 23
+packages/pi-mesh/extension/ask-queue.ts
+  s_06a9e986aa412b::t_b1f3c3107a2f97 1-2
+  s_06a9e986aa412b::t_048ec7f75ba773 23-26
+  s_06a9e986aa412b::t_6d8313dbd374a6 34-37
+packages/pi-mesh/extension/active-inbound-mailbox.test.ts
+  s_06a9e986aa412b::t_bac9251c810837 16
+  s_06a9e986aa412b::t_a70eae275166fe 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "406bfbb616e43e18620e4f62eb0662bc23179f86",
+  "prompts": {},
+  "sessions": {
+    "s_06a9e986aa412b": {
+      "agent_id": {
+        "tool": "Enrico Mars Mavalvala",
+        "id": "a9f74595-e2bb-41bc-8cef-e5b5508dd996",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
