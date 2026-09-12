@@ -1,0 +1,18 @@
+packages/pi-mesh/extension/inbound-dedup.test.ts
+  h_59730e3e3c55ed 1-38
+packages/pi-mesh/extension/inbound-dedup.ts
+  h_59730e3e3c55ed 1-43
+packages/pi-mesh/extension/pi-mesh.ts
+  h_59730e3e3c55ed 9,1762-1764,2365-2373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e58de5720f09771715f522d69cb4d9e8bb60b160",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
