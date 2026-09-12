@@ -1,0 +1,22 @@
+packages/pi-mesh/extension/inbound-dedup.test.ts
+  h_59730e3e3c55ed 2-4,41-68
+packages/pi-mesh/extension/inbound-dedup.ts
+  h_59730e3e3c55ed 13-16,19-29,38-43,45,47-48,50-76,79,83,90,93
+packages/pi-mesh/extension/pi-mesh.ts
+  h_59730e3e3c55ed 9,1764-1771,2059-2066,2069,2077
+packages/pi-mesh/extension/tell-target.test.ts
+  h_59730e3e3c55ed 1-43
+packages/pi-mesh/extension/tell-target.ts
+  h_59730e3e3c55ed 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5f7e2abfaeca090daa0698f0854f2f329cc75b26",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
