@@ -1,0 +1,22 @@
+packages/code-mode/extensions/code-mode.ts
+  h_59730e3e3c55ed 11,1443-1447
+packages/mesh-telegram-bridge/src/bridge.ts
+  h_59730e3e3c55ed 26,135-136,174-183,196,206
+packages/shared/package.json
+  h_59730e3e3c55ed 10
+packages/shared/src/afk.test.ts
+  h_59730e3e3c55ed 1-35
+packages/shared/src/afk.ts
+  h_59730e3e3c55ed 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "418b7a0aafddda86d4bd0b3bc387a460b06552b8",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
