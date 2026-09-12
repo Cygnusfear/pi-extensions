@@ -1789,6 +1789,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const resolveTargetSessionId = (rawSessionId: string): string =>
     resolveDurableTarget(mesh.peers(), rawSessionId);
 
+  /** An explicit mesh address - a durable id or a client id (both UUID shaped).
+   *  Unlike a nickname it needs no peer-map entry to be reachable: the topic is
+   *  deterministic and the receiver subscribes to it. */
+  const isExplicitMeshAddress = (rawSessionId: string): boolean =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSessionId.trim());
+
   // /agent <name> <message> — message a mesh peer by name (native mesh command).
   pi.registerCommand("agent", {
     description: "Message a mesh peer by name",
@@ -2684,14 +2690,21 @@ export default function piMeshExtension(pi: ExtensionAPI) {
               details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
             };
           }
-          // No live peer AND no revive descriptor → genuinely dead.
-          const deliveryId = createDeliveryId();
-          const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
-          const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and no revivable durable session is registered for it.`;
-          return {
-            content: [{ type: "text", text }],
-            details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
-          };
+          // No live peer AND no revive descriptor. A NICKNAME that matched nothing
+          // is genuinely unresolvable. An explicit address is not: the topic is
+          // deterministic, so publish and let the receipt decide - declaring a
+          // reachable peer undeliverable is how the bridge became unreachable.
+          if (isExplicitMeshAddress(sessionId)) {
+            resolved = sessionId;
+          } else {
+            const deliveryId = createDeliveryId();
+            const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+            const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and no revivable durable session is registered for it.`;
+            return {
+              content: [{ type: "text", text }],
+              details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,
+            };
+          }
         }
         return {
           content: [{ type: "text", text: `Error: ${e}` }],
