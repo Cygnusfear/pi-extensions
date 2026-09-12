@@ -81,6 +81,7 @@ import {
   formatInboundTellContent,
   formatPendingTellsBatch,
   formatReviveDrainBatch,
+  formatSentSuffix,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
 import {
@@ -1110,6 +1111,7 @@ export class PiMesh {
             payload: ask.payload,
             askId: ask.askId,
             askReceiptRequested: ask.receiptRequested,
+            timestamp: ask.timestamp,
             timeoutMs: ask.timeoutMs,
           };
           this._emit("request", event);
@@ -1731,7 +1733,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     } catch {}
   };
   let ambientChatFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  const pendingAmbientChat: Array<{ channelId: string; senderLabel: string; text: string }> = [];
+  const pendingAmbientChat: Array<{ channelId: string; senderLabel: string; text: string; sentAt: number }> = [];
   // User-initiated channel subscriptions. Mirrored into session entries so a
   // /reload or session resume can rejoin them — the PiMesh instance itself is
   // recreated on every reload and its channelSubs set starts empty.
@@ -1763,6 +1765,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     payloadText: string;
     askId: string;
     askReceiptRequested: MeshAskReceiptWaitForPhase | undefined;
+    sentAt: number;
     expiresAt: number;
   }> = [];
 
@@ -1909,8 +1912,8 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       "Read it and decide whether to act, reply, or ignore it.",
       "",
       ...batch.map(
-        ({ channelId, senderLabel, text }, idx) =>
-          `${idx + 1}. ${MI.chat} ${MI.sep} #${channelId} ${MI.sep} ${senderLabel}: ${text}`,
+        ({ channelId, senderLabel, text, sentAt }, idx) =>
+          `${idx + 1}. ${MI.chat} ${MI.sep} #${channelId} ${MI.sep} ${senderLabel}${formatSentSuffix(MI.sep, sentAt)}: ${text}`,
       ),
     ].join("\n");
     pi.sendMessage(
@@ -1941,7 +1944,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         requestId: ask.requestId,
         senderLabel: ask.senderLabel,
         payloadText: ask.payloadText,
+        sentAt: ask.sentAt,
       })),
+      MI,
     );
     pi.sendMessage(
       {
@@ -2036,7 +2041,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       if (drained.length > 0) {
         const blob = formatReviveDrainBatch(
           MI,
-          drained.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText })),
+          drained.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText, sentAt: d.sentAt })),
         );
         pi.sendMessage(
           {
@@ -2429,6 +2434,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             deliveryId,
             originalFrom,
             ackRequested,
+            sentAt: msg.timestamp,
           });
           // We have the message — ack 'delivered' now. 'surfaced' ack fires only on flush.
           sendAck();
@@ -2457,7 +2463,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         // Append a bottom signature so an agent who only reads the END of the
         // message still sees the real mesh sender (see default-prompt identity
         // block + inbound-format.ts). The interrupt banner leads when preempting.
-        const content = `${banner}${formatInboundTellContent(MI, senderLabel, payloadText)}`;
+        const content = `${banner}${formatInboundTellContent(MI, senderLabel, payloadText, msg.timestamp)}`;
         const details = {
           from: msg.from,
           senderLabel,
@@ -2492,10 +2498,10 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         const text = formatPayloadForDisplay(msg.payload);
         pi.sendMessage({
           customType: "mesh-chat",
-          content: formatInboundChatContent(MI, msg.channel, senderLabel, text),
+          content: formatInboundChatContent(MI, msg.channel, senderLabel, text, msg.timestamp),
           display: true,
         });
-        pendingAmbientChat.push({ channelId: msg.channel, senderLabel, text });
+        pendingAmbientChat.push({ channelId: msg.channel, senderLabel, text, sentAt: msg.timestamp });
         scheduleAmbientChatFlush();
       });
 
@@ -2540,6 +2546,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             payloadText,
             askId: req.askId,
             askReceiptRequested: req.askReceiptRequested,
+            sentAt: req.timestamp,
             expiresAt: Date.now() + Math.max(35_000, (req.timeoutMs ?? 30_000) + 5_000),
           });
           if (req.from.id !== "unknown") {
@@ -2564,7 +2571,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         pi.sendMessage(
           {
             customType: "mesh-inbound-ask",
-            content: formatInboundAskContent(MI, senderLabel, payloadText, replyHint),
+            content: formatInboundAskContent(MI, senderLabel, payloadText, replyHint, req.timestamp),
             display: true,
           },
           deliveryOptions,
@@ -2735,7 +2742,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       const tells = peekInbox();
       const text = tells.length === 0
         ? "mesh inbox empty"
-        : tells.map((t, idx) => `${idx + 1}. ${t.senderLabel}: ${t.preview}`).join("\n");
+        : tells
+            .map((t, idx) => {
+              const sent = t.sentAt === undefined ? "" : ` · sent ${new Date(t.sentAt).toISOString()}`;
+              return `${idx + 1}. ${t.senderLabel}${sent}: ${t.preview}`;
+            })
+            .join("\n");
       return {
         content: [{ type: "text", text }],
         details: { status: "ok", count: tells.length, tells } satisfies MeshInboxDetails,

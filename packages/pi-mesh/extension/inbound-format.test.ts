@@ -127,3 +127,61 @@ describe("formatReviveDrainBatch — hibernation-seam drain (ADD-2)", () => {
     expect(out).toContain("— Vera Rubin (mesh sender, authoritative)");
   });
 });
+
+describe("send-time stamp — out-of-order delivery must be visible", () => {
+  const SENT = Date.UTC(2026, 8, 11, 0, 48, 12, 345);
+  const ISO = "2026-09-11T00:48:12.345Z";
+
+  test("the fixture is the instant it claims to be", () => {
+    expect(new Date(SENT).toISOString()).toBe(ISO);
+  });
+
+  test("a tell renders the sender's send time in ISO-8601 UTC", () => {
+    const out = formatInboundTellContent(ICONS, "Vera Rubin", "hello", SENT);
+    expect(out).toContain(`${ICONS.sep} sent ${ISO}`);
+    // The bottom signature is untouched by the added stamp.
+    expect(out).toContain("— Vera Rubin (mesh sender, authoritative)");
+  });
+
+  test("chat and ask render it too", () => {
+    expect(formatInboundChatContent(ICONS, "team-abc", "Reinhard Genzel", "msg", SENT)).toContain(` sent ${ISO}`);
+    expect(formatInboundAskContent(ICONS, "Reinhard Genzel", "q?", "reply via mesh_ask", SENT)).toContain(` sent ${ISO}`);
+  });
+
+  test("a missing stamp renders nothing rather than a placeholder", () => {
+    const out = formatInboundTellContent(ICONS, "Vera Rubin", "hello");
+    expect(out).not.toContain("sent");
+    expect(out).not.toContain("Invalid Date");
+    expect(out).not.toContain("undefined");
+  });
+
+  test("a non-finite stamp is treated as missing", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const out = formatInboundTellContent(ICONS, "Vera Rubin", "hello", bad);
+      expect(out).not.toContain("sent");
+      expect(out).not.toContain("Invalid Date");
+    }
+  });
+
+  test("a batch keeps one stamp per entry, so a reversed pair is visible", () => {
+    const out = formatPendingTellsBatch(ICONS, [
+      { senderLabel: "Newer", payloadText: "second sent", sentAt: SENT + 60_000 },
+      { senderLabel: "Older", payloadText: "first sent", sentAt: SENT },
+    ]);
+    // Arrival order puts Newer first; its stamp says it was SENT later. That gap
+    // is the whole point — without per-entry stamps the reader cannot see it.
+    expect(out).toContain(`1. ${ICONS.tell} ${ICONS.sep} Newer${ICONS.sep === "·" ? " ·" : ""}`);
+    expect(out.indexOf(new Date(SENT + 60_000).toISOString())).toBeGreaterThan(-1);
+    expect(out.indexOf(new Date(SENT + 60_000).toISOString())).toBeLessThan(out.indexOf(new Date(SENT).toISOString()));
+  });
+
+  test("an unstamped entry in a batch gets no stamp and no neighbour's stamp", () => {
+    const out = formatReviveDrainBatch(ICONS, [
+      { senderLabel: "Stamped", payloadText: "a", sentAt: SENT },
+      { senderLabel: "Unstamped", payloadText: "b" },
+    ]);
+    const unstamped = out.split("\n").filter((l) => l.includes("Unstamped")).join("\n");
+    expect(unstamped).not.toContain("sent");
+    expect(out).toContain(` sent ${ISO}`);
+  });
+});

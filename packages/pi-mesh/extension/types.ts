@@ -124,6 +124,9 @@ export interface RequestEvent {
 	payload: unknown;
 	askId: string;
 	askReceiptRequested?: MeshAskReceiptWaitForPhase;
+	/** Sender-stamped send time (unix ms), taken from the ask envelope's mint
+	 *  time — so an out-of-order ask is as visible as an out-of-order tell. */
+	timestamp: number;
 	timeoutMs?: number;
 }
 

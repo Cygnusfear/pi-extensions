@@ -9,6 +9,10 @@ export interface ActiveInboundTell {
 	deliveryId: string | undefined;
 	originalFrom: string | undefined;
 	ackRequested: MeshTellReceiptWaitForPhase | undefined;
+	/** Sender-stamped send time (unix ms). Distinct from receivedAt, and the only
+	 *  one that can show out-of-order delivery: receivedAt is monotonic by
+	 *  construction, so it hides exactly the inversion a reader needs to see. */
+	sentAt: number | undefined;
 	receivedAt: number;
 	sequence: number;
 }
@@ -19,6 +23,7 @@ export interface ActiveInboundTellPeek {
 	topic?: string;
 	deliveryId?: string;
 	ackRequested?: MeshTellReceiptWaitForPhase;
+	sentAt: number | undefined;
 	receivedAt: number;
 	sequence: number;
 	payload: unknown;
@@ -40,6 +45,7 @@ export function toActiveInboundTellPeek(tell: ActiveInboundTell): ActiveInboundT
 		...(tell.topic !== undefined ? { topic: tell.topic } : {}),
 		...(tell.deliveryId !== undefined ? { deliveryId: tell.deliveryId } : {}),
 		...(tell.ackRequested !== undefined ? { ackRequested: tell.ackRequested } : {}),
+		sentAt: tell.sentAt,
 		receivedAt: tell.receivedAt,
 		sequence: tell.sequence,
 		payload: tell.payload,

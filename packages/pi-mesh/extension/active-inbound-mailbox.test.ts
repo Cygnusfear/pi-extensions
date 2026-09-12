@@ -13,6 +13,7 @@ describe("ActiveInboundTellMailbox — peek is not consumption", () => {
 			deliveryId: "delivery-1",
 			originalFrom: "sender-1",
 			ackRequested: "surfaced",
+			sentAt: 111,
 			receivedAt: 123,
 			sequence: 7,
 		});
@@ -26,6 +27,7 @@ describe("ActiveInboundTellMailbox — peek is not consumption", () => {
 				topic: "session/receiver",
 				deliveryId: "delivery-1",
 				ackRequested: "surfaced",
+				sentAt: 111,
 				receivedAt: 123,
 				sequence: 7,
 				payload: { body: "full body" },
