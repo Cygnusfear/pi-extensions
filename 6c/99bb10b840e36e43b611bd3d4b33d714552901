@@ -1,0 +1,14 @@
+packages/pi-mesh/extension/pi-mesh.ts
+  h_59730e3e3c55ed 10,2209-2216,2721-2728
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6c99bb10b840e36e43b611bd3d4b33d714552901",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
