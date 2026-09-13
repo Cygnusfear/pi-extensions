@@ -7,6 +7,7 @@
  */
 
 import { createSurfacedDeliveryGuard, surfacedDeliveryPath } from "./inbound-dedup.ts";
+import { tellAttempts } from "./tell-target.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import {
@@ -1796,12 +1797,6 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   const resolveTargetSessionId = (rawSessionId: string): string =>
     resolveDurableTarget(mesh.peers(), rawSessionId);
 
-  /** An explicit mesh address - a durable id or a client id (both UUID shaped).
-   *  Unlike a nickname it needs no peer-map entry to be reachable: the topic is
-   *  deterministic and the receiver subscribes to it. */
-  const isExplicitMeshAddress = (rawSessionId: unknown): boolean =>
-    typeof rawSessionId === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSessionId.trim());
 
   // /agent <name> <message> — message a mesh peer by name (native mesh command).
   pi.registerCommand("agent", {
@@ -2211,8 +2206,14 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           // matched nothing is genuinely unresolvable, while an explicit address is
           // routable because its topic is deterministic. Both copies must change
           // together - extracting them is owed work, not done here.
-          if (isExplicitMeshAddress(params.sessionId)) {
-            resolved = params.sessionId;
+          // One shared decision (tell-target.ts). Two copies of this rule cost an
+          // evening: an explicit address is routable without a peer-map entry, a
+          // nickname that matched nothing is genuinely unresolvable.
+          const routeFallback = tellAttempts(params.sessionId, resolveTargetSessionId).find(
+            (attempt) => attempt.kind === "route",
+          );
+          if (routeFallback?.kind === "route") {
+            resolved = routeFallback.route;
           } else {
             const deliveryId = createDeliveryId();
             const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
@@ -2717,8 +2718,14 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           // is genuinely unresolvable. An explicit address is not: the topic is
           // deterministic, so publish and let the receipt decide - declaring a
           // reachable peer undeliverable is how the bridge became unreachable.
-          if (isExplicitMeshAddress(sessionId)) {
-            resolved = sessionId;
+          // One shared decision (tell-target.ts). Two copies of this rule cost an
+          // evening: an explicit address is routable without a peer-map entry, a
+          // nickname that matched nothing is genuinely unresolvable.
+          const routeFallback = tellAttempts(sessionId, resolveTargetSessionId).find(
+            (attempt) => attempt.kind === "route",
+          );
+          if (routeFallback?.kind === "route") {
+            resolved = routeFallback.route;
           } else {
             const deliveryId = createDeliveryId();
             const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
