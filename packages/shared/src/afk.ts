@@ -26,7 +26,7 @@ export const AFK_STATE_PATH =
 
 /** Shown to agents in code-mode output while the Hooman is away. */
 export const AFK_CONTACT_BANNER =
-	"📞 afk | Please contact the Hooman over mesh.tell so they can receive your message on Telegram where they are available now";
+	"📞 Please contact the Hooman over mesh.tell so they can receive your message on Telegram where they are available now";
 
 export interface AfkState {
 	on: boolean;

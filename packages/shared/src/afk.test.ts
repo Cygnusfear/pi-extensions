@@ -19,7 +19,11 @@ describe("afk contact flag", () => {
 		writeAfkState({ on: true, message: "at lunch", since: 123 });
 		expect(readAfkState()).toEqual({ on: true, message: "at lunch", since: 123 });
 		expect(withAfkContactBanner("output")).toBe("output\n\n" + AFK_CONTACT_BANNER);
-		expect(AFK_CONTACT_BANNER.startsWith("📞 afk | ")).toBe(true);
+		// Exactly the sentence the hooman specified - no label, no decoration.
+		// Anything added here is meta-noise to every model that RECEIVES the
+		// message, which is why this is pinned rather than left to taste.
+		expect(AFK_CONTACT_BANNER).not.toContain("afk");
+		expect(AFK_CONTACT_BANNER.endsWith("Please contact the Hooman over mesh.tell so they can receive your message on Telegram where they are available now")).toBe(true);
 	});
 
 	test("an OFF flag hides the banner", () => {
