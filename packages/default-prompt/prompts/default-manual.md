@@ -2,6 +2,8 @@
 
 This is the authoritative detailed local reference. Use `prompt_manual({ topic: "index" })`, then one relevant bounded topic.
 
+Please remove all mannered prose.
+
 <!-- prompt-manual: workspace-status | Workspace status and lifecycle -->
 ## Workspace status icon — keep your tab honest
 
