@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiMesh } from "./pi-mesh.ts";
-import { pidsForScript, reapSidecars } from "./sidecar-test-harness.ts";
+import { pidFileOf, pidsForScript, reapSidecars, sweepStaleSidecarHomes, sidecarPid } from "./sidecar-test-harness.ts";
 
 /**
  * Sidecar lifecycle tests (kal-0suu3dur): ensure-sidecar nuke-and-respawn,
@@ -21,6 +21,14 @@ import { pidsForScript, reapSidecars } from "./sidecar-test-harness.ts";
  */
 
 const FAKE_SIDECAR_FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fake-sidecar.ts");
+// kal-x2akvjnh: clear HOMEs abandoned by earlier crashed or leaking runs.
+// Bounded by age and live-process ownership, because this prefix is shared by
+// concurrent runs of this suite - see sweepStaleSidecarHomes().
+const sweptHomes = sweepStaleSidecarHomes("pi-mesh-lifecycle-");
+if (sweptHomes.length > 0) {
+  console.log("[pi-mesh test harness] swept " + sweptHomes.length + " stale lifecycle home(s)");
+}
+
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_OUT = process.env.FAKE_SIDECAR_OUT;
 const ORIGINAL_DELAY = process.env.FAKE_SIDECAR_BIND_DELAY_MS;
@@ -71,19 +79,6 @@ function startMesh(root: Root, sessionId: string): PiMesh {
 
 function sockPathOf(home: string): string {
   return join(home, ".pi", "mesh.sock");
-}
-
-function pidFileOf(home: string): string {
-  return join(home, ".pi", "mesh.pid");
-}
-
-function sidecarPid(home: string): number | null {
-  try {
-    const pid = parseInt(readFileSync(pidFileOf(home), "utf8").trim(), 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
 }
 
 function socketUp(p: string): Promise<boolean> {

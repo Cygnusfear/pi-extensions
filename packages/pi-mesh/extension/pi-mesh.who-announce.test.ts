@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiMesh } from "./pi-mesh.ts";
-import { reapSidecars } from "./sidecar-test-harness.ts";
+import { reapSidecars, sweepStaleSidecarHomes } from "./sidecar-test-harness.ts";
 
 /**
  * kal-1dymeveg: a fresh session sees an empty roster for up to
@@ -28,6 +28,13 @@ import { reapSidecars } from "./sidecar-test-harness.ts";
  */
 
 const FAKE_SIDECAR_FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fake-sidecar.ts");
+// kal-x2akvjnh: sweep HOMEs left by runs that predate the teardown fix. Age-
+// and ownership-bounded, so a concurrent run’s in-flight HOME is never touched.
+const sweptHomes = sweepStaleSidecarHomes("pi-mesh-who-");
+if (sweptHomes.length > 0) {
+  console.log("[pi-mesh test harness] swept " + sweptHomes.length + " stale who home(s)");
+}
+
 const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_OUT = process.env.FAKE_SIDECAR_OUT;
 
