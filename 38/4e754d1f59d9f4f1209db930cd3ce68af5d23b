@@ -1,0 +1,59 @@
+packages/pi-mesh/extension/durable-session-store.ts
+  s_e1edfff8cd915d::t_b29acefce32784 9-13
+packages/pi-mesh/extension/durable-registry-index.ts
+  s_e1edfff8cd915d::t_e312f6ce53abb0 190-192,196,198,205-215,220
+  s_e1edfff8cd915d::t_e450678c4c5f24 182-183,188-189,193-195,197,199,216-219
+  s_e1edfff8cd915d::t_df40d774a7b934 1,23,58,63,103,107,129-159
+  s_e1edfff8cd915d::t_dc428d5a78b3f3 2-4,20-22
+  s_e1edfff8cd915d::t_66632e712a5536 24-26,55-57
+  s_e1edfff8cd915d::t_ee6563fb3fe00e 59-62
+  s_e1edfff8cd915d::t_0819e28353d6ae 64-66,100-102
+  s_e1edfff8cd915d::t_5adff04625470a 104-106
+  s_e1edfff8cd915d::t_c74df87a3444f7 108-110,126-128
+  s_e1edfff8cd915d::t_576c8e2ef1045c 160-162,179-181
+  s_e1edfff8cd915d::t_9152484d593f83 184-187
+  s_e1edfff8cd915d::t_a4cb7e568c5e4e 200-204
+  s_e1edfff8cd915d::t_acf94601179d67 221-223
+packages/pi-mesh/extension/route-resolve.ts
+  s_e1edfff8cd915d::t_7c61e525366564 106-113,134-135,155-156
+  s_e1edfff8cd915d::t_a864b6f8372d84 12-35,140,161,166
+packages/pi-mesh/extension/durable-session-store.test.ts
+  s_e1edfff8cd915d::t_558a13c60012af 217-232
+  s_e1edfff8cd915d::t_0d5c5111adcda4 216
+packages/pi-mesh/package.json
+  s_e1edfff8cd915d::t_e07d5fd885bfb8 11-13
+packages/shared/src/session-view.ts
+  s_e1edfff8cd915d::t_f2d769b76b3bb3 53
+packages/pi-mesh/tsconfig.json
+  s_e1edfff8cd915d::t_4e3dd9418124d0 1,22
+  s_e1edfff8cd915d::t_b48205fa3a6d7b 2-13,15-21
+  s_e1edfff8cd915d::t_313ce7ab02e08c 14
+packages/pi-mesh/extension/pi-mesh.ts
+  s_e1edfff8cd915d::t_5ac060e2f00eef 46-51,2034-2059
+  s_e1edfff8cd915d::t_1e0b28c136a79a 2063,2068-2070,2899-2913,2942-2950
+  s_4551a461bd0890::t_073c390583436c 45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "384e754d1f59d9f4f1209db930cd3ce68af5d23b",
+  "prompts": {},
+  "sessions": {
+    "s_4551a461bd0890": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9466593c-8095-48c6-a4a7-0640fa632076",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
