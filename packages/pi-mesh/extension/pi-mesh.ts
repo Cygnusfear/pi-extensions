@@ -227,11 +227,17 @@ export function probeSidecarSocket(sockPath: string): Promise<"serving" | "down"
 }
 
 /**
- * Every pi-mesh sidecar process on this machine: command-line matches of this
- * install's binary path (precise) plus process-name matches of the sidecar
- * (strays spawned from an older install path).
+ * Sidecar processes that belong to THIS HOME, never to this machine (kal-3un104dw).
+ *
+ * The two scans below are deliberately only a candidate filter. Killing by
+ * command-line or process-name match alone is machine-wide: a session whose probe
+ * fails (sandboxed HOME, no socket) used to enter repair and SIGTERM the
+ * operator's live daemon plus every other session's sidecar - and the `-x` scan
+ * matched by process NAME, so it was not even limited to this install's binary.
+ * A process is only a stray once it is attributed to the HOME doing the asking:
+ * it either holds this HOME's mesh socket or is recorded in this HOME's pidfile.
  */
-export function findStraySidecarPids(binPath: string): number[] {
+export function findStraySidecarPids(binPath: string, homeDir: string = meshHomeDir()): number[] {
   const pids = new Set<number>();
   const collect = (raw: string) => {
     for (const line of raw.split("\n")) {
@@ -252,6 +258,45 @@ export function findStraySidecarPids(binPath: string): number[] {
     } catch {
       // same as above
     }
+  }
+  // Attribution, not proximity: of everything that merely looks like a sidecar,
+  // only what actually serves this HOME may be signalled.
+  const serving = new Set(sidecarPidsForHome(homeDir));
+  return [...pids].filter((pid) => serving.has(pid));
+}
+
+/**
+ * Pids serving one HOME: the process holding that HOME's mesh unix socket, plus
+ * the pid recorded in its pidfile. Socket ownership is the authority - the
+ * pidfile alone can be stale, and a stale pidfile must never become a licence to
+ * kill a stranger. If lsof is unavailable we degrade to the pidfile ONLY, because
+ * seeing less is safe here while guessing wider is the exact bug being fixed.
+ */
+export function sidecarPidsForHome(homeDir: string = meshHomeDir()): number[] {
+  const pids = new Set<number>();
+  const sockPath = join(homeDir, ".pi", "mesh.sock");
+  const pidPath = join(homeDir, ".pi", "mesh.pid");
+  try {
+    const raw = execFileSync("lsof", ["-U", "-n", "-F", "pn"], { maxBuffer: 32 * 1024 * 1024 }).toString();
+    // -F pn emits paired lines: 'p<pid>' then 'n<name>'. Walk it as pairs so the
+    // parse never depends on column widths or on a name containing whitespace.
+    let current: number | null = null;
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("p")) {
+        const pid = Number(line.slice(1));
+        current = Number.isInteger(pid) && pid > 0 ? pid : null;
+      } else if (line.startsWith("n") && current !== null && line.slice(1) === sockPath) {
+        pids.add(current);
+      }
+    }
+  } catch {
+    // no lsof, or no such holder
+  }
+  try {
+    const holder = parseInt(readFileSync(pidPath, "utf8").trim(), 10);
+    if (Number.isInteger(holder) && holder > 0) pids.add(holder);
+  } catch {
+    // no pidfile
   }
   return [...pids];
 }
@@ -284,9 +329,13 @@ function isProcessDead(pid: number): boolean {
  * of by the daemon itself under the start lock (kal-0suu3dur), so the
  * session-side nuke never kills a process that has already published itself.
  */
-export function killStraySidecars(binPath: string, exceptPid: number | null = null): { killed: number[]; survivors: number[] } {
+export function killStraySidecars(
+  binPath: string,
+  exceptPid: number | null = null,
+  homeDir: string = meshHomeDir(),
+): { killed: number[]; survivors: number[] } {
   const killed: number[] = [];
-  for (const pid of findStraySidecarPids(binPath)) {
+  for (const pid of findStraySidecarPids(binPath, homeDir)) {
     if (exceptPid !== null && pid === exceptPid) continue;
     try {
       process.kill(pid, "SIGTERM");

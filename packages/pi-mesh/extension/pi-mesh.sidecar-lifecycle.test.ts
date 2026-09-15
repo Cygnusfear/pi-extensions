@@ -5,7 +5,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PiMesh } from "./pi-mesh.ts";
+import { killStraySidecars, PiMesh, sidecarPidsForHome } from "./pi-mesh.ts";
 import { pidFileOf, pidsForScript, reapSidecars, sweepStaleSidecarHomes, sidecarPid } from "./sidecar-test-harness.ts";
 
 /**
@@ -80,6 +80,18 @@ function startMesh(root: Root, sessionId: string): PiMesh {
 function sockPathOf(home: string): string {
   return join(home, ".pi", "mesh.sock");
 }
+
+function until(predicate: () => Promise<boolean> | boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const step = async (): Promise<boolean> => {
+    if (await predicate()) return true;
+    if (Date.now() > deadline) return predicate();
+    await new Promise((r) => setTimeout(r, 60));
+    return step();
+  };
+  return step();
+}
+
 
 function socketUp(p: string): Promise<boolean> {
   if (!existsSync(p)) return Promise.resolve(false);
@@ -224,22 +236,29 @@ describe("PiMesh sidecar lifecycle (kal-0suu3dur)", () => {
     expect(await socketUp(sockPathOf(root.home))).toBe(true);
   });
 
-  test("kills all stray sidecar processes before spawning (the Aug 25 duplicate state)", async () => {
+  test("rebinds this HOME without touching another HOME’s sidecar (was: kills all strays)", async () => {
     const root = makeRoot();
-    // A stray sidecar running from THIS install's binary path, under a
-    // different HOME (its own files) — the duplicate left behind by the old
-    // racy spawn.
+    // A sidecar serving a DIFFERENT HOME, running from the same install path.
+    // This is the shape that used to be fatal: the old sweep matched on binary
+    // path and on process name, machine-wide, so a session repairing its own
+    // HOME SIGTERMed this process too - and in production that process was the
+    // operator's live daemon, taking every other session off the mesh
+    // (kal-3un104dw). The expectation below is therefore DELIBERATELY REVERSED
+    // from the original test, which asserted this stray was killed.
     const strayHome = mkdtempSync(join(tmpdir(), "pi-mesh-lifecycle-stray-"));
+    mkdirSync(join(strayHome, ".pi"), { recursive: true });
+    let strayPid: number | null = null;
     try {
-      mkdirSync(join(strayHome, ".pi"), { recursive: true });
       const stray = spawn(root.fakePath, ["{}"], {
         env: { ...process.env, HOME: strayHome, FAKE_SIDECAR_OUT: "" },
         stdio: "ignore",
         detached: true,
       });
       stray.unref();
-      const strayPid = await waitSpawned(stray);
-      // The production end state: stale socket file + dead pidfile, stray alive.
+      strayPid = await waitSpawned(stray);
+      expect(await until(() => socketUp(sockPathOf(strayHome)), 5_000)).toBe(true);
+
+      // The production end state for OUR HOME: stale socket file + dead pidfile.
       await leaveStaleSocket(sockPathOf(root.home));
       const deadPid = await makeDeadPid();
       writeFileSync(pidFileOf(root.home), String(deadPid));
@@ -247,20 +266,64 @@ describe("PiMesh sidecar lifecycle (kal-0suu3dur)", () => {
       const mesh = startMesh(root, "session-nuke");
       await waitReady(mesh);
 
-      // The stray was killed; exactly one sidecar remains (the fresh one).
-      let strayAlive = true;
-      try {
-        process.kill(strayPid, 0);
-      } catch {
-        strayAlive = false;
-      }
-      expect(strayAlive).toBe(false);
-      const pids = pidsForScript(root.fakePath);
-      expect(pids).toHaveLength(1);
-      expect(sidecarPid(root.home)).toBe(pids[0]);
-      expect(await socketUp(sockPathOf(root.home))).toBe(true);
+      // Another HOME's sidecar is left alive, and ours is up and single.
+      expect(() => process.kill(strayPid, 0)).not.toThrow();
+      expect(await socketUp(sockPathOf(strayHome))).toBe(true);
+      expect(sidecarPid(root.home)).not.toBe(deadPid);
+      expect(await until(() => socketUp(sockPathOf(root.home)), 5_000)).toBe(true);
     } finally {
+      if (strayPid !== null) {
+        try {
+          process.kill(strayPid, "SIGKILL");
+        } catch {}
+      }
       rmSync(strayHome, { recursive: true, force: true });
+    }
+  });
+
+  test("attribution: the sweep may kill the holder of its own HOME and only that one", async () => {
+    // Two HOMEs, one install path - the exact ambiguity that made the old
+    // machine-wide match unsafe. Attribution must resolve it before any signal
+    // is sent, so this asserts membership as well as outcome.
+    const homeA = makeRoot();
+    const homeB = mkdtempSync(join(tmpdir(), "pi-mesh-lifecycle-homeB-"));
+    mkdirSync(join(homeB, ".pi"), { recursive: true });
+    let pidA: number | null = null;
+    let pidB: number | null = null;
+    try {
+      const a = spawn(homeA.fakePath, ["{}"], { env: { ...process.env, HOME: homeA.home, FAKE_SIDECAR_OUT: "" }, stdio: "ignore", detached: true });
+      a.unref();
+      pidA = await waitSpawned(a);
+      const b = spawn(homeA.fakePath, ["{}"], { env: { ...process.env, HOME: homeB, FAKE_SIDECAR_OUT: "" }, stdio: "ignore", detached: true });
+      b.unref();
+      pidB = await waitSpawned(b);
+      expect(await until(() => socketUp(sockPathOf(homeA.home)) && socketUp(sockPathOf(homeB)), 6_000)).toBe(true);
+
+      // Membership first: A's view of "who serves A" must name A only.
+      const servingA = sidecarPidsForHome(homeA.home);
+      expect(servingA).toContain(pidA!);
+      expect(servingA).not.toContain(pidB!);
+
+      const res = killStraySidecars(homeA.fakePath, null, homeA.home);
+      expect(res.killed).toContain(pidA!);
+      expect(res.killed).not.toContain(pidB!);
+      expect(res.survivors).toEqual([]);
+
+      // B is untouched and still serving; A's socket is released.
+      expect(() => process.kill(pidB!, 0)).not.toThrow();
+      expect(await until(() => socketUp(sockPathOf(homeB)), 5_000)).toBe(true);
+      // The fixture leaves the socket FILE behind after SIGKILL, so file existence
+      // proves nothing here - only a connection attempt reflects the dead listener.
+      expect(await until(async () => !(await socketUp(sockPathOf(homeA.home))), 5_000)).toBe(true);
+    } finally {
+      for (const pid of [pidA, pidB]) {
+        if (pid !== null) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }
+      }
+      rmSync(homeB, { recursive: true, force: true });
     }
   });
 
