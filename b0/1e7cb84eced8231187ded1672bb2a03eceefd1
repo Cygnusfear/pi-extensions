@@ -1,0 +1,19 @@
+packages/rlm/test/rlm.contract.test.ts
+  s_e1edfff8cd915d::t_3149eaa4cf7c00 4,73-75,77-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b01e7cb84eced8231187ded1672bb2a03eceefd1",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
