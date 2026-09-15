@@ -6,10 +6,9 @@ import { buildReviveDescriptor, SPAWNER_PARTIAL_DESCRIPTOR_FILE } from "@pi-exte
 import { durableDescriptorPath } from "./durable-inbound-mailbox.ts";
 import {
 	buildReviveNotify,
-	listDurableDescriptors,
-	writeDurableDescriptor,
 	isRevivable,
 	isReviveNotify,
+	listDurableDescriptors,
 	materialiseDurableDescriptor,
 	readDurableDescriptor,
 	readSpawnerPartialDescriptor,
@@ -18,6 +17,11 @@ import {
 	spawnerPartialDescriptorPath,
 	writeDurableDescriptor,
 } from "./durable-session-store.ts";
+import {
+	createRegistryIndex,
+	REGISTRY_TTL_MS,
+	scanRegistry,
+} from "./durable-registry-index.ts";
 
 const cleanup: string[] = [];
 function tmpRoot(): string {
@@ -230,3 +234,134 @@ test("returns registered descriptors keyed by the id inside the file", () => {
 // exercise. Runtime coverage of the default path would need an additive seam -
 // honouring PI_MESH_HOME in durableMeshRoot() - which changes product behaviour
 // for every durable path and so is deliberately left as a proposal, not a quiet edit.
+
+// kal-3gc9tzrt required items: the default-root path, and a fixture that actually
+// constructs the case it claims to test.
+describe("listDurableDescriptors default root (kal-3gc9tzrt)", () => {
+	// This only became testable in-process once durableMeshRoot() started honouring
+	// $HOME. The earlier attempt failed for a real reason: os.homedir() ignored HOME,
+	// so the test was silently writing to the LIVE registry. The product fix is what
+	// makes this isolation honest, and that is the regression this pins.
+	test("the no-argument call resolves the registry under $HOME, not the account home", () => {
+		const home = fs.mkdtempSync(path.join(os.tmpdir(), "durable-home-"));
+		const prev = process.env.HOME;
+		try {
+			process.env.HOME = home;
+			writeDurableDescriptor(
+				"durable-default",
+				buildReviveDescriptor({
+					durableId: "durable-default",
+					nickname: "Zephyr Tester",
+					sessionId: "s-default",
+					sessionFile: path.join(home, "d.jsonl"),
+					cwd: home,
+					command: "pi",
+					args: ["--resume"],
+					supervisors: ["sup-1"],
+					env: {},
+					updatedAt: 1,
+				}),
+			);
+			const found = listDurableDescriptors();
+			expect(found.map((d) => d.durableId)).toEqual(["durable-default"]);
+		} finally {
+			if (prev === undefined) delete process.env.HOME;
+			else process.env.HOME = prev;
+			fs.rmSync(home, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("scanRegistry and the index (kal-3gc9tzrt)", () => {
+	const rootOf = () => fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
+	// Built through the production constructor: a hand-written literal with the wrong
+	// kind silently fails isReviveDescriptor, the row vanishes, and a test that then
+	// asserts the row was filtered out passes for entirely the wrong reason.
+	const descriptor = (id: string, nick: string, updatedAt: number) =>
+		buildReviveDescriptor({
+			durableId: id, nickname: nick, sessionId: "s-" + id,
+			sessionFile: "/tmp/" + id + ".jsonl", cwd: "/tmp", command: "pi",
+			args: ["--resume"], supervisors: ["sup-1"], env: {}, updatedAt,
+		});
+	const putInto = (dir: string, subDir: string, body: object) => {
+		fs.mkdirSync(path.join(dir, subDir), { recursive: true });
+		fs.writeFileSync(path.join(dir, subDir, "descriptor.json"), JSON.stringify(body));
+	};
+	const put = (dir: string, id: string, nick: string, updatedAt: number) =>
+		putInto(dir, id, descriptor(id, nick, updatedAt));
+
+	test("a descriptor whose id disagrees with its directory name is refused", () => {
+		const dir = rootOf();
+		try {
+			// The genuine case putGood could never express: it derived the path from
+			// the id every time, so dir and id always agreed.
+			// a descriptor that is valid in every way except the one under test: it is
+			// filed under a directory that is not its durable id
+			putInto(dir, "weird-dir", descriptor("other-id", "Mismatched", Date.now()));
+			fs.writeFileSync(
+				path.join(dir, "weird-dir", "descriptor.json"),
+				JSON.stringify({
+					kind: "pi.mesh.revive", version: 1, durableId: "other-id", nickname: "Mismatched",
+					sessionId: "s", sessionFile: "/tmp/x", cwd: "/tmp", command: "pi",
+					args: [], supervisors: [], env: {}, updatedAt: Date.now(),
+				}),
+			);
+			put(dir, "good-id", "Matched", Date.now());
+			const ids = scanRegistry({ root: dir }).entries.map((e) => e.descriptor.durableId);
+			expect(ids).toEqual(["good-id"]);
+		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+	});
+
+	test("registrations past the freshness bound are not routable", () => {
+		const dir = rootOf();
+		try {
+			const now = 1_700_000_000_000;
+			put(dir, "fresh", "Fresh Name", now - 60_000);
+			put(dir, "ancient", "Ancient Name", now - 400 * 24 * 3600_000);
+			const got = scanRegistry({ root: dir, now: () => now });
+			expect(got.entries.map((e) => e.descriptor.durableId)).toEqual(["fresh"]);
+		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+	});
+
+	test("the snapshot is reused inside the TTL and re-read after it", () => {
+		const dir = rootOf();
+		try {
+			let clock = 1_700_000_000_000;
+			put(dir, "one", "First", clock);
+			const idx = createRegistryIndex({ root: dir, now: () => clock });
+			expect(idx.entries().length).toBe(1);
+			put(dir, "two", "Second", clock);
+			expect(idx.entries().length).toBe(1);
+			clock += REGISTRY_TTL_MS + 1;
+			expect(idx.entries().length).toBe(2);
+		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+	});
+
+	test("a colliding nickname is reported ambiguous with both candidates, newest first", () => {
+		const dir = rootOf();
+		try {
+			const now = 1_700_000_000_000;
+			put(dir, "older", "Collide", now - 10_000);
+			put(dir, "newer", "Collide", now - 1);
+			const hit = createRegistryIndex({ root: dir, now: () => now }).lookupNickname("collide");
+			expect(hit.kind).toBe("ambiguous");
+			if (hit.kind === "ambiguous") {
+				expect(hit.candidates.map((c) => c.durableId).sort()).toEqual(["newer", "older"]);
+				expect(hit.candidates[0].durableId).toBe("newer");
+			}
+		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+	});
+
+	test("too-old and never-present are told apart, because the fixes differ", () => {
+		const dir = rootOf();
+		try {
+			const now = 1_700_000_000_000;
+			put(dir, "old", "Ghost", now - 400 * 24 * 3600_000);
+			const idx = createRegistryIndex({ root: dir, now: () => now });
+			const ghost = idx.lookupNickname("Ghost");
+			expect(ghost.kind === "none" && ghost.reason).toBe("stale");
+			const never = idx.lookupNickname("Never Existed");
+			expect(never.kind === "none" && never.reason).toBe("not-found");
+		} finally { fs.rmSync(dir, { recursive: true, force: true }); }
+	});
+});

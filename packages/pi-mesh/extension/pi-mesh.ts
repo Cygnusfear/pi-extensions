@@ -48,7 +48,7 @@ import {
   resolveOfflineDurableTarget,
   type OfflineDurableResolution,
 } from "./route-resolve.ts";
-import { createRegistryIndex } from "./durable-registry-index.ts";
+import { createRegistryIndex, type RegistryFailureReason } from "./durable-registry-index.ts";
 import {
   readZmxSession,
   reconcileZmxSession,
@@ -2035,30 +2035,55 @@ export default function piMeshExtension(pi: ExtensionAPI) {
   // than twice per refusal, and the freshness bound lives with the scan.
   const registryIndex = createRegistryIndex();
 
-  const resolveRevivableTarget = (
-    rawTarget: string,
-    livePeers: PeerInfo[],
-  ): OfflineDurableResolution => {
-    const liveIds = new Set<string>();
-    for (const p of livePeers) {
-      liveIds.add(p.id);
-      if (p.meshId) liveIds.add(p.meshId);
-    }
-    const offline = readDurableDescriptor(rawTarget)
-      ? { kind: "resolved" as const, durableId: rawTarget }
-      : resolveOfflineDurableTarget(
-          registryIndex.entries().map((e) => ({
-            durableId: e.descriptor.durableId ?? "",
-            nickname: e.descriptor.nickname,
-          })),
-          rawTarget,
-        );
-    // A registration that is also live right now is not an offline target.
-    // Returning it is what let a running peer be told 'delivered' to a mailbox.
-    if (offline.kind === "resolved" && liveIds.has(offline.durableId)) return { kind: "none" };
-    return offline;
-  };
+  /**
+   * The ONE resolution used by every tell path (mesh_tell and code-mode alike),
+   * returning the durable id to deliver to or a reason it could not be resolved.
+   *
+   * Delegates to registryIndex.lookupNickname() rather than re-matching by hand,
+   * so the freshness bound and newest-wins rule are actually in force; an earlier
+   * revision mapped entries into the pure matcher itself and left those policies
+   * unreachable, which is a claim the code did not honour.
+   *
+   * LIMIT, stated rather than implied: the live-peer check below only catches a peer
+   * the roster still lists. A peer that is running but UNROSTERED - a roster gap
+   * under the stale-peer window, a lapsed announce, a rotated clientId - is by
+   * definition absent from mesh.peers(), so no in-process check can see it. Real
+   * liveness has to be decided where the sockets are, by the sidecar (kal-28jaxzqo);
+   * until then a tell to such a peer lands in the durable mailbox and reads
+   * 'delivered', which is the same failure this guard was written to avoid.
+   */
+  // One named type rather than an inline union: the two fallback sites below each
+  // spelled the object out, and when a field was added to one the other silently
+  // stopped carrying it - which is how the refusal ended up reading a property a
+  // branch did not define.
+  type RevivableResolution =
+    | { ok: true; durableId: string }
+    | {
+        ok: false;
+        reason: "none" | "ambiguous";
+        candidates?: string[];
+        detail?: RegistryFailureReason;
+      };
 
+  const resolveRevivableTarget = (rawTarget: string): RevivableResolution => {
+    if (readDurableDescriptor(rawTarget)) return { ok: true, durableId: rawTarget };
+    const hit = registryIndex.lookupNickname(rawTarget);
+    if (hit.kind === "resolved") {
+      const id = hit.entry.descriptor.durableId;
+      if (typeof id !== "string" || !id) return { ok: false, reason: "none" };
+      const liveNow = mesh.peers().some((p) => p.id === id || p.meshId === id);
+      if (liveNow) return { ok: false, reason: "none" };
+      return { ok: true, durableId: id };
+    }
+    if (hit.kind === "ambiguous") {
+      return { ok: false, reason: "ambiguous", candidates: hit.candidates.map((c) => c.durableId) };
+    }
+    // `none` also covers 'matched nothing' and 'everything that matched is too old to
+    // route'; the refusal wording must not claim a reason we did not establish, so the
+    // distinction is reported honestly rather than invented here.
+    // Carry the reason the index actually established into the refusal.
+    return { ok: false, reason: "none", detail: hit.kind === "none" ? hit.reason : undefined };
+  };
   const deliverToDurableMailbox = (
     durableId: string,
     message: unknown,
@@ -2382,12 +2407,22 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           // durable session the code-mode tell lands in its durable mailbox +
           // notifies supervisors — same honest 'delivered' as the mesh_tell tool.
           const receiptMode = mode === "visible" ? "surfaced" : mode;
-          const delivered = deliverToDurableMailbox(
-            params.sessionId,
-            params.message,
-            formatPayloadForDisplay(params.message),
-            receiptMode,
-          );
+          // Same single resolver as the mesh_tell tool path. Passing the raw target
+          // here was the bug: this parameter now means an ALREADY-RESOLVED durable id,
+          // so a nickname would be looked up as an id, find nothing, and fall through to
+          // undeliverable while the tool path resolved it fine. Two entry points must not
+          // hold two opinions about what a name means.
+          const cmResolved = isNoMatchFailure(e)
+            ? resolveRevivableTarget(params.sessionId)
+            : ({ ok: false, reason: "none" }) as RevivableResolution;
+          const delivered = cmResolved.ok
+            ? deliverToDurableMailbox(
+                cmResolved.durableId,
+                params.message,
+                formatPayloadForDisplay(params.message),
+                receiptMode,
+              )
+            : null;
           if (delivered) {
             const ack = buildTellReceiptAck(delivered.deliveryId, mesh.self().id, "delivered");
             return JSON.stringify({
@@ -2907,10 +2942,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           //     clientId — and mailboxing it then answers 'delivered' and fires a
           //     needless revive while the message sits unread.
           const offline = isNoMatchFailure(e)
-            ? resolveRevivableTarget(sessionId, mesh.peers())
-            : { kind: "none" as const };
-          const delivered =
-            offline.kind === "resolved" ? deliverToDurableMailbox(offline.durableId, message, rendered, receiptMode) : null;
+            ? resolveRevivableTarget(sessionId)
+            : ({ ok: false, reason: "none" }) as RevivableResolution;
+          const delivered = offline.ok
+            ? deliverToDurableMailbox(offline.durableId, message, rendered, receiptMode)
+            : null;
           if (delivered) {
             const ack = buildTellReceiptAck(delivered.deliveryId, mesh.self().id, "delivered");
             const label = delivered.descriptor.nickname ?? sessionId.slice(0, 8);
@@ -2944,9 +2980,11 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             // are different problems with different fixes, and the old text lied about
             // the first whenever the second was true.
             const refusal =
-              offline.kind === "ambiguous"
-                ? `the name '${sessionId}' is ambiguous between revivable sessions: ${offline.durableIds.join(", ")} - address one by its durable id`
-                : `no revivable durable session is registered for it`;
+              !offline.ok && offline.reason === "ambiguous"
+                ? `the name '${sessionId}' is ambiguous between revivable sessions: ${(offline.candidates ?? []).join(", ")} - address one by its durable id`
+                : offline.ok === false && offline.detail === "stale"
+                  ? `the only registration for '${sessionId}' is older than the freshness bound and was not routed`
+                  : `no revivable durable session is registered for it`;
             const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and ${refusal}.`;
             return {
               content: [{ type: "text", text }],

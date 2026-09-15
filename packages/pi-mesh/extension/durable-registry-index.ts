@@ -23,7 +23,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { isRevivable, readDurableDescriptor, removeDurableDescriptor } from "./durable-session-store.ts";
+import { readDurableDescriptor } from "./durable-session-store.ts";
 import { durableMeshRoot } from "./durable-inbound-mailbox.ts";
 import type { ReviveDescriptor } from "@pi-extensions/shared/revive-descriptor";
 
@@ -38,7 +38,7 @@ export interface RegistryEntry {
 export type NicknameLookup =
 	| { kind: "resolved"; entry: RegistryEntry }
 	| { kind: "ambiguous"; candidates: Array<{ durableId: string; ageMs: number }> }
-	| { kind: "none" };
+	| { kind: "none"; reason: RegistryFailureReason };
 
 export interface RegistryIndexOptions {
 	/** Registry root. Defaults to the HOME-derived one. */
@@ -61,16 +61,30 @@ export const REGISTRY_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
  * note that "smaller" is not "empty" - a caller that needs to distinguish "no
  * registrations" from "every registration unreadable" must look at `degraded`.
  */
-export function scanRegistry(options: RegistryIndexOptions = {}): { entries: RegistryEntry[]; degraded: boolean } {
+export interface RegistryScan {
+	entries: RegistryEntry[];
+	/** Every row was present but unreadable - distinct from an empty registry. */
+	degraded: boolean;
+	/**
+	 * Nicknames that ARE registered but were dropped for exceeding the freshness
+	 * bound, kept precisely so a lookup can tell 'too old to route' apart from
+	 * 'nobody ever registered that name'. Without them the difference is not
+	 * recoverable downstream, and reporting 'stale' would be an unreachable claim.
+	 */
+	expiredNicknames: string[];
+}
+
+export function scanRegistry(options: RegistryIndexOptions = {}): RegistryScan {
 	const root = options.root ?? durableMeshRoot();
 	const now = (options.now ?? Date.now)();
 	let names: string[];
 	try {
 		names = fs.readdirSync(root);
 	} catch {
-		return { entries: [], degraded: false };
+		return { entries: [], degraded: false, expiredNicknames: [] };
 	}
 	const entries: RegistryEntry[] = [];
+	const expiredNicknames: string[] = [];
 	let unreadable = 0;
 	let seen = 0;
 	for (const dirName of names) {
@@ -93,11 +107,14 @@ export function scanRegistry(options: RegistryIndexOptions = {}): { entries: Reg
 			continue;
 		}
 		if (typeof descriptor.updatedAt !== "number" || now - descriptor.updatedAt > (options.maxAgeMs ?? REGISTRY_MAX_AGE_MS)) {
+			if (typeof descriptor.nickname === "string" && descriptor.nickname) {
+				expiredNicknames.push(descriptor.nickname.trim().toLowerCase());
+			}
 			continue;
 		}
 		entries.push({ dirName, descriptor });
 	}
-	return { entries, degraded: seen > 0 && unreadable === seen };
+	return { entries, degraded: seen > 0 && unreadable === seen, expiredNicknames };
 }
 
 /**
@@ -105,26 +122,6 @@ export function scanRegistry(options: RegistryIndexOptions = {}): { entries: Reg
  * honest over time - a bound that only ever hides stale rows lets the directory
  * grow forever and every scan pay for them.
  */
-export function pruneRegistry(options: RegistryIndexOptions = {}): number {
-	const root = options.root ?? durableMeshRoot();
-	const maxAgeMs = options.maxAgeMs ?? REGISTRY_MAX_AGE_MS;
-	const now = (options.now ?? Date.now)();
-	let removed = 0;
-	let names: string[];
-	try {
-		names = fs.readdirSync(root);
-	} catch {
-		return 0;
-	}
-	for (const dirName of names) {
-		const descriptor = readDurableDescriptor(dirName, root);
-		if (!descriptor) continue;
-		if (typeof descriptor.updatedAt === "number" && now - descriptor.updatedAt <= maxAgeMs) continue;
-		removeDurableDescriptor(dirName, root);
-		removed++;
-	}
-	return removed;
-}
 
 /**
  * Why a nickname lookup did not resolve, kept distinct because the sender must be
@@ -137,12 +134,6 @@ export interface RegistryIndex {
 	entries(): RegistryEntry[];
 	/** Nickname lookup with freshness and newest-wins already applied. */
 	lookupNickname(rawName: string): NicknameLookup;
-	/** True when a durable id has a live-enough registration, for the offline guard. */
-	isRoutableDurableId(durableId: string): boolean;
-	/** Force the next entries() call to re-read. */
-	invalidate(): void;
-	/** Why a lookup failed, so refusal wording is derived, not guessed. */
-	lastFailureReason(): RegistryFailureReason | null;
 }
 
 /**
@@ -155,13 +146,21 @@ export interface RegistryIndex {
 export function createRegistryIndex(options: RegistryIndexOptions = {}): RegistryIndex {
 	const ttlMs = options.ttlMs ?? REGISTRY_TTL_MS;
 	const now = options.now ?? Date.now;
-	let cache: { at: number; entries: RegistryEntry[]; degraded: boolean } | null = null;
-	let reason: RegistryFailureReason | null = null;
+	let cache: { at: number; entries: RegistryEntry[]; degraded: boolean; expired: string[] } | null = null;
 
-	const snapshot = (): { entries: RegistryEntry[]; degraded: boolean } => {
+	const snapshot = (): { entries: RegistryEntry[]; degraded: boolean; expired: string[] } => {
 		const at = now();
 		if (cache && at - cache.at < ttlMs) return cache;
-		cache = { at, ...scanRegistry({ ...options, now }) };
+				const scanned = scanRegistry({ ...options, now });
+		// Named fields rather than a spread: the scan calls this column
+		// expiredNicknames and the cache calls it expired, and a spread let those two
+		// drift apart silently - the lookup then read an undefined it trusted.
+		cache = {
+			at,
+			entries: scanned.entries,
+			degraded: scanned.degraded,
+			expired: scanned.expiredNicknames,
+		};
 		return cache;
 	};
 
@@ -169,23 +168,23 @@ export function createRegistryIndex(options: RegistryIndexOptions = {}): Registr
 
 	return {
 		entries: () => snapshot().entries,
-		isRoutableDurableId: (durableId: string) => snapshot().entries.some((e) => e.descriptor.durableId === durableId),
-		invalidate: () => {
-			cache = null;
-		},
-		lastFailureReason: () => reason,
 		lookupNickname: (rawName: string) => {
-			reason = null;
 			const needle = norm(rawName);
-			if (!needle) {
-				reason = "not-found";
-				return { kind: "none" };
-			}
-			const { entries, degraded } = snapshot();
+			// Empty input is not a stale match or a corrupt registry; saying so keeps
+			// the refusal accurate instead of blaming the data.
+			if (!needle) return { kind: "none", reason: "not-found" };
+			const { entries, degraded, expired } = snapshot();
 			const hits = entries.filter((e) => norm(e.descriptor.nickname ?? "") === needle);
 			if (hits.length === 0) {
-				reason = degraded ? "corrupt" : entries.length === 0 ? "not-found" : "stale";
-				return { kind: "none" };
+				// Three different problems, told apart because they have three different fixes:
+				// nobody registered, everyone registered is too old, or the registry is
+				// unreadable. Collapsing them is what made the old message lie.
+				const why: RegistryFailureReason = expired.includes(needle)
+					? "stale"
+					: degraded
+						? "corrupt"
+						: "not-found";
+				return { kind: "none", reason: why };
 			}
 			// Bind the validated id into the value once. Re-reading descriptor.durableId
 			// afterwards would re-introduce the optional-field problem being guarded here.
@@ -198,7 +197,6 @@ export function createRegistryIndex(options: RegistryIndexOptions = {}): Registr
 				if (!byId.has(id)) byId.set(id, { id, entry: h });
 			}
 			if (byId.size > 1) {
-				reason = "ambiguous";
 				return {
 					kind: "ambiguous",
 					candidates: [...byId.values()]
@@ -213,15 +211,9 @@ export function createRegistryIndex(options: RegistryIndexOptions = {}): Registr
 			const winner = [...byId.values()].sort(
 				(a, b) => b.entry.descriptor.updatedAt - a.entry.descriptor.updatedAt,
 			)[0];
-			if (!winner) {
-				reason = "corrupt";
-				return { kind: "none" };
-			}
+			if (!winner) return { kind: "none", reason: "corrupt" };
 			return { kind: "resolved", entry: winner.entry };
 		},
 	};
 }
 
-export function isRegisteredRevivable(durableId: string, root?: string): boolean {
-	return isRevivable(durableId, root);
-}
