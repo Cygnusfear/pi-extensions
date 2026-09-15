@@ -1,0 +1,19 @@
+bun.lock
+  s_ad3e634404fe30::t_bdf68f2c5f9a0d 47,51-53,75,401,581
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8673110a463d02449e452676d79fea7aac0f7f4d",
+  "prompts": {},
+  "sessions": {
+    "s_ad3e634404fe30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "29c8db99-5569-49dc-a949-ea09ebcc7313",
+        "model": "unknown"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
