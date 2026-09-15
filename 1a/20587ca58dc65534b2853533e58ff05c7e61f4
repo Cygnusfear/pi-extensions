@@ -1,0 +1,35 @@
+packages/pi-mesh/extension/pi-mesh.who-announce.test.ts
+  s_2f1359b3d38dfd::t_dad139cadf6850 1-136,147,149-151,163,168-227
+  s_2f1359b3d38dfd::t_e9ea6da2fb0d2c 155,157-162,164-167
+  s_2f1359b3d38dfd::t_9dcab494e2eaf4 137-146,148
+  s_2f1359b3d38dfd::t_723c47cdca0dd2 152-154,156
+packages/pi-mesh/extension/pi-mesh.ts
+  s_2f1359b3d38dfd::t_0dad5558df2a86 323-331,1095-1104,1293-1295,1298-1300
+  s_2f1359b3d38dfd::t_02a10336c4f947 304-310
+  s_2f1359b3d38dfd::t_6a0bb2254e3310 987-1003
+  s_2f1359b3d38dfd::t_7f3953f6546f38 1067-1075
+  s_2f1359b3d38dfd::t_df9ddf98ca8abf 1279-1292,1296-1297,1301-1302
+  s_2f1359b3d38dfd::t_3967c82d952ec7 1246-1247
+  s_2f1359b3d38dfd::t_8ea696b7904833 3070-3073
+  s_2f1359b3d38dfd::t_8d594dcfcd0f60 1094
+  s_2f1359b3d38dfd::t_119d70afc4005f 1303
+packages/pi-mesh/extension/fake-sidecar.ts
+  s_2f1359b3d38dfd::t_8cf092193de6ab 21-30
+  s_2f1359b3d38dfd::t_6e33151e1a9b3c 170-196,199,215-222,225-229
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a20587ca58dc65534b2853533e58ff05c7e61f4",
+  "prompts": {},
+  "sessions": {
+    "s_2f1359b3d38dfd": {
+      "agent_id": {
+        "tool": "Adam Magnetar Sandage",
+        "id": "01a097ed-1bab-74e0-864d-88c7571ea68a",
+        "model": "anthropic/claude-sonnet-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
