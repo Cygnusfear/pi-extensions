@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { runRlm } from "../src/loop";
 import { cancelAllRlmHandles, createRlmHandle } from "../src/handle";
+import { buildRlmReturn } from "../src/return-injection";
 import type { RlmHandle } from "../src/types";
 
 type CompleteMock = (model: unknown, request: any, auth: any) => Promise<any> | any;
@@ -69,10 +70,27 @@ describe("rlm contract", () => {
 		);
 	});
 	test("2 rlm.return idempotency exposes the second-call error", async () => {
-		const key = envKey("SECOND_ERROR");
-		queue(js("try { rlm.return({a:1}); } catch (e) {}\ntry { rlm.return({a:2}); } catch (e) { process.env[" + JSON.stringify(key) + "] = e.message; throw e; }"));
+		// End-to-end half: a second rlm.return inside the same block must not disturb
+		// the value the run already resolved with.
+		queue(js("try { rlm.return({a:1}); } catch (e) {}\ntry { rlm.return({a:2}); } catch (e) { throw e; }"));
 		await expect(runRlm(deps(), { task: "idempotent", tools: [] }, 0)).resolves.toMatchObject({ a: 1 });
-		expect(process.env[key]).toBe("rlm: already returned");
+
+		// Error half, asserted at the guard itself. This test previously carried the
+		// message out of the sandbox by writing it into process.env and reading it on
+		// the host side - an ambient sandbox-to-host write channel that kal-fq41qj60
+		// deliberately closed. Asserting buildRlmReturn directly tests the same
+		// property without depending on an escape hatch, and it names the message
+		// exactly instead of trusting a string that survived a round trip.
+		const state: any = { resolved: false };
+		const rlmReturn = buildRlmReturn(state);
+		expect(() => rlmReturn({ a: 1 })).not.toThrow();
+		expect(state.resolved).toBe(true);
+		expect(() => rlmReturn({ a: 2 })).toThrow("rlm: already returned");
+		// a rejected value must not flip the settled state on the way out
+		const guarded: any = { resolved: false };
+		const second = buildRlmReturn(guarded);
+		expect(() => second({ big: 1n } as any)).toThrow("rlm.return: value must be JSON-serializable");
+		expect(guarded.resolved).toBe(false);
 	});
 	test("3 rlm.return after dispose is silent noop without unhandled process errors", async () => {
 		const unhandled: unknown[] = [];
