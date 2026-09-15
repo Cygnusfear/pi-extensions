@@ -44,6 +44,46 @@ function dedupByIdentity(peers: PeerInfo[]): PeerInfo[] {
  * Throws with a human-readable message on no-match or ambiguity — same surface as
  * the previous inline resolver, now durable-aware and unit-testable.
  */
+/** A registered-but-offline revivable session, reduced to what routing needs. */
+export interface OfflineDurableTarget {
+	durableId: string;
+	nickname?: string;
+}
+
+export type OfflineDurableResolution
+	= { kind: "resolved"; durableId: string }
+	| { kind: "ambiguous"; durableIds: string[] }
+	| { kind: "none" };
+
+/**
+ * Resolve a raw target against the OFFLINE durable registry by nickname.
+ *
+ * Lives apart from resolveDurableTarget because the two lookups answer different
+ * questions: the live one resolves a roster entry to a ROUTE, this one resolves a
+ * name to a durable id that has no roster entry at all. The matcher is pure and the
+ * caller supplies the candidates, so the ambiguity rule is testable without a
+ * filesystem and the scan can be reused by both the delivery path and the message
+ * that explains a refusal.
+ *
+ * Same rule the live roster uses: exact case-insensitive nickname, and duplicates of
+ * ONE durable id are not an ambiguity - they are one session listed twice.
+ */
+export function resolveOfflineDurableTarget(
+	candidates: readonly OfflineDurableTarget[],
+	rawTarget: string,
+): OfflineDurableResolution {
+	const needle = rawTarget.trim().toLowerCase();
+	if (!needle) return { kind: "none" };
+	const ids = new Set<string>();
+	for (const c of candidates) {
+		const nickname = c.nickname?.trim().toLowerCase();
+		if (nickname && nickname === needle) ids.add(c.durableId);
+	}
+	if (ids.size === 1) return { kind: "resolved", durableId: [...ids][0] };
+	if (ids.size > 1) return { kind: "ambiguous", durableIds: [...ids].sort() };
+	return { kind: "none" };
+}
+
 export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): string {
 	const needle = rawTarget.trim();
 	const needleLower = needle.toLowerCase();

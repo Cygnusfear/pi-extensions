@@ -42,7 +42,7 @@ import {
 } from "./ask-protocol.ts";
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
-import { resolveDurableTarget } from "./route-resolve.ts";
+import { resolveDurableTarget, resolveOfflineDurableTarget, type OfflineDurableResolution } from "./route-resolve.ts";
 import {
   readZmxSession,
   reconcileZmxSession,
@@ -96,6 +96,7 @@ import {
 import { DurableInboundMailbox } from "./durable-inbound-mailbox.ts";
 import {
   buildReviveNotify,
+listDurableDescriptors,
   materialiseDurableDescriptor,
   readDurableDescriptor,
 } from "./durable-session-store.ts";
@@ -2014,12 +2015,38 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
   // Deliver a tell to a HIBERNATED durable session's persisted mailbox. Returns
   // null when the target has no revive descriptor (→ dead → 'undeliverable').
+  /**
+   * Resolve a raw target to a revivable durable id: an exact id (or anything
+   * readDurableDescriptor already accepts) wins outright, and only a target that is
+   * NOT a known id is looked up by the offline registry's nickname.
+   *
+   * Exact-id precedence is load-bearing, not tidiness: a nickname that happens to
+   * collide with a real durable id must route to that id rather than to whoever else
+   * is called by that name, and the previous behaviour of treating any id-shaped
+   * string as the only possible key is what made offline peers unreachable by name.
+   */
+  const resolveRevivableTarget = (rawTarget: string): OfflineDurableResolution => {
+    if (readDurableDescriptor(rawTarget)) return { kind: "resolved", durableId: rawTarget };
+    return resolveOfflineDurableTarget(
+      listDurableDescriptors().map((d) => ({ durableId: d.durableId, nickname: d.nickname })),
+      rawTarget,
+    );
+  };
+
   const deliverToDurableMailbox = (
-    durableId: string,
+rawTarget: string,
     message: unknown,
     payloadText: string,
     receiptMode: MeshTellReceiptWaitForPhase,
   ): { descriptor: ReviveDescriptor; deliveryId: string; mailboxCount: number; notified: number } | null => {
+    // `rawTarget` is whatever the agent typed. A nickname used to fall straight
+    // through to 'undeliverable' here even when exactly one registered descriptor
+    // carried that nickname, which forced every caller to address sleeping actors
+    // by uuid (kal-sbc4q4l9). One resolution, used by the delivery below and by
+    // the message that explains a refusal, so the two can never disagree.
+    const offline = resolveRevivableTarget(rawTarget);
+    if (offline.kind !== "resolved") return null;
+    const durableId = offline.durableId;
     const descriptor = readDurableDescriptor(durableId);
     if (!descriptor) return null;
     const now = Date.now();
@@ -2877,7 +2904,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           } else {
             const deliveryId = createDeliveryId();
             const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
-            const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and no revivable durable session is registered for it.`;
+						// Naming the candidates matters: 'no revivable session is registered' is the
+						// wrong sentence when two ARE registered and the target simply did not say
+						// which. The caller can only fix an ambiguity it can see.
+						const offlineWhy = resolveRevivableTarget(sessionId);
+						const refusal =
+						  offlineWhy.kind === "ambiguous"
+						    ? `the nickname '${sessionId}' is ambiguous between revivable sessions: ${offlineWhy.durableIds.join(", ")} - address one by its durable id`
+						    : `no revivable durable session is registered for it`;
+						const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and ${refusal}.`;
             return {
               content: [{ type: "text", text }],
               details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,

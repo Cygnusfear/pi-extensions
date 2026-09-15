@@ -52,6 +52,34 @@ export function readDurableDescriptor(durableId: string, root?: string): ReviveD
 }
 
 /** A durable id is REVIVABLE iff a valid persisted descriptor exists for it. */
+/**
+ * Every canonical descriptor registered under `root`, keyed by the durable id
+ * INSIDE the descriptor rather than the directory name: the directory name is the
+ * sanitised form, so handing back dir names would leak a mangled id into routing.
+ * Unreadable or malformed entries are skipped rather than throwing - one corrupt
+ * descriptor must not make the whole offline registry unresolvable.
+ */
+export function listDurableDescriptors(root?: string): ReviveDescriptor[] {
+	const dir = root ?? durableMeshRoot();
+	let names: string[];
+	try {
+		names = fs.readdirSync(dir);
+	} catch {
+		return [];
+	}
+	const found: ReviveDescriptor[] = [];
+	for (const name of names) {
+		try {
+			if (!fs.statSync(path.join(dir, name)).isDirectory()) continue;
+		} catch {
+			continue;
+		}
+		const descriptor = readDurableDescriptor(name, root);
+		if (descriptor) found.push(descriptor);
+	}
+	return found;
+}
+
 export function isRevivable(durableId: string, root?: string): boolean {
 	return readDurableDescriptor(durableId, root) !== null;
 }

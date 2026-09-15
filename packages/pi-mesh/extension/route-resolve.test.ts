@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveDurableTarget, selectRoute } from "./route-resolve.ts";
+import { resolveDurableTarget, resolveOfflineDurableTarget, selectRoute } from "./route-resolve.ts";
 import type { PeerInfo } from "./types.ts";
 
 function peer(p: Partial<PeerInfo> & { id: string }): PeerInfo {
@@ -76,3 +76,49 @@ describe("resolveDurableTarget — durable-id routing", () => {
 		expect(resolveDurableTarget(peers, "durable-H")).toBe("durable-H");
 	});
 });
+
+describe("resolveOfflineDurableTarget — nickname routing for offline peers (kal-sbc4q4l9)", () => {
+	const dur = (durableId: string, nickname?: string) => ({ durableId, nickname });
+
+	test("an offline peer's nickname resolves to its durable id", () => {
+		const c = [dur("durable-valencia", "Valencia")];
+		expect(resolveOfflineDurableTarget(c, "Valencia")).toEqual({ kind: "resolved", durableId: "durable-valencia" });
+	});
+
+	test("matching is case-insensitive and ignores surrounding whitespace", () => {
+		const c = [dur("d-1", "Jedidah Uranus Medeiros")];
+		// Surrounding whitespace and case are normalised; INTERNAL spacing is not, on
+		// purpose. Folding runs of spaces would be a matching policy nobody asked for and
+		// it manufactures collisions between distinct nicknames, so the resolver stays
+		// byte-exact on the inside of a name.
+		expect(resolveOfflineDurableTarget(c, "  Jedidah Uranus Medeiros  ")).toEqual({ kind: "resolved", durableId: "d-1" });
+		expect(resolveOfflineDurableTarget(c, "Jedidah  Uranus Medeiros").kind).toBe("none");
+	});
+
+	test("two registrations sharing one durable id are not an ambiguity", () => {
+		const c = [dur("d-1", "Valencia"), dur("d-1", "Valencia")];
+		expect(resolveOfflineDurableTarget(c, "valencia").kind).toBe("resolved");
+	});
+
+	test("a genuinely ambiguous nickname names every candidate", () => {
+		const c = [dur("d-2", "Valencia"), dur("d-1", "valencia")];
+		const r = resolveOfflineDurableTarget(c, "Valencia");
+		expect(r.kind).toBe("ambiguous");
+		if (r.kind === "ambiguous") expect(r.durableIds).toEqual(["d-1", "d-2"]);
+	});
+
+	test("no match and blank input both yield none rather than a guess", () => {
+		const c = [dur("d-1", "Valencia")];
+		expect(resolveOfflineDurableTarget(c, "Nobody").kind).toBe("none");
+		expect(resolveOfflineDurableTarget(c, "   ").kind).toBe("none");
+		expect(resolveOfflineDurableTarget([], "Valencia").kind).toBe("none");
+	});
+
+	test("a descriptor with no nickname cannot match any name", () => {
+		expect(resolveOfflineDurableTarget([dur("d-1"), dur("d-2", undefined)], "d-1").kind).toBe("none");
+	});
+});
+// kal-sbc4q4l9: an offline peer must be addressable by nickname. The matcher is pure
+// and takes candidates, so these rules are pinned without touching the filesystem —
+// the same matcher both the delivery path and the refusal message use, so the two
+// cannot disagree about what "ambiguous" means.

@@ -6,6 +6,8 @@ import { buildReviveDescriptor, SPAWNER_PARTIAL_DESCRIPTOR_FILE } from "@pi-exte
 import { durableDescriptorPath } from "./durable-inbound-mailbox.ts";
 import {
 	buildReviveNotify,
+	listDurableDescriptors,
+	writeDurableDescriptor,
 	isRevivable,
 	isReviveNotify,
 	materialiseDurableDescriptor,
@@ -155,5 +157,59 @@ describe("revive notify (supervisor-notified, v1)", () => {
 		expect(notify.mailboxCount).toBe(3);
 		expect(isReviveNotify({})).toBe(false);
 		expect(isReviveNotify({ ...notify, kind: "other" })).toBe(false);
+	});
+});
+
+// kal-sbc4q4l9: offline peers must be addressable by nickname, which requires the
+// whole registry to be enumerable. The scan returns what the DESCRIPTOR says rather
+// than directory names (those are sanitised), and one corrupt entry must not make the
+// rest of the registry unresolvable.
+describe("listDurableDescriptors (kal-sbc4q4l9)", () => {
+		// Built with the production constructor rather than a hand-written object: the
+	// schema validator requires kind/version/cwd/command/args, and an ad-hoc literal
+	// silently fails validation, which would make a green-looking test assert nothing.
+	const descriptorFor = (durableId: string, nickname: string) =>
+		buildReviveDescriptor({
+			durableId,
+			nickname,
+			sessionId: "session-" + durableId,
+			sessionFile: "/tmp/" + durableId + ".jsonl",
+			cwd: "/tmp",
+			command: "pi",
+			args: ["--resume"],
+			supervisors: ["sup-" + durableId],
+			env: {},
+			updatedAt: 1,
+		});
+test("returns registered descriptors keyed by the id inside the file", () => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "durable-list-"));
+		try {
+			const put = (dir: string, body: string) => {
+				fs.mkdirSync(path.join(root, dir), { recursive: true });
+				fs.writeFileSync(path.join(root, dir, "descriptor.json"), body);
+			};
+			const putGood = (dir: string, durableId: string, nickname: string) =>
+				writeDurableDescriptor(durableId, descriptorFor(durableId, nickname), root);
+			putGood("d-a", "d-a", "Valencia");
+			putGood("d-b", "d-b", "Adam");
+			// this dir name and its internal durable id differ on purpose: it proves
+			// the returned id comes from the descriptor, not from the directory name
+			putGood("dir-name", "real-id", "Nadia");
+			put("d-corrupt", "{ definitely not json");
+			put("d-incomplete", JSON.stringify({ durableId: "d-incomplete" }));
+			fs.mkdirSync(path.join(root, "d-empty"), { recursive: true });
+			fs.writeFileSync(path.join(root, "stray.txt"), "not a session dir");
+
+			const found = listDurableDescriptors(root);
+			expect(found.map((d) => d.durableId).sort()).toEqual(["d-a", "d-b", "real-id"]);
+			expect(found.map((d) => d.nickname).sort()).toEqual(["Adam", "Nadia", "Valencia"]);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	test("an absent registry is empty rather than fatal", () => {
+		const missing = path.join(os.tmpdir(), "definitely-not-a-durable-root-" + Date.now());
+		expect(listDurableDescriptors(missing)).toEqual([]);
 	});
 });
