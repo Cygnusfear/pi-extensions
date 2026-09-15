@@ -1,0 +1,24 @@
+packages/pi-mesh/extension/pi-mesh.who-announce.test.ts
+  s_e1edfff8cd915d::t_2135958e96c3f9 2,7,47-53,62-66
+packages/pi-mesh/extension/sidecar-test-harness.ts
+  s_e1edfff8cd915d::t_76e5e0ac50e3b7 1-151
+packages/pi-mesh/extension/pi-mesh.sidecar-lifecycle.test.ts
+  s_e1edfff8cd915d::t_08786e1105791a 9
+  s_e1edfff8cd915d::t_70de1429c6e894 2,59-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ac0f2d1d6b99c8b9c54b588f6dbf7de3d5e3c9c",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
