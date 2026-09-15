@@ -44,10 +44,13 @@
     },
     "packages/canonical-agent-resources": {
       "name": "@pi-extensions/canonical-agent-resources",
-      "version": "0.0.6",
+      "version": "0.0.9",
       "peerDependencies": {
         "@earendil-works/pi-agent-core": ">=0.80.10",
       },
+      "optionalPeers": [
+        "@earendil-works/pi-agent-core",
+      ],
     },
     "packages/code-mode": {
       "name": "@pi-extensions/code-mode",
@@ -69,7 +72,7 @@
     },
     "packages/code-mode-runtime": {
       "name": "@pi-extensions/code-mode-runtime",
-      "version": "0.0.1",
+      "version": "0.0.5",
     },
     "packages/code-review-guard": {
       "name": "@pi-extensions/code-review-guard",
@@ -395,7 +398,7 @@
     },
     "packages/pi-mesh": {
       "name": "@pi-extensions/pi-mesh",
-      "version": "0.0.3",
+      "version": "0.0.4",
       "dependencies": {
         "@pi-extensions/shared": "*",
         "@sinclair/typebox": "*",
@@ -575,7 +578,7 @@
     },
     "packages/transcription-runtime": {
       "name": "@pi-extensions/transcription-runtime",
-      "version": "0.0.1",
+      "version": "0.0.3",
     },
     "packages/webfetch": {
       "name": "@pi-extensions/webfetch",
