@@ -326,7 +326,20 @@ let currentOuijaSessionFile: string | null = null;
 let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
 
 function getSession(): CodeModeSession {
-	if (!session) session = createCodeModeSession();
+	if (!session) session = createCodeModeSession({
+	  // The harness documents PI_* as agent-facing session/model metadata, so these stay
+	  // visible by explicit grant rather than by accident. PI_AGENT_EMAIL is deliberately
+	  // NOT granted: it is identity detail, not something the sandbox needs. (kal-fq41qj60)
+	  sandboxEnvNames: [
+	    "PI_CODING_AGENT",
+	    "PI_SESSION_NAME",
+	    "PI_GIT_LOCK_MODE",
+	    "PI_AGENT_MODEL",
+	    "PI_AGENT_NAME",
+	    "PI_SESSION_ID",
+	    "PI_MESH_ENDPOINTS",
+	  ],
+	});
 	return session;
 }
 

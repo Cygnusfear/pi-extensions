@@ -27,6 +27,7 @@ import {
 	type SquashHandoff,
 } from "./deferred-squash";
 import { loadRunbook } from "@pi-extensions/runbooks/engine";
+import { buildSandboxEnv } from "./sandbox-env.ts";
 import { resolveSandboxBindings } from "./sandbox-bindings.ts";
 import {
 	getSandboxFnsForCall,
@@ -64,6 +65,12 @@ export interface CreateSessionOptions {
 	storePath?: string;
 	/** Default false. */
 	initialEscaped?: boolean;
+	/**
+	 * Extra EXACT environment variable names the host grants this session on top of the
+	 * default allowlist (kal-fq41qj60). Names only - a host cannot push values through
+	 * this path. Anything not covered is absent from the sandbox's process.env.
+	 */
+	sandboxEnvNames?: readonly string[];
 }
 
 
@@ -128,9 +135,12 @@ export function createCodeModeSession(opts?: CreateSessionOptions): CodeModeSess
 		// (training-data habit); injecting it removes a whole ReferenceError class.
 		Buffer,
 
-		// Process — env, platform, pid are static; cwd is updated per-execution by executeInSession.
+		// Process — a narrowed, freshly allocated view (kal-fq41qj60), NOT the host env by
+		// reference. Not frozen: executeInSession reassigns process.cwd on every call.
 		process: {
-			env: globalThis.process.env,
+			env: buildSandboxEnv(globalThis.process.env, {
+				sandboxEnvNames: opts?.sandboxEnvNames,
+			}),
 			cwd: () => globalThis.process.cwd(),
 			platform: globalThis.process.platform,
 			pid: globalThis.process.pid,

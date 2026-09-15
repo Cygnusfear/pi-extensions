@@ -48,18 +48,20 @@ describe("code-mode vm context exposes no ambient machine access (kal-v3ounic4)"
     expect(probe("Function('return typeof process.binding')()")).toBe("undefined");
   });
 
-  test("OPEN FINDING (reported, not asserted-acceptable): process.env is ambient", () => {
-    // kal-v3ounic4 says an actor must have no ambient machine access. The four vectors
-    // the ticket names are closed above, but the narrowed process still carries the
-    // host's ENTIRE environment - which on this box includes provider API keys and
-    // paths. That is ambient read access to secrets by another route, so it is
-    // recorded here as a pinned observation rather than a passing assertion that
-    // would launder it into 'audited clean'. Narrowing it is a design call: tools and
-    // host extensions legitimately read env, so it needs kaliv2/Claire + Alexander
-    // rather than a unilateral change on a pinned repo.
-    const envKeys = probe("Object.keys(process.env)") as string[];
-    expect(Array.isArray(envKeys)).toBe(true);
-    expect(envKeys.length).toBeGreaterThan(0);
-    expect(probe("typeof process.env")).toBe("object");
+  test("no credential-shaped environment name is visible in the sandbox (kal-fq41qj60)", () => {
+    // Was an OPEN FINDING: the narrowed process still carried the host's entire
+    // env, so secrets were ambient by another route. Now it is an assertion. The
+    // host genuinely holds 8 credential-shaped names on this box, so a leak of the
+    // whole object would fail this loudly rather than pass quietly.
+    const names = probe("Object.keys(process.env)") as string[];
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.filter((n) => /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(n))).toEqual([]);
+    expect(probe("typeof process.env.OPENAI_API_KEY")).toBe("undefined");
+    expect(probe("'OPENAI_API_KEY' in process.env")).toBe(false);
+    // basic operability is preserved, and writes stay inside the sandbox copy
+    expect(probe("typeof process.env.PATH")).toBe("string");
+    expect(probe("typeof process.env.HOME")).toBe("string");
+    expect(probe("(() => { process.env.SCRATCH = 'x'; return 'SCRATCH' in process.env; })()")).toBe(true);
+    expect(probe("process.env === undefined")).toBe(false);
   });
 });
