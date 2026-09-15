@@ -18,6 +18,16 @@
  *  - Per connection: sends {"ev":"ready","zid","client_id"} with a FRESH
  *    client_id per connection (like the real daemon), and records every
  *    received command line to $FAKE_SIDECAR_OUT/events.jsonl.
+ *  - Pub/sub relay (kal-1dymeveg): tracks each connection's {cmd:"subscribe",
+ *    topic} calls (exact topics and "prefix/**" wildcards, matching the real
+ *    daemon's topic shape) and on {cmd:"publish", topic, payload} forwards
+ *    {"ev":"msg","topic","payload"} to every connection whose subscriptions
+ *    match — INCLUDING the publisher itself, mirroring the real sidecar's
+ *    self-echo (pi-mesh.ts's own _handleAnnounce/_handleWho already defend
+ *    against reacting to a self-echo where it matters). This is the minimum
+ *    needed for a multi-client test (two real PiMesh sessions actually
+ *    exchanging pi/mesh/announce/pi/mesh/who) without touching the real
+ *    zenoh-backed daemon.
  *  - SIGTERM/SIGINT: unlinks sock+pid and exits 0 (the real daemon's
  *    cleanup_files on graceful exit). SIGKILL: no cleanup — stale files
  *    remain, exactly like the production incidents.
@@ -157,8 +167,36 @@ try {
   } catch {}
   mkdirSync(piDir, { recursive: true });
 
+  // kal-1dymeveg: connections + their subscriptions, for the pub/sub relay
+  // below. A connection is dropped from here on socket close/error so a
+  // dead client never receives (or blocks on) a relay write.
+  interface Conn {
+    readonly id: string;
+    readonly socket: import("node:net").Socket;
+    readonly topics: Set<string>;
+  }
+  const conns = new Map<string, Conn>();
+
+  const topicMatches = (pattern: string, topic: string): boolean => {
+    if (pattern === topic) return true;
+    if (pattern.endsWith("/**")) return topic.startsWith(pattern.slice(0, -2));
+    return false;
+  };
+
+  const relay = (fromId: string, topic: string, payload: string): void => {
+    const line = JSON.stringify({ ev: "msg", topic, payload }) + "\n";
+    for (const conn of conns.values()) {
+      if (![...conn.topics].some((pattern) => topicMatches(pattern, topic))) continue;
+      try {
+        conn.socket.write(line);
+      } catch {}
+    }
+    record("events.jsonl", { event: "relay", from: fromId, topic, recipients: [...conns.values()].filter((c) => [...c.topics].some((p) => topicMatches(p, topic))).map((c) => c.id) });
+  };
+
   const server = createServer((socket) => {
     const clientId = randomUUID();
+    conns.set(clientId, { id: clientId, socket, topics: new Set() });
     socket.write(JSON.stringify({ ev: "ready", zid: "fake-zid", client_id: clientId }) + "\n");
     record("events.jsonl", { event: "ready", connection: clientId, zid: "fake-zid", client_id: clientId });
     let buf = "";
@@ -174,8 +212,21 @@ try {
           command = JSON.parse(line);
         } catch {}
         record("events.jsonl", { event: "command", connection: clientId, command });
+        if (command && typeof command === "object") {
+          const cmd = command as { cmd?: string; topic?: string; payload?: string };
+          if (cmd.cmd === "subscribe" && typeof cmd.topic === "string") {
+            conns.get(clientId)?.topics.add(cmd.topic);
+          } else if (cmd.cmd === "publish" && typeof cmd.topic === "string") {
+            relay(clientId, cmd.topic, cmd.payload ?? "");
+          }
+        }
       }
     });
+    const cleanup = (): void => {
+      conns.delete(clientId);
+    };
+    socket.on("close", cleanup);
+    socket.on("error", cleanup);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

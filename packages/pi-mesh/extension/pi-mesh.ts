@@ -301,6 +301,13 @@ export function killStraySidecars(binPath: string, exceptPid: number | null = nu
 type MeshEventType = "ready" | "message" | "peer-join" | "peer-leave" | "request" | "channel";
 type MeshEventCallback<T = unknown> = (data: T) => void;
 
+// kal-1dymeveg: rate limit for _handleWho — see that method's doc comment.
+const WHO_RATE_LIMIT_MS = 1_000;
+// kal-1dymeveg: how long mesh_peers waits for at least one "who" reply before
+// answering with whatever it has (possibly still empty, if truly alone).
+const WHO_WAIT_MS = 1_500;
+const WHO_POLL_INTERVAL_MS = 50;
+
 export class PiMesh {
   private sock: Socket | null = null;
   private peerMap: Map<string, PeerInfo> = new Map();
@@ -313,6 +320,15 @@ export class PiMesh {
   private myName: string | undefined;
   private myIdentity: MeshIdentity | null = null; // stable mesh identity (persisted in session file)
   private announceIntervalMs = 30_000;
+  // kal-1dymeveg: last time a "who" round-trip made US re-announce (0 =
+  // never). Deliberately NOT shared with the connect-time/heartbeat announce
+  // clock: an existing peer that happens to have announced a moment ago for
+  // an UNRELATED reason must still answer a brand-new peer's first "who" —
+  // that unrelated announce was broadcast before the new peer was even
+  // subscribed, so it was never actually heard by them. This clock only
+  // rate-limits repeated WHO-triggered announces (the thundering-herd case:
+  // many peers connecting within the same second all asking "who" at once).
+  private lastWhoAnnounceAt = 0;
   private lineBuf = "";
   private pendingGets: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }> =
     new Map();
@@ -968,6 +984,23 @@ export class PiMesh {
     return Array.from(this.peerMap.values());
   }
 
+  /** kal-1dymeveg: peers(), but when the roster is still empty (a fresh
+   *  session whose "who" round from connect hasn't come back yet, or ran
+   *  before any peer was listening) publish another "who" and poll for up to
+   *  WHO_WAIT_MS before giving up — used by the mesh_peers tool so a session
+   *  that calls it within the first second of connecting doesn't report
+   *  "you're alone" when it is not. Returns immediately, without publishing,
+   *  once the roster is already non-empty. */
+  async peersOrWait(maxWaitMs = WHO_WAIT_MS): Promise<PeerInfo[]> {
+    if (this.peerMap.size > 0) return this.peers();
+    this._publishWho();
+    const deadline = Date.now() + maxWaitMs;
+    while (this.peerMap.size === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, WHO_POLL_INTERVAL_MS));
+    }
+    return this.peers();
+  }
+
   // The "message" event delivers an already-unwrapped InboundMeshMessage: the
   // inner payload is at .message.payload, so a consumer cannot forget to unwrap
   // and silently drop a wrapped tell (see the emit site in _handleMsg).
@@ -1031,6 +1064,15 @@ export class PiMesh {
         this._setupSubscriptions(this.myClientId, process.cwd());
         this._ensureChannelSubscription();
         this._announce(this.myClientId, process.cwd());
+        // kal-1dymeveg: a fresh session otherwise sees an empty roster for up
+        // to announceIntervalMs (30s default) — the ONLY proactive signal
+        // before this fix was our own heartbeat, which tells existing peers
+        // about US but never asks THEM to re-announce. Publishing "who" right
+        // after our own first announce asks every already-connected peer to
+        // re-announce immediately (rate-limited on their end — see
+        // _handleWho), so this process's peerMap fills within one round trip
+        // instead of waiting up to 30s.
+        this._publishWho();
         this._startHeartbeat(this.myClientId, process.cwd());
         this._emit("ready", this.self());
         break;
@@ -1049,6 +1091,17 @@ export class PiMesh {
         const ann: AnnouncePayload = JSON.parse(payload);
         this._handleAnnounce(ann);
       } catch {}
+    } else if (topic === "pi/mesh/who") {
+      // kal-1dymeveg: someone is asking the mesh to re-announce right now.
+      // Skip our OWN who, echoed back by the sidecar (the same self-echo
+      // _handleAnnounce already guards against) — responding to it would
+      // just be a redundant announce a few milliseconds after our
+      // connect-time one, for no one's benefit.
+      let from: string | undefined;
+      try {
+        from = (JSON.parse(payload) as { from?: string }).from;
+      } catch {}
+      if (from !== this.myClientId) this._handleWho();
     } else if (topic.startsWith("pi/mesh/channel/")) {
       const channelId = topic.slice("pi/mesh/channel/".length);
       if (this.channelSubs.has(channelId)) {
@@ -1190,6 +1243,8 @@ export class PiMesh {
     this._subscribeToDurableTopic();
     this._send({ cmd: "subscribe", topic: "pi/mesh/announce/**" });
     this._send({ cmd: "subscribe", topic: "pi/mesh/broadcast/**" });
+    // kal-1dymeveg: the roster-bootstrap topic — see _handleWho/_publishWho.
+    this._send({ cmd: "subscribe", topic: "pi/mesh/who" });
   }
 
   private _ensureChannelSubscription(): void {
@@ -1219,6 +1274,31 @@ export class PiMesh {
       topic: `pi/mesh/announce/${clientId}`,
       payload: JSON.stringify(ann),
     });
+  }
+
+  /** kal-1dymeveg: ask the whole mesh to re-announce right now (published once
+   *  on connect, right after this process's own first announce — see the
+   *  "ready" handler — and again from mesh_peers when the roster is still
+   *  empty; see peersOrWait). Every peer's _handleWho answers via its own
+   *  rate-limited _announce, so a late joiner's peerMap fills within one
+   *  round trip instead of waiting for the next 30s heartbeat. */
+  private _publishWho(): void {
+    this._send({
+      cmd: "publish",
+      topic: "pi/mesh/who",
+      payload: JSON.stringify({ from: this.myClientId }),
+    });
+  }
+
+  /** Rate-limited to at most once per WHO_RATE_LIMIT_MS per process (see
+   *  lastWhoAnnounceAt's doc comment for why this clock is dedicated, not
+   *  shared with the general announce cadence). */
+  private _handleWho(): void {
+    if (!this.myClientId) return;
+    const now = Date.now();
+    if (now - this.lastWhoAnnounceAt < WHO_RATE_LIMIT_MS) return;
+    this.lastWhoAnnounceAt = now;
+    this._announce(this.myClientId, process.cwd());
   }
 
   private _startHeartbeat(clientId: string, cwd: string): void {
@@ -2987,7 +3067,10 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute() {
       const me = mesh.self();
-      const peerList = mesh.peers();
+      // kal-1dymeveg: if we have no peers yet, this might just mean we
+      // connected moments ago and haven't heard from anyone — ask (see
+      // peersOrWait) rather than reporting "you're alone" prematurely.
+      const peerList = await mesh.peersOrWait();
       const fmtPeer = (p: PeerInfo, tag?: string) => {
         const label = getPeerLabel(p);
         const short = p.id.slice(0, 8);
