@@ -143,6 +143,16 @@ const MI = {
 // ── Path resolution ──────────────────────────────────────────────────────────
 
 function resolveBinPath(): string | null {
+  // Test/dev seam (kal-q9xmr2og): an explicit sidecar path, honored only when it
+  // exists. Without it, a checkout that has never built the native sidecar cannot
+  // wire the extension at all - resolveBinPath() returns null, piMeshExtension()
+  // takes its build-kickoff branch, and registers no PiMesh and no mesh tools. That
+  // is right for a real session (the user is told to rebuild) but wrong for a unit
+  // test that only wants to exercise mesh logic: importing such a test into a fresh
+  // checkout silently starts a cargo release build. PiMesh#start() already takes an
+  // injected binPath, so this is the same seam, applied to the entry point.
+  const injected = process.env.PI_MESH_BIN;
+  if (injected && existsSync(injected)) return injected;
   const extensionDir = dirname(fileURLToPath(import.meta.url));
   const binName = process.platform === "win32" ? "pi-mesh.exe" : "pi-mesh";
   const primary = resolve(extensionDir, "..", "native", binName);

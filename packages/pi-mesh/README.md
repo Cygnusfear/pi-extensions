@@ -176,6 +176,7 @@ Other local behavior uses these environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PI_MESH_AMBIENT_CHAT_BATCH_MS` | `750` | Milliseconds to batch ambient channel messages |
+| `PI_MESH_BIN` | unset | Sidecar binary path, honored only when the file exists. Lets a test wire the extension on a checkout that has never built the native sidecar, without the entry point starting a release build to do it. Production leaves it unset |
 | `HOME` | system home | Socket, PID, and machine-config directory under `~/.pi` |
 
 ## Setup

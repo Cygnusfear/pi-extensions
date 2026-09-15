@@ -3,6 +3,8 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import piMeshExtension, { PiMesh, resolveAndSetIdentity } from "./pi-mesh.ts";
 import type { AnnouncePayload, PeerInfo } from "./types.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readZmxSession, reconcileZmxSession } from "./zmx-session.ts";
 
 const baseIdentity: MeshIdentity = {
@@ -331,6 +333,15 @@ describe("registered peer displays", () => {
 		const globals = globalThis as typeof globalThis & { __piMesh?: PiMesh };
 		const previousMesh = globals.__piMesh;
 
+		// kal-q9xmr2og: point the entry point at the local fake-sidecar fixture so the
+		// extension takes its wiring path in ANY checkout. Otherwise a checkout with no
+		// prebuilt native binary sends piMeshExtension() down its build-kickoff branch:
+		// __piMesh is never assigned (this test then dies on internals.myClientId) and the
+		// import silently starts a cargo release build. Nothing here needs the real daemon
+		// - the test drives mesh internals directly and pi.on() is stubbed, so the injected
+		// path is never spawned.
+		const previousBin = process.env.PI_MESH_BIN;
+		process.env.PI_MESH_BIN = join(dirname(fileURLToPath(import.meta.url)), "fake-sidecar.ts");
 		try {
 			piMeshExtension(pi);
 			const mesh = globals.__piMesh!;
@@ -380,6 +391,8 @@ describe("registered peer displays", () => {
 			expect(notifications[0]!).toContain("zmx: Ghostty-window-peer");
 			expect(notifications[0]!).not.toContain("zmx: undefined");
 		} finally {
+			if (previousBin === undefined) delete process.env.PI_MESH_BIN;
+			else process.env.PI_MESH_BIN = previousBin;
 			if (previousMesh) globals.__piMesh = previousMesh;
 			else delete globals.__piMesh;
 		}
