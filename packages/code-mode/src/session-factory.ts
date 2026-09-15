@@ -27,6 +27,7 @@ import {
 	type SquashHandoff,
 } from "./deferred-squash";
 import { loadRunbook } from "@pi-extensions/runbooks/engine";
+import { resolveSandboxBindings } from "./sandbox-bindings.ts";
 import {
 	getSandboxFnsForCall,
 	type ParentSessionIdentity,
@@ -1023,7 +1024,19 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 	);
 	const ctxFns = getSandboxFnsForCall(buildSandboxCallContext(deps));
 
-	const merged: Record<string, unknown> = { ...guarded, ...ctxFns };
+	// A host binding registered under a built-in's name claims that capability: the
+	// built-in is suppressed here, before anything reaches the vm context, so
+	// precedence never depends on spread order (kal-0q4nb1ae).
+	const resolved = resolveSandboxBindings(
+		guarded as Record<string, unknown>,
+		ctxFns as Record<string, unknown>,
+	);
+	if (resolved.suppressed.length > 0) {
+		session.logs.push(
+			"[code-mode] host sandbox bindings replace built-ins: " + resolved.suppressed.join(", "),
+		);
+	}
+	const merged: Record<string, unknown> = resolved.bindings;
 
 	if (deps.allowedTools) {
 		const filtered: Record<string, unknown> = {};
