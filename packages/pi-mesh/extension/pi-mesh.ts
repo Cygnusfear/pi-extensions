@@ -42,7 +42,13 @@ import {
 } from "./ask-protocol.ts";
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
-import { resolveDurableTarget, resolveOfflineDurableTarget, type OfflineDurableResolution } from "./route-resolve.ts";
+import {
+  isNoMatchFailure,
+  resolveDurableTarget,
+  resolveOfflineDurableTarget,
+  type OfflineDurableResolution,
+} from "./route-resolve.ts";
+import { createRegistryIndex } from "./durable-registry-index.ts";
 import {
   readZmxSession,
   reconcileZmxSession,
@@ -2025,28 +2031,43 @@ export default function piMeshExtension(pi: ExtensionAPI) {
    * is called by that name, and the previous behaviour of treating any id-shaped
    * string as the only possible key is what made offline peers unreachable by name.
    */
-  const resolveRevivableTarget = (rawTarget: string): OfflineDurableResolution => {
-    if (readDurableDescriptor(rawTarget)) return { kind: "resolved", durableId: rawTarget };
-    return resolveOfflineDurableTarget(
-      listDurableDescriptors().map((d) => ({ durableId: d.durableId, nickname: d.nickname })),
-      rawTarget,
-    );
+  // One instance per session: the registry is read at most once per TTL rather
+  // than twice per refusal, and the freshness bound lives with the scan.
+  const registryIndex = createRegistryIndex();
+
+  const resolveRevivableTarget = (
+    rawTarget: string,
+    livePeers: PeerInfo[],
+  ): OfflineDurableResolution => {
+    const liveIds = new Set<string>();
+    for (const p of livePeers) {
+      liveIds.add(p.id);
+      if (p.meshId) liveIds.add(p.meshId);
+    }
+    const offline = readDurableDescriptor(rawTarget)
+      ? { kind: "resolved" as const, durableId: rawTarget }
+      : resolveOfflineDurableTarget(
+          registryIndex.entries().map((e) => ({
+            durableId: e.descriptor.durableId ?? "",
+            nickname: e.descriptor.nickname,
+          })),
+          rawTarget,
+        );
+    // A registration that is also live right now is not an offline target.
+    // Returning it is what let a running peer be told 'delivered' to a mailbox.
+    if (offline.kind === "resolved" && liveIds.has(offline.durableId)) return { kind: "none" };
+    return offline;
   };
 
   const deliverToDurableMailbox = (
-rawTarget: string,
+    durableId: string,
     message: unknown,
     payloadText: string,
     receiptMode: MeshTellReceiptWaitForPhase,
   ): { descriptor: ReviveDescriptor; deliveryId: string; mailboxCount: number; notified: number } | null => {
-    // `rawTarget` is whatever the agent typed. A nickname used to fall straight
-    // through to 'undeliverable' here even when exactly one registered descriptor
-    // carried that nickname, which forced every caller to address sleeping actors
-    // by uuid (kal-sbc4q4l9). One resolution, used by the delivery below and by
-    // the message that explains a refusal, so the two can never disagree.
-    const offline = resolveRevivableTarget(rawTarget);
-    if (offline.kind !== "resolved") return null;
-    const durableId = offline.durableId;
+    // Takes an ALREADY-RESOLVED durable id. Resolving inside here was what made a
+    // refusal cost two full registry scans, and let the delivery path and the
+    // refusal message disagree about who a name meant (kal-rzjxbmgj).
     const descriptor = readDurableDescriptor(durableId);
     if (!descriptor) return null;
     const now = Date.now();
@@ -2875,7 +2896,21 @@ rawTarget: string,
           // durable session (a persisted descriptor exists) the tell lands in its
           // durable mailbox + notifies its supervisors — an HONEST 'delivered'
           // (it reached the durable mailbox), never a false-negative drop.
-          const delivered = deliverToDurableMailbox(sessionId, message, rendered, receiptMode);
+          //
+          // Two guards, both because 'any live failure' is far wider than 'this peer
+          // is offline' (kal-rzjxbmgj item 3):
+          //   * only a genuine no-match may go offline. An AMBIGUOUS live name means
+          //     several live peers matched, and picking one is a wrong-delivery risk,
+          //     not a delivery failure.
+          //   * the resolved id must not be live. A peer can fail to resolve while
+          //     running — a roster gap under 30s, a lapsed announce, a just-restarted
+          //     clientId — and mailboxing it then answers 'delivered' and fires a
+          //     needless revive while the message sits unread.
+          const offline = isNoMatchFailure(e)
+            ? resolveRevivableTarget(sessionId, mesh.peers())
+            : { kind: "none" as const };
+          const delivered =
+            offline.kind === "resolved" ? deliverToDurableMailbox(offline.durableId, message, rendered, receiptMode) : null;
           if (delivered) {
             const ack = buildTellReceiptAck(delivered.deliveryId, mesh.self().id, "delivered");
             const label = delivered.descriptor.nickname ?? sessionId.slice(0, 8);
@@ -2904,15 +2939,15 @@ rawTarget: string,
           } else {
             const deliveryId = createDeliveryId();
             const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
-						// Naming the candidates matters: 'no revivable session is registered' is the
-						// wrong sentence when two ARE registered and the target simply did not say
-						// which. The caller can only fix an ambiguity it can see.
-						const offlineWhy = resolveRevivableTarget(sessionId);
-						const refusal =
-						  offlineWhy.kind === "ambiguous"
-						    ? `the nickname '${sessionId}' is ambiguous between revivable sessions: ${offlineWhy.durableIds.join(", ")} - address one by its durable id`
-						    : `no revivable durable session is registered for it`;
-						const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and ${refusal}.`;
+            // Wording comes from the reason we already computed, never from a guess
+            // re-deriving it: 'nothing is registered' and 'two peers claim that name'
+            // are different problems with different fixes, and the old text lied about
+            // the first whenever the second was true.
+            const refusal =
+              offline.kind === "ambiguous"
+                ? `the name '${sessionId}' is ambiguous between revivable sessions: ${offline.durableIds.join(", ")} - address one by its durable id`
+                : `no revivable durable session is registered for it`;
+            const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and ${refusal}.`;
             return {
               content: [{ type: "text", text }],
               details: { status: "acked", sessionId, resolvedSessionId: sessionId, waitFor: receiptMode, ack } satisfies MeshTellDetails,

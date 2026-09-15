@@ -9,6 +9,30 @@ import type { PeerInfo } from "./types.ts";
  * durable id survives clientId churn (reconnect / resume). Peers with no resolved
  * identity yet (legacy or pre-identity) fall back to their clientId.
  */
+/**
+ * Why live resolution failed, as data rather than as prose.
+ *
+ * The distinction is not cosmetic: 'no peer by that name' is a legitimate reason to
+ * consult the offline registry, while 'two live peers claim that name' is a message
+ * for a human. Callers comparing error strings would invert silently the day a
+ * message was reworded, which is the bug class this removes.
+ */
+export type DurableRouteFailureReason = "no-match" | "ambiguous";
+
+export class DurableRouteError extends Error {
+	readonly reason: DurableRouteFailureReason;
+	constructor(reason: DurableRouteFailureReason, message: string) {
+		super(message);
+		this.name = "DurableRouteError";
+		this.reason = reason;
+	}
+}
+
+/** True only for a failure the offline registry is allowed to answer. */
+export function isNoMatchFailure(err: unknown): boolean {
+	return err instanceof DurableRouteError && err.reason === "no-match";
+}
+
 export function selectRoute(peer: PeerInfo): string {
 	return peer.meshId ?? peer.id;
 }
@@ -79,7 +103,14 @@ export function resolveOfflineDurableTarget(
 		const nickname = c.nickname?.trim().toLowerCase();
 		if (nickname && nickname === needle) ids.add(c.durableId);
 	}
-	if (ids.size === 1) return { kind: "resolved", durableId: [...ids][0] };
+	if (ids.size === 1) {
+		// Guarded rather than asserted: an `!` here is precisely the lie this gate
+		// exists to catch, and a resolved-but-undefined id would be worse than the
+		// 'none' we fall back to.
+		const only = [...ids][0];
+		if (only !== undefined) return { kind: "resolved", durableId: only };
+		return { kind: "none" };
+	}
 	if (ids.size > 1) return { kind: "ambiguous", durableIds: [...ids].sort() };
 	return { kind: "none" };
 }
@@ -100,12 +131,13 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 		const name = peer.name?.trim().toLowerCase();
 		return nickname === needleLower || name === needleLower;
 	}));
-	if (byLabel.length === 1) return selectRoute(byLabel[0]);
+	const soleLabel = byLabel.length === 1 ? byLabel[0] : undefined;
+	if (soleLabel) return selectRoute(soleLabel);
 	if (byLabel.length > 1) {
 		const matched = byLabel
 			.map((peer) => `${peerLabel(peer)} (${peer.id.slice(0, 8)})`)
 			.join(", ");
-		throw new Error(`Peer name '${needle}' is ambiguous: ${matched}`);
+		throw new DurableRouteError("ambiguous", `Peer name '${needle}' is ambiguous: ${matched}`);
 	}
 
 	// 3. ID / meshId / sessionId prefix match
@@ -120,15 +152,16 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 				peerMeshId.startsWith(needle)
 			);
 		}));
-		if (byPrefix.length === 1) return selectRoute(byPrefix[0]);
+		const solePrefix = byPrefix.length === 1 ? byPrefix[0] : undefined;
+	if (solePrefix) return selectRoute(solePrefix);
 		if (byPrefix.length > 1) {
 			const matched = byPrefix
 				.map((peer) => `${peerLabel(peer)} (${peer.id.slice(0, 8)})`)
 				.join(", ");
-			throw new Error(`Session id '${needle}' is ambiguous: ${matched}`);
+			throw new DurableRouteError("ambiguous", `Session id '${needle}' is ambiguous: ${matched}`);
 		}
 	}
 
 	const available = peers.map((p) => `${peerLabel(p)} (${p.id.slice(0, 8)})`).join(", ");
-	throw new Error(`No peer matching '${needle}'. Online: ${available || "none"}`);
+	throw new DurableRouteError("no-match", `No peer matching '${needle}'. Online: ${available || "none"}`);
 }

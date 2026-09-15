@@ -8,6 +8,9 @@
     "./extension/tell-protocol.js": "./extension/tell-protocol.ts",
     "./types": "./extension/types.ts"
   },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
   "pi": {
     "extensions": [
       "./extension/pi-mesh.ts"

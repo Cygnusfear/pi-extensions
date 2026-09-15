@@ -6,7 +6,11 @@ import {
 	SPAWNER_PARTIAL_DESCRIPTOR_FILE,
 	type ReviveDescriptor,
 } from "@pi-extensions/shared/revive-descriptor";
-import { durableDescriptorPath, durableSessionDir } from "./durable-inbound-mailbox.ts";
+import {
+	durableDescriptorPath,
+	durableMeshRoot,
+	durableSessionDir,
+} from "./durable-inbound-mailbox.ts";
 
 /**
  * Durable-session STORE — the address book that makes revive-on-send possible.

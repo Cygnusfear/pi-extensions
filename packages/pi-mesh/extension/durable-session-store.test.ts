@@ -213,3 +213,20 @@ test("returns registered descriptors keyed by the id inside the file", () => {
 		expect(listDurableDescriptors(missing)).toEqual([]);
 	});
 });
+
+// A note on the missing default-root test, because its absence is a decision.
+//
+// The shipped bug was an unimported symbol on the no-argument path. The first two
+// tests written for it had to be removed: durableMeshRoot() resolves via
+// os.homedir(), which deliberately ignores process.env.HOME, so 'isolating' the
+// registry that way did not isolate anything - the test wrote a nickname-'Valencia'
+// descriptor into the real ~/.pi/mesh/durable registry that every live session on
+// this box reads, and scanned all 4,835 entries (461ms) while asserting nothing.
+// A test that pollutes a shared production registry is worse than no test.
+//
+// The static gate now covers this properly: packages/pi-mesh/tsconfig.json is
+// strict and includes the routing files plus pi-mesh.ts, so an unimported symbol
+// fails typecheck in EVERY call path rather than only the one a test happens to
+// exercise. Runtime coverage of the default path would need an additive seam -
+// honouring PI_MESH_HOME in durableMeshRoot() - which changes product behaviour
+// for every durable path and so is deliberately left as a proposal, not a quiet edit.

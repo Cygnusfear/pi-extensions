@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "ignoreDeprecations": "5.0"
+  },
+  "include": [
+    "extension/pi-mesh.ts",
+    "extension/route-resolve.ts",
+    "extension/durable-session-store.ts",
+    "extension/durable-registry-index.ts",
+    "extension/durable-inbound-mailbox.ts",
+    "extension/tell-protocol.ts"
+  ],
+  "exclude": ["**/*.test.ts"]
+}
