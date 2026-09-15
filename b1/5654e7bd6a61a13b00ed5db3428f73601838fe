@@ -1,0 +1,31 @@
+packages/code-mode/src/sandbox-env.ts
+  s_e1edfff8cd915d::t_fcd31f686a01c6 1-70
+packages/code-mode/extensions/code-mode.ts
+  s_e1edfff8cd915d::t_f1e362a03305d4 329
+  s_e1edfff8cd915d::t_d8b70232fdd641 330-342
+packages/code-mode/src/sandbox-env.test.ts
+  s_e1edfff8cd915d::t_4e14adc34e1e12 1-54
+packages/code-mode/src/session-factory.ts
+  s_e1edfff8cd915d::t_32051e9fb76e3c 143
+  s_e1edfff8cd915d::t_b34f3c84c8a60e 30,68-73,141-142
+  s_e1edfff8cd915d::t_ae6ce1873c2fa4 138-139
+packages/code-mode/src/sandbox-ambient.test.ts
+  s_e1edfff8cd915d::t_cfe4d91a3500d2 51-63,65
+  s_e1edfff8cd915d::t_fa91fbcbfc5806 64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b15654e7bd6a61a13b00ed5db3428f73601838fe",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
