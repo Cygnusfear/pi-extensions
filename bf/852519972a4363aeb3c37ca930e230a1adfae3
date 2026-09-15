@@ -1,0 +1,23 @@
+packages/pi-mesh/extension/pi-mesh.ts
+  s_e1edfff8cd915d::t_39b663b31f1ec6 230-238,240,262-300,332-336,338
+packages/pi-mesh/extension/pi-mesh.sidecar-lifecycle.test.ts
+  s_e1edfff8cd915d::t_970f4a3889b375 8,84-95,239,241-247,249-250,258-261,269-273,275-279,284-314,318-326
+  s_e1edfff8cd915d::t_e7c1fff2e626e2 315-317
+  s_e1edfff8cd915d::t_4f79f6ad6cc3dc 327-329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf852519972a4363aeb3c37ca930e230a1adfae3",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
