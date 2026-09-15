@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiMesh } from "./pi-mesh.ts";
+import { pidsForScript, reapSidecars } from "./sidecar-test-harness.ts";
 
 /**
  * Sidecar lifecycle tests (kal-0suu3dur): ensure-sidecar nuke-and-respawn,
@@ -55,41 +56,10 @@ function restoreEnv(): void {
   else process.env.FAKE_SIDECAR_BIND_DELAY_MS = ORIGINAL_DELAY;
 }
 
-function pidsForScript(scriptPath: string): number[] {
-  try {
-    const escaped = scriptPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const raw = execFileSync("pgrep", ["-f", escaped]).toString();
-    return raw
-      .split("\n")
-      .map((l) => Number(l.trim()))
-      .filter((p) => Number.isInteger(p) && p > 0 && p !== process.pid);
-  } catch {
-    return [];
-  }
-}
-
-function killPids(pids: number[]): void {
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {}
-  }
-}
-
-afterEach(() => {
-  for (const mesh of meshes.splice(0)) {
-    try {
-      mesh.stop();
-    } catch {}
-  }
-  const collected = roots.splice(0);
-  for (const { root } of collected) {
-    killPids(pidsForScript(root.fakePath));
-  }
+afterEach(async () => {
+  const collected = roots.splice(0).map((entry) => entry.root);
+  await reapSidecars({ meshes, roots: collected });
   restoreEnv();
-  // brief settle so SIGKILLs land before the dirs are removed
-  const homes = collected.map((c) => c.root.home);
-  for (const home of homes) rmSync(home, { recursive: true, force: true });
 });
 
 function startMesh(root: Root, sessionId: string): PiMesh {

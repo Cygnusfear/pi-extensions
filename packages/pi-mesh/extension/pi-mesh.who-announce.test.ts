@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PiMesh } from "./pi-mesh.ts";
+import { reapSidecars } from "./sidecar-test-harness.ts";
 
 /**
  * kal-1dymeveg: a fresh session sees an empty roster for up to
@@ -43,6 +44,13 @@ function makeRoot(): Root {
   const home = mkdtempSync(join(tmpdir(), "pi-mesh-who-"));
   const out = join(home, "out");
   mkdirSync(join(home, ".pi"), { recursive: true });
+  // Written as the FULL exact-key V1 shape on purpose: a partial file fails
+  // decodeMachineMeshConfig, and _sidecarConfigArg degrades that to the default
+  // config - i.e. multicast back ON. scouting:false keeps an orphan off the LAN.
+  writeFileSync(
+    join(home, ".pi", "mesh-config.json"),
+    JSON.stringify({ schemaVersion: 1, mode: "peer", endpoints: [], scouting: false }),
+  );
   const fakePath = join(home, "fake-sidecar.ts");
   writeFileSync(fakePath, readFileSync(FAKE_SIDECAR_FIXTURE, "utf8"));
   chmodSync(fakePath, 0o755);
@@ -51,16 +59,13 @@ function makeRoot(): Root {
   return root;
 }
 
-afterEach(() => {
-  for (const mesh of meshes.splice(0)) {
-    try {
-      mesh.stop();
-    } catch {}
-  }
-  const collected = roots.splice(0);
+// PiMesh#stop() intentionally leaves the shared singleton running, so stop()
+// alone orphans the sidecar this private test HOME spawned. Teardown reaps it,
+// and fails loudly if the kill does not land rather than hiding it in a catch.
+afterEach(async () => {
+  await reapSidecars({ meshes, roots });
   process.env.HOME = ORIGINAL_HOME;
   process.env.FAKE_SIDECAR_OUT = ORIGINAL_OUT;
-  for (const root of collected) rmSync(root.home, { recursive: true, force: true });
 });
 
 /** Both clients in a test share ONE fake sidecar (same HOME → same mesh.sock),
