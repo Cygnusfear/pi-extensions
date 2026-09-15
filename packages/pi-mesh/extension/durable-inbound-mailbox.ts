@@ -107,7 +107,7 @@ export function durableMeshRoot(): string {
 	// os.homedir(), which ignores HOME: any pi launched with a non-default HOME got
 	// its socket and pid under $HOME but its durable registry under the account home,
 	// so revive-on-send could not see a descriptor its own session had written.
-	return path.join(process.env.HOME ?? os.homedir(), ".pi", "mesh", "durable");
+	return path.join(process.env.HOME || os.homedir(), ".pi", "mesh", "durable");
 }
 
 /** The per-durable-session directory (descriptor + mailbox live here). */

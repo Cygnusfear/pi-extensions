@@ -50,7 +50,6 @@ export function capSessionViewEntries(
 	const kept: SessionViewEntry[] = [];
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const e = entries[i];
-		if (!e) continue;
 		const text = e.text.length <= perEntryChars ? e.text : truncateSessionText(e.text, perEntryChars);
 		total += text.length;
 		if (total > maxTotalChars && kept.length > 0) {

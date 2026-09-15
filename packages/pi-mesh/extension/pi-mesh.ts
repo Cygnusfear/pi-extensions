@@ -42,12 +42,7 @@ import {
 } from "./ask-protocol.ts";
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
-import {
-  isNoMatchFailure,
-  resolveDurableTarget,
-  resolveOfflineDurableTarget,
-  type OfflineDurableResolution,
-} from "./route-resolve.ts";
+import { isNoMatchFailure, resolveDurableTarget } from "./route-resolve.ts";
 import { createRegistryIndex, type RegistryFailureReason } from "./durable-registry-index.ts";
 import {
   readZmxSession,
@@ -102,7 +97,6 @@ import {
 import { DurableInboundMailbox } from "./durable-inbound-mailbox.ts";
 import {
   buildReviveNotify,
-listDurableDescriptors,
   materialiseDurableDescriptor,
   readDurableDescriptor,
 } from "./durable-session-store.ts";
@@ -2983,7 +2977,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
               !offline.ok && offline.reason === "ambiguous"
                 ? `the name '${sessionId}' is ambiguous between revivable sessions: ${(offline.candidates ?? []).join(", ")} - address one by its durable id`
                 : offline.ok === false && offline.detail === "stale"
-                  ? `the only registration for '${sessionId}' is older than the freshness bound and was not routed`
+                  ? `the registration(s) for '${sessionId}' are older than the freshness bound and were not routed`
                   : `no revivable durable session is registered for it`;
             const text = `${MI.tell} ${MI.sep} ${sessionId} (undeliverable)\n${rendered}\n\nNo live peer matched '${sessionId}' and ${refusal}.`;
             return {

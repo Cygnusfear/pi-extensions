@@ -216,6 +216,13 @@ test("returns registered descriptors keyed by the id inside the file", () => {
 		const missing = path.join(os.tmpdir(), "definitely-not-a-durable-root-" + Date.now());
 		expect(listDurableDescriptors(missing)).toEqual([]);
 	});
+
+	// Pins the path production actually takes: no argument at all. listDurableDescriptors
+	// is covered above, but scanRegistry is what the index calls, and it is the caller
+	// whose default root could still blow up on a machine with no registry.
+	test("scanRegistry with no root resolves the live registry without throwing", () => {
+		expect(() => scanRegistry()).not.toThrow();
+	});
 });
 
 // A note on the missing default-root test, because its absence is a decision.
@@ -298,14 +305,6 @@ describe("scanRegistry and the index (kal-3gc9tzrt)", () => {
 			// a descriptor that is valid in every way except the one under test: it is
 			// filed under a directory that is not its durable id
 			putInto(dir, "weird-dir", descriptor("other-id", "Mismatched", Date.now()));
-			fs.writeFileSync(
-				path.join(dir, "weird-dir", "descriptor.json"),
-				JSON.stringify({
-					kind: "pi.mesh.revive", version: 1, durableId: "other-id", nickname: "Mismatched",
-					sessionId: "s", sessionFile: "/tmp/x", cwd: "/tmp", command: "pi",
-					args: [], supervisors: [], env: {}, updatedAt: Date.now(),
-				}),
-			);
 			put(dir, "good-id", "Matched", Date.now());
 			const ids = scanRegistry({ root: dir }).entries.map((e) => e.descriptor.durableId);
 			expect(ids).toEqual(["good-id"]);
