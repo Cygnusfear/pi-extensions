@@ -1196,7 +1196,7 @@ export default function (
 				}
 
 				const bgWork = (async () => {
-					const result = await executeAndPublishContext(bgAbort.signal);
+					const result = await executeInSession(sess, params.code, buildDeps(bgAbort.signal));
 					// Build the follow-up message body. Same shape as a sync result, plus
 					// a jobId tag so the agent can correlate.
 					const body = withAfkContactBanner(buildResultText(result.output, result.error));
