@@ -1737,7 +1737,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     const extensionDir = dirname(fileURLToPath(import.meta.url));
     const nativeDir = resolve(extensionDir, "..", "native");
     const buildScript = resolve(nativeDir, "build.sh");
-    const proc = spawn("bash", [buildScript], { cwd: nativeDir, stdio: "inherit" });
+        // stdio is detached on purpose (kal-q9xmr2og). With "inherit" the build hands
+    // THIS process's stdout to a long-lived grandchild, so the pipe stays open for
+    // the whole cargo run even after the caller has finished: measured here as a
+    // 45s-bounded, piped load of the extension entry not returning for 52s while
+    // "Compiling hashbrown/syn/spin" streamed through it. Anything piping pi-mesh
+    // output - CI, an agent harness, `... | tail` - wedges until the build ends.
+    // Nothing is lost but live compile text: the user is still told about the build
+    // on session_start, and the exit handler below still reports the code plus the
+    // manual command to run.
+    const proc = spawn("bash", [buildScript], { cwd: nativeDir, stdio: "ignore" });
     proc.on("exit", (code) => {
       if (code === 0) {
         console.warn("[pi-mesh] Build complete. Restart pi to activate mesh tools.");
