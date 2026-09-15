@@ -1223,7 +1223,34 @@ export default function (
 						// process-guard would catch it anyway, but cleaner to swallow here.
 						const _ignore = err;
 					}
-				})().finally(() => {
+				})()
+					.catch((err) => {
+						// The ack returned to the agent promises the result WILL arrive as a
+						// follow-up turn. With only finally() on this chain, any throw before the
+						// sendMessage above vanished without ever producing that turn, so the
+						// guarantee in the ack text was false and the agent waited forever. This
+						// delivers an aborted result instead, tagged with the same jobId so the
+						// agent can correlate it with the acknowledgement it already got.
+						const abortedDurStr = ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
+						const abortedFollowUp = formatProgressiveOutput(
+							`[async execute_code ${jobId} aborted · ${abortedDurStr}]\n\n` +
+								"Error: " + String((err as Error)?.message ?? err),
+							{ filePrefix: "pi-codemode-async" },
+						).text;
+						try {
+							(pi as any).sendMessage?.(
+								{
+									customType: "async-execute-code-result",
+									content: abortedFollowUp,
+									display: true,
+								},
+								{ deliverAs: "followUp", triggerTurn: true },
+							);
+						} catch {
+							// No further attempt is available here; finally() still releases the job.
+						}
+					})
+					.finally(() => {
 					asyncJobs.delete(jobId);
 					// Only clear the mutex if WE are still the holder. A later async job
 					// may have already overwritten pendingExecution.
