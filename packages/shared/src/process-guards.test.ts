@@ -257,3 +257,11 @@ describe("documented limits (not caught)", () => {
 	test("does not catch kill -9 $(echo -1)", () =>
 		expectSafe("kill -9 $(echo -1)"));
 });
+
+describe("non-string command tolerance", () => {
+	test("isProcessKillBroadcast returns null instead of crashing on non-string input", () => {
+		expect(isProcessKillBroadcast(undefined as unknown as string)).toBeNull();
+		expect(isProcessKillBroadcast(42 as unknown as string)).toBeNull();
+		expect(isProcessKillBroadcast({} as unknown as string)).toBeNull();
+	});
+});

@@ -799,6 +799,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     }) => {
       throwIfAborted();
       if (isLocked()) throw new Error(lockError("Bash"));
+      // Boundary validation: a bare string argument (Bash("ls")) leaves `command`
+      // undefined, which used to crash inside the kill-broadcast guard with
+      // "undefined is not an object (evaluating 's.length')". Fail with the contract.
+      if (typeof command !== "string" || command.trim() === "") {
+        throw new Error('Bash takes an object: Bash({ command: "..." }). A bare string is not a valid argument.');
+      }
       // Process-kill broadcast guard — ALWAYS active, not gated by git-lock mode.
       const killResult = isProcessKillBroadcast(command);
       if (killResult) throw new Error(processKillGuardError(killResult.reason));
@@ -917,6 +923,9 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     }) => {
       throwIfAborted();
       if (isLocked()) throw new Error(lockError("Python"));
+      if (typeof code !== "string" || code.trim() === "") {
+        throw new Error('Python takes an object: Python({ code: "..." }). A bare string is not a valid argument.');
+      }
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
       const tmpFile = path.join(os.tmpdir(), `pi-python-${Date.now()}-${Math.random().toString(36).slice(2)}.py`);

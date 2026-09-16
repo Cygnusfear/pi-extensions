@@ -33,6 +33,9 @@
  * respecting quoted strings. Quotes inside a statement are preserved.
  */
 function splitStatements(s: string): string[] {
+	// A bare-string Bash argument reaches here as undefined via the kill-broadcast
+	// guard; a tokenizer must report nothing rather than crash on bad input.
+	if (typeof s !== "string") return [];
 	const out: string[] = [];
 	let buf = "";
 	let quote: '"' | "'" | null = null;
