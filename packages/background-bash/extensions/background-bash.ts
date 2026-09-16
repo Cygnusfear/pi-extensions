@@ -59,6 +59,10 @@ export type BackgroundBashJob = {
 };
 
 export type BackgroundLogsResult = {
+	/** True when the output drain did not finish within the bound - a
+	 *  grandchild may still hold the pipe open, so the last lines may not be on
+	 *  disk yet. Callers must not treat the page as complete. */
+	drainPending?: boolean;
 	text: string;
 	offset: number;
 	limit: number;
@@ -425,6 +429,30 @@ function finishLogStream(stream: WriteStream): Promise<void> {
 	});
 }
 
+/** How long readLogs/waitForExit wait for the output drain before giving up. */
+const OUTPUT_DRAIN_WAIT_MS = 2_000;
+
+/**
+ * Race a drain against a deadline, reporting which won.
+ *
+ * A job's stdout/stderr pipes stay open as long as ANY process holds them, and a
+ * backgrounded grandchild (a server, a daemon, `nohup ... &`) outlives the direct
+ * child. Without a deadline, awaiting the drain hangs the caller forever - which
+ * is exactly how a bash_bg_logs call could pin an agent's turn to "working" with
+ * no way out and nothing to promote to async.
+ */
+function withDeadline(promise: Promise<void>, ms: number): Promise<"completed" | "deadline"> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	return Promise.race([
+		promise.then(() => "completed" as const),
+		new Promise<"deadline">((resolve) => {
+			timer = setTimeout(() => resolve("deadline"), ms);
+		}),
+	]).finally(() => {
+		if (timer) clearTimeout(timer);
+	});
+}
+
 function completeJobOutput(runtime: JobRuntime): Promise<void> {
 	if (!runtime.outputComplete) {
 		runtime.outputComplete = runtime.outputDrained
@@ -659,12 +687,20 @@ export class BackgroundBashManager {
 		this.refreshJob(job);
 		const offset = sanitizeLineNumber(options?.offset, 1, Number.MAX_SAFE_INTEGER);
 		const limit = sanitizeLineNumber(options?.limit, DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
+		let drainPending = false;
 		if (job.status !== "running") {
 			const runtime = this.runtimes.get(id);
-			if (runtime) await completeJobOutput(runtime);
+			if (runtime) {
+				drainPending =
+					(await withDeadline(completeJobOutput(runtime), OUTPUT_DRAIN_WAIT_MS)) === "deadline";
+			}
 		}
 
-		return { ...(await readBoundedLogPage(job.logPath, offset, limit)), status: job.status };
+		return {
+			...(await readBoundedLogPage(job.logPath, offset, limit)),
+			status: job.status,
+			drainPending,
+		};
 	}
 
 	/**
@@ -704,7 +740,7 @@ export class BackgroundBashManager {
 		if (job.status !== "running") {
 			const runtime = this.runtimes.get(id);
 			return runtime
-				? completeJobOutput(runtime).then(() => this.buildResult(job, job.status as BashBgWaitStatus))
+				? withDeadline(completeJobOutput(runtime), OUTPUT_DRAIN_WAIT_MS).then(() => this.buildResult(job, job.status as BashBgWaitStatus))
 				: Promise.resolve(this.buildResult(job, job.status as BashBgWaitStatus));
 		}
 

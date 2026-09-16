@@ -524,3 +524,39 @@ describe("wireLineStreams", () => {
 		expect(() => wireLineStreams(null, "stdout", { jobId: "bg-test", logStream, listeners })).not.toThrow();
 	});
 });
+
+describe("output drain deadline", () => {
+	it("readLogs returns promptly when a grandchild holds the pipe open", async () => {
+		const { manager } = await makeManager();
+		// The direct child exits at once; the backgrounded sleep inherits stdout and
+		// keeps the pipe open. Before the deadline this hung readLogs forever, which
+		// is what pinned an agent's turn to "working" with nothing to promote.
+		const { job, spawnPromise } = manager.startSync({
+			// 8s, not 3: the hold must outlast both bounded drains so drainPending is
+			// deterministic rather than a race against the pipe closing.
+			command: "sleep 8 & echo hi",
+			cwd: process.cwd(),
+		});
+		await spawnPromise;
+		await manager.waitForExit(job.id, { timeoutMs: 5000 });
+
+		const t0 = Date.now();
+		const page = await manager.readLogs(job.id, {});
+		const elapsed = Date.now() - t0;
+
+		expect(page.text).toContain("hi");
+		expect(page.status).toBe("exited");
+		expect(page.drainPending).toBe(true);
+		expect(elapsed).toBeLessThan(4000);
+	}, 15_000); // two bounded drains plus spawn; bun's default 5s is too tight
+
+	it("a normal job reports drainPending false and complete output", async () => {
+		const { manager } = await makeManager();
+		const { job, spawnPromise } = manager.startSync({ command: "echo done", cwd: process.cwd() });
+		await spawnPromise;
+		await manager.waitForExit(job.id, { timeoutMs: 5000 });
+		const page = await manager.readLogs(job.id, {});
+		expect(page.text).toContain("done");
+		expect(page.drainPending).toBe(false);
+	});
+});
