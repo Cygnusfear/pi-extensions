@@ -1,0 +1,47 @@
+packages/pi-mesh/native/src/receipt.rs
+  s_e1edfff8cd915d::t_7b44538a0529cd 150-158
+  s_e1edfff8cd915d::t_99832fabf54ec0 367
+packages/pi-mesh/native/src/main.rs
+  s_e1edfff8cd915d::t_dd2364baa4b9af 58-64,95,520-544
+  s_e1edfff8cd915d::t_e9ff233a16030b 545
+packages/pi-mesh/extension/durable-session-store.test.ts
+  s_e1edfff8cd915d::t_4ccc656284b16a 15,17,84,86,88-156
+  s_e1edfff8cd915d::t_9e5048d2553ccc 6,16
+packages/pi-mesh/native/src/store.rs
+  s_e1edfff8cd915d::t_0096e014c728e8 1514-1542
+  s_e1edfff8cd915d::t_2717d6287dd5f8 461-527,529-531,535-546,548-549,551-570
+  s_e1edfff8cd915d::t_eed11ccfa5aa4c 532-534
+  s_e1edfff8cd915d::t_80cfbc26f4bcb1 528
+  s_e1edfff8cd915d::t_8f1a249cb68a45 775
+  s_e1edfff8cd915d::t_2bcbaac330a6b2 34-41
+  s_e1edfff8cd915d::t_8185afffe6b7f3 547,550
+  s_e1edfff8cd915d::t_fb0a7ecbe9dd85 1412-1513
+packages/pi-mesh/extension/durable-session-store.ts
+  s_e1edfff8cd915d::t_a7e742e706f789 91-121,123-131,133-136,138-155,157-170,172,174,176
+  s_e1edfff8cd915d::t_b51d268ce74f6c 156
+packages/pi-mesh/native/src/route.rs
+  s_e1edfff8cd915d::t_d7131963efe595 43-52,118-123,155-159,161-167,169,236-244,267-273,317,339-341,343-348,364-373,375-380,544,552
+  s_e1edfff8cd915d::t_a718a1054b1ecc 160
+  s_e1edfff8cd915d::t_33c7dde9569868 335
+  s_e1edfff8cd915d::t_7b79c23996159c 168
+  s_e1edfff8cd915d::t_0cf6daf24a4ed2 374
+  s_e1edfff8cd915d::t_1eaa8c7cc19d04 605-688
+  s_e1edfff8cd915d::t_3b4d8966f10af9 342
+  s_e1edfff8cd915d::t_872759bebdede5 331-334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "964fa7c220ba13d32f5f806a8f2beab583bdd84f",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
