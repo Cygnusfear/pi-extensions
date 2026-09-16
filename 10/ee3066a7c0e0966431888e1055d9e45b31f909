@@ -1,0 +1,22 @@
+packages/pi-mesh/extension/mesh-paths.test.ts
+  s_e1edfff8cd915d::t_412b2adc7fdfe1 14,29-42
+packages/pi-mesh/extension/mesh-paths.ts
+  s_e1edfff8cd915d::t_72dc3cc9a32840 28-51,55-63
+  s_e1edfff8cd915d::t_e3c8fd98878e44 6,17-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "10ee3066a7c0e0966431888e1055d9e45b31f909",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
