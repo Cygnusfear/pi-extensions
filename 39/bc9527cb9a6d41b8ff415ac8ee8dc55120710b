@@ -1,0 +1,45 @@
+packages/pi-mesh/extension/durable-mailbox-compat.test.ts
+  s_e1edfff8cd915d::t_afedb50240b917 1-136
+packages/pi-mesh/native/src/store.rs
+  s_e1edfff8cd915d::t_2c6655ac69055f 948-973,975,983-986,988-1017,1019-1028,1030-1047,1049-1064,1066-1069,1071-1082,1084-1087,1090-1102,1104-1125,1127-1137,1139-1173,1175-1193,1195-1207,1214-1220,1222-1227,1229-1230
+  s_e1edfff8cd915d::t_7cdaf5a7dfd591 15-19,86-89,372,729-732,734,845,847,864,987,1018,1029,1048,1065,1070,1083,1088-1089,1103,1126,1138,1174,1194,1228
+  s_e1edfff8cd915d::t_a989fb037a7899 651-662,798-800,833-835,837,852-853,855,917-918,923,927
+  s_e1edfff8cd915d::t_f0b53a7600c8be 1-14,20-85,90-143,146-223,226-362,364-367,373-379,381-546,548-560,562-602,604-605,607-650,663-728,733,735-754,756-797,801-804,806-808,810-819,822,827-832,836,838-842,844,846,848-851,854,856-863,865-916,919-922,924-926,928-947,1277
+  s_e1edfff8cd915d::t_4a496b5c977402 369-371
+  s_e1edfff8cd915d::t_dac0ac108d2b26 144
+  s_e1edfff8cd915d::t_68cacff08db96a 603,755
+  s_e1edfff8cd915d::t_afba2eee39792c 805,809,820,823-826
+  s_e1edfff8cd915d::t_bf32b7c53438ad 145
+  s_e1edfff8cd915d::t_014cff574f6a9b 224
+  s_e1edfff8cd915d::t_26459c0b95bfb7 1208-1211
+  s_e1edfff8cd915d::t_1b6ee8cb5d048f 363,368,380,561
+  s_e1edfff8cd915d::t_2bf55e585e4541 1212-1213,1221
+  s_e1edfff8cd915d::t_d36514a16dbfb9 843,974,976-982
+  s_e1edfff8cd915d::t_f2c9b56034a71e 547
+  s_e1edfff8cd915d::t_6440811517ce39 225
+  s_e1edfff8cd915d::t_4bf93eef1aff05 1231-1276
+  s_e1edfff8cd915d::t_30879f820b9d19 821
+  s_e1edfff8cd915d::t_412244acf2c78d 606
+packages/pi-mesh/native/src/route.rs
+  s_e1edfff8cd915d::t_56e0d2b59bc429 59-63
+packages/pi-mesh/native/src/main.rs
+  s_e1edfff8cd915d::t_fbab5e44074cde 503-505,511
+  s_e1edfff8cd915d::t_8578891ba9a15a 22,57-69,81,489-502,506-510,512-542
+  s_e1edfff8cd915d::t_39471804546af1 543-544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "39bc9527cb9a6d41b8ff415ac8ee8dc55120710b",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
