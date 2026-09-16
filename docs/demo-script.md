@@ -182,7 +182,6 @@ Quick montage of extensions in action:
 | **context7** | Live library documentation injection |
 | **explain** | Clear communication via a dedicated writing model |
 | **background-bash** | Non-blocking long-running commands |
-| **mid-mortem** | Auto-checkpoint before compaction |
 | **lock-mode** | Read-only mode for safe exploration |
 | **git-safety** | Blocks destructive git commands |
 | **skills** | Install and manage agent skills from git |

@@ -145,7 +145,7 @@ const self = await ouija({ action: "self", query: "database migration gotcha" })
 
 **Your debugging history is a gold mine. Ouija lets you mine it.**
 
-> **Packages:** [ouija](packages/ouija/) · [context](packages/context/) · [mid-mortem](packages/mid-mortem/) · [worktree-summaries](packages/worktree-summaries/)
+> **Packages:** [ouija](packages/ouija/) · [context](packages/context/) · [worktree-summaries](packages/worktree-summaries/)
 
 ---
 
