@@ -1,0 +1,34 @@
+packages/pi-mesh/native/src/route.rs
+  s_e1edfff8cd915d::t_8ad74b8055511e 324-328,383-384,389-396,398-406,409-414
+  s_e1edfff8cd915d::t_da08f20d708e69 370-375,528-543
+  s_e1edfff8cd915d::t_1210f9fa6d2d13 397
+  s_e1edfff8cd915d::t_1ec41c376c69e4 354
+  s_e1edfff8cd915d::t_dad8a4a6b75236 329-333,523,656-659
+  s_e1edfff8cd915d::t_c5b4d25bd1a4e9 334-336,379
+  s_e1edfff8cd915d::t_71bd9477e16cf9 376
+  s_e1edfff8cd915d::t_102f319dbf34b1 350-351,355-357,369
+  s_e1edfff8cd915d::t_579618b804f0b6 377-378,380-382,386-388,525,662-665
+  s_e1edfff8cd915d::t_2ec0d2f8756fba 385
+  s_e1edfff8cd915d::t_619f0ec7c3c587 729-754
+  s_e1edfff8cd915d::t_f4483e4fb71062 755-780
+packages/pi-mesh/extension/pi-mesh.sidecar-routing-e2e.test.ts
+  s_e1edfff8cd915d::t_ed3e081080487a 34,293-299,301-304
+  s_e1edfff8cd915d::t_c5bb4667c6dd72 144-149,253,256,267-272,283-292,300
+  s_e1edfff8cd915d::t_b5594261a3704b 1-33,35-143,150-252,254-255,257-266,273-282,305-513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ae3665fbbebe680625115f58cb4d5fa6599e8a0",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
