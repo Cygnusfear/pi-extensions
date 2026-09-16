@@ -1,0 +1,24 @@
+packages/pi-mesh/extension/durable-mailbox-compat.test.ts
+  s_e1edfff8cd915d::t_3ccedada748f9d 22,65-86
+  s_e1edfff8cd915d::t_afea9450ed7755 17-18
+packages/pi-mesh/native/fixtures/mailbox.hostile.jsonl
+  s_e1edfff8cd915d::t_f502e578af3ae8 1-6
+packages/pi-mesh/native/src/store.rs
+  s_e1edfff8cd915d::t_957252bc0f09ee 1840-1883
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9fb5a120f34655f0d49e65b102b9bdc088d94d2b",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
