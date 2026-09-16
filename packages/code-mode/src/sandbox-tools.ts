@@ -788,22 +788,20 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
   };
 
   const tools = {
-    Bash: async ({
-      command,
-      cwd: explicitCwd,
-      timeout,
-    }: {
-      command: string;
-      cwd?: string;
-      timeout?: number;
-    }) => {
+    Bash: async (
+      args: string | { command: string; cwd?: string; timeout?: number },
+    ) => {
+      // Bare-string shorthand: Bash("ls") means Bash({ command: "ls" }). The sandbox
+      // advertises Bash without a signature, so the string form was a trap; accepting
+      // it removes the trap, and the validation below still rejects real garbage.
+      const { command, cwd: explicitCwd, timeout } =
+        typeof args === "string"
+          ? { command: args, cwd: undefined, timeout: undefined }
+          : { command: args?.command, cwd: args?.cwd, timeout: args?.timeout };
       throwIfAborted();
       if (isLocked()) throw new Error(lockError("Bash"));
-      // Boundary validation: a bare string argument (Bash("ls")) leaves `command`
-      // undefined, which used to crash inside the kill-broadcast guard with
-      // "undefined is not an object (evaluating 's.length')". Fail with the contract.
       if (typeof command !== "string" || command.trim() === "") {
-        throw new Error('Bash takes an object: Bash({ command: "..." }). A bare string is not a valid argument.');
+        throw new Error('Bash requires a command: Bash({ command: "..." }) or the shorthand Bash("...").');
       }
       // Process-kill broadcast guard — ALWAYS active, not gated by git-lock mode.
       const killResult = isProcessKillBroadcast(command);
@@ -912,19 +910,18 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       };
     },
 
-    Python: async ({
-      code,
-      cwd: explicitCwd,
-      timeout,
-    }: {
-      code: string;
-      cwd?: string;
-      timeout?: number;
-    }) => {
+    Python: async (
+      args: string | { code: string; cwd?: string; timeout?: number },
+    ) => {
+      // Same shorthand rule as Bash: a bare string is unambiguously the code.
+      const { code, cwd: explicitCwd, timeout } =
+        typeof args === "string"
+          ? { code: args, cwd: undefined, timeout: undefined }
+          : { code: args?.code, cwd: args?.cwd, timeout: args?.timeout };
       throwIfAborted();
       if (isLocked()) throw new Error(lockError("Python"));
       if (typeof code !== "string" || code.trim() === "") {
-        throw new Error('Python takes an object: Python({ code: "..." }). A bare string is not a valid argument.');
+        throw new Error('Python requires code: Python({ code: "..." }) or the shorthand Python("...").');
       }
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;
       const dir = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
