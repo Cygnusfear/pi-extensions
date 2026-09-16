@@ -1,0 +1,19 @@
+docs/walkthrough.md
+  s_37a242ce994208::t_e210ca4ff3bf02 148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ab897978ac20781ee7c472c5db4b00264231bb6d",
+  "prompts": {},
+  "sessions": {
+    "s_37a242ce994208": {
+      "agent_id": {
+        "tool": "Subrahmanyan Halo Baldassare",
+        "id": "01a0ab87-38d2-70a8-a1f7-368905c96435",
+        "model": "openrouter/stealth/union-alpha"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
