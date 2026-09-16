@@ -1,0 +1,27 @@
+packages/pi-mesh/extension/durable-session-store.ts
+  s_e1edfff8cd915d::t_fdcc6307d86d6e 153,166-169
+  s_e1edfff8cd915d::t_5b0e82601c8023 170-172
+packages/pi-mesh/native/src/route.rs
+  s_e1edfff8cd915d::t_03319326c735b2 207-209
+  s_e1edfff8cd915d::t_57968bb5b7d4a5 202-206
+  s_e1edfff8cd915d::t_f95195a93179a7 836-839,841,843-872
+  s_e1edfff8cd915d::t_d61a4a8f577aff 840,842
+packages/pi-mesh/extension/durable-session-store.test.ts
+  s_e1edfff8cd915d::t_0aed14058844bd 158-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2646084f014cc100e46eb44b47c29ff9ea0f4d4",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
