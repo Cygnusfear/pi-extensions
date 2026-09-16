@@ -1,0 +1,35 @@
+packages/pi-mesh/native/src/receipt.rs
+  s_e1edfff8cd915d::t_c8ae4262a952d8 224
+  s_e1edfff8cd915d::t_3d9271606ba039 114
+  s_e1edfff8cd915d::t_2fc4dfe8854999 155
+  s_e1edfff8cd915d::t_386e0b747fad96 170
+  s_e1edfff8cd915d::t_f0eb02f5c5afb7 138
+  s_e1edfff8cd915d::t_2df9102c0f3de1 149
+  s_e1edfff8cd915d::t_4633ed81d9a82d 109
+  s_e1edfff8cd915d::t_6249725cc70307 226-230,367
+  s_e1edfff8cd915d::t_7c723430663a78 1-88,90-108,110-112,115-137,139-148,150-154,156-169,171-223,225,231-366,368-383
+  s_e1edfff8cd915d::t_a38b958efa0c10 89
+  s_e1edfff8cd915d::t_4ee447fec05ec5 113
+packages/pi-mesh/native/src/store.rs
+  s_e1edfff8cd915d::t_3d1554a8ae6203 521-529,534,552-556,588,594
+packages/pi-mesh/native/src/main.rs
+  s_e1edfff8cd915d::t_421919109c7ae5 21,88-94,509-510,530-534,560-568,572-575
+  s_e1edfff8cd915d::t_1da2a012cdacfa 81-87,501,503-508
+  s_e1edfff8cd915d::t_103dcfdce10812 499-500,502
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de10c13f88c485947dbd6ad9cf79970392881643",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
