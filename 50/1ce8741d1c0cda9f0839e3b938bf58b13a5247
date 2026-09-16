@@ -1,0 +1,58 @@
+packages/pi-mesh/native/src/main.rs
+  s_e1edfff8cd915d::t_37f878bc534b17 22
+packages/pi-mesh/native/src/registry.rs
+  s_e1edfff8cd915d::t_27bfdc63f5aa73 104-105,107,109
+  s_e1edfff8cd915d::t_ac93277904a65f 89,276
+  s_e1edfff8cd915d::t_75ec31d2693186 47
+  s_e1edfff8cd915d::t_eddbe7cc6c602b 18,113-115,178,204,220,223,232,239,245,255,274
+  s_e1edfff8cd915d::t_f22f446803413d 1-17,19-46,48-88,90-103,106,108,110-112,116-177,179-203,205-219,221-222,224-231,233-238,240-244,246-254,256-273,275,277-284
+packages/pi-mesh/native/src/route.rs
+  s_e1edfff8cd915d::t_a0f84767826c3c 404,670-698
+  s_e1edfff8cd915d::t_c9aacd43fe5f20 24-25,27,154,158-160,177-179,188,190
+  s_e1edfff8cd915d::t_41b1206d3fcc86 48
+  s_e1edfff8cd915d::t_bd12449a7e3cb9 20,115-118,241-247,397-401,411,416-431
+  s_e1edfff8cd915d::t_cf3205480f8250 575-581
+  s_e1edfff8cd915d::t_478a27a7ddbf41 582
+  s_e1edfff8cd915d::t_df6fad30c424f6 119
+  s_e1edfff8cd915d::t_1d33d546d9e6b2 402
+  s_e1edfff8cd915d::t_b11c5337b26f7c 403
+  s_e1edfff8cd915d::t_94dd63b6a9feb3 405
+  s_e1edfff8cd915d::t_5980dba3474f0d 669
+packages/pi-mesh/native/src/receipt.rs
+  s_e1edfff8cd915d::t_76f7473ece5e94 50-53
+  s_e1edfff8cd915d::t_a04c4f724d719e 115
+packages/pi-mesh/native/src/store.rs
+  s_e1edfff8cd915d::t_6834b6d3937d3b 944
+  s_e1edfff8cd915d::t_95c197a8dc95c7 740,1552-1641,1643-1660
+  s_e1edfff8cd915d::t_0ffbef10e4540f 41
+  s_e1edfff8cd915d::t_093f6ae6c1959e 387,987,989,991,1088,1090
+  s_e1edfff8cd915d::t_169137ebac3bfc 1642
+  s_e1edfff8cd915d::t_22222bfbc5f6fd 50,388
+  s_e1edfff8cd915d::t_3d196abc760daf 374
+  s_e1edfff8cd915d::t_f0a7610ad7031f 942,964,977,996,1061,1136-1137
+  s_e1edfff8cd915d::t_21e9bc8083e25d 324-327,407-408,445-446,632-635,737-738
+  s_e1edfff8cd915d::t_46d61a8bf9fdf4 340-344,359-373,375,562
+  s_e1edfff8cd915d::t_23e75cbfc2859a 382-385
+  s_e1edfff8cd915d::t_6e2bbb1ae1c388 386
+  s_e1edfff8cd915d::t_0845bea734bfa2 545,547
+  s_e1edfff8cd915d::t_554358651339bd 765-769
+  s_e1edfff8cd915d::t_6e86ede430abf5 1160
+  s_e1edfff8cd915d::t_d5d7896a56223d 1441
+  s_e1edfff8cd915d::t_ac6f0f7d369d12 739
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "501ce8741d1c0cda9f0839e3b938bf58b13a5247",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
