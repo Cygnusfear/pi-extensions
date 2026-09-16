@@ -1,0 +1,16 @@
+packages/background-bash/extensions/background-bash.ts
+  h_59730e3e3c55ed 62-65,432-455,690,693-696,699-703,743
+packages/background-bash/extensions/background-bash.test.ts
+  h_59730e3e3c55ed 527-562
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "953b26659a9d413b587d8793f9438c33f998fed8",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
