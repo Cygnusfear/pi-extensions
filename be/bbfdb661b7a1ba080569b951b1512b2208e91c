@@ -1,0 +1,29 @@
+packages/pi-mesh/extension/pi-mesh.sidecar-routing-e2e.test.ts
+  s_e1edfff8cd915d::t_f63ec2f6a22912 540-555
+  s_e1edfff8cd915d::t_0a4f875f42c7d6 574-600,602-606,612-613,623-625,627-637
+  s_e1edfff8cd915d::t_1c8a42d1f45fde 33,57-67,347,368,378,391,404,414,421,444,457,501,532,601,626,638,646,702
+  s_e1edfff8cd915d::t_dbbc4638b2b86d 144-157,248-258,260,262-265,267-286,288-296
+  s_e1edfff8cd915d::t_3d1d9b0db38d25 607-611,614-622
+packages/pi-mesh/native/src/main.rs
+  s_e1edfff8cd915d::t_294af0f377dd3c 795-805
+  s_e1edfff8cd915d::t_3c710c39cd3071 107-109,694-697,699-700,702,704-707,873-913
+  s_e1edfff8cd915d::t_53290ce8d4a9a6 41-50,588
+  s_e1edfff8cd915d::t_484e5ca52232e0 384-387,411-420,698,727-733
+  s_e1edfff8cd915d::t_08babf92cb6009 734-735
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bebbfdb661b7a1ba080569b951b1512b2208e91c",
+  "prompts": {},
+  "sessions": {
+    "s_e1edfff8cd915d": {
+      "agent_id": {
+        "tool": "Nadia Neutrino Lynden-Bell",
+        "id": "c7343bb3-578d-480b-a436-70127f888508",
+        "model": "qwencloud/qwen3.8-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
