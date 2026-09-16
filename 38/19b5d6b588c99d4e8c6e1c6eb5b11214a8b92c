@@ -1,0 +1,19 @@
+packages/code-mode/src/sandbox-tools.ts
+  s_add107463d1cb4::t_ced57dc6bad167 791-800,804,913-920,924
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3819b5d6b588c99d4e8c6e1c6eb5b11214a8b92c",
+  "prompts": {},
+  "sessions": {
+    "s_add107463d1cb4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1aa96788-abc8-489e-94aa-c45508b39105",
+        "model": "unknown"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
