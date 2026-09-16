@@ -1,0 +1,18 @@
+packages/code-mode/src/sandbox-tools.ts
+  h_59730e3e3c55ed 802-807,926-928
+packages/shared/src/process-guards.test.ts
+  h_59730e3e3c55ed 260-267
+packages/shared/src/process-guards.ts
+  h_59730e3e3c55ed 36-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "20954a57970c331125586c532f19714a4c5ab547",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
