@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createPlayback, pointOnRoute } from './prism-playback.js';
+import { outlineFor, marksFor, STORE_RINGS, SEAM_COSINE } from './prism-shapes.js';
 
 const data = window.ATLAS_SCENE;
 if (!data?.nodes?.length) throw new Error('Prism needs at least one component');
@@ -97,29 +98,51 @@ const prismMaterial = new THREE.ShaderMaterial({
     }`,
 });
 const attributes = { position: [], aFaceUv: [], aHatch: [], aFace: [], aIndex: [], aRemoved: [] };
-function face(corners, width, height, side, index, removed) {
-  const uv = [[0,0],[1,0],[1,1],[0,1]];
-  for (const k of [0,1,2,0,2,3]) {
-    attributes.position.push(...corners[k]);
-    attributes.aFaceUv.push(...uv[k]);
-    attributes.aHatch.push(uv[k][0]*width,uv[k][1]*height);
-    attributes.aFace.push(side); attributes.aIndex.push(index); attributes.aRemoved.push(removed);
+// Top caps and sides carry no per-quad edge highlight: the silhouette is stroked explicitly in
+// the decoration pass, so a 40-segment cylinder does not render as a picket fence of seams.
+function triangle(corners, index, removed) {
+  for (const corner of corners) {
+    attributes.position.push(...corner);
+    attributes.aFaceUv.push(0.5, 0.5);
+    attributes.aHatch.push(corner[0], corner[2]);
+    attributes.aFace.push(0); attributes.aIndex.push(index); attributes.aRemoved.push(removed);
   }
 }
+function sideQuad(corners, hatches, index, removed) {
+  for (const k of [0,1,2,0,2,3]) {
+    attributes.position.push(...corners[k]);
+    attributes.aFaceUv.push(0.5, 0.5);
+    attributes.aHatch.push(hatches[k][0], hatches[k][1]);
+    attributes.aFace.push(1); attributes.aIndex.push(index); attributes.aRemoved.push(removed);
+  }
+}
+// SHAPE VOCABULARY — see prism-shapes.js: pure, unit-tested, shared by Flow and Infra.
 data.nodes.forEach((n,index) => {
   const x=n.x, z=n.z, X=x+n.w, Z=z+n.d, h=Math.max(0.08,n.h), removed=n.state==='removed'?1:0;
   sceneBounds.expandByPoint(new THREE.Vector3(x,0,z));
   sceneBounds.expandByPoint(new THREE.Vector3(X,h,Z));
-  face([[x,h,z],[x,h,Z],[X,h,Z],[X,h,z]],n.d,n.w,0,index,removed);
-  // Outward winding: near sides must not expose the distant interior faces.
-  face([[X,0,z],[x,0,z],[x,h,z],[X,h,z]],n.w,h,1,index,removed);
-  face([[X,0,Z],[X,0,z],[X,h,z],[X,h,Z]],n.d,h,1,index,removed);
-  face([[x,0,Z],[X,0,Z],[X,h,Z],[x,h,Z]],n.w,h,1,index,removed);
-  face([[x,0,z],[x,0,Z],[x,h,Z],[x,h,z]],n.d,h,1,index,removed);
-  if(n.type==='database') {
-    for(const fraction of [0.3,0.6]) {
-      const y=h*fraction;
-      face([[x,y,z],[x,y,Z],[X,y,Z],[X,y,z]],n.d,n.w,0,index,removed);
+  const centreX = x + n.w / 2, centreZ = z + n.d / 2;
+  const outline = outlineFor(n.type, n.w, n.d);
+  const outlineWorld = outline.map(([u, v]) => [centreX + u, centreZ + v]);
+  if (removed === 0) {
+    for (let i = 1; i < outlineWorld.length - 1; i++) {
+      triangle([[outlineWorld[0][0], h, outlineWorld[0][1]], [outlineWorld[i][0], h, outlineWorld[i][1]], [outlineWorld[i + 1][0], h, outlineWorld[i + 1][1]]], index, removed);
+    }
+    let travelled = 0;
+    for (let i = 0; i < outlineWorld.length; i++) {
+      const a = outlineWorld[i], b = outlineWorld[(i + 1) % outlineWorld.length];
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      sideQuad([[a[0], 0, a[1]], [b[0], 0, b[1]], [b[0], h, b[1]], [a[0], h, a[1]]],
+        [[travelled, 0], [travelled + length, 0], [travelled + length, h], [travelled, h]], index, removed);
+      travelled += length;
+    }
+    if (n.type === 'database') {
+      for (const fraction of STORE_RINGS) {
+        const y = h * fraction;
+        for (let i = 1; i < outlineWorld.length - 1; i++) {
+          triangle([[outlineWorld[0][0], y, outlineWorld[0][1]], [outlineWorld[i][0], y, outlineWorld[i][1]], [outlineWorld[i + 1][0], y, outlineWorld[i + 1][1]]], index, removed);
+        }
+      }
     }
   }
   const pick = new THREE.Mesh(new THREE.BoxGeometry(n.w,h,n.d),new THREE.MeshBasicMaterial({visible:false}));
@@ -155,28 +178,52 @@ const lineMaterial=new THREE.ShaderMaterial({
       ${output}
     }`,
 });
-function line(points,kind,width=1.5,arrow=false) {
+function ribbon(groups, kind, width, arrow) {
   const a={position:[],aOffset:[],aDistance:[],aSide:[],aKind:[]};
   const vertex=(p,offset,d,side,k=kind)=>{a.position.push(p.x,p.y,p.z);a.aOffset.push(offset.x,offset.y,offset.z);a.aDistance.push(d);a.aSide.push(side);a.aKind.push(k);};
   let distance=0;
-  for(let i=1;i<points.length;i++){
-    const start=points[i-1],end=points[i],direction=end.clone().sub(start),length=direction.length();
-    if(length<0.00001)continue;
-    direction.divideScalar(length);
-    const normal=new THREE.Vector3(-direction.z,0,direction.x).multiplyScalar(width/2);
-    for(const [p,s,d] of [[start,1,distance],[start,-1,distance],[end,1,distance+length],[end,1,distance+length],[start,-1,distance],[end,-1,distance+length]]) vertex(p,normal.clone().multiplyScalar(s),d,s);
-    distance+=length;
-  }
-  if(arrow&&points.length>1){
-    const tip=points.at(-1),direction=tip.clone().sub(points.at(-2)).normalize();
-    const normal=new THREE.Vector3(-direction.z,0,direction.x);
-    for(const offset of [new THREE.Vector3(),direction.clone().multiplyScalar(-7).addScaledVector(normal,3),direction.clone().multiplyScalar(-7).addScaledVector(normal,-3)]) vertex(tip,offset,0,0,kind===1?1:0);
+  for(const points of groups){
+    for(let i=1;i<points.length;i++){
+      const start=points[i-1],end=points[i],direction=end.clone().sub(start),length=direction.length();
+      if(length<0.00001)continue;
+      direction.divideScalar(length);
+      const normal=new THREE.Vector3(-direction.z,0,direction.x).multiplyScalar(width/2);
+      for(const [p,s,d] of [[start,1,distance],[start,-1,distance],[end,1,distance+length],[end,1,distance+length],[start,-1,distance],[end,-1,distance+length]]) vertex(p,normal.clone().multiplyScalar(s),d,s);
+      distance+=length;
+    }
+    if(arrow&&points.length>1){
+      const tip=points.at(-1),direction=tip.clone().sub(points.at(-2)).normalize();
+      const normal=new THREE.Vector3(-direction.z,0,direction.x);
+      for(const offset of [new THREE.Vector3(),direction.clone().multiplyScalar(-7).addScaledVector(normal,3),direction.clone().multiplyScalar(-7).addScaledVector(normal,-3)]) vertex(tip,offset,0,0,kind===1?1:0);
+    }
   }
   const geometry=new THREE.BufferGeometry();
   for(const [name,values] of Object.entries(a)) geometry.setAttribute(name,new THREE.Float32BufferAttribute(values,['position','aOffset'].includes(name)?3:1));
   const material=lineMaterial.clone();material.uniforms={...common,uTrace:{value:0}};
   const mesh=new THREE.Mesh(geometry,material); mesh.frustumCulled=false; scene.add(mesh);return mesh;
 }
+function line(points,kind,width=1.5,arrow=false){return ribbon([points],kind,width,arrow);}
+// DECORATION — silhouette rims, seams where the outline actually turns, and the type marks.
+// One mesh for every solid stroke in the scene and one for every dashed stroke: the marks cost
+// two draw calls instead of one per hairline.
+const solidStrokes = [], dashedStrokes = [];
+data.nodes.forEach(n => {
+  const removed = n.state === 'removed';
+  const cx = n.x + n.w / 2, cz = n.z + n.d / 2, h = Math.max(0.08, n.h);
+  const outline = outlineFor(n.type, n.w, n.d);
+  const group = removed ? dashedStrokes : solidStrokes;
+  const ring = y => [...outline, outline[0]].map(([u, value]) => new THREE.Vector3(cx + u, y, cz + value));
+  group.push(ring(h), ring(0.002));
+  for (let i = 0; i < outline.length; i++) {
+    const previous = outline[(i - 1 + outline.length) % outline.length], point = outline[i], next = outline[(i + 1) % outline.length];
+    const incoming = new THREE.Vector2(point[0] - previous[0], point[1] - previous[1]).normalize();
+    const outgoing = new THREE.Vector2(next[0] - point[0], next[1] - point[1]).normalize();
+    if (incoming.dot(outgoing) < SEAM_COSINE) group.push([new THREE.Vector3(cx + point[0], 0.002, cz + point[1]), new THREE.Vector3(cx + point[0], h, cz + point[1])]);
+  }
+  if (!removed) for (const mark of marksFor(n.type, n.w, n.d, h)) group.push(mark.map(([mx, my, mz]) => new THREE.Vector3(mx + cx, my, mz + cz)));
+});
+ribbon(solidStrokes, 0, 1.1);
+ribbon(dashedStrokes, 2, 1.1);
 function textLabel(text,position,className){
   const element=document.createElement('div');element.className=className;element.textContent=text;
   const object=new CSS2DObject(element);object.position.copy(position);scene.add(object);return {element,object};
