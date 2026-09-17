@@ -1,0 +1,36 @@
+skills/atlas/scripts/parity-check.mjs
+  h_59730e3e3c55ed 5-17,20-23,25-26,37-38,42-46,56,60-64,67-78,80-82,87-91,96-97,104,110-112,115-133,139-145,155,163-164,166
+skills/atlas/vendor/PROVENANCE.json
+  h_59730e3e3c55ed 56,61,66,71,76,81,86,91,96,101,106,111,116,121,124-132
+skills/atlas/vendor/UPSTREAM.md
+  h_59730e3e3c55ed 74-86,116-117,119-138,140-153,155-158
+skills/atlas/vendor/archify/assets/template.html
+  h_59730e3e3c55ed 324-415,3399-3405,3524-3539,5138-5142,5692,5698-5699
+skills/atlas/vendor/archify/renderers/architecture/render-architecture.mjs
+  h_59730e3e3c55ed 13,65-79
+skills/atlas/vendor/archify/renderers/atlas/plate.mjs
+  h_59730e3e3c55ed 1-502
+skills/atlas/vendor/archify/renderers/shared/generated-validators.mjs
+  h_59730e3e3c55ed 13
+skills/atlas/vendor/archify/renderers/shared/i18n.mjs
+  h_59730e3e3c55ed 100-102
+skills/atlas/vendor/archify/schemas/architecture.schema.json
+  h_59730e3e3c55ed 38-48,110-130
+skills/atlas/vendor/archify/schemas/common.schema.json
+  h_59730e3e3c55ed 17-27
+skills/atlas/vendor/archify/scripts/check-render-output.mjs
+  h_59730e3e3c55ed 88-272,286-293,303-306,308-319,321,335-336,350-354,359,361,377,386-389
+skills/atlas/vendor/viewer/template.source.html
+  h_59730e3e3c55ed 324-415,3399-3405,3524-3539,5138-5142,5692,5698-5699
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67040cd13979f768242ddc35ad284d5c4898528a",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
