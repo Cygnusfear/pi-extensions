@@ -1,0 +1,126 @@
+{
+  "upstream": {
+    "project": "archify",
+    "repository": "https://github.com/tt-a1i/archify",
+    "commit": "72c750bb070d95171dbb2244e5b62b1b7da69c12",
+    "commitSubject": "fix(deps): unstick the fast-uri override from a version that is itself vulnerable (#347)",
+    "commitDate": "2026-09-17T01:04:47+10:00",
+    "version": "2.17.0-dev.1",
+    "license": "MIT",
+    "basedOn": "Cocoon-AI/architecture-diagram-generator (MIT, v1.0)"
+  },
+  "vendoredAt": "2026-09-17T04:10:17.026Z",
+  "vendoredBy": "Lucianne Luna Godbole",
+  "method": "Subtree copy of the upstream package's runtime paths, verbatim; upstream repository-root LICENSE and THIRD_PARTY_NOTICES.md are byte-identical to the vendored package copies.",
+  "vendoredPaths": [
+    "archify/bin",
+    "archify/renderers",
+    "archify/schemas",
+    "archify/assets",
+    "archify/scripts",
+    "archify/references",
+    "archify/migrations",
+    "archify/brand-marks",
+    "archify/recipes",
+    "archify/delta",
+    "archify/examples/*.json",
+    "archify/LICENSE",
+    "archify/THIRD_PARTY_NOTICES.md",
+    "archify/package.json",
+    "viewer",
+    "scripts/generate-viewer.mjs"
+  ],
+  "excludedPaths": [
+    "archify/test",
+    "archify/examples/*.html",
+    "docs",
+    "benchmarks",
+    "experiments",
+    "integrations",
+    "generated",
+    "scripts/build-gallery.mjs",
+    "scripts/build-guide.mjs",
+    "scripts/build-start.mjs",
+    "scripts/build-readme-showcase.mjs",
+    "scripts/run-tests.mjs",
+    ".github",
+    "repository-root documents"
+  ],
+  "runtimeDependencies": [],
+  "integrity": {
+    "viewerRegeneration": "node vendor/scripts/generate-viewer.mjs --check",
+    "renderParity": [
+      {
+        "spec": "agent-run.lifecycle.json",
+        "type": "lifecycle",
+        "sha256": "de9b9fe608b5ece07d6d516665fe1cc844f09a76354ee46c8f1c80837624e457"
+      },
+      {
+        "spec": "agent-tool-call.workflow.json",
+        "type": "workflow",
+        "sha256": "c040b6bce3c9cab51146dfa44120204705ed68dbada05685de3e6ff40ecffdcc"
+      },
+      {
+        "spec": "async-job-roundtrip.sequence.json",
+        "type": "sequence",
+        "sha256": "ea86c3009152eefa0d6a54792d6b66858664867aa78f3db12cb11488013cd1da"
+      },
+      {
+        "spec": "brand-aware-delivery.architecture.json",
+        "type": "architecture",
+        "sha256": "5ab1582d32a8fab14f8fbb0b78a199f5b26a9252e03534ae9f537984cec7dd60"
+      },
+      {
+        "spec": "cache-miss-request.sequence.json",
+        "type": "sequence",
+        "sha256": "0570c137a36a8505cecd894fbd74ff8a49c5ab06746c25158467d9a782e35a64"
+      },
+      {
+        "spec": "checkout-platform.base.architecture.json",
+        "type": "architecture",
+        "sha256": "8af6242a5ac4e65b73cb83f50b2313c2605cf467ca0cb4a9bbbe5105ed9c749e"
+      },
+      {
+        "spec": "checkout-platform.head.architecture.json",
+        "type": "architecture",
+        "sha256": "f47fbb53f141767a9179cb419d5afdaa9c3076a95105f66fe1c051f904fc5498"
+      },
+      {
+        "spec": "deployment-release.lifecycle.json",
+        "type": "lifecycle",
+        "sha256": "0b3012b48540846ef9def49e940a581842db63c7ecdf2af45d0ad85b1a4bb57c"
+      },
+      {
+        "spec": "event-stream.dataflow.json",
+        "type": "dataflow",
+        "sha256": "9fc3e47d910f25f3403058d8200faa252e161afd43ba7a56a6ba60eaf0f96692"
+      },
+      {
+        "spec": "incident-response.workflow.json",
+        "type": "workflow",
+        "sha256": "d688a532de33aa5b32be24e3ad06cb18768c92e6db3f8fbd00a8dc32db2b590d"
+      },
+      {
+        "spec": "product-analytics.dataflow.json",
+        "type": "dataflow",
+        "sha256": "8e09936581b5240aab423aa698545e85103cf1a3d47cc6a5d0a0582c127625ba"
+      },
+      {
+        "spec": "production-deployment.architecture.json",
+        "type": "architecture",
+        "sha256": "3ddcf14ba2475722d316c07f4dec49006e3ccd911187888dd8898fc54547ad7f"
+      },
+      {
+        "spec": "release-delivery.workflow.json",
+        "type": "workflow",
+        "sha256": "a0af2ccafa809ff0eb21ad5a9c652b2edab61f0a7d068b5bf756464d506eb1d4"
+      },
+      {
+        "spec": "web-app.architecture.json",
+        "type": "architecture",
+        "sha256": "426db7bd1842de45916b00233b859dbb6cfb17a0d2fa9c70353c8fe121811d93"
+      }
+    ],
+    "recordedAt": "2026-09-17T04:10:37.204Z"
+  }
+}
