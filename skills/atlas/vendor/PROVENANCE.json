@@ -53,74 +53,82 @@
       {
         "spec": "agent-run.lifecycle.json",
         "type": "lifecycle",
-        "sha256": "de9b9fe608b5ece07d6d516665fe1cc844f09a76354ee46c8f1c80837624e457"
+        "svgSha256": "118b456d81b3dd2470ee744b8571c38965e4bd9cd81d3fd53d583ab335aed6a4"
       },
       {
         "spec": "agent-tool-call.workflow.json",
         "type": "workflow",
-        "sha256": "c040b6bce3c9cab51146dfa44120204705ed68dbada05685de3e6ff40ecffdcc"
+        "svgSha256": "d1806970d6a118e1f575a7c3347d0a57ef592eb68558d8876ed57c9e10072279"
       },
       {
         "spec": "async-job-roundtrip.sequence.json",
         "type": "sequence",
-        "sha256": "ea86c3009152eefa0d6a54792d6b66858664867aa78f3db12cb11488013cd1da"
+        "svgSha256": "c68458a9c718a2be0ac4ad4db3d10a3964d3081461a62c175d623f22f0337ac2"
       },
       {
         "spec": "brand-aware-delivery.architecture.json",
         "type": "architecture",
-        "sha256": "5ab1582d32a8fab14f8fbb0b78a199f5b26a9252e03534ae9f537984cec7dd60"
+        "svgSha256": "9379191b4779253e6f70fa13a1b450a22c3753df5dc525a04a18fdf2b9fd8f77"
       },
       {
         "spec": "cache-miss-request.sequence.json",
         "type": "sequence",
-        "sha256": "0570c137a36a8505cecd894fbd74ff8a49c5ab06746c25158467d9a782e35a64"
+        "svgSha256": "66d22991559a94c567cffeb7dbbe9e8498fdc8b6910c82e24a18a33071051a8d"
       },
       {
         "spec": "checkout-platform.base.architecture.json",
         "type": "architecture",
-        "sha256": "8af6242a5ac4e65b73cb83f50b2313c2605cf467ca0cb4a9bbbe5105ed9c749e"
+        "svgSha256": "6267ed89f807f702af351cc272a436479f543774f20ee8df86d5caad060482ad"
       },
       {
         "spec": "checkout-platform.head.architecture.json",
         "type": "architecture",
-        "sha256": "f47fbb53f141767a9179cb419d5afdaa9c3076a95105f66fe1c051f904fc5498"
+        "svgSha256": "ecf10d1e277f18ecb2e3df39e0ba1396b594d85e51dc30cc0d8720adc4f801f1"
       },
       {
         "spec": "deployment-release.lifecycle.json",
         "type": "lifecycle",
-        "sha256": "0b3012b48540846ef9def49e940a581842db63c7ecdf2af45d0ad85b1a4bb57c"
+        "svgSha256": "59b46f7d1ab08b913733f45d6a3f5bcd102d5b38308ea39d4069a0314e9de2e2"
       },
       {
         "spec": "event-stream.dataflow.json",
         "type": "dataflow",
-        "sha256": "9fc3e47d910f25f3403058d8200faa252e161afd43ba7a56a6ba60eaf0f96692"
+        "svgSha256": "a4ed5e0ec583200872b99b8374ca3342db7bdadb2be0209223c9e21e6d9ce3e6"
       },
       {
         "spec": "incident-response.workflow.json",
         "type": "workflow",
-        "sha256": "d688a532de33aa5b32be24e3ad06cb18768c92e6db3f8fbd00a8dc32db2b590d"
+        "svgSha256": "854845aad8c9a380f834e1d4f00a64b05e02ec5eb7786237d52671358db19538"
       },
       {
         "spec": "product-analytics.dataflow.json",
         "type": "dataflow",
-        "sha256": "8e09936581b5240aab423aa698545e85103cf1a3d47cc6a5d0a0582c127625ba"
+        "svgSha256": "813d672465bba4b4fb813c6dbce83fa4e717c05558308e3d3728fa104da1ca05"
       },
       {
         "spec": "production-deployment.architecture.json",
         "type": "architecture",
-        "sha256": "3ddcf14ba2475722d316c07f4dec49006e3ccd911187888dd8898fc54547ad7f"
+        "svgSha256": "10899cb121f40df8b56d2be2b193d90b423c7f45cde2c5098ec67b66b456129a"
       },
       {
         "spec": "release-delivery.workflow.json",
         "type": "workflow",
-        "sha256": "a0af2ccafa809ff0eb21ad5a9c652b2edab61f0a7d068b5bf756464d506eb1d4"
+        "svgSha256": "8eed86e3da08a7ddfd852c298bbba55906e64a45a3c872ba7c434baf78762cf5"
       },
       {
         "spec": "web-app.architecture.json",
         "type": "architecture",
-        "sha256": "426db7bd1842de45916b00233b859dbb6cfb17a0d2fa9c70353c8fe121811d93"
+        "svgSha256": "54f4f23886247f7eb7edf8222b8679907b1b5d1c1e0de8cc26e40cbf8d426172"
       }
     ],
-    "recordedAt": "2026-09-17T04:10:37.204Z"
+    "recordedAt": "2026-09-17T04:19:18.610Z",
+    "recordedArtifacts": [
+      {
+        "id": "viewer-template",
+        "path": "archify/assets/template.html",
+        "sha256": "c8cf0d957bbdc7fb7c63bbf020f595137ade46a15afdfb9bb29e785ee9c7a1e6",
+        "generatedBy": "node vendor/scripts/generate-viewer.mjs"
+      }
+    ]
   }
 }

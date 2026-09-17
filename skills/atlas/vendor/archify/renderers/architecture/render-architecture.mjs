@@ -10,6 +10,7 @@ import { brandLabelFitWidth, brandMetadataFor, brandTopRailProblem, renderBrandM
 import { minimumReadableSourceTextPx } from '../shared/desktop-readability.mjs';
 import { translateMessage as i18nText } from '../shared/i18n.mjs';
 import { gridLayout, resolveComponentPos, validateGridPlacement } from './grid.mjs';
+import { renderPlate } from '../atlas/plate.mjs';
 import {
   asArray,
   isFinitePoint,
@@ -60,6 +61,21 @@ const { diagram: arch, template, outPath, sourceEvidence } = await loadDiagramWi
 });
 
 const grid = gridLayout(arch);
+
+// The atlas plate is a different projection of the same IR, so it owns the whole
+// render when the spec asks for it. See renderers/atlas/plate.mjs.
+if (arch.meta?.visual_preset === "atlas") {
+  writeDiagram({
+    outPath,
+    template,
+    diagramType: "architecture",
+    meta: arch.meta,
+    svg: renderPlate(arch),
+    cards: arch.cards,
+    sourceEvidence,
+  });
+  process.exit(0);
+}
 
 const layout = {
   defaultW: 120,

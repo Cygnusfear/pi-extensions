@@ -322,6 +322,98 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     }
 
     /* ==========================================================
+       ATLAS — the published-plate register for system maps. Blue ink on
+       white paper, hairline grid, squared geometry, mono micro-caps. Flow
+       direction stays the compiler's and stays the loudest thing on the
+       plate: one indigo accent carries the main path, everything else is a
+       blue-family ink that keeps the legend truthful. Every type stroke is
+       also a text colour in this viewer (.t-<type>), so all seven are held
+       to 4.5:1 on their paper, not the 3:1 a pure stroke would need.
+       ========================================================== */
+    [data-preset="atlas"][data-theme="light"] {
+      --bg: #ffffff;
+      --grid: #dbe4f5;
+      --panel: rgba(255, 255, 255, 0.96);
+      --panel-border: #c3cfe6;
+      --lane-fill: rgba(79, 70, 229, 0.05);
+      --lane-stroke: #b9c4e8;
+      --text: #0b1b34;
+      --text-muted: #4a5878;
+      --text-dim: #5f6c94;
+      --text-faint: #66739b;
+      --mask: #f6f9ff;
+      --frontend-fill: rgba(79, 70, 229, 0.12);
+      --frontend-stroke: #4f46e5;
+      --backend-fill: rgba(29, 78, 216, 0.1);
+      --backend-stroke: #1d4ed8;
+      --database-fill: rgba(30, 58, 138, 0.1);
+      --database-stroke: #1e3a8a;
+      --cloud-fill: rgba(3, 105, 161, 0.1);
+      --cloud-stroke: #0369a1;
+      --security-fill: rgba(91, 33, 182, 0.1);
+      --security-stroke: #5b21b6;
+      --messagebus-fill: rgba(14, 116, 144, 0.09);
+      --messagebus-stroke: #0e7490;
+      --external-fill: rgba(71, 85, 105, 0.08);
+      --external-stroke: #475569;
+      --arrow: #475569;
+      --arrow-emphasis: #4f46e5;
+      --toolbar-bg: rgba(255, 255, 255, 0.94);
+      --toolbar-border: #c3cfe6;
+      --toolbar-text: #0b1b34;
+      --toolbar-hover: #eef2fb;
+      --toolbar-menu-bg: #ffffff;
+    }
+
+    [data-preset="atlas"][data-theme="dark"] {
+      --bg: #0a1730;
+      --grid: #1e2f52;
+      --panel: rgba(12, 26, 52, 0.94);
+      --panel-border: #2c4370;
+      --lane-fill: rgba(165, 180, 252, 0.05);
+      --lane-stroke: #35507f;
+      --text: #eaf1ff;
+      --text-muted: #a8b8d8;
+      --text-dim: #93a4c6;
+      --text-faint: #8fa6d8;
+      --mask: #0c1a34;
+      --frontend-fill: rgba(165, 180, 252, 0.16);
+      --frontend-stroke: #a5b4fc;
+      --backend-fill: rgba(147, 197, 253, 0.14);
+      --backend-stroke: #93c5fd;
+      --database-fill: rgba(168, 184, 216, 0.13);
+      --database-stroke: #a8b8d8;
+      --cloud-fill: rgba(125, 211, 252, 0.13);
+      --cloud-stroke: #7dd3fc;
+      --security-fill: rgba(196, 181, 253, 0.13);
+      --security-stroke: #c4b5fd;
+      --messagebus-fill: rgba(103, 232, 249, 0.12);
+      --messagebus-stroke: #67e8f9;
+      --external-fill: rgba(203, 213, 225, 0.1);
+      --external-stroke: #cbd5e1;
+      --arrow: #a8b8d8;
+      --arrow-emphasis: #a5b4fc;
+      --toolbar-bg: rgba(10, 23, 48, 0.95);
+      --toolbar-border: #2c4370;
+      --toolbar-text: #eaf1ff;
+      --toolbar-hover: rgba(99, 99, 241, 0.16);
+      --toolbar-menu-bg: #0c1a34;
+    }
+
+    /* The atlas plate owns its own region and lane styling instead of
+       inheriting the classic warm base, so the surface stays blue and white
+       and the region tint matches the legend. */
+    svg[data-preset="atlas"] .c-region {
+      fill: color-mix(in srgb, var(--cloud-fill) 55%, transparent);
+      stroke-dasharray: 10 4;
+    }
+    svg[data-preset="atlas"] .c-security-group,
+    svg[data-preset="atlas"] .c-lane { stroke-dasharray: 6 3; }
+    html[data-preset="atlas"] .diagram-container,
+    html[data-preset="atlas"] .card { border-radius: 0.25rem; }
+    html[data-preset="atlas"] .header-row .title { letter-spacing: 0.01em; }
+
+    /* ==========================================================
        BLUEPRINT — a review-first drafting preset for deployment,
        infrastructure, and technical design documentation. It keeps
        the same semantic palette and geometry while trading glow for
@@ -3304,6 +3396,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--arrow-emphasis) 14%, transparent);
       transform: rotate(45deg) scale(0.72);
     }
+    #btn-preset[data-preset-option="atlas"] .preset-control-mark {
+      border-color: #6363f1;
+      border-radius: 0.05rem;
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(99, 99, 241, 0.5);
+      transform: rotate(45deg) scale(0.8);
+    }
     .toolbar .preset-menu {
       position: absolute;
       top: calc(100% + 0.375rem);
@@ -3421,6 +3520,22 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       bottom: 0.34rem;
       left: 0.38rem;
       border: 1px solid #66d9ef;
+    }
+    .preset-option-swatch.atlas {
+      border-color: #c3cfe6;
+      border-radius: 0.05rem;
+      background-color: #ffffff;
+      background-image:
+        linear-gradient(rgba(99, 99, 241, 0.22) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 99, 241, 0.22) 1px, transparent 1px);
+      background-size: 0.46rem 0.46rem;
+    }
+    .preset-option-swatch.atlas::before {
+      top: 0.3rem;
+      right: 0.34rem;
+      bottom: 0.3rem;
+      left: 0.34rem;
+      border: 1px solid #6363f1;
     }
     .preset-option-swatch.editorial {
       border-color: #b8aa94;
@@ -5020,6 +5135,11 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <span class="preset-option-copy"><strong>{{i18n:viewer.preset.editorial}}</strong><small>{{i18n:viewer.preset.editorial.hint}}</small></span>
           <span class="preset-option-check" aria-hidden="true"></span>
         </button>
+        <button class="preset-option" data-preset-value="atlas" type="button" role="menuitemradio" aria-checked="false" tabindex="-1">
+          <span class="preset-option-swatch atlas" aria-hidden="true"></span>
+          <span class="preset-option-copy"><strong>{{i18n:viewer.preset.atlas}}</strong><small>{{i18n:viewer.preset.atlas.hint}}</small></span>
+          <span class="preset-option-check" aria-hidden="true"></span>
+        </button>
       </div>
     </div>
     <button id="btn-motion" type="button" hidden
@@ -5569,12 +5689,14 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
        URL, or a later diagram's authored default.
        ============================================================ */
     Archify.preset = (function () {
-      var PRESETS = ['classic', 'signal-flow', 'blueprint', 'editorial'];
+      var PRESETS = ['classic', 'signal-flow', 'blueprint', 'editorial'];      var PRESETS = ['classic', 'signal-flow', 'blueprint', 'editorial', 'atlas'];
       var LABELS = {
         classic: viewerText('viewer.preset.classic.short'),
         'signal-flow': viewerText('viewer.preset.flow.short'),
         blueprint: viewerText('viewer.preset.blueprint'),
         editorial: viewerText('viewer.preset.editorial')
+      };        editorial: viewerText('viewer.preset.editorial'),
+        atlas: viewerText('viewer.preset.atlas')
       };
       var html = document.documentElement;
       var svg = document.querySelector('.diagram-container svg');

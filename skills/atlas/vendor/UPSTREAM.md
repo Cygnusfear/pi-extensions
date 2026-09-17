@@ -71,10 +71,19 @@ node skills/atlas/vendor/scripts/generate-viewer.mjs --check
 node skills/atlas/scripts/parity-check.mjs --upstream-root /path/to/archify-src/archify
 ```
 
-The recorded hashes in `vendor/PROVENANCE.json#integrity.renderParity` were produced
-by `parity-check.mjs --record` on a tree whose output matched the pristine upstream
-checkout exactly — ten of ten specs identical across all five diagram types. Re-record
-only when a deliberate change to rendering is intended, and say so in the commit.
+The gate checks two different things, because the vendored tree is deliberately not
+pristine:
+
+* **Compiler parity.** `integrity.renderParity` records the SHA-256 of the *compiled SVG*
+  per spec — not of the whole page. The viewer template is an upstream file we edit on
+  purpose, so hashing the page would turn every intentional viewer change into a false
+  regression. The SVG is the compiler's output and it must equal pristine upstream,
+  always, including `--upstream-root` comparisons at any commit.
+* **Recorded artefacts.** `integrity.recordedArtifacts` records the digest of the
+  generated viewer template. Changing it requires `--record` on a verified tree, which
+  makes an intentional viewer change a visible, reviewed act instead of a silent drift.
+
+`--record` refuses to write a manifest from a tree that does not render cleanly.
 
 ## Runtime and generator dependencies
 
@@ -104,25 +113,46 @@ only when a deliberate change to rendering is intended, and say so in the commit
 
 ## Touched upstream files
 
-None yet. The atlas tier is currently additive only; this table gains a row the moment
-that stops being true.
+These are the only vendored upstream files the atlas tier edits. Keep this table short:
+every row is a conflict to resolve on the next pull.
 
-## Pull procedure
+| File | Edit |
+|---|---|
+| `archify/schemas/common.schema.json` | `$defs.visualPreset.enum` gains `atlas` (additive enum member) |
+| `archify/renderers/shared/generated-validators.mjs` | regenerated from the schema above. Verified by normalising both copies: apart from the new enum member the regenerated file is byte-identical to the pinned one, so the vendored generated artefact was in sync with the vendored schemas. |
+| `archify/renderers/shared/i18n.mjs` | four `viewer.preset.atlas*` keys, in both shipped locales (`en`, `zh-CN`) |
+| `viewer/template.source.html` | the atlas register: light and dark token blocks, the preset control mark, the preset swatch, the menu option, and the `PRESETS` / `LABELS` entries |
+| `archify/assets/template.html` | regenerated output of `node vendor/scripts/generate-viewer.mjs`; never hand-edited |
+| `archify/scripts/check-render-output.mjs` | the plate profile: the four orthographic composition rules are replaced for `data-preset="atlas"` by three that hold in a projection (occlusion, route overlap, footprint separation), and the twenty `viewer.preset.atlas*` strings stay out of the 2D path entirely. Orthographic rules stay enforced for every other preset. |
+| `archify/renderers/architecture/render-architecture.mjs` | a fourteen line dispatch: when `meta.visual_preset` is `atlas`, the plate compiler owns the render and the 2D layout never runs. |
+| `archify/schemas/architecture.schema.json` | additive component fields `footprint`, `elevation`, `state`, `dossier`, and `meta.plate`. Existing specs are unaffected. |
+| `archify/schemas/common.schema.json` | `$defs.visualPreset.enum` gains `atlas`; `$defs.plateFootprint` added. |
 
-```bash
-git clone https://github.com/tt-a1i/archify && cd archify
-git checkout <new-commit>          # note: git rev-parse HEAD and package.json version
-```
+## Patches we own outright (no upstream file touched)
 
-1. Re-run the gate of the *existing* vendored tree before pulling, so a failure is
-   attributable (`parity-check.mjs --upstream-root` against the old commit).
-2. Diff upstream between the pinned commit and the new one, scoped to the vendored
-   paths: `git diff <old>..<new> -- archify/bin archify/renderers archify/schemas
-   archify/assets archify/references archify/migrations archify/brand-marks
-   archify/recipes archify/delta archify/scripts viewer scripts/generate-viewer.mjs`.
-3. Re-copy those paths into `vendor/`, then re-apply every row of **Touched upstream
-   files**.
-4. Re-run the gate with `--upstream-root` pointing at the new checkout, then
-   `--record` to update `vendor/PROVENANCE.json`, and add the new commit and version
-   to the table at the top of this file.
-5. Commit the pull as its own commit, separate from any atlas-tier work.
+Our own modules live beside the vendor tree, not inside it, and are free to change.
+This table lists them once they exist; the plate compiler is the first entry.
+
+| Path | Responsibility |
+|---|---|
+| `archify/renderers/atlas/plate.mjs` | the plate compiler: isometric projection, prisms with hatch faces, zones from `boundaries.wraps`, ground-plane routing with projected arrowheads, a deterministic label solver, a fixed authoring canvas. Ours; upstream files are touched only to dispatch into it. |
+
+## Atlas register palette — measured, not estimated
+
+The type strokes double as text colours in this viewer (`.t-<type>`), so all seven are
+held to 4.5:1 on their paper, not to the 3:1 a pure stroke would need.
+
+Light theme, on paper `#ffffff`: frontend `#4f46e5` 6.3:1, backend `#1d4ed8` 6.7:1,
+database `#1e3a8a` 10.4:1, cloud `#0369a1` 5.9:1, security `#5b21b6` 9.0:1,
+messagebus `#0e7490` 5.4:1, external `#475569` 7.6:1; body text `#0b1b34` 17.2:1,
+muted `#4a5878` 7.1:1, dim `#5f6c94` 5.2:1.
+
+Dark theme, on navy `#0a1730`: frontend `#a5b4fc` 8.9:1, backend `#93c5fd` 9.9:1,
+database `#a8b8d8` 8.9:1, cloud `#7dd3fc` 10.7:1, security `#c4b5fd` 9.7:1,
+messagebus `#67e8f9` 12.3:1, external `#cbd5e1` 12.0:1; body text `#eaf1ff` 15.7:1,
+muted `#a8b8d8` 8.9:1, dim `#93a4c6` 7.1:1.
+
+The flow accent is `#4f46e5` (6.3:1 on paper), reserved for emphasis arcs so direction
+stays the loudest thing on the plate while everything else is workhorse ink. The ramp is
+produced by a generator that refuses to write the file if any pair misses its threshold,
+so these numbers cannot drift silently. Re-measure before changing any value here.

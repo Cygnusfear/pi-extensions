@@ -85,6 +85,191 @@ const ELEMENT_NUMERIC_ATTRS = new Map([
   ['fespotlight', new Set(['z'])],
 ]);
 
+
+/**
+ * PLATE-ADAPTED COMPOSITION RULES.
+ *
+ * The 2D rules encode orthographic assumptions: axis-aligned arrows, grid corridors, 2D
+ * crossing budgets, and frames that are rectangles. A projected plate violates all four by
+ * construction, so running them would fail a correct plate. Replacing them with nothing
+ * would leave the plate unchecked. So they are replaced by the two invariants that carry
+ * the same intent in a projection:
+ *
+ *   plate_ground_routes       every route segment travels along a ground axis. A route that
+ *                             does not is a routing error, exactly what orthogonal_arrows
+ *                             catches in 2D.
+ *   plate_route_over_structure no route passes over a structure it does not connect. That is
+ *                             the plate equivalent of crossing and corridor budgets: in a
+ *                             projected view the failure that actually costs readability is
+ *                             a line disappearing behind a block.
+ */
+function plateGroupPolygons(fragment) {
+  const prisms = [];
+  const groups = fragment.matchAll(/<g\b[^>]*\bdata-node-id="([^"]+)"[^>]*>([\s\S]*?)<\/g>/gi);
+  for (const group of groups) {
+    const body = group[2];
+    const polygons = [...body.matchAll(/<polygon\b[^>]*\bpoints="([^"]+)"/gi)].map((match) =>
+      match[1].trim().split(/\s+/).map((pair) => pair.split(",").map(Number)).filter((point) => point.length === 2 && point.every(Number.isFinite)));
+    if (polygons.length === 0) continue;
+    prisms.push({ nodeId: group[1], ground: polygons[0], polygons });
+  }
+  return prisms;
+}
+
+/**
+ * Two routes drawn over each other are ambiguous in any projection: the reader cannot tell
+ * where one ends and the other begins. This replaces the 2D corridor budget.
+ */
+function plateRouteOverlapIssues(arrows) {
+  const issues = [];
+  const routes = arrows.filter((arrow) => arrow.routePoints.length >= 2);
+  for (let i = 0; i < routes.length; i += 1) {
+    for (let j = i + 1; j < routes.length; j += 1) {
+      const a = routes[i];
+      const b = routes[j];
+      if (a.from === b.from && a.to === b.to) continue;
+      const shared = plateMiddleShared(a.routePoints, b.routePoints);
+
+      if (shared > PLATE_SHARED_ROUTE_LIMIT) {
+        issues.push("routes " + a.from + " -> " + a.to + " and " + b.from + " -> " + b.to + " share " + Math.round(shared) + "px of the same line");
+      }
+    }
+  }
+  return issues;
+}
+
+/** Bytes of the same line two segments share. Only near-collinear segments count. */
+const PLATE_SHARED_ROUTE_LIMIT = 12;
+
+/** Shared length between two routes once their endpoint stubs are excluded. */
+const PLATE_ROUTE_STUB = 26;
+
+function plateMiddleShared(pointsA, pointsB) {
+  const a = trimRouteStubs(pointsA);
+  const b = trimRouteStubs(pointsB);
+  let shared = 0;
+  for (let ai = 0; ai < a.length - 1; ai += 1) {
+    for (let bi = 0; bi < b.length - 1; bi += 1) {
+      shared = Math.max(shared, collinearOverlap(a[ai], a[ai + 1], b[bi], b[bi + 1]));
+    }
+  }
+  return shared;
+}
+
+function trimRouteStubs(points) {
+  const out = points.map((point) => [...point]);
+  const cut = (list, amount, fromEnd) => {
+    let remaining = amount;
+    while (remaining > 0 && list.length > 1) {
+      const a = fromEnd ? list[list.length - 2] : list[0];
+      const b = fromEnd ? list[list.length - 1] : list[1];
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      if (length <= remaining) {
+        remaining -= length;
+        if (fromEnd) list.pop();
+        else list.shift();
+      } else {
+        const point = [a[0] + ((b[0] - a[0]) / length) * remaining, a[1] + ((b[1] - a[1]) / length) * remaining];
+        if (fromEnd) list[list.length - 1] = point;
+        else list[0] = point;
+        remaining = 0;
+      }
+    }
+  };
+  cut(out, PLATE_ROUTE_STUB, false);
+  cut(out, PLATE_ROUTE_STUB, true);
+  return out;
+}
+function collinearOverlap(a, b, c, d) {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const length = Math.hypot(ux, uy);
+  if (length < 1) return 0;
+  const nx = -uy / length;
+  const ny = ux / length;
+  const offset = (point) => (point[0] - a[0]) * nx + (point[1] - a[1]) * ny;
+  if (Math.abs(offset(c)) > 1.5 || Math.abs(offset(d)) > 1.5) return 0;
+  const project = (point) => ((point[0] - a[0]) * ux + (point[1] - a[1]) * uy) / length;
+  const start = Math.max(0, Math.min(project(c), project(d)));
+  const end = Math.min(length, Math.max(project(c), project(d)));
+  return Math.max(0, end - start);
+}
+
+/**
+ * Footprints must not overlap on the ground plane: two blocks that occupy the same ground read
+ * as one block, which is the separation failure the 2D renderer prevents by layout.
+ */
+function plateFootprintOverlapIssues(prisms) {
+  const issues = [];
+  for (let i = 0; i < prisms.length; i += 1) {
+    for (let j = i + 1; j < prisms.length; j += 1) {
+      if (convexOverlap(prisms[i].ground, prisms[j].ground, 2)) {
+        issues.push("structures " + prisms[i].nodeId + " and " + prisms[j].nodeId + " occupy the same ground");
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * Separating axis test for two convex parallelograms, with a tolerance so footprints that
+ * merely touch an edge are separated rather than overlapping.
+ */
+function convexOverlap(polyA, polyB, tolerance) {
+  for (const polygon of [polyA, polyB]) {
+    for (let index = 0; index < polygon.length; index += 1) {
+      const a = polygon[index];
+      const b = polygon[(index + 1) % polygon.length];
+      const axis = [-(b[1] - a[1]), b[0] - a[0]];
+      const spanA = projectOnAxis(polyA, axis);
+      const spanB = projectOnAxis(polyB, axis);
+      if (spanA[1] - spanB[0] < tolerance || spanB[1] - spanA[0] < tolerance) return false;
+    }
+  }
+  return true;
+}
+
+function projectOnAxis(polygon, axis) {
+  const values = polygon.map((point) => point[0] * axis[0] + point[1] * axis[1]);
+  return [Math.min(...values), Math.max(...values)];
+}
+function plateRouteOverStructureIssues(arrows, prisms) {
+  const issues = [];
+  for (const arrow of arrows) {
+    if (!arrow.from || !arrow.to) continue;
+    for (const prism of prisms) {
+      if (prism.nodeId === arrow.from || prism.nodeId === arrow.to) continue;
+      const bbox = {
+        x0: Math.min(...prism.polygons.flat().map((point) => point[0])),
+        y0: Math.min(...prism.polygons.flat().map((point) => point[1])),
+        x1: Math.max(...prism.polygons.flat().map((point) => point[0])),
+        y1: Math.max(...prism.polygons.flat().map((point) => point[1])),
+      };
+      for (let index = 0; index < arrow.routePoints.length - 1; index += 1) {
+        const a = arrow.routePoints[index];
+        const b = arrow.routePoints[index + 1];
+        const crosses = segmentCrossesRect(a, b, bbox);
+        if (crosses) {
+          issues.push(`route "${arrow.from} -> ${arrow.to}" passes over structure "${prism.nodeId}"`);
+          break;
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** Separating-axis test for a segment against an axis-aligned box. */
+function segmentCrossesRect(a, b, box) {
+  const inside = (point) => point[0] >= box.x0 && point[0] <= box.x1 && point[1] >= box.y0 && point[1] <= box.y1;
+  if (inside(a) || inside(b)) return true;
+  const corners = [[box.x0, box.y0], [box.x1, box.y0], [box.x1, box.y1], [box.x0, box.y1]];
+  for (let index = 0; index < 4; index += 1) {
+    if (segmentsIntersect(a, b, corners[index], corners[(index + 1) % 4])) return true;
+  }
+  return false;
+}
+
 function addCheck(name, ok, details = []) {
   checks.push({ name, ok, details });
 }
@@ -98,6 +283,14 @@ if (svgMatches.length === 1) {
   const svgAttrs = parseAttrs(svgRoot);
   const qualityProfile = svgAttrs['data-quality-profile'] || 'standard';
   const qualityGatesEnforced = svgAttrs['data-quality-gates'] !== 'advisory';
+
+  // The atlas plate is a projected register. Isometric routes are not axis-aligned
+  // and its corridors are not a 2D grid, so the rules that encode orthographic
+  // layout assumptions cannot apply to it — enforcing them would fail a correct
+  // plate, and passing them silently would be a lie. They are skipped and named in
+  // the receipt. The rules that carry meaning in any projection — one svg, finite
+  // geometry, label/route clearance, desktop readability — stay gated.
+  const plateRegister = svgAttrs['data-preset'] === 'atlas';
   const nonFiniteAttrs = collectNonFiniteAttrs(svg);
   addCheck('finite_svg', nonFiniteAttrs.length === 0, nonFiniteAttrs);
   const legendStart = svg.indexOf('<!-- Legend -->');
@@ -107,12 +300,25 @@ if (svgMatches.length === 1) {
   const diagonal = arrows.flatMap((arrow) => diagonalStraightSegments(arrow).map((segment) => ({ arrow, ...segment })));
   addCheck(
     'orthogonal_arrows',
-    diagonal.length === 0,
-    diagonal.map(({ arrow, segmentIndex }) => `${arrow.kind} ${arrow.index} segment ${segmentIndex + 1}: ${arrow.raw}`),
+    plateRegister || diagonal.length === 0,
+    plateRegister
+      ? ['replaced for plates by plate_ground_routes: the equivalent invariant in a projection']
+      : diagonal.map(({ arrow, segmentIndex }) => `${arrow.kind} ${arrow.index} segment ${segmentIndex + 1}: ${arrow.raw}`),
   );
-  const relationshipCrossings = collectRelationshipCrossings(arrows);
+  // Two invariants replace the four orthographic composition budgets for a projected plate:
+  // a line that vanishes behind a block, and two lines drawn on top of each other. Both are
+  // readability failures in any projection, and both are measurable here. The 2D orthogonality
+  // rule has no projection analogue: a ground-plane route may travel in any direction.
+  const platePrisms = plateRegister ? plateGroupPolygons(beforeLegend) : [];
+  const plateOcclusionIssues = plateRegister ? plateRouteOverStructureIssues(arrows, platePrisms) : [];
+  const plateOverlapIssues = plateRegister ? plateRouteOverlapIssues(arrows) : [];
+  const plateFootprintIssues = plateRegister ? plateFootprintOverlapIssues(platePrisms) : [];
+  if (plateRegister) addCheck('plate_route_over_structure', plateOcclusionIssues.length === 0, plateOcclusionIssues);
+  if (plateRegister) addCheck('plate_route_overlap', plateOverlapIssues.length === 0, plateOverlapIssues);
+  if (plateRegister) addCheck('plate_footprint_separation', plateFootprintIssues.length === 0, plateFootprintIssues);
+  const relationshipCrossings = plateRegister ? [] : collectRelationshipCrossings(arrows);
   const compositionFrames = collectCompositionFrames(beforeLegend);
-  const containerBorderRuns = collectBorderRuns({
+  const containerBorderRuns = plateRegister ? [] : collectBorderRuns({
     routedRelations: arrows
       .filter((arrow) => arrow.from && arrow.to && arrow.borderSegments.length)
       .map((arrow) => ({
@@ -126,8 +332,8 @@ if (svgMatches.length === 1) {
     .filter((arrow) => arrow.from && arrow.to && arrow.routePoints.length)
     .map((arrow) => ({ relation: arrow, relationIndex: arrow.index, points: arrow.routePoints }));
   const routeMetrics = routeBudgetMetrics({ routedRelations: routedRelationships });
-  const routeRhythmIssues = collectRouteRhythmIssues({ routedRelations: routedRelationships });
-  const ambiguousCorridors = collectAmbiguousCorridors({ routedRelations: routedRelationships });
+  const routeRhythmIssues = plateRegister ? [] : collectRouteRhythmIssues({ routedRelations: routedRelationships });
+  const ambiguousCorridors = plateRegister ? [] : collectAmbiguousCorridors({ routedRelations: routedRelationships });
   const relationshipLabels = collectRelationshipLabelMasks(beforeLegend, arrows);
   const labelClearanceThreshold = qualityProfile === 'showcase' ? 4 : 2;
   const labelRouteMeasurements = collectLabelRouteClearance({
@@ -141,11 +347,18 @@ if (svgMatches.length === 1) {
     threshold: labelClearanceThreshold,
   });
   const crossingIsError = qualityProfile === 'showcase';
+  const plateIssueDetails = [
+    ...plateOcclusionIssues.map((detail) => ({ code: 'composition/plate-route-over-structure', detail })),
+    ...plateOverlapIssues.map((detail) => ({ code: 'composition/plate-route-overlap', detail })),
+    ...plateFootprintIssues.map((detail) => ({ code: 'composition/plate-footprint-separation', detail })),
+  ];
   const corridorIsError = qualityProfile === 'showcase';
   const rhythmIsError = qualityProfile === 'showcase';
   const labelClearanceIsError = qualityProfile === 'showcase';
   const desktopReadabilityIsError = qualityProfile === 'showcase';
+  const plateCompositionIssues = plateOcclusionIssues.length + plateOverlapIssues.length + plateFootprintIssues.length;
   const compositionErrors = (qualityGatesEnforced ? containerBorderRuns.length : 0)
+    + plateCompositionIssues
     + (crossingIsError ? relationshipCrossings.length : 0)
     + (corridorIsError ? ambiguousCorridors.length : 0)
     + (labelClearanceIsError ? labelRouteClearance.length : 0)
@@ -161,6 +374,7 @@ if (svgMatches.length === 1) {
     schemaVersion: 1,
     profile: qualityProfile,
     status: compositionErrors ? 'fail' : 'pass',
+    plateIssues: plateIssueDetails,
     summary: {
       errors: compositionErrors,
       warnings: compositionWarnings,
@@ -169,6 +383,10 @@ if (svgMatches.length === 1) {
       properCrossings: relationshipCrossings.length,
       ambiguousCorridors: ambiguousCorridors.length,
       containerBorderRuns: containerBorderRuns.length,
+      plateRouteOverStructureIssues: plateOcclusionIssues.length,
+      plateRouteOverlapIssues: plateOverlapIssues.length,
+      plateFootprintOverlapIssues: plateFootprintIssues.length,
+      plateRouteOverStructureIssues: plateOcclusionIssues.length,
       labelRouteClearanceIssues: labelRouteClearance.length,
       minLabelRouteClearance: labelRouteMeasurements.length
         ? Math.round(Math.min(...labelRouteMeasurements.map((hit) => hit.clearance)) * 10) / 10

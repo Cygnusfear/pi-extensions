@@ -14,7 +14,17 @@
       "enum": ["trace", "none"]
     },
     "visualPreset": {
-      "enum": ["classic", "signal-flow", "blueprint", "editorial"]
+      "enum": ["classic", "signal-flow", "blueprint", "editorial", "atlas"]
+    },
+    "plateFootprint": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "exclusiveMinimum": 0 },
+        { "type": "number", "exclusiveMinimum": 0 }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
     },
     "qualityProfile": {
       "enum": ["standard", "showcase"]
