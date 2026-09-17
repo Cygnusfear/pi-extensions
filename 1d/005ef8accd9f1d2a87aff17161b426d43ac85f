@@ -1,0 +1,14 @@
+skills/atlas/SKILL.md
+  h_59730e3e3c55ed 39-53,60,63-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d005ef8accd9f1d2a87aff17161b426d43ac85f",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
