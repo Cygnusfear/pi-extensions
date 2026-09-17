@@ -156,3 +156,9 @@ The flow accent is `#4f46e5` (6.3:1 on paper), reserved for emphasis arcs so dir
 stays the loudest thing on the plate while everything else is workhorse ink. The ramp is
 produced by a generator that refuses to write the file if any pair misses its threshold,
 so these numbers cannot drift silently. Re-measure before changing any value here.
+
+## Prism playback update
+
+Owned additions: `atlas/prism-viewer.js`, `atlas/prism-playback.js`, `archify/renderers/atlas/prism.mjs`, and `archify/assets/prism-plate.html`. The viewer supplies Flow/Infra projection and a finite authored-flow player; the compiler resolves each hop to a unique directed route. `architecture.schema.json` gains optional `meta.plate.flows`; `shared/generated-validators.mjs` is regenerated. No existing field is redefined. The authored helpdesk example and browser/unit verification live under `examples/` and `scripts/`; build instructions are in `examples/README.md`.
+
+The Three.js 0.186.0 runtime is bundled (MIT), not fetched at page load. The original SVG atlas template and renderer are unchanged by playback. The 14-spec compiled-SVG parity gate passed after validator regeneration.

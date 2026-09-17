@@ -1,0 +1,11 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {compileScene} from '../vendor/archify/renderers/atlas/prism.mjs';
+import {createPlayback,pointOnRoute} from '../vendor/atlas/prism-playback.js';
+const spec=JSON.parse(fs.readFileSync(new URL('../examples/helpdesk.prism.architecture.json',import.meta.url)));
+test('compiler preserves all authored flows and resolves every hop',()=>{const scene=compileScene(spec);assert.equal(scene.flows.length,4);assert.deepEqual(scene.flows.map(f=>f.steps.length),[12,8,2,2]);for(const flow of scene.flows)for(const step of flow.steps){assert.equal(scene.routes[step.route].from,step.from);assert.equal(scene.routes[step.route].to,step.to);}});
+test('compiler rejects nonexistent and ambiguous hops',()=>{const invalid=structuredClone(spec);invalid.meta.plate.flows[0].steps[0].to='missing';assert.throws(()=>compileScene(invalid),/exactly one connection/);const duplicate=structuredClone(spec);duplicate.connections.push(duplicate.connections[0]);assert.throws(()=>compileScene(duplicate),/exactly one connection/);});
+test('old specs have no invented flows',()=>{const old=structuredClone(spec);delete old.meta.plate.flows;assert.deepEqual(compileScene(old).flows,[]);});
+test('every flow completes in order, pause is stable, restart clears completion',()=>{const flows=compileScene(spec).flows,p=createPlayback(flows,10);for(let f=0;f<flows.length;f++){p.choose(f);p.play();for(let s=0;s<flows[f].steps.length;s++){assert.equal(p.state.step,s);p.tick(10);}assert.equal(p.state.playing,false);assert.equal(p.state.finished,true);p.restart();p.play();p.tick(5);p.pause();p.tick(100);assert.equal(p.state.progress,0.5);}assert.equal(p.choose(-1),false);});
+test('marker follows distance through elbows and degenerate segments',()=>{assert.deepEqual(pointOnRoute([{x:0,z:0},{x:0,z:0},{x:4,z:0},{x:4,z:4}],0.75),{x:4,z:2});assert.equal(pointOnRoute([],0),null);});

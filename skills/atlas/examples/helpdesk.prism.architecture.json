@@ -1,0 +1,1094 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Helpdesk Atlas",
+    "subtitle": "The same system as the hand-authored plate: prism height is write volume, one instance per deployment",
+    "locale": "en",
+    "visual_preset": "prism",
+    "quality_profile": "showcase",
+    "plate": {
+      "system": "HELPDESK ATLAS",
+      "datum": "relief: prism height is write volume, about 7 transcript rows per turn",
+      "elevation_label": "write volume",
+      "revision": "transcribed from system-atlas.html",
+      "no": "PLATE 01",
+      "flows": [
+        {
+          "id": "support-loop",
+          "label": "Full support loop",
+          "steps": [
+            {
+              "from": "chat",
+              "to": "http",
+              "title": "CLIENT → CASES SERVICE",
+              "story": "A staff member types “which warehouse serves this product?”. The page POSTs it with the bearer and keeps one SSE stream open; nothing else in the browser talks to the backend."
+            },
+            {
+              "from": "http",
+              "to": "temporal",
+              "title": "MESSAGE → SIGNAL",
+              "story": "The service does signalWithStart on the conversation workflow, id = session id. If the workflow does not exist yet this creates it; if it does, the message is queued in workflow state and never dropped — even while the worker is down, which is the case that wedged the old runtime."
+            },
+            {
+              "from": "temporal",
+              "to": "conv",
+              "title": "TASK → WORKFLOW",
+              "story": "Temporal hands the worker a task. The workflow appends turn.started and message.received to the transcript and decides: agent mode, so the model may speak."
+            },
+            {
+              "from": "conv",
+              "to": "llm",
+              "title": "WORKFLOW → MODEL STEP",
+              "story": "One llmStep activity. The conversation plus the eight tool schemas go to the model with stopWhen stepCountIs(1), so it answers or asks for exactly one tool. Heartbeats on every delta keep Temporal from timing it out."
+            },
+            {
+              "from": "llm",
+              "to": "ort",
+              "title": "MODEL STEP → OPENROUTER",
+              "story": "claude-haiku-4.5 over HTTPS, about 3.4k input tokens per step. Caching cannot hit yet: the stable prefix sits under the 4096-token minimum."
+            },
+            {
+              "from": "conv",
+              "to": "tool",
+              "title": "TOOL CALL",
+              "story": "The model asked for ecs_relationships. The workflow dispatches a toolCall activity, which runs one plain function behind the read-only guard."
+            },
+            {
+              "from": "tool",
+              "to": "rap",
+              "title": "GET ONLY → REST-API",
+              "story": "inventory_position → located_at → warehouse, read from the client’s accepted state on staging. No write can leave this box: the guard throws on anything but GET."
+            },
+            {
+              "from": "conv",
+              "to": "trw",
+              "title": "EVERY EVENT → TRANSCRIPT",
+              "story": "action.result, step.completed, message.completed, session.waiting: each is a transcriptWrite activity, idempotent on (session, seq), then streamed live to the page. About seven rows per turn."
+            },
+            {
+              "from": "conv",
+              "to": "case",
+              "title": "“ESCALATE” → CASE",
+              "story": "The escalate tool is special-cased: the workflow startChild’s the support case, flips itself to human, and from then on offers no tools and calls no model. Passivity is state, not a prompt."
+            },
+            {
+              "from": "case",
+              "to": "tkt",
+              "title": "CASE → TICKET",
+              "story": "The case writes a ticket file (Asana later) and waits. A wait of days costs nothing: no process holds anything open, the history is the state."
+            },
+            {
+              "from": "console",
+              "to": "http",
+              "title": "SUPPORT REPLIES",
+              "story": "From the console, “Send as support” is POST /cases/:id/reply, which becomes a humanReplied signal on the case. The text is routed to the conversation as human.message and published over SSE. It never enters the model."
+            },
+            {
+              "from": "case",
+              "to": "conv",
+              "title": "HAND BACK → ASSISTANT RESUMES",
+              "story": "“Hand back to assistant” signals deescalate; the case routes it to its parent; the conversation flips to agent and answers on the same transcript. Escalate again and it is still one case, one ticket."
+            }
+          ]
+        },
+        {
+          "id": "ask-answer",
+          "label": "Ask and answer",
+          "steps": [
+            {
+              "from": "chat",
+              "to": "http",
+              "title": "CLIENT → CASES SERVICE",
+              "story": "A staff member types “which warehouse serves this product?”. The page POSTs it with the bearer and keeps one SSE stream open; nothing else in the browser talks to the backend."
+            },
+            {
+              "from": "http",
+              "to": "temporal",
+              "title": "MESSAGE → SIGNAL",
+              "story": "The service does signalWithStart on the conversation workflow, id = session id. If the workflow does not exist yet this creates it; if it does, the message is queued in workflow state and never dropped — even while the worker is down, which is the case that wedged the old runtime."
+            },
+            {
+              "from": "temporal",
+              "to": "conv",
+              "title": "TASK → WORKFLOW",
+              "story": "Temporal hands the worker a task. The workflow appends turn.started and message.received to the transcript and decides: agent mode, so the model may speak."
+            },
+            {
+              "from": "conv",
+              "to": "llm",
+              "title": "WORKFLOW → MODEL STEP",
+              "story": "One llmStep activity. The conversation plus the eight tool schemas go to the model with stopWhen stepCountIs(1), so it answers or asks for exactly one tool. Heartbeats on every delta keep Temporal from timing it out."
+            },
+            {
+              "from": "llm",
+              "to": "ort",
+              "title": "MODEL STEP → OPENROUTER",
+              "story": "claude-haiku-4.5 over HTTPS, about 3.4k input tokens per step. Caching cannot hit yet: the stable prefix sits under the 4096-token minimum."
+            },
+            {
+              "from": "conv",
+              "to": "tool",
+              "title": "TOOL CALL",
+              "story": "The model asked for ecs_relationships. The workflow dispatches a toolCall activity, which runs one plain function behind the read-only guard."
+            },
+            {
+              "from": "tool",
+              "to": "rap",
+              "title": "GET ONLY → REST-API",
+              "story": "inventory_position → located_at → warehouse, read from the client’s accepted state on staging. No write can leave this box: the guard throws on anything but GET."
+            },
+            {
+              "from": "conv",
+              "to": "trw",
+              "title": "EVERY EVENT → TRANSCRIPT",
+              "story": "action.result, step.completed, message.completed, session.waiting: each is a transcriptWrite activity, idempotent on (session, seq), then streamed live to the page. About seven rows per turn."
+            }
+          ]
+        },
+        {
+          "id": "escalate",
+          "label": "Escalate",
+          "steps": [
+            {
+              "from": "conv",
+              "to": "case",
+              "title": "“ESCALATE” → CASE",
+              "story": "The escalate tool is special-cased: the workflow startChild’s the support case, flips itself to human, and from then on offers no tools and calls no model. Passivity is state, not a prompt."
+            },
+            {
+              "from": "case",
+              "to": "tkt",
+              "title": "CASE → TICKET",
+              "story": "The case writes a ticket file (Asana later) and waits. A wait of days costs nothing: no process holds anything open, the history is the state."
+            }
+          ]
+        },
+        {
+          "id": "human",
+          "label": "Human handoff",
+          "steps": [
+            {
+              "from": "console",
+              "to": "http",
+              "title": "SUPPORT REPLIES",
+              "story": "From the console, “Send as support” is POST /cases/:id/reply, which becomes a humanReplied signal on the case. The text is routed to the conversation as human.message and published over SSE. It never enters the model."
+            },
+            {
+              "from": "case",
+              "to": "conv",
+              "title": "HAND BACK → ASSISTANT RESUMES",
+              "story": "“Hand back to assistant” signals deescalate; the case routes it to its parent; the conversation flips to agent and answers on the same transcript. Escalate again and it is still one case, one ticket."
+            }
+          ]
+        }
+      ]
+    },
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "Browser surface"
+        },
+        "backend": {
+          "label": "Service — height is write volume"
+        },
+        "database": {
+          "label": "Store — a database or a directory"
+        },
+        "messagebus": {
+          "label": "Broker"
+        },
+        "external": {
+          "label": "Third party"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "ask",
+        "label": "Ask and answer",
+        "focus": [
+          "chat",
+          "http",
+          "temporal",
+          "conv",
+          "llm",
+          "ort",
+          "tool",
+          "rap",
+          "trw",
+          "trn"
+        ],
+        "note": "A question becomes a signal. Model activities and read-only tools answer it; transcript events stream back to the browser."
+      },
+      {
+        "id": "esc",
+        "label": "Escalate",
+        "focus": [
+          "chat",
+          "conv",
+          "case",
+          "tkt",
+          "ack"
+        ],
+        "note": "The escalate tool starts the support case as a child workflow. The assistant goes passive by state: no tools offered, no model called."
+      },
+      {
+        "id": "hum",
+        "label": "The human",
+        "focus": [
+          "console",
+          "http",
+          "case",
+          "conv",
+          "pub",
+          "chat"
+        ],
+        "note": "A support reply is a signal on the case, routed to the conversation and published straight to the browser. It never enters the model."
+      },
+      {
+        "id": "gone",
+        "label": "What was removed",
+        "focus": [
+          "eve",
+          "wpg",
+          "conv",
+          "temporal"
+        ],
+        "note": "Eve and its Postgres world owned the session until 2026-09-14. Neither resumed a mid-turn crash, so Temporal took the conversation."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "chat",
+      "type": "frontend",
+      "label": "Client chat",
+      "sublabel": "CHT · THE BROWSER",
+      "footprint": [
+        2.4,
+        1.6
+      ],
+      "elevation": 0.8,
+      "state": "active",
+      "pos": [
+        0,
+        0
+      ],
+      "dossier": {
+        "does": "The page a client’s staff talks to. Airbnb-style support messaging: streamed answers, tool activity in plain words, a case card when a human takes over, the support person as a named bubble.",
+        "built": "web/index.html, app.js, app.css served by cases/http.ts on :8787. SSE stream with a per-session seq cursor and gapless reconnect; light/dark; settings drawer; verified in Chrome with Playwright (scripts/ui-check.mjs).",
+        "facts": [
+          [
+            "served by",
+            "cases/http.ts"
+          ],
+          [
+            "stream",
+            "GET /sessions/:id/stream"
+          ],
+          [
+            "send",
+            "POST /sessions/:id/message"
+          ],
+          [
+            "auth",
+            "Bearer token"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "console",
+      "type": "frontend",
+      "label": "Support console",
+      "sublabel": "CON · THE BROWSER",
+      "footprint": [
+        2.4,
+        1.6
+      ],
+      "elevation": 0.8,
+      "state": "active",
+      "pos": [
+        3.6,
+        0
+      ],
+      "dossier": {
+        "does": "The inbox a support human uses: open cases with status pills, the user’s transcript, reply, hand back, mark resolved.",
+        "built": "web/console.html. GET /cases, GET /cases/:id/transcript, POST /cases/:id/{reply,handback,close}; every action becomes a Temporal signal on the case workflow.",
+        "facts": [
+          [
+            "served by",
+            "cases/http.ts"
+          ],
+          [
+            "list",
+            "GET /cases"
+          ],
+          [
+            "actions",
+            "reply · handback · close"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "http",
+      "type": "backend",
+      "label": "cases/http.ts",
+      "sublabel": "HTP · THE CASES SERVICE",
+      "footprint": [
+        3.4,
+        1.8
+      ],
+      "elevation": 1.2,
+      "state": "active",
+      "pos": [
+        1.2,
+        4.2
+      ],
+      "dossier": {
+        "does": "The only door into the system. Accepts a message, opens the live stream, exposes case status and the support endpoints, and serves both pages.",
+        "built": "POST /sessions/:id/message = signalWithStart(conversationWorkflow, workflowId = sessionId). GET /sessions/:id/stream replays helpdesk_transcript by seq then tails live chunks. Static route for web/.",
+        "facts": [
+          [
+            "port",
+            "8787"
+          ],
+          [
+            "auth",
+            "shared bearer"
+          ],
+          [
+            "SSE",
+            "sessions + cases"
+          ],
+          [
+            "static",
+            "/ · /app/* · /console"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "temporal",
+      "type": "messagebus",
+      "label": "Temporal server",
+      "sublabel": "TMP · TEMPORAL",
+      "footprint": [
+        3.4,
+        1.8
+      ],
+      "elevation": 1.6,
+      "state": "active",
+      "pos": [
+        1.2,
+        8.6
+      ],
+      "dossier": {
+        "does": "Holds every workflow’s history. Whatever dies, the system resumes from here: the worker, the HTTP service, Postgres, even this server itself.",
+        "built": "Dev: temporal server start-dev --db-filename. It is in-memory by default, so durability tests must pass a file. Prod: self-hosted server + Postgres, or Temporal Cloud.",
+        "facts": [
+          [
+            "address",
+            "localhost:7233"
+          ],
+          [
+            "persistence",
+            "SQLite file (dev)"
+          ],
+          [
+            "history / turn",
+            "~70 events"
+          ],
+          [
+            "continueAsNew",
+            "every 20 turns"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tdb",
+      "type": "database",
+      "label": "Temporal history",
+      "sublabel": "TDB · THE STORES",
+      "footprint": [
+        1.8,
+        1.6
+      ],
+      "elevation": 1,
+      "state": "active",
+      "pos": [
+        -2.4,
+        10.2
+      ],
+      "dossier": {
+        "does": "The event history of every conversation and case. The source of truth for replay.",
+        "built": "SQLite file in dev; Postgres or Cassandra behind a self-hosted server in prod.",
+        "facts": [
+          [
+            "dev",
+            "--db-filename"
+          ],
+          [
+            "per case",
+            "64–135 events"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "conv",
+      "type": "backend",
+      "label": "conversationWorkflow",
+      "sublabel": "CNV · THE WORKER · WORKFLOWS",
+      "footprint": [
+        3.6,
+        2.2
+      ],
+      "elevation": 2,
+      "state": "active",
+      "pos": [
+        8.2,
+        8
+      ],
+      "dossier": {
+        "does": "The conversation itself as a durable state machine: it queues your messages, decides when the model may speak, goes passive while a human holds the case, and resumes on handback.",
+        "built": "Signals userMessage / humanReplied / deescalate / close; query status. Each model step, tool call and transcript write is an activity. Passivity is state: while human, no tool is offered and no model is called.",
+        "facts": [
+          [
+            "id",
+            "sessionId"
+          ],
+          [
+            "signals",
+            "4"
+          ],
+          [
+            "per turn",
+            "~7 writes, 2 steps"
+          ],
+          [
+            "tallest",
+            "heaviest writer"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "case",
+      "type": "backend",
+      "label": "supportCaseWorkflow",
+      "sublabel": "CSE · THE WORKER · WORKFLOWS",
+      "footprint": [
+        3.6,
+        1.8
+      ],
+      "elevation": 1.5,
+      "state": "active",
+      "pos": [
+        8.2,
+        2.2
+      ],
+      "dossier": {
+        "does": "One escalation. Opens a ticket, waits for a human for as long as it takes at zero compute, routes their reply back to the conversation, then hands back or closes.",
+        "built": "startChild from the conversation on escalate, ParentClosePolicy ABANDON, workflowId <sessionId>:case. A parentless case is refused (non-retryable). Signals humanRequested / humanReplied / deescalate / close.",
+        "facts": [
+          [
+            "id",
+            "<sessionId>:case"
+          ],
+          [
+            "parent",
+            "conversationWorkflow"
+          ],
+          [
+            "sink",
+            "FileTicketSink → Asana"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tkt",
+      "type": "database",
+      "label": "Ticket files",
+      "sublabel": "TKT · THE STORES",
+      "footprint": [
+        1.8,
+        1.6
+      ],
+      "elevation": 0.8,
+      "state": "active",
+      "pos": [
+        12.6,
+        6.2
+      ],
+      "dossier": {
+        "does": "Where a case becomes something a team can see. Files today, Asana next.",
+        "built": ".spike/tickets/<caseId>.json, idempotent on caseId, behind the TicketSink interface.",
+        "facts": [
+          [
+            "path",
+            ".spike/tickets"
+          ],
+          [
+            "next",
+            "Asana sink"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "llm",
+      "type": "backend",
+      "label": "llmStep",
+      "sublabel": "LLM · THE WORKER · ACTIVITIES",
+      "footprint": [
+        2.6,
+        1.8
+      ],
+      "elevation": 1.3,
+      "state": "active",
+      "pos": [
+        13.4,
+        8.2
+      ],
+      "dossier": {
+        "does": "One model step: read the conversation, then either answer or ask for a tool.",
+        "built": "AI SDK streamText, stopWhen stepCountIs(1), tools declared without execute so the SDK returns tool calls. Heartbeat on every delta; 90s timeout, 3 attempts. Deltas stream to the page and are never persisted.",
+        "facts": [
+          [
+            "timeout",
+            "90s · heartbeat 20s"
+          ],
+          [
+            "per step",
+            "~3.4k in, ~100 out"
+          ],
+          [
+            "cache",
+            "below the 4096 minimum"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tool",
+      "type": "backend",
+      "label": "toolCall",
+      "sublabel": "TLC · THE WORKER · ACTIVITIES",
+      "footprint": [
+        2.6,
+        1.8
+      ],
+      "elevation": 1.1,
+      "state": "active",
+      "pos": [
+        13.4,
+        12
+      ],
+      "dossier": {
+        "does": "Reads the client’s data: products, inventory positions, warehouses, documents.",
+        "built": "Eight plain functions behind a read-only guard, GET only: find_product, product_facts, ecs_entities, ecs_components, ecs_relationships, read_view, list_documents, describe_api.",
+        "facts": [
+          [
+            "tools",
+            "8"
+          ],
+          [
+            "method",
+            "GET only"
+          ],
+          [
+            "timeout",
+            "30s · 3 attempts"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "trw",
+      "type": "backend",
+      "label": "transcriptWrite",
+      "sublabel": "TRW · THE WORKER · ACTIVITIES",
+      "footprint": [
+        2.6,
+        1.6
+      ],
+      "elevation": 1.9,
+      "state": "active",
+      "pos": [
+        8.2,
+        12.4
+      ],
+      "dossier": {
+        "does": "Writes every event of every conversation to Postgres, in order. Tall because it fires about seven times per turn.",
+        "built": "Idempotent upsert on (session_id, seq); the pool resets after a Postgres blip; retries bounded at about four minutes; then a best-effort stream chunk for live fan-out.",
+        "facts": [
+          [
+            "writes / turn",
+            "~7"
+          ],
+          [
+            "key",
+            "(session_id, seq)"
+          ],
+          [
+            "retry",
+            "10 · max 30s"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ack",
+      "type": "backend",
+      "label": "escalateAck",
+      "sublabel": "ACK · THE WORKER · ACTIVITIES",
+      "footprint": [
+        1.8,
+        1.2
+      ],
+      "elevation": 0.6,
+      "state": "active",
+      "pos": [
+        13.8,
+        1.6
+      ],
+      "dossier": {
+        "does": "Returns the acknowledgement line with a wait estimate.",
+        "built": "Constant today; production would use a rolling median of first-response times.",
+        "facts": [
+          [
+            "estimate",
+            "15 minutes"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "pub",
+      "type": "backend",
+      "label": "publishHuman",
+      "sublabel": "PUB · THE WORKER · ACTIVITIES",
+      "footprint": [
+        1.8,
+        1.2
+      ],
+      "elevation": 0.6,
+      "state": "active",
+      "pos": [
+        6,
+        0.2
+      ],
+      "dossier": {
+        "does": "Pushes a support reply to the browser channel. The human never passes through the model.",
+        "built": "POST /cases/:id/publish → JSONL + SSE fan-out, deduped by seq.",
+        "facts": [
+          [
+            "idempotency",
+            "caseId:seq"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "trn",
+      "type": "database",
+      "label": "helpdesk_transcript",
+      "sublabel": "TRN · THE STORES",
+      "footprint": [
+        2.4,
+        1.8
+      ],
+      "elevation": 1.4,
+      "state": "active",
+      "pos": [
+        3.6,
+        13.4
+      ],
+      "dossier": {
+        "does": "Every event of every conversation, in order. What the page replays on reload.",
+        "built": "Postgres 16, PRIMARY KEY (session_id, seq), created under an advisory lock so the worker and the HTTP service do not race.",
+        "facts": [
+          [
+            "db",
+            "helpdesk-pg :55432"
+          ],
+          [
+            "rows / turn",
+            "~7"
+          ],
+          [
+            "replay",
+            "?startIndex="
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ort",
+      "type": "external",
+      "label": "OpenRouter",
+      "sublabel": "ORT · EXTERNAL",
+      "footprint": [
+        2,
+        1.6
+      ],
+      "elevation": 0.7,
+      "state": "active",
+      "pos": [
+        17.6,
+        8.4
+      ],
+      "dossier": {
+        "does": "The model provider.",
+        "built": "@openrouter/ai-sdk-provider, anthropic/claude-haiku-4.5. Prompt caching needs cache_control and a prompt over 4096 tokens; today it is ~3.5k, so it does not hit.",
+        "facts": [
+          [
+            "model",
+            "claude-haiku-4.5"
+          ],
+          [
+            "cost / turn",
+            "~$0.004"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "rap",
+      "type": "external",
+      "label": "rest-api",
+      "sublabel": "RAP · EXTERNAL",
+      "footprint": [
+        2,
+        1.6
+      ],
+      "elevation": 0.9,
+      "state": "active",
+      "pos": [
+        17.6,
+        12.2
+      ],
+      "dossier": {
+        "does": "The client’s accepted data, read-only.",
+        "built": "velosport staging over TLS, one bearer per deployment, no tenant model yet ([[cod-7hdsz36x]]). Next: WorkOS scopes, so the agent can also read the ops telemetry it needs to debug a broken system.",
+        "facts": [
+          [
+            "auth",
+            "bearer per deployment"
+          ],
+          [
+            "used",
+            "products · ecs · views · documents"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "eve",
+      "type": "external",
+      "label": "Eve runtime",
+      "sublabel": "EVE · REMOVED · 2026-09-14",
+      "footprint": [
+        3.6,
+        1.8
+      ],
+      "elevation": 1,
+      "state": "removed",
+      "pos": [
+        8.2,
+        17
+      ],
+      "dossier": {
+        "does": "Used to own the session here. Removed after its self-hosted durability failed to resume mid-turn crashes on both of its worlds.",
+        "built": "Postgres world: the Graphile Worker lock is reclaimed only after four hours. Local world: killed runs stayed running forever, even under a built eve start. Measured three ways; see REPORT.md and ADR [[whs-4hpbq3iw]].",
+        "facts": [
+          [
+            "removed",
+            "2026-09-14"
+          ],
+          [
+            "reason",
+            "no mid-turn resume"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "wpg",
+      "type": "external",
+      "label": "world-postgres",
+      "sublabel": "WPG · REMOVED · 2026-09-14",
+      "footprint": [
+        1.8,
+        1.6
+      ],
+      "elevation": 0.7,
+      "state": "removed",
+      "pos": [
+        13.4,
+        17.2
+      ],
+      "dossier": {
+        "does": "Eve’s Postgres world. The data was durable, but a four-hour lock lease turned any crash into a stranded conversation.",
+        "built": "@workflow/world-postgres 5.0.0-beta on Graphile Worker; is_available has no age term and the four hours live in resetLockedAt, not in config.",
+        "facts": [
+          [
+            "lease",
+            "4h, not configurable"
+          ]
+        ]
+      }
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "THE BROWSER",
+      "wraps": [
+        "chat",
+        "console"
+      ],
+      "pad": 0.4
+    },
+    {
+      "kind": "region",
+      "label": "THE CASES SERVICE · :8787",
+      "wraps": [
+        "http"
+      ],
+      "pad": 0.4
+    },
+    {
+      "kind": "region",
+      "label": "TEMPORAL",
+      "wraps": [
+        "temporal",
+        "tdb"
+      ],
+      "pad": 0.4
+    },
+    {
+      "kind": "region",
+      "label": "THE WORKER · cases/worker.ts",
+      "wraps": [
+        "conv",
+        "case",
+        "tkt",
+        "llm",
+        "tool",
+        "trw",
+        "ack"
+      ],
+      "pad": 0.4
+    },
+    {
+      "kind": "region",
+      "label": "EXTERNAL",
+      "wraps": [
+        "ort",
+        "rap"
+      ],
+      "pad": 0.4
+    },
+    {
+      "kind": "security-group",
+      "label": "REMOVED · 2026-09-14",
+      "wraps": [
+        "eve",
+        "wpg"
+      ],
+      "pad": 0.4
+    }
+  ],
+  "connections": [
+    {
+      "id": "r1",
+      "from": "chat",
+      "to": "http",
+      "variant": "default",
+      "label": "POST message · SSE"
+    },
+    {
+      "id": "r2",
+      "from": "console",
+      "to": "http",
+      "variant": "dashed",
+      "label": "reply · handback · resolve"
+    },
+    {
+      "id": "r3",
+      "from": "http",
+      "to": "temporal",
+      "variant": "default",
+      "label": "signalWithStart · query"
+    },
+    {
+      "id": "r4",
+      "from": "temporal",
+      "to": "tdb",
+      "variant": "dashed",
+      "label": "history"
+    },
+    {
+      "id": "r5",
+      "from": "temporal",
+      "to": "conv",
+      "variant": "default",
+      "label": "workflow tasks",
+      "via": [
+        [
+          6.6,
+          9.5
+        ]
+      ]
+    },
+    {
+      "id": "r6",
+      "from": "conv",
+      "to": "case",
+      "variant": "dashed",
+      "label": "startChild on escalate",
+      "via": [
+        [
+          9.2,
+          6
+        ]
+      ]
+    },
+    {
+      "id": "r7",
+      "from": "case",
+      "to": "conv",
+      "variant": "emphasis",
+      "label": "humanReplied · deescalate",
+      "via": [
+        [
+          11.9,
+          4.1
+        ],
+        [
+          11.9,
+          9.6
+        ]
+      ]
+    },
+    {
+      "id": "r8",
+      "from": "case",
+      "to": "ack",
+      "variant": "dashed",
+      "label": "ack"
+    },
+    {
+      "id": "r9",
+      "from": "case",
+      "to": "tkt",
+      "variant": "default",
+      "label": "createTicket"
+    },
+    {
+      "id": "r10",
+      "from": "case",
+      "to": "pub",
+      "variant": "emphasis",
+      "label": "publishHuman",
+      "via": [
+        [
+          6.9,
+          3.1
+        ]
+      ]
+    },
+    {
+      "id": "r11",
+      "from": "pub",
+      "to": "http",
+      "variant": "emphasis",
+      "label": "SSE to the browser"
+    },
+    {
+      "id": "r12",
+      "from": "conv",
+      "to": "llm",
+      "variant": "default",
+      "label": "model step"
+    },
+    {
+      "id": "r13",
+      "from": "llm",
+      "to": "ort",
+      "variant": "default",
+      "label": "HTTPS"
+    },
+    {
+      "id": "r14",
+      "from": "conv",
+      "to": "tool",
+      "variant": "default",
+      "label": "tool call",
+      "via": [
+        [
+          12.6,
+          9.6
+        ],
+        [
+          12.6,
+          12.9
+        ]
+      ]
+    },
+    {
+      "id": "r15",
+      "from": "tool",
+      "to": "rap",
+      "variant": "default",
+      "label": "GET only · read-only guard"
+    },
+    {
+      "id": "r16",
+      "from": "conv",
+      "to": "trw",
+      "variant": "default",
+      "label": "transcriptWrite"
+    },
+    {
+      "id": "r17",
+      "from": "trw",
+      "to": "trn",
+      "variant": "default",
+      "label": "upsert (session, seq)"
+    },
+    {
+      "id": "r18",
+      "from": "trn",
+      "to": "http",
+      "variant": "dashed",
+      "label": "replay on reconnect",
+      "via": [
+        [
+          1.4,
+          14.3
+        ]
+      ]
+    },
+    {
+      "id": "r19",
+      "from": "eve",
+      "to": "conv",
+      "variant": "dashed",
+      "label": "session ownership moved here"
+    },
+    {
+      "id": "r20",
+      "from": "wpg",
+      "to": "eve",
+      "variant": "dashed"
+    }
+  ]
+}

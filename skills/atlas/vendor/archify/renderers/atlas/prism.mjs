@@ -20,6 +20,14 @@ const PAD = 1.2;
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const num = (value, fallback) => (typeof value === 'number' && Number.isFinite(value) ? value : fallback);
+const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function port(node, toward) {
+  const x = node.x + node.w / 2, z = node.z + node.d / 2;
+  const dx = toward.x - x, dz = toward.z - z;
+  const scale = Math.min(dx ? node.w / (2 * Math.abs(dx)) : Infinity, dz ? node.d / (2 * Math.abs(dz)) : Infinity);
+  return Number.isFinite(scale) ? { x: x + dx * scale, z: z + dz * scale } : { x, z };
+}
 
 function callsign(component) {
   const fromSublabel = String(component.sublabel || '').trim().split(/[\s\u00b7:]+/)[0];
@@ -89,6 +97,14 @@ export function compileScene(arch) {
         ? [start, { x: end.x, z: start.z }, end]
         : [start, { x: start.x, z: end.z }, end];
     }
+    points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.z !== points[index - 1].z);
+    const inside = (node, p) => p.x > node.x && p.x < node.x + node.w && p.z > node.z && p.z < node.z + node.d;
+    while (points.length > 2 && inside(from, points[1])) points.splice(1, 1);
+    while (points.length > 2 && inside(to, points.at(-2))) points.splice(-2, 1);
+    if (points.length > 1) {
+      points[0] = port(from, points[1]);
+      points[points.length - 1] = port(to, points.at(-2));
+    }
     return {
       from: connection.from,
       to: connection.to,
@@ -115,15 +131,27 @@ export function compileScene(arch) {
     views.push({ id: view.id, label: view.label, nodes: asArray(view.focus).length ? asArray(view.focus) : null });
   });
 
+  const flowIds = new Set();
+  const flows = asArray(plate.flows).map((flow) => {
+    if (flowIds.has(flow.id)) throw new Error('Duplicate flow id: ' + flow.id);
+    flowIds.add(flow.id);
+    return { id: flow.id, label: flow.label, steps: asArray(flow.steps).map((hop) => {
+      const matches = routes.map((route, index) => ({ route, index })).filter(({ route, index }) =>
+        route.from === hop.from && route.to === hop.to && (hop.connection === undefined || hop.connection === index));
+      if (matches.length !== 1) throw new Error('Flow ' + flow.id + ': hop ' + hop.from + ' -> ' + hop.to + ' needs exactly one connection (found ' + matches.length + ')');
+      return { from: hop.from, to: hop.to, route: matches[0].index, title: hop.title || matches[0].route.label, story: hop.story || '' };
+    }) };
+  });
+
   const stats = [
     nodes.length + ' components',
     zones.length + ' zones',
     routes.length + ' relationships',
     nodes.filter((node) => node.state === 'removed').length + ' removed',
   ];
-  const introHtml = '<div class="k">Nothing selected</div><h2 class="pt">' + (plate.system || arch.meta.title || 'Atlas') +
+  const introHtml = '<div class="k">Nothing selected</div><h2 class="pt">' + escape(plate.system || arch.meta.title || 'Atlas') +
     '</h2><p class="ps">' + stats.join(' \u00b7 ') + '</p>' +
-    '<div class="k">Read it</div><p>' + (plate.datum || '') + '</p>';
+    '<div class="k">Read it</div><p>' + escape(plate.datum || '') + '</p>';
 
   return {
     title: arch.meta.title || 'Atlas Plate',
@@ -131,6 +159,7 @@ export function compileScene(arch) {
     routes,
     zones,
     views,
+    flows,
     introHtml,
     stats,
     keyRows: KEY_GLYPHS.map(([glyph, text]) => [glyph, text.replace('{metric}', plate.elevation_label || 'a stated metric')]),
@@ -139,12 +168,12 @@ export function compileScene(arch) {
       { eyebrow: 'Components', value: String(nodes.length) },
       { eyebrow: 'Zones', value: String(zones.length) },
       { eyebrow: 'Relationships', value: String(routes.length) },
-    ].map((stat) => '  <div class="stat"><span class="eyebrow">' + stat.eyebrow + '</span><span class="v">' + stat.value +
-      (stat.small ? '<small>' + stat.small + '</small>' : '') + '</span></div>').join('\n'),
-    plateHtml: '    <div class="plate"><b>' + (plate.system || arch.meta.title || 'ATLAS') + '</b>' + (plate.no || 'Plate 01') +
-      '<div class="sub">' + stats.join(' &middot; ') + '<br>' + (plate.datum || '') + '</div></div>',
+    ].map((stat) => '  <div class="stat"><span class="eyebrow">' + stat.eyebrow + '</span><span class="v">' + escape(stat.value) +
+      (stat.small ? '<small>' + escape(stat.small) + '</small>' : '') + '</span></div>').join('\n'),
+    plateHtml: '    <div class="plate"><b>' + escape(plate.system || arch.meta.title || 'ATLAS') + '</b>' + escape(plate.no || 'Plate 01') +
+      '<div class="sub">' + stats.join(' &middot; ') + '<br>' + escape(plate.datum || '') + '</div></div>',
     keyHtml: '    <div class="key"><b>Key</b>' + KEY_GLYPHS.map(([glyph, text]) =>
-      '      <div><svg viewBox="0 0 24 16">' + glyph + '</svg>' + text.replace('{metric}', plate.elevation_label || 'a stated metric') + '</div>').join('\n') + '</div>',
+      '      <div><svg viewBox="0 0 24 16">' + glyph + '</svg>' + escape(text.replace('{metric}', plate.elevation_label || 'a stated metric')) + '</div>').join('\n') + '</div>',
   };
 }
 
@@ -159,7 +188,7 @@ export function renderPrismDocument(arch, templatePath = TEMPLATE, runtimePath =
     if (hits !== 1) throw new Error('prism template is missing ' + marker + ' (found ' + hits + ')');
     html = html.replace(marker, () => value);
   };
-  inject('__ATLAS_TITLE__', compiled.title);
+  inject('__ATLAS_TITLE__', escape(compiled.title));
   inject('<!--__ATLAS_STATS__-->', compiled.statsHtml);
   inject('<!--__ATLAS_PLATE__-->', compiled.plateHtml);
   inject('<!--__ATLAS_KEY__-->', compiled.keyHtml);
