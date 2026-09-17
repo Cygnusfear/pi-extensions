@@ -1,0 +1,32 @@
+skills/atlas/vendor/archify/assets/atlas-plate.html
+  h_59730e3e3c55ed 1-483
+skills/atlas/vendor/archify/assets/prism-plate.html
+  h_59730e3e3c55ed 1-221
+skills/atlas/vendor/archify/renderers/architecture/render-architecture.mjs
+  h_59730e3e3c55ed 1,67-75,77-82
+skills/atlas/vendor/archify/renderers/atlas/plate.mjs
+  h_59730e3e3c55ed 2,4-8,10-16,18-20,22-24,27-60,63-66,68-92,94,97-102,105-129,131-151,153-154,156-164,167-172,175-198,200,202-210
+skills/atlas/vendor/archify/renderers/atlas/prism.mjs
+  h_59730e3e3c55ed 1-168
+skills/atlas/vendor/archify/renderers/shared/generated-validators.mjs
+  h_59730e3e3c55ed 13
+skills/atlas/vendor/archify/schemas/common.schema.json
+  h_59730e3e3c55ed 17
+skills/atlas/vendor/archify/scripts/check-render-output.mjs
+  h_59730e3e3c55ed 277-406
+skills/atlas/vendor/atlas/prism-runtime.js
+  h_59730e3e3c55ed 1-4227
+skills/atlas/vendor/atlas/prism-viewer.js
+  h_59730e3e3c55ed 1-689
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52805e8df116be7b611be735076ffb263404b7a1",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
