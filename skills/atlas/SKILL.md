@@ -36,15 +36,32 @@ node vendor/archify/bin/archify.mjs validate <type> <spec.json> --quality showca
 node vendor/archify/bin/archify.mjs deliver  <type> <spec.json> <out.html> --quality showcase --json
 ```
 
-A `deliver` exit code of zero is the only acceptance: its receipt reports every
-artefact check. A non-zero exit is never success and never "a warning".
+`deliver` is the acceptance path for the SVG registers — architecture, workflow, sequence,
+lifecycle, dataflow — and for the atlas plate. There, an exit code of zero is the only
+acceptance: its receipt reports every artefact check, and a non-zero exit is never success
+and never "a warning".
+
+**The prism register is render-only.** Its plate is a WebGL scene, not an SVG, so the
+artefact checker — which requires exactly one diagram SVG — rejects it at
+`artifact/single-svg`. That diagnostic is expected for a prism spec and is not a defect in
+it. Compile and verify a prism plate on its own path:
+
+```bash
+node vendor/archify/renderers/architecture/render-architecture.mjs <spec.json> <out.html> --json   # {"ok":true,"prism":true,…}
+bun scripts/prism-browser-check.mjs   <out.html> <dir> <playwright-module> <chrome>                 # geometry, themes, export, mobile
+bun scripts/prism-playback-check.mjs  <out.html> <dir> <playwright-module> <chrome>                 # authored flows, projections, controls
+```
 
 ## Before you commit anything touching this skill
 
 ```bash
 node skills/atlas/scripts/parity-check.mjs                              # compiler still inert
 node skills/atlas/vendor/scripts/generate-viewer.mjs --check            # viewer sources agree with the template
+bun  skills/atlas/scripts/prism-flows.test.mjs                          # shape vocabulary and routing
 ```
+
+Anything touching the prism plate additionally runs `prism-browser-check.mjs` and, when a
+spec authors flows, `prism-playback-check.mjs` — see the render-only note above.
 
 ## Rules that do not bend
 
