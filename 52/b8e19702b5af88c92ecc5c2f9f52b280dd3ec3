@@ -1,0 +1,200 @@
+skills/atlas/SKILL.md
+  h_59730e3e3c55ed 1-60
+skills/atlas/scripts/parity-check.mjs
+  h_59730e3e3c55ed 1-137
+skills/atlas/vendor/PROVENANCE.json
+  h_59730e3e3c55ed 1-126
+skills/atlas/vendor/UPSTREAM.md
+  h_59730e3e3c55ed 1-128
+skills/atlas/vendor/archify/LICENSE
+  h_59730e3e3c55ed 1-22
+skills/atlas/vendor/archify/THIRD_PARTY_NOTICES.md
+  h_59730e3e3c55ed 1-69
+skills/atlas/vendor/archify/assets/JetBrainsMono-OFL.txt
+  h_59730e3e3c55ed 1-93
+skills/atlas/vendor/archify/assets/template.html
+  h_59730e3e3c55ed 1-14937
+skills/atlas/vendor/archify/bin/archify.mjs
+  h_59730e3e3c55ed 1-2139
+skills/atlas/vendor/archify/bin/open-artifact.mjs
+  h_59730e3e3c55ed 1-86
+skills/atlas/vendor/archify/bin/preview.mjs
+  h_59730e3e3c55ed 1-653
+skills/atlas/vendor/archify/bin/visual-check.mjs
+  h_59730e3e3c55ed 1-829
+skills/atlas/vendor/archify/brand-marks/README.md
+  h_59730e3e3c55ed 1-31
+skills/atlas/vendor/archify/brand-marks/catalog.json
+  h_59730e3e3c55ed 1-131
+skills/atlas/vendor/archify/delta/architecture-delta.mjs
+  h_59730e3e3c55ed 1-1232
+skills/atlas/vendor/archify/examples/agent-run.lifecycle.json
+  h_59730e3e3c55ed 1-60
+skills/atlas/vendor/archify/examples/agent-tool-call.workflow.json
+  h_59730e3e3c55ed 1-94
+skills/atlas/vendor/archify/examples/async-job-roundtrip.sequence.json
+  h_59730e3e3c55ed 1-61
+skills/atlas/vendor/archify/examples/brand-aware-delivery.architecture.json
+  h_59730e3e3c55ed 1-47
+skills/atlas/vendor/archify/examples/cache-miss-request.sequence.json
+  h_59730e3e3c55ed 1-82
+skills/atlas/vendor/archify/examples/checkout-platform.base.architecture.json
+  h_59730e3e3c55ed 1-31
+skills/atlas/vendor/archify/examples/checkout-platform.head.architecture.json
+  h_59730e3e3c55ed 1-31
+skills/atlas/vendor/archify/examples/deployment-release.lifecycle.json
+  h_59730e3e3c55ed 1-49
+skills/atlas/vendor/archify/examples/event-stream.dataflow.json
+  h_59730e3e3c55ed 1-57
+skills/atlas/vendor/archify/examples/incident-response.workflow.json
+  h_59730e3e3c55ed 1-64
+skills/atlas/vendor/archify/examples/product-analytics.dataflow.json
+  h_59730e3e3c55ed 1-76
+skills/atlas/vendor/archify/examples/production-deployment.architecture.json
+  h_59730e3e3c55ed 1-71
+skills/atlas/vendor/archify/examples/release-delivery.workflow.json
+  h_59730e3e3c55ed 1-62
+skills/atlas/vendor/archify/examples/web-app.architecture.json
+  h_59730e3e3c55ed 1-46
+skills/atlas/vendor/archify/migrations/workflow-v2.mjs
+  h_59730e3e3c55ed 1-279
+skills/atlas/vendor/archify/package.json
+  h_59730e3e3c55ed 1-39
+skills/atlas/vendor/archify/recipes/scenarios.mjs
+  h_59730e3e3c55ed 1-391
+skills/atlas/vendor/archify/references/authoring-contract.md
+  h_59730e3e3c55ed 1-247
+skills/atlas/vendor/archify/references/brand-marks.md
+  h_59730e3e3c55ed 1-65
+skills/atlas/vendor/archify/references/delivery-contract.md
+  h_59730e3e3c55ed 1-138
+skills/atlas/vendor/archify/references/viewer-runtime.md
+  h_59730e3e3c55ed 1-45
+skills/atlas/vendor/archify/renderers/architecture/grid.mjs
+  h_59730e3e3c55ed 1-62
+skills/atlas/vendor/archify/renderers/architecture/render-architecture.mjs
+  h_59730e3e3c55ed 1-1078
+skills/atlas/vendor/archify/renderers/dataflow/README.md
+  h_59730e3e3c55ed 1-104
+skills/atlas/vendor/archify/renderers/dataflow/render-dataflow.mjs
+  h_59730e3e3c55ed 1-483
+skills/atlas/vendor/archify/renderers/lifecycle/README.md
+  h_59730e3e3c55ed 1-115
+skills/atlas/vendor/archify/renderers/lifecycle/render-lifecycle.mjs
+  h_59730e3e3c55ed 1-561
+skills/atlas/vendor/archify/renderers/sequence/README.md
+  h_59730e3e3c55ed 1-114
+skills/atlas/vendor/archify/renderers/sequence/render-sequence.mjs
+  h_59730e3e3c55ed 1-464
+skills/atlas/vendor/archify/renderers/shared/brand-marks.mjs
+  h_59730e3e3c55ed 1-563
+skills/atlas/vendor/archify/renderers/shared/cli.mjs
+  h_59730e3e3c55ed 1-218
+skills/atlas/vendor/archify/renderers/shared/desktop-readability.mjs
+  h_59730e3e3c55ed 1-26
+skills/atlas/vendor/archify/renderers/shared/diagnostics.mjs
+  h_59730e3e3c55ed 1-160
+skills/atlas/vendor/archify/renderers/shared/engineering-profiles.mjs
+  h_59730e3e3c55ed 1-157
+skills/atlas/vendor/archify/renderers/shared/generated-brand-marks.mjs
+  h_59730e3e3c55ed 1-2003
+skills/atlas/vendor/archify/renderers/shared/generated-validators.mjs
+  h_59730e3e3c55ed 1-13
+skills/atlas/vendor/archify/renderers/shared/geometry.mjs
+  h_59730e3e3c55ed 1-1423
+skills/atlas/vendor/archify/renderers/shared/i18n.mjs
+  h_59730e3e3c55ed 1-595
+skills/atlas/vendor/archify/renderers/shared/layout-report.mjs
+  h_59730e3e3c55ed 1-40
+skills/atlas/vendor/archify/renderers/shared/legend.mjs
+  h_59730e3e3c55ed 1-217
+skills/atlas/vendor/archify/renderers/shared/output-path.mjs
+  h_59730e3e3c55ed 1-340
+skills/atlas/vendor/archify/renderers/shared/repository-evidence.mjs
+  h_59730e3e3c55ed 1-239
+skills/atlas/vendor/archify/renderers/shared/repository-location.mjs
+  h_59730e3e3c55ed 1-58
+skills/atlas/vendor/archify/renderers/shared/text-fit.mjs
+  h_59730e3e3c55ed 1-49
+skills/atlas/vendor/archify/renderers/shared/utils.mjs
+  h_59730e3e3c55ed 1-232
+skills/atlas/vendor/archify/renderers/shared/validator.mjs
+  h_59730e3e3c55ed 1-86
+skills/atlas/vendor/archify/renderers/workflow/README.md
+  h_59730e3e3c55ed 1-223
+skills/atlas/vendor/archify/renderers/workflow/render-workflow.mjs
+  h_59730e3e3c55ed 1-35
+skills/atlas/vendor/archify/renderers/workflow/workflow-compiler.mjs
+  h_59730e3e3c55ed 1-4400
+skills/atlas/vendor/archify/renderers/workflow/workflow-migration-geometry.mjs
+  h_59730e3e3c55ed 1-144
+skills/atlas/vendor/archify/schemas/README.md
+  h_59730e3e3c55ed 1-211
+skills/atlas/vendor/archify/schemas/architecture.schema.json
+  h_59730e3e3c55ed 1-178
+skills/atlas/vendor/archify/schemas/common.schema.json
+  h_59730e3e3c55ed 1-115
+skills/atlas/vendor/archify/schemas/dataflow.schema.json
+  h_59730e3e3c55ed 1-243
+skills/atlas/vendor/archify/schemas/lifecycle.schema.json
+  h_59730e3e3c55ed 1-266
+skills/atlas/vendor/archify/schemas/sequence.schema.json
+  h_59730e3e3c55ed 1-223
+skills/atlas/vendor/archify/schemas/workflow.schema.json
+  h_59730e3e3c55ed 1-428
+skills/atlas/vendor/archify/scripts/check-render-output.mjs
+  h_59730e3e3c55ed 1-916
+skills/atlas/vendor/archify/scripts/check-update.mjs
+  h_59730e3e3c55ed 1-1667
+skills/atlas/vendor/archify/scripts/generate-brand-marks.mjs
+  h_59730e3e3c55ed 1-141
+skills/atlas/vendor/archify/scripts/generate-validators.mjs
+  h_59730e3e3c55ed 1-66
+skills/atlas/vendor/archify/scripts/render-examples.mjs
+  h_59730e3e3c55ed 1-26
+skills/atlas/vendor/archify/scripts/update-contract.mjs
+  h_59730e3e3c55ed 1-182
+skills/atlas/vendor/scripts/generate-viewer.mjs
+  h_59730e3e3c55ed 1-62
+skills/atlas/vendor/viewer/README.md
+  h_59730e3e3c55ed 1-943
+skills/atlas/vendor/viewer/export-cleanup.js
+  h_59730e3e3c55ed 1-182
+skills/atlas/vendor/viewer/export.js
+  h_59730e3e3c55ed 1-1273
+skills/atlas/vendor/viewer/focus.js
+  h_59730e3e3c55ed 1-1441
+skills/atlas/vendor/viewer/guided-views.js
+  h_59730e3e3c55ed 1-1730
+skills/atlas/vendor/viewer/intent-trace.js
+  h_59730e3e3c55ed 1-213
+skills/atlas/vendor/viewer/motion-governor.js
+  h_59730e3e3c55ed 1-264
+skills/atlas/vendor/viewer/node-finder.js
+  h_59730e3e3c55ed 1-265
+skills/atlas/vendor/viewer/reader-layout.js
+  h_59730e3e3c55ed 1-168
+skills/atlas/vendor/viewer/route-probe.js
+  h_59730e3e3c55ed 1-1034
+skills/atlas/vendor/viewer/semantic-lens.js
+  h_59730e3e3c55ed 1-675
+skills/atlas/vendor/viewer/semantic-radar.js
+  h_59730e3e3c55ed 1-627
+skills/atlas/vendor/viewer/template.source.html
+  h_59730e3e3c55ed 1-6237
+skills/atlas/vendor/viewer/viewer-camera.js
+  h_59730e3e3c55ed 1-526
+skills/atlas/vendor/viewer/viewer-chrome-layout.js
+  h_59730e3e3c55ed 1-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52b8e19702b5af88c92ecc5c2f9f52b280dd3ec3",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
