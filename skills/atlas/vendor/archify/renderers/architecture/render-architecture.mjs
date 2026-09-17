@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { esc, renderDefinitions, renderSemanticSigil, textUnits } from '../shared/utils.mjs';
@@ -10,7 +11,6 @@ import { brandLabelFitWidth, brandMetadataFor, brandTopRailProblem, renderBrandM
 import { minimumReadableSourceTextPx } from '../shared/desktop-readability.mjs';
 import { translateMessage as i18nText } from '../shared/i18n.mjs';
 import { gridLayout, resolveComponentPos, validateGridPlacement } from './grid.mjs';
-import { renderPlate } from '../atlas/plate.mjs';
 import {
   asArray,
   isFinitePoint,
@@ -64,16 +64,22 @@ const grid = gridLayout(arch);
 
 // The atlas plate is a different projection of the same IR, so it owns the whole
 // render when the spec asks for it. See renderers/atlas/plate.mjs.
+if (arch.meta?.visual_preset === "prism") {
+  // The prism register is the interactive one: one geometry authority, a second presentation.
+  const { renderPrismDocument } = await import("../atlas/prism.mjs");
+  const { html, compiled } = renderPrismDocument(arch);
+  fs.writeFileSync(outPath, html);
+  process.stdout.write(JSON.stringify({ ok: true, prism: true, atlas: arch.meta.title, stats: compiled.stats }) + "\n");
+  process.exit(0);
+}
+
 if (arch.meta?.visual_preset === "atlas") {
-  writeDiagram({
-    outPath,
-    template,
-    diagramType: "architecture",
-    meta: arch.meta,
-    svg: renderPlate(arch),
-    cards: arch.cards,
-    sourceEvidence,
-  });
+  // The atlas register produces its own document: the atlas viewer draws the scene from the
+  // compiled data, so there is no SVG to hand to the template writer.
+  const { renderPlateDocument } = await import("../atlas/plate.mjs");
+  const { html, compiled } = renderPlateDocument(arch);
+  fs.writeFileSync(outPath, html);
+  process.stdout.write(JSON.stringify({ ok: true, plate: true, atlas: arch.meta.title, stats: compiled.stats }) + "\n");
   process.exit(0);
 }
 

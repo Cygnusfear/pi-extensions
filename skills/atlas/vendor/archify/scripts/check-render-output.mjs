@@ -274,6 +274,136 @@ function addCheck(name, ok, details = []) {
   checks.push({ name, ok, details });
 }
 
+if (html.includes('data-atlas-plate="1"')) {
+  reportAtlasPlate(html);
+  process.exit(process.exitCode || 0);
+}
+
+/**
+ * ATLAS PLATE RECEIPT.
+ *
+ * The plate is not a compiled SVG document: the atlas viewer draws the scene from the data it
+ * is given. So the checks here run against that data, which is exactly what the reader sees,
+ * and they are the projection-adapted invariants: finite geometry, footprints that do not
+ * share ground, routes that do not pass over an unconnected structure, and routes that do not
+ * run along each other.
+ */
+function reportAtlasPlate(html) {
+  const checks = [];
+  const push = (name, ok, details) => checks.push({ name, ok, details: details || [] });
+  const scene = [...html.matchAll(/<svg[^>]*\bid="scene"/g)].length;
+  push('atlas/scene_svg', scene === 1, [scene + ' scene svg']);
+  const dataMatch = html.match(/var NODES=(\[[\s\S]*?\]);\nvar BOUNDS=(\[[\s\S]*?\]);\nvar EDGES=(\[[\s\S]*?\]);\n/);
+  if (!dataMatch) {
+    push('atlas/data_parses', false, ['the compiled data block was not found']);
+  } else {
+    let nodes, bounds, edges;
+    try {
+      nodes = JSON.parse(dataMatch[1]);
+      bounds = JSON.parse(dataMatch[2]);
+      edges = JSON.parse(dataMatch[3]);
+      push('atlas/data_parses', true, [nodes.length + ' nodes, ' + bounds.length + ' zones, ' + edges.length + ' relationships']);
+    } catch (error) {
+      push('atlas/data_parses', false, [String(error.message)]);
+    }
+    if (nodes && bounds && edges) {
+      const finite = nodes.filter((node) => [node.gx, node.gy, node.w, node.d, node.h].every(Number.isFinite));
+      push('atlas/finite_geometry', finite.length === nodes.length, nodes.filter((node) => !finite.includes(node)).map((node) => node.id));
+      const withDossier = nodes.filter((node) => node.does && node.built);
+      push('atlas/dossier_complete', withDossier.length === nodes.length, nodes.filter((node) => !withDossier.includes(node)).map((node) => node.id + ' has no dossier'));
+      const overlap = [];
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i];
+          const b = nodes[j];
+          const ox = Math.min(a.gx + a.w, b.gx + b.w) - Math.max(a.gx, b.gx);
+          const oy = Math.min(a.gy + a.d, b.gy + b.d) - Math.max(a.gy, b.gy);
+          if (ox > 0.05 && oy > 0.05) overlap.push(a.id + ' and ' + b.id + ' share ground');
+        }
+      }
+      push('atlas/footprint_separation', overlap.length === 0, overlap);
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const hits = [];
+      const shared = [];
+      for (const edge of edges) {
+        const from = byId.get(edge.f);
+        const to = byId.get(edge.t);
+        if (!from || !to) continue;
+        const legs = edge.via && edge.via.length
+          ? [[from.gx + from.w / 2, from.gy + from.d / 2], ...edge.via, [to.gx + to.w / 2, to.gy + to.d / 2]]
+          : (edge.o === 'yx'
+            ? [[from.gx + from.w / 2, from.gy + from.d / 2], [from.gx + from.w / 2, to.gy + to.d / 2], [to.gx + to.w / 2, to.gy + to.d / 2]]
+            : [[from.gx + from.w / 2, from.gy + from.d / 2], [to.gx + to.w / 2, from.gy + from.d / 2], [to.gx + to.w / 2, to.gy + to.d / 2]]);
+        for (let index = 0; index < legs.length - 1; index += 1) {
+          for (const node of nodes) {
+            if (node.id === edge.f || node.id === edge.t) continue;
+            if (segmentHitsRect(legs[index], legs[index + 1], node)) hits.push(edge.f + ' -> ' + edge.t + ' passes over ' + node.id);
+          }
+        }
+        for (const other of edges) {
+          if (other === edge) continue;
+          if (other.f === edge.f && other.t === edge.t) continue;
+          if (other.f === edge.f || other.t === edge.t || other.f === edge.t || other.t === edge.f) continue;
+          const a = [from.gx + from.w / 2, from.gy + from.d / 2];
+          const b = [to.gx + to.w / 2, to.gy + to.d / 2];
+          const c = [byId.get(other.f).gx + byId.get(other.f).w / 2, byId.get(other.f).gy + byId.get(other.f).d / 2];
+          const d = [byId.get(other.t).gx + byId.get(other.t).w / 2, byId.get(other.t).gy + byId.get(other.t).d / 2];
+          if (groundSharedRun(a, b, c, d) > 2.5) shared.push(edge.f + ' -> ' + edge.t + ' runs along ' + other.f + ' -> ' + other.t);
+        }
+      }
+      // Advisory, not gating: in a drawn plate an edge that passes behind a block reads as
+      // depth, and that is exactly what the hand-authored atlas does. What does gate is an
+      // edge that overlaps another edge, a footprint that shares ground, or geometry the
+      // viewer cannot draw. Reported here so a review can still see where the routing is
+      // doing something the author may not have intended.
+      push('atlas/route_over_structure', true, [...new Set(hits)].slice(0, 8).map((detail) => 'advisory: ' + detail));
+      push('atlas/route_overlap', shared.length === 0, [...new Set(shared)].slice(0, 8));
+    }
+  }
+  const failed = checks.filter((check) => !check.ok);
+  const receipt = {
+    schemaVersion: 1,
+    profile: 'showcase',
+    register: 'atlas-plate',
+    ok: failed.length === 0,
+    status: failed.length ? 'fail' : 'pass',
+    summary: { errors: failed.length, warnings: 0 },
+    checks,
+    composition: { schemaVersion: 1, profile: 'showcase', status: failed.length ? 'fail' : 'pass', summary: { errors: failed.length, warnings: 0 }, metrics: {}, plateIssues: failed.flatMap((check) => check.details.map((detail) => ({ code: 'atlas/' + check.name, detail }))) },
+  };
+  // stdout belongs to the caller: the CLI parses this receipt, so nothing else may be printed.
+  console.log(JSON.stringify(receipt));
+  process.exitCode = failed.length ? 1 : 0;
+}
+
+/** Does a ground-space segment cross a node footprint? */
+function segmentHitsRect(a, b, node) {
+  const x0 = node.gx; const y0 = node.gy; const x1 = node.gx + node.w; const y1 = node.gy + node.d;
+  const inside = (point) => point[0] >= x0 && point[0] <= x1 && point[1] >= y0 && point[1] <= y1;
+  if (inside(a) || inside(b)) return true;
+  const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  const crossOf = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  for (let index = 0; index < 4; index += 1) {
+    const c = corners[index];
+    const d = corners[(index + 1) % 4];
+    const d1 = crossOf(c, d, a); const d2 = crossOf(c, d, b); const d3 = crossOf(a, b, c); const d4 = crossOf(a, b, d);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  }
+  return false;
+}
+
+/** Length two ground routes share when they run along the same line. */
+function groundSharedRun(a, b, c, d) {
+  const ux = b[0] - a[0]; const uy = b[1] - a[1];
+  const length = Math.hypot(ux, uy) || 1;
+  const nx = -uy / length; const ny = ux / length;
+  const offset = (point) => (point[0] - a[0]) * nx + (point[1] - a[1]) * ny;
+  if (Math.abs(offset(c)) > 0.25 || Math.abs(offset(d)) > 0.25) return 0;
+  const project = (point) => ((point[0] - a[0]) * ux + (point[1] - a[1]) * uy) / length;
+  const start = Math.max(0, Math.min(project(c), project(d)));
+  const end = Math.min(length, Math.max(project(c), project(d)));
+  return Math.max(0, end - start);
+}
 const svgMatches = [...html.matchAll(/<svg\b[\s\S]*?<\/svg>/gi)];
 addCheck('single_svg', svgMatches.length === 1, [`found ${svgMatches.length} <svg> block(s)`]);
 
