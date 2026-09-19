@@ -1,0 +1,30 @@
+packages/frontpage/extensions/frontpage.ts
+  s_e210abbd6699df::t_543fd06f0d68fa 224-247,250,252-253,255-258,282-291,298-303,305,308-311,313-339,343,346-400
+  s_e210abbd6699df::t_214afeaf97835e 1157,1198,1200-1201,1203-1205,1208-1209,1212,1242-1255,1258,1270-1271
+  s_e210abbd6699df::t_91127228f0e30f 29,111-116
+  s_e210abbd6699df::t_65c2a8884f6f4b 1295,1482-1483,1485-1490,1500-1502,1524-1525
+packages/frontpage/scripts/frontpage-test-harness.ts
+  s_e210abbd6699df::t_a4b8b64e6d16be 15-21,29-31,35,38-60,64-65,76-77,88-90,97-99,104,108
+packages/frontpage/scripts/mai-reporting.test.ts
+  s_e210abbd6699df::t_8abb4ed7a5a74d 46-56
+  s_e210abbd6699df::t_eee2e1c6a21d43 1-2,13-19
+  s_e210abbd6699df::t_e45eb50d0ac862 3-12,20-45,57-191
+packages/frontpage/README.md
+  s_e210abbd6699df::t_b95475ca3cd598 65-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "311dce72226ad40e5f081e2442de750f80499cb4",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
