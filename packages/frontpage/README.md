@@ -62,6 +62,16 @@ The compiled pi binary loads extensions via jiti with a closed list of `virtualM
 
 `.tldraw.json` and `.layout.json` are derived — safe to delete to reset annotations.
 
+### mai artifacts are evidence, not assumptions
+
+`frontpage_create`/`frontpage_update` record durable history via the `mai` CLI.
+mai stores notes in git notes refs, so the artifact is only created when the
+session cwd is inside a git repo. When that call cannot run (mai missing,
+cwd outside a repo, non-zero exit), the page is still written and the tool
+result says `mai artifact NOT recorded` with the exit code and captured
+stderr — never a guessed cause. Start pi inside a repo, or set
+`FRONTPAGE_MAI_CWD=/path/to/repo`, to record artifacts.
+
 ## Scripts
 
 ```bash

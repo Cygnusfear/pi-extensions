@@ -26,6 +26,7 @@ import { type Static, Type } from "@sinclair/typebox";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import { getStableNickname } from "@pi-extensions/shared/session-nickname";
+import { getMaiBin } from "@pi-extensions/shared/mai-binary";
 import {
 	formatMermaidFinding,
 	lintMermaid,
@@ -107,6 +108,12 @@ export type FrontpageSpawn = typeof nodeSpawn;
 
 export interface FrontpageDependencies {
 	spawn: FrontpageSpawn;
+	/**
+	 * Absolute path to the mai binary. Optional — production resolves it
+	 * lazily through the shared PATH-independent resolver; tests inject
+	 * "mai" so recorded spawn calls stay deterministic.
+	 */
+	maiBin?: string;
 }
 
 async function capPngForApi(
@@ -214,13 +221,41 @@ async function writeMeta(meta: Meta): Promise<void> {
 }
 
 // ---- mai shelling ----
+
+/**
+ * Resolve the mai binary. Prefers an injected path (tests); production goes
+ * through the shared resolver so the spawn does not depend on PATH at spawn
+ * time. Returns an error instead of throwing — callers report it in the tool
+ * result rather than losing the artifact behind a wrong label.
+ */
+function resolveMaiBin(
+	dependencies: FrontpageDependencies,
+): { bin: string } | { error: string } {
+	if (dependencies.maiBin) return { bin: dependencies.maiBin };
+	try {
+		return { bin: getMaiBin() };
+	} catch (err) {
+		return { error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+interface MaiRun {
+	stdout: string;
+	stderr: string;
+	code: number;
+}
+
 function runMai(
 	spawnProcess: FrontpageSpawn,
+	bin: string,
 	args: string[],
-	opts: { input?: string } = {},
-): Promise<{ stdout: string; stderr: string; code: number }> {
+	opts: { input?: string; cwd?: string } = {},
+): Promise<MaiRun> {
 	return new Promise((resolve) => {
-		const proc = spawnProcess("mai", args, { stdio: ["pipe", "pipe", "pipe"] });
+		const proc = spawnProcess(bin, args, {
+			stdio: ["pipe", "pipe", "pipe"],
+			...(opts.cwd ? { cwd: opts.cwd } : {}),
+		});
 		let stdout = "",
 			stderr = "";
 		proc.stdout.on("data", (d) => {
@@ -244,38 +279,125 @@ function runMai(
 	});
 }
 
+/** Format a non-zero mai exit as EVIDENCE: exit code + captured stderr. */
+function maiFailure(action: string, run: MaiRun, cwd: string): string {
+	const detail = (
+		run.stderr.trim() ||
+		run.stdout.trim() ||
+		"(no output)"
+	).replace(/\s+/g, " ");
+	return `mai ${action} failed (exit ${run.code}) in cwd=${cwd}: ${detail}`;
+}
+
 // Extract "Created <id>" from mai artifact create output.
 function extractArtifactId(out: string): string | undefined {
 	const m = out.match(/\b([a-z]+-[a-z0-9]+)\b/);
 	return m?.[1];
 }
 
+interface ArtifactResult {
+	artifactId?: string;
+	error?: string;
+	cwd: string;
+}
+
 async function createArtifact(
-	spawnProcess: FrontpageSpawn,
+	dependencies: FrontpageDependencies,
 	spec: FrontpageSpec,
 	htmlPath: string,
-): Promise<string | undefined> {
+	cwd: string,
+): Promise<ArtifactResult> {
+	const resolved = resolveMaiBin(dependencies);
+	if ("error" in resolved) return { error: resolved.error, cwd };
 	const desc = spec.description ?? spec.thesis.slice(0, 200);
-	const { stdout, code } = await runMai(spawnProcess, [
-		"artifact",
-		spec.title,
-		"--target",
-		htmlPath,
-		"-l",
-		"frontpage",
-		"-d",
-		desc,
-	]);
-	if (code !== 0) return undefined;
-	return extractArtifactId(stdout);
+	const run = await runMai(
+		dependencies.spawn,
+		resolved.bin,
+		[
+			"artifact",
+			spec.title,
+			"--target",
+			htmlPath,
+			"-l",
+			"frontpage",
+			"-d",
+			desc,
+		],
+		{ cwd },
+	);
+	if (run.code !== 0)
+		return { error: maiFailure("artifact create", run, cwd), cwd };
+	const artifactId = extractArtifactId(run.stdout);
+	if (!artifactId) {
+		return {
+			error: `mai artifact create exited 0 but printed no id (stdout: ${JSON.stringify(
+				run.stdout.trim() || "(empty)",
+			)})`,
+			cwd,
+		};
+	}
+	return { artifactId, cwd };
 }
 
 async function addNote(
-	spawnProcess: FrontpageSpawn,
+	dependencies: FrontpageDependencies,
 	artifactId: string,
 	note: string,
-): Promise<void> {
-	await runMai(spawnProcess, ["add-note", artifactId, note]);
+	cwd: string,
+): Promise<string | undefined> {
+	const resolved = resolveMaiBin(dependencies);
+	if ("error" in resolved) return resolved.error;
+	const run = await runMai(
+		dependencies.spawn,
+		resolved.bin,
+		["add-note", artifactId, note],
+		{ cwd },
+	);
+	if (run.code !== 0) return maiFailure("add-note", run, cwd);
+	return undefined;
+}
+
+// ---- artifact cwd ----
+
+/**
+ * Nearest git work-tree root at or above `start`, or undefined.
+ * `.git` is a directory in a normal clone and a file in worktrees/submodules,
+ * so existence is the right test. Mirrors how git walks up to find a repo.
+ */
+export function findGitRoot(start: string): string | undefined {
+	let dir = path.resolve(start);
+	for (;;) {
+		if (fs.existsSync(path.join(dir, ".git"))) return dir;
+		const parent = path.dirname(dir);
+		if (parent === dir) return undefined;
+		dir = parent;
+	}
+}
+
+/**
+ * Pick the working directory for mai.
+ *
+ * mai stores notes in a git repo's notes refs and HARD-FAILS when cwd is not
+ * inside one ("mai: not a git repository (or any parent)", exit 1). Order:
+ *   1. FRONTPAGE_MAI_CWD — explicit escape hatch for sessions started outside
+ *      a repo (used as-is; a bad value surfaces as a spawn error).
+ *   2. The git root of the pi session cwd — the project the page documents.
+ *   3. The git root of the frontpage store, if that store ever becomes one.
+ *   4. The session cwd itself — so a failure carries mai's real stderr
+ *      instead of losing the artifact behind a wrong label.
+ */
+export function resolveMaiCwd(
+	sessionCwd: string | undefined,
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	const override = env.FRONTPAGE_MAI_CWD?.trim();
+	if (override) return path.resolve(override);
+	for (const candidate of [sessionCwd, STORE_DIR]) {
+		if (!candidate) continue;
+		const root = findGitRoot(candidate);
+		if (root) return root;
+	}
+	return sessionCwd ?? process.cwd();
 }
 
 // ---- OS open ----
@@ -1032,7 +1154,7 @@ function registerFrontpage(
 			"frontpage_create does NOT auto-open the file. If the hooman should see it now, follow up with a separate frontpage_open call. Do NOT also pass { open: true } — that opens twice.",
 		],
 		parameters: CreateParams,
-		async execute(_id, params) {
+		async execute(_id, params, _signal, _onUpdate, ctx) {
 			if (
 				!params ||
 				typeof params !== "object" ||
@@ -1073,15 +1195,21 @@ function registerFrontpage(
 			const filePath = pagePath(spec.slug);
 			await fsp.writeFile(filePath, html, "utf8");
 
+			const maiCwd = resolveMaiCwd(ctx?.cwd);
 			let artifactId = existingMeta?.artifactId;
+			let artifactError: string | undefined;
+			let noteError: string | undefined;
 			if (!artifactId) {
-				artifactId = await createArtifact(dependencies.spawn, spec, filePath);
+				const created = await createArtifact(dependencies, spec, filePath, maiCwd);
+				artifactId = created.artifactId;
+				artifactError = created.error;
 			} else {
 				// Updating via create — log a note
-				await addNote(
-					dependencies.spawn,
+				noteError = await addNote(
+					dependencies,
 					artifactId,
 					`Regenerated frontpage (${spec.sections.length} sections).`,
+					maiCwd,
 				);
 			}
 
@@ -1111,11 +1239,23 @@ function registerFrontpage(
 			const mermaidFindings = collectMermaidFindings(spec);
 			const mermaidBlock = formatMermaidFindingsSection(mermaidFindings);
 
+			const maiLines: string[] = [];
+			if (artifactId) {
+				maiLines.push(`mai artifact: ${artifactId}`);
+				if (noteError) maiLines.push(`mai note NOT added — ${noteError}`);
+			} else {
+				maiLines.push(
+					`mai artifact NOT recorded — ${artifactError ?? "unknown error"}`,
+				);
+				if (artifactError && /not a git repository/i.test(artifactError)) {
+					maiLines.push(
+						`  (${maiCwd} is not inside a git repo; run pi from one or set FRONTPAGE_MAI_CWD to record artifacts. The page was written regardless.)`,
+					);
+				}
+			}
 			const textLines = [
 				`Frontpage written: ${filePath}`,
-				artifactId
-					? `mai artifact: ${artifactId}`
-					: "mai unavailable — no artifact recorded",
+				...maiLines,
 				`Sections: ${spec.sections.length}`,
 				`Palette: ${spec.palette} · Register: ${spec.register}`,
 			];
@@ -1127,6 +1267,8 @@ function registerFrontpage(
 					slug: spec.slug,
 					path: filePath,
 					artifactId,
+					artifactError: artifactError ?? null,
+					maiCwd,
 					sectionCount: spec.sections.length,
 					mermaidFindings: mermaidFindings.map((x) => ({
 						sectionId: x.sectionId,
@@ -1150,7 +1292,7 @@ function registerFrontpage(
 			"Always provide a short 'note' describing what changed — it becomes the artifact history.",
 		],
 		parameters: UpdateParams,
-		async execute(_id, params) {
+		async execute(_id, params, _signal, _onUpdate, ctx) {
 			if (!params || typeof params !== "object") {
 				return missingParamError(
 					"frontpage_update",
@@ -1337,8 +1479,15 @@ function registerFrontpage(
 				sectionDiff?.summary,
 			);
 
+			const maiCwd = resolveMaiCwd(ctx?.cwd);
+			let noteError: string | undefined;
 			if (meta.artifactId)
-				await addNote(dependencies.spawn, meta.artifactId, params.note);
+				noteError = await addNote(
+					dependencies,
+					meta.artifactId,
+					params.note,
+					maiCwd,
+				);
 			if (params.open) void osOpen(dependencies.spawn, filePath);
 
 			// Mermaid lint surfaces back to the agent — SOFT, never blocks the write.
@@ -1348,7 +1497,9 @@ function registerFrontpage(
 			const textLines = [
 				`Frontpage updated: ${filePath}`,
 				meta.artifactId
-					? `mai note added to ${meta.artifactId}`
+					? noteError
+						? `mai note NOT added to ${meta.artifactId} — ${noteError}`
+						: `mai note added to ${meta.artifactId}`
 					: "mai artifact unknown — no note",
 				`Ops applied: ${applied.length}/${params.patch.length}`,
 				...applied.map((a) => `  ✓ ${a}`),
@@ -1370,6 +1521,8 @@ function registerFrontpage(
 					slug: withIds.slug,
 					path: filePath,
 					artifactId: meta.artifactId,
+					noteError: noteError ?? null,
+					maiCwd,
 					applied: applied.length,
 					skipped: skipped.length,
 					sectionIds: withIds.sections.map((s) => s.id),

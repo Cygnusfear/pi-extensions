@@ -12,6 +12,13 @@ import {
 export interface SpawnCall {
 	command: string;
 	args: string[];
+	cwd?: string;
+}
+
+export interface SpawnResponse {
+	stdout?: string;
+	stderr?: string;
+	code?: number;
 }
 
 const toolContext = {} as ExtensionContext;
@@ -19,16 +26,43 @@ const toolContext = {} as ExtensionContext;
 export function createFrontpageTestHarness() {
 	const spawnCalls: SpawnCall[] = [];
 	const tools = new Map<string, ToolDefinition>();
+	// Programmable per-call child result. Default: exit 0, no output.
+	let respond: (call: SpawnCall) => SpawnResponse = () => ({ code: 0 });
+
 	const fakeSpawn = ((
 		command: string,
 		argsOrOptions?: readonly string[] | object,
+		options?: object,
 	) => {
 		const args = Array.isArray(argsOrOptions) ? argsOrOptions.map(String) : [];
-		spawnCalls.push({ command, args });
+		const cwd =
+			options && "cwd" in options
+				? ((options as { cwd?: string }).cwd ?? undefined)
+				: undefined;
+		const call: SpawnCall = { command, args, ...(cwd ? { cwd } : {}) };
+		spawnCalls.push(call);
+		const response = respond(call);
+		const streamFor = (key: "stdout" | "stderr") => {
+			const stream = {
+				on(event: string, callback: (...args: unknown[]) => void) {
+					if (event === "data")
+						setTimeout(
+							() => callback(Buffer.from(response[key] ?? "")),
+							0,
+						);
+					return stream;
+				},
+				resume() {
+					return stream;
+				},
+			};
+			return stream;
+		};
 		const fakeChild = {
 			pid: 12_345,
 			on(event: string, callback: (...args: unknown[]) => void) {
-				if (event === "close") setTimeout(() => callback(0), 0);
+				if (event === "close")
+					setTimeout(() => callback(response.code ?? 0), 0);
 				return fakeChild;
 			},
 			once(event: string, callback: (...args: unknown[]) => void) {
@@ -39,22 +73,8 @@ export function createFrontpageTestHarness() {
 				return true;
 			},
 			stdin: { write() {}, end() {} },
-			stdout: {
-				on() {
-					return fakeChild.stdout;
-				},
-				resume() {
-					return fakeChild.stdout;
-				},
-			},
-			stderr: {
-				on() {
-					return fakeChild.stderr;
-				},
-				resume() {
-					return fakeChild.stderr;
-				},
-			},
+			stdout: streamFor("stdout"),
+			stderr: streamFor("stderr"),
 		};
 		return fakeChild;
 	}) as unknown as FrontpageSpawn;
@@ -65,21 +85,27 @@ export function createFrontpageTestHarness() {
 		},
 		registerCommand() {},
 	};
-	createFrontpageExtension({ spawn: fakeSpawn })(fakeApi as ExtensionAPI);
+	createFrontpageExtension({ spawn: fakeSpawn, maiBin: "mai" })(
+		fakeApi as ExtensionAPI,
+	);
 
 	return {
 		spawnCalls,
 		resetSpawnCalls() {
 			spawnCalls.length = 0;
 		},
+		setResponder(fn: (call: SpawnCall) => SpawnResponse) {
+			respond = fn;
+		},
 		async execute(
 			name: string,
 			callId: string,
 			params: object,
+			ctx: ExtensionContext = toolContext,
 		): Promise<AgentToolResult<unknown>> {
 			const tool = tools.get(name);
 			if (!tool) throw new Error(`Frontpage tool was not registered: ${name}`);
-			return tool.execute(callId, params, undefined, undefined, toolContext);
+			return tool.execute(callId, params, undefined, undefined, ctx);
 		},
 	};
 }
