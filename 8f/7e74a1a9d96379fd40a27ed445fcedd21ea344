@@ -1,0 +1,43 @@
+packages/mesh-telegram-bridge/skills/mesh-telegram-bridge/SKILL.md
+  s_e210abbd6699df::t_d9178ae883683a 43-44,106,196
+packages/mesh-telegram-bridge/src/topic-lifecycle.ts
+  s_e210abbd6699df::t_c40dffbcdbfbf8 1-206
+packages/mesh-telegram-bridge/src/bridge-state.ts
+  s_e210abbd6699df::t_e4eb02a83c79b4 11,42,165
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_e210abbd6699df::t_b8c20538a576a8 22,51-56,87-91,123,129,138-164,280,296,304-309,311-312,317,320,326-337,566-573,670-677
+  s_e210abbd6699df::t_0d2eeb82c3806e 678-679
+packages/mesh-telegram-bridge/src/bridge-state.test.ts
+  s_e210abbd6699df::t_bfc82fff834a61 252
+packages/mesh-telegram-bridge/src/topic-routes.ts
+  s_e210abbd6699df::t_655c348e597531 108
+  s_e210abbd6699df::t_93270a47ce3ab3 4-6,12-13,90-107,109-110,157-160,171-174,223-226,236,247-250,253
+packages/mesh-telegram-bridge/src/topic-routes.test.ts
+  s_e210abbd6699df::t_da9c06fb13f7b3 71,94,98,179
+packages/pi-mesh/extension/durable-registry-index.ts
+  s_e210abbd6699df::t_8db0d29868b6bd 26-27,121-131,133-197
+packages/pi-mesh/extension/pi-mesh.ts
+  s_e210abbd6699df::t_cb5e6e8cfd1daa 2353-2373
+  s_e210abbd6699df::t_fdd94711615f9a 46,1825
+  s_e210abbd6699df::t_079e116e5643c5 2374
+packages/mesh-telegram-bridge/src/topic-lifecycle.test.ts
+  s_e210abbd6699df::t_d835c23e39f39d 1-184
+packages/pi-mesh/extension/durable-registry-prune.test.ts
+  s_e210abbd6699df::t_f0536b5dcc8c13 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8f7e74a1a9d96379fd40a27ed445fcedd21ea344",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
