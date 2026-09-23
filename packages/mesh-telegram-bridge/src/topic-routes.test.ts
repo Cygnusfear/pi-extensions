@@ -68,7 +68,7 @@ describe("TopicRouteController bridge orchestration", () => {
 		create.resolve({ message_thread_id: 77 });
 		expect(await Promise.all([first, second])).toEqual([77, 77]);
 		expect(createCalls).toHaveLength(1);
-		expect([...routes.entries()]).toEqual([[peer.key, { topicId: 77, title: "Build Lisa Nova" }]]);
+		expect([...routes.entries()]).toMatchObject([[peer.key, { topicId: 77, title: "Build Lisa Nova" }]]);
 		expect(ready).toEqual([77, 77]);
 	});
 
@@ -91,11 +91,11 @@ describe("TopicRouteController bridge orchestration", () => {
 		});
 
 		expect(await controller.ensure(peer)).toBe(77);
-		expect(routes.get(peer.key)).toEqual({ topicId: 77, title: "Lisa Nova · Build" });
+		expect(routes.get(peer.key)).toMatchObject({ topicId: 77, title: "Lisa Nova · Build" });
 		expect(changes).toBe(0);
 		expect(await controller.ensure(peer)).toBe(77);
 		expect(edits).toEqual(["Build Lisa Nova", "Build Lisa Nova"]);
-		expect(routes.get(peer.key)).toEqual({ topicId: 77, title: "Build Lisa Nova" });
+		expect(routes.get(peer.key)).toMatchObject({ topicId: 77, title: "Build Lisa Nova" });
 		expect(changes).toBe(1);
 	});
 
@@ -176,7 +176,7 @@ describe("TopicRouteController bridge orchestration", () => {
 		await controller.announce({ key: "durable-nova", clientId: "old-client", meshId: "durable-nova", nickname: "Nova", sessionName: "Build" });
 		expect(creates).toBe(0);
 		expect(edits).toEqual(["Build Nova"]);
-		expect([...routes.entries()]).toEqual([["durable-nova", { topicId: 77, title: "Build Nova" }]]);
+		expect([...routes.entries()]).toMatchObject([["durable-nova", { topicId: 77, title: "Build Nova" }]]);
 	});
 
 	});

@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import type { AgentTopicRoute } from "./topic-routes.ts";
 
 export const MAX_SENT_MESSAGE_ROUTES = 2_000;
 /** Telegram launched in 2013; older/far-future ledger times are not credible remote-delete input. */
@@ -38,11 +39,7 @@ export interface DeleteEligibleSentMessageRoute extends AgentRoute {
 /** New delete-eligible and legacy reaction-only records are intentionally distinct states. */
 export type SentMessageRoute = LegacyReactionRoute | DeleteEligibleSentMessageRoute;
 
-/** The one persisted agent-topic record; title is absent only on migrated numeric records. */
-export interface AgentTopicRoute {
-	topicId: number;
-	title?: string;
-}
+// AgentTopicRoute is owned by topic-routes.ts (the route-state owner) and imported above.
 
 export interface TelegramContactState {
 	on: boolean;
@@ -165,6 +162,7 @@ function parseAgentTopicRoute(value: unknown): AgentTopicRoute | null {
 	return {
 		topicId: value.topicId,
 		...(typeof value.title === "string" && value.title.trim() ? { title: value.title } : {}),
+		...(isPlausibleSentAtMs(value.lastSeenAt) ? { lastSeenAt: value.lastSeenAt } : {}),
 	};
 }
 

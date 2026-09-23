@@ -40,6 +40,8 @@ Ramdock is a **forum**. The bridge auto-creates a **topic per agent**, titled ex
 
 You don't choose the topic — it's derived from your mesh identity. Just send tells; the topic exists or gets created on first contact.
 
+- **Topics are reaped after 7 days unseen** (`MESH_TG_TOPIC_TTL_DAYS`, 0 disables). The bridge deletes the topic and drops the route; your next tell recreates it.
+
 ---
 
 ## 3. Send text
@@ -101,7 +103,7 @@ The newest 2,000 agent-message routes are persisted, so reactions on recent mess
 
 (Reactions on the Hooman's *own* messages don't relay — only reactions on agent-sent messages do.)
 
-**Retention.** The forum's auto-delete is set to **1 day** (86,400s). The bridge ALSO owns a 24h sweep that deletes its own outbound messages by their exact `(chatId, messageId)` once they age out, as a defence-in-depth backstop. Telegram auto-delete is forward-only and the Bot API cannot set the timer or safely enumerate historic traffic, so messages that predate the timer (or bridge-owned messages lacking a ledgered chat id/timestamp) must be cleared in the Telegram client — the bot will not blind-delete them.
+**Retention.** Telegram's per-chat auto-delete is a **group setting the Bot API cannot change** — the bridge reads it at startup and warns unless it is 86,400s (1 day). If the group is set to 604800s (7 days), agent chatter older than a day is NOT auto-removed; change it in Telegram's group settings ("Auto-delete messages"). Independently, the bridge owns a 24h sweep that deletes its own outbound messages by their exact `(chatId, messageId)` once they age out, as a defence-in-depth backstop. Telegram auto-delete is forward-only and cannot safely enumerate historic traffic, so messages that predate the timer (or bridge-owned messages lacking a ledgered chat id/timestamp) must be cleared in the Telegram client — the bot will not blind-delete them.
 
 ---
 
@@ -191,4 +193,4 @@ The bridge sends `text` first and synthesizes the `voice` sidecar when present. 
 
 ## Reference
 
-Source: `packages/mesh-telegram-bridge/src/{bridge.ts, bridge-state.ts, topic-routes.ts, message-retention.ts, telegram-values.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, and optional transcription provider keys) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Voice transcription checks `OPENAI_API_KEY`, `GROQ_API_KEY`, `ZAI_API_KEY`, then `OPENROUTER_API_KEY`. Topic↔agent state and the bounded recent-message reaction routes persist in `~/.config/mesh-telegram-bridge/state.json` (mode 600). Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.
+Source: `packages/mesh-telegram-bridge/src/{bridge.ts, bridge-state.ts, topic-routes.ts, topic-lifecycle.ts, message-retention.ts, telegram-values.ts, mesh-client.ts, config.ts, index.ts}` + launchd plist + README. Config (bot token, chat id, mesh id, and optional transcription provider keys) lives in `~/.config/mesh-telegram-bridge/config.env` (mode 600, gitignored, outside the repo). Voice transcription checks `OPENAI_API_KEY`, `GROQ_API_KEY`, `ZAI_API_KEY`, then `OPENROUTER_API_KEY`. Topic↔agent state and the bounded recent-message reaction routes persist in `~/.config/mesh-telegram-bridge/state.json` (mode 600). Restart the bridge: `launchctl kickstart -k gui/$(id -u)/com.piextensions.mesh-telegram-bridge`.

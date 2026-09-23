@@ -19,6 +19,7 @@ import type { TranscriptionProvider, TranscriptionFallbackHooks } from "@pi-exte
 export { TranscriptionProviderError, transcriptionResponseError, transcribeWithFallback } from "@pi-extensions/shared/transcription";
 export type { TranscriptionProvider, TranscriptionFallbackHooks } from "@pi-extensions/shared/transcription";
 import { TopicRouteController } from "./topic-routes.ts";
+import { TopicLifecycleController, topicTtlMsFromEnv } from "./topic-lifecycle.ts";
 import { MessageRetentionController } from "./message-retention.ts";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -46,6 +47,12 @@ const CREDIT_NOTIFICATION_WINDOW_MS = 12 * 60 * 60 * 1000;
 /** Bound pre-announcement tells; a transient connection id must never create a persistent forum topic. */
 const MAX_PENDING_TOPIC_PEERS = 256;
 const PENDING_TOPIC_ANNOUNCEMENT_MS = 10_000;
+
+/** Forum detection retry backoff: 5s, 10s, … capped at 60s. */
+export function forumDetectRetryDelayMs(attempt: number): number {
+	const safe = Math.max(1, Math.min(Math.trunc(attempt), 6));
+	return Math.min(5_000 * 2 ** (safe - 1), 60_000);
+}
 
 interface PendingTopicPeer {
 	readonly clientId: string;
@@ -77,6 +84,11 @@ export class Bridge {
 	/** Legacy numeric records remain reaction-only and are never passed to Telegram delete APIs. */
 	private readonly legacyMsgToAgent = new Map<number, LegacyReactionRoute>();
 	private readonly topicRoutes: TopicRouteController;
+
+	private readonly topicLifecycle: TopicLifecycleController;
+	/** Forum detection retry backoff state; see detectForum. */
+	private forumDetectAttempts = 0;
+	private forumDetectTimer: ReturnType<typeof setTimeout> | undefined;
 	/** One bounded wait per unstable connection; resolved only by its durable peer announcement or stop/timeout. */
 	private readonly pendingTopicPeers = new Map<string, PendingTopicPeer>();
 	private readonly retention: MessageRetentionController<DeleteEligibleSentMessageRoute>;
@@ -108,12 +120,13 @@ export class Bridge {
 		this.ttsCreditNotifiedAt = state.ttsCreditNotifiedAt;
 		this.tts = cfg.fishApiKey ? createFishTtsProvider({ apiKey: cfg.fishApiKey }) : null;
 		for (const [provider, timestamp] of state.transcriptionCreditNotifications) this.transcriptionCreditNotifiedAt.set(provider, timestamp);
+		const agentRoutes = new Map(state.agentTopics);
 		this.topicRoutes = new TopicRouteController({
 			api: {
 				createForumTopic: (chatId, name) => this.bot.api.createForumTopic(chatId, name),
 				editForumTopic: (chatId, topicId, other) => this.bot.api.editForumTopic(chatId, topicId, other),
 			},
-			routes: new Map(state.agentTopics),
+			routes: agentRoutes,
 			chatId: () => this.chatId,
 			onRoutesChanged: () => this.stateStore.requestSave(),
 			onTopicReady: (topicId, peer) => {
@@ -121,6 +134,33 @@ export class Bridge {
 				this.stateStore.requestSave();
 			},
 			onError: (operation, error, peer) => console.warn(`[bridge] topic ${operation} failed for ${peer.nickname}:`, error.message),
+		});
+		// Pre-lifecycle routes carry no lastSeenAt. Stamp them now so the first sweep
+		// grants each one a full TTL instead of deleting every legacy topic at once.
+		let migratedLastSeen = 0;
+		for (const [, route] of agentRoutes) {
+			if (route.lastSeenAt === undefined) {
+				route.lastSeenAt = Date.now();
+				migratedLastSeen++;
+			}
+		}
+		if (migratedLastSeen > 0) this.stateStore.requestSave();
+		this.topicLifecycle = new TopicLifecycleController({
+			api: { deleteForumTopic: (chatId, topicId) => this.bot.api.deleteForumTopic(chatId, topicId) },
+			routes: agentRoutes,
+			chatId: () => this.chatId,
+			forget: (key) => this.topicRoutes.forget(key),
+			isLive: (key) => this.isRouteLive(key),
+			ttlMs: topicTtlMsFromEnv(),
+			onReap: (key, route, ageMs) => {
+				this.topicAgent.delete(route.topicId);
+				console.log(`[bridge] topic lifecycle: deleted topic ${route.topicId} for ${key} (unseen ${Math.round(ageMs / 3_600_000)}h)`);
+			},
+			onAlreadyGone: (key, route) => {
+				this.topicAgent.delete(route.topicId);
+				console.warn(`[bridge] topic lifecycle: topic ${route.topicId} for ${key} was already gone; dropped route`);
+			},
+			onError: (key, route, error) => console.warn(`[bridge] topic lifecycle: delete failed for ${key} (topic ${route.topicId}):`, error.message),
 		});
 		this.retention = new MessageRetentionController({
 			api: { deleteMessages: (chatId, messageIds) => this.bot.api.deleteMessages(chatId, messageIds) },
@@ -237,6 +277,7 @@ export class Bridge {
 		this.mesh.on("peer", (p: { meshId?: string; clientId: string; nickname: string; name?: string }) => void this.onPeerAnnounce(p));
 		this.mesh.start();
 		this.retention.start();
+		this.topicLifecycle.start();
 		if (this.chatId != null) void this.detectForum();
 		this.bot.on("message", (ctx) => void this.onTelegramMessage(ctx));
 		this.bot.on("message_reaction", (ctx) => void this.onReaction(ctx));
@@ -252,6 +293,7 @@ export class Bridge {
 	/** Stop owns the retention epoch and awaits a deferred Telegram delete before flushing state. */
 	async stop(): Promise<void> {
 		this.clearPendingTopicPeers();
+		this.topicLifecycle.stop();
 		await this.retention.stop();
 		this.stateStore.flush();
 		this.mesh.stop();
@@ -259,22 +301,40 @@ export class Bridge {
 	}
 
 	private async detectForum(): Promise<void> {
+		const chatId = this.chatId;
+		if (chatId == null) return;
+		if (this.forumDetectTimer) {
+			clearTimeout(this.forumDetectTimer);
+			this.forumDetectTimer = undefined;
+		}
 		try {
-			const chat = (await this.bot.api.getChat(this.chatId!)) as unknown as Record<string, unknown>;
+			const chat = (await this.bot.api.getChat(chatId)) as unknown as Record<string, unknown>;
+			this.forumDetectAttempts = 0;
 			this.forumMode = !!chat.is_forum;
 			console.log("[bridge] forum mode:", this.forumMode);
 			const autoDelete = typeof chat.message_auto_delete_time === "number" ? chat.message_auto_delete_time : undefined;
 			if (autoDelete !== 86_400) {
-				console.warn(`[bridge] forum auto-delete is ${autoDelete === undefined ? "absent" : `${autoDelete}s`}, expected 86400 (1 day). The Bot API cannot set this timer. Telegram's setting applies only to new traffic; old unledgered traffic requires native Telegram cleanup.`);
+				console.warn(`[bridge] forum auto-delete is ${autoDelete === undefined ? "absent" : `${autoDelete}s`}, expected 86400 (1 day). The Bot API cannot set this timer — set "Auto-delete messages" to 1 day in the group settings. Telegram's setting applies only to new traffic; old unledgered traffic requires native Telegram cleanup.`);
 			}
 			if (this.forumMode && this.broadcastTopicId == null) {
-				const t = await this.bot.api.createForumTopic(this.chatId!, BROADCAST_TOPIC_NAME);
+				const t = await this.bot.api.createForumTopic(chatId, BROADCAST_TOPIC_NAME);
 				this.broadcastTopicId = t.message_thread_id;
 				this.saveState();
 				console.log("[bridge] broadcast topic:", this.broadcastTopicId);
 			}
 		} catch (e) {
-			console.warn("[bridge] forum detect failed:", (e as Error).message, "(single-chat fallback)");
+			// A failed detection must not silently leave the bridge in single-chat mode:
+			// there every agent tell is posted to the main chat (General) instead of the
+			// agent's own topic. Retry until detection succeeds.
+			this.forumDetectAttempts++;
+			const delayMs = forumDetectRetryDelayMs(this.forumDetectAttempts);
+			console.warn(
+				`[bridge] forum detect failed: ${(e as Error).message} — retrying in ${Math.round(delayMs / 1000)}s; until it succeeds agent replies go to the main chat`,
+			);
+			this.forumDetectTimer = setTimeout(() => {
+				this.forumDetectTimer = undefined;
+				void this.detectForum();
+			}, delayMs);
 		}
 	}
 
@@ -503,6 +563,14 @@ export class Bridge {
 		}
 		if (msg.from?.is_bot) return;
 
+		// A message Telegram marks as a topic message proves the chat is a forum even if
+		// the startup getChat failed. Self-heal so the next reply routes into the agent
+		// topic instead of the main chat, and run detection to pick up the broadcast topic.
+		if (m.is_topic_message === true && !this.forumMode) {
+			this.forumMode = true;
+			void this.detectForum();
+		}
+
 		if (this.chatId == null) { this.chatId = msg.chat.id; console.log("[bridge] captured chat id:", this.chatId); persistChatId(this.chatId); void this.detectForum(); }
 		if (msg.chat.id !== this.chatId) return;
 
@@ -597,6 +665,16 @@ export class Bridge {
 		return [...this.mesh.peers.values()]
 			.filter((p) => p.meshId !== this.cfg.hoomanMeshId)
 			.sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
+	}
+
+	/** True while a peer announced within LIVE_MS claims this route key (durable id or connection id). */
+	private isRouteLive(key: string): boolean {
+		const now = Date.now();
+		for (const peer of this.mesh.peers.values()) {
+			if (now - (peer.lastSeen ?? 0) > LIVE_MS) continue;
+			if (peer.meshId === key || peer.id === key) return true;
+		}
+		return false;
 	}
 
 	/** Build a tappable roster message + inline keyboard for the given page. */

@@ -1,11 +1,16 @@
 /** Telegram forum topic cap for topic name length. */
 export const TELEGRAM_TOPIC_NAME_MAX = 128;
 
+/** Contact refreshes lastSeenAt in memory always; state.json is written at this cadence. */
+const TOUCH_PERSIST_MIN_MS = 5 * 60_000;
+
 /** The persisted route state for a single mesh agent's Telegram topic. */
 export interface AgentTopicRoute {
 	topicId: number;
 	/** Missing only on a legacy numeric `agentTopic` record awaiting first reconciliation. */
 	title?: string;
+	/** Last contact (announce/tell) for the topic-lifecycle TTL. Absent on pre-lifecycle records. */
+	lastSeenAt?: number;
 }
 
 export interface TopicRoutePeer {
@@ -82,6 +87,27 @@ export class TopicRouteController {
 		return this.options.routes.has(key);
 	}
 
+	/** Drop every controller-side reference after a topic is deleted (or already gone). */
+	forget(key: string): void {
+		if (!this.options.routes.has(key)) return;
+		this.options.routes.delete(key);
+		for (const [clientId, durableKey] of [...this.aliases]) {
+			if (durableKey === key) this.aliases.delete(clientId);
+		}
+		this.peers.delete(key);
+		this.inFlight.delete(key);
+		this.options.onRoutesChanged();
+	}
+
+	/** Record contact for the lifecycle TTL; persists at most every TOUCH_PERSIST_MIN_MS. */
+	private touch(key: string, now = Date.now()): void {
+		const route = this.options.routes.get(key);
+		if (!route) return;
+		const previous = route.lastSeenAt;
+		route.lastSeenAt = now;
+		if (previous !== undefined && now - previous >= TOUCH_PERSIST_MIN_MS) this.options.onRoutesChanged();
+	}
+
 	/** Create or reconcile a route only once its peer has durable identity. */
 	async ensure(peer: TopicRoutePeer): Promise<number | null> {
 		if (!peer.key || this.options.chatId() === null) return null;
@@ -128,7 +154,10 @@ export class TopicRouteController {
 
 		const currentRoute = this.options.routes.get(durableKey);
 		// The Bridge receives the durable inbound association before this move is persisted.
-		if (currentRoute) this.options.onTopicReady?.(currentRoute.topicId, durablePeer);
+		if (currentRoute) {
+			this.touch(durableKey);
+			this.options.onTopicReady?.(currentRoute.topicId, durablePeer);
+		}
 		if (changed) this.options.onRoutesChanged();
 
 		const operation = this.inFlight.get(durableKey);
@@ -139,7 +168,10 @@ export class TopicRouteController {
 			await this.coalesce(durablePeer);
 		}
 		const finalRoute = this.options.routes.get(durableKey);
-		if (finalRoute) this.options.onTopicReady?.(finalRoute.topicId, durablePeer);
+		if (finalRoute) {
+			this.touch(durableKey);
+			this.options.onTopicReady?.(finalRoute.topicId, durablePeer);
+		}
 	}
 
 	/** Reconcile only an already-known route; peer announcements never create topics. */
@@ -188,7 +220,10 @@ export class TopicRouteController {
 		const key = this.routeKey(peer);
 		const persisted = this.options.routes.get(key);
 		if (persisted) {
-			if (persisted.title === desired) return persisted.topicId;
+			if (persisted.title === desired) {
+				this.touch(key);
+				return persisted.topicId;
+			}
 			try {
 				await this.options.api.editForumTopic(chatId, persisted.topicId, { name: desired });
 				const finalKey = this.routeKey(peer);
@@ -198,6 +233,7 @@ export class TopicRouteController {
 			} catch (error) {
 				this.onError("rename", asError(error), this.peers.get(this.routeKey(peer)) ?? peer);
 			}
+			this.touch(this.routeKey(peer));
 			return persisted.topicId;
 		}
 		try {
@@ -208,9 +244,13 @@ export class TopicRouteController {
 			const finalKey = this.routeKey(peer);
 			const established = this.options.routes.get(finalKey);
 			// Compatibility guard for an old transient operation: a pre-existing durable route always wins.
-			if (established) return established.topicId;
+			if (established) {
+				this.touch(finalKey);
+				return established.topicId;
+			}
 			this.options.routes.set(finalKey, { topicId: created.message_thread_id, title: desired });
 			this.options.onRoutesChanged();
+			this.touch(finalKey);
 			return created.message_thread_id;
 		} catch (error) {
 			this.onError("create", asError(error), this.peers.get(this.routeKey(peer)) ?? peer);

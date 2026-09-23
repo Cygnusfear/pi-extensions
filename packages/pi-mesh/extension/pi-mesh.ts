@@ -43,7 +43,7 @@ import {
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
 import { isNoMatchFailure, resolveDurableTarget } from "./route-resolve.ts";
-import { createRegistryIndex, type RegistryFailureReason } from "./durable-registry-index.ts";
+import { createRegistryIndex, pruneRegistry, type RegistryFailureReason } from "./durable-registry-index.ts";
 import {
   readZmxSession,
   reconcileZmxSession,
@@ -1822,6 +1822,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
   const mesh = new PiMesh();
   let started = false;
+  let registryPruneScheduled = false;
   let currentCtx: {
     sessionManager: {
       getBranch: () => unknown[];
@@ -2348,6 +2349,28 @@ export default function piMeshExtension(pi: ExtensionAPI) {
 
     // Load persisted broadcast-allowed flag. Default off (see declaration).
     broadcastAllowed = resolveBroadcastAllowedFromSession(ctx);
+
+    // Registry hygiene — once per process, out of the startup path. The durable
+    // registry accumulates dead sessions forever otherwise (measured: 5,872
+    // directories, ~1.3k descriptors, 286-980ms per scan). Deferred so it never
+    // delays the session; the sweep itself is best-effort.
+    if (!registryPruneScheduled) {
+      registryPruneScheduled = true;
+      const pruneTimer = setTimeout(() => {
+        try {
+          const pruned = pruneRegistry();
+          const removed = pruned.removedExpired + pruned.removedCorrupt + pruned.removedEmpty;
+          if (removed > 0 || pruned.failed > 0) {
+            console.log(
+              `[pi-mesh] durable registry prune: removed ${pruned.removedExpired} expired, ${pruned.removedCorrupt} corrupt, ${pruned.removedEmpty} empty (scanned ${pruned.scanned}, failed ${pruned.failed})`,
+            );
+          }
+        } catch (error) {
+          console.warn("[pi-mesh] durable registry prune failed:", error instanceof Error ? error.message : String(error));
+        }
+      }, 15_000);
+      pruneTimer.unref?.();
+    }
 
     if (started) {
       // Already running — handle identity for reload/resume/fork/new transitions

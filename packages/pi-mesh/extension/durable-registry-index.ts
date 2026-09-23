@@ -23,8 +23,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { readDurableDescriptor } from "./durable-session-store.ts";
-import { durableMeshRoot } from "./durable-inbound-mailbox.ts";
+import { readDurableDescriptor, removeDurableDescriptor } from "./durable-session-store.ts";
+import { durableDescriptorPath, durableMeshRoot } from "./durable-inbound-mailbox.ts";
 import type { ReviveDescriptor } from "@pi-extensions/shared/revive-descriptor";
 
 /** One registry row: where it lives, and what it claims. */
@@ -118,10 +118,83 @@ export function scanRegistry(options: RegistryIndexOptions = {}): RegistryScan {
 }
 
 /**
- * Remove registrations past the freshness bound. Pruning is what keeps rule 2
- * honest over time - a bound that only ever hides stale rows lets the directory
- * grow forever and every scan pay for them.
+ * Remove registrations past the freshness bound, plus descriptor-less empty
+ * directories. Pruning is what keeps rule 2 honest over time - a bound that
+ * only ever hides stale rows lets the directory grow forever and every scan
+ * pay for them (measured: 5,872 directories, ~1.3k descriptors, 286-980ms per
+ * scan). A descriptor past REGISTRY_MAX_AGE_MS is already unroutable, so
+ * deleting it changes no routing answer; it only stops it costing future scans.
+ *
+ * Never deletes a mailbox: a non-empty directory keeps its mail and loses only
+ * the descriptor, so revive-on-send reports 'undeliverable' instead of waking
+ * a dead session. Everything is best-effort - one failed unlink never aborts
+ * the sweep, and concurrent scans racing on the same file are harmless.
  */
+export interface RegistryPruneResult {
+	/** Directories inspected. */
+	scanned: number;
+	/** Descriptors past the freshness bound, removed. */
+	removedExpired: number;
+	/** Descriptors whose recorded id did not match their directory, removed. */
+	removedCorrupt: number;
+	/** Empty descriptor-less directories, removed. */
+	removedEmpty: number;
+	/** Directories that could not be inspected or cleaned this pass. */
+	failed: number;
+}
+
+export function pruneRegistry(options: RegistryIndexOptions = {}): RegistryPruneResult {
+	const root = options.root ?? durableMeshRoot();
+	const now = (options.now ?? Date.now)();
+	const result: RegistryPruneResult = { scanned: 0, removedExpired: 0, removedCorrupt: 0, removedEmpty: 0, failed: 0 };
+	let names: string[];
+	try {
+		names = fs.readdirSync(root);
+	} catch {
+		return result;
+	}
+	const removeEmptyDir = (dirPath: string): boolean => {
+		try {
+			fs.rmdirSync(dirPath);
+			return true;
+		} catch {
+			// Non-empty (mailbox present) or a racing writer - leave it.
+			return false;
+		}
+	};
+	for (const dirName of names) {
+		const dirPath = path.join(root, dirName);
+		try {
+			if (!fs.statSync(dirPath).isDirectory()) continue;
+		} catch {
+			result.failed++;
+			continue;
+		}
+		result.scanned++;
+		const descriptor = readDurableDescriptor(dirName, root);
+		if (!descriptor) {
+			if (removeEmptyDir(dirPath)) result.removedEmpty++;
+			continue;
+		}
+		// A descriptor whose id is not the directory it sits in cannot be trusted;
+		// the scan refuses to route on it, and keeping the file only leaks space.
+		if (descriptor.durableId !== dirName) {
+			try {
+				fs.unlinkSync(durableDescriptorPath(dirName, root));
+				result.removedCorrupt++;
+			} catch {
+				result.failed++;
+			}
+			removeEmptyDir(dirPath);
+			continue;
+		}
+		if (typeof descriptor.updatedAt !== "number" || now - descriptor.updatedAt > (options.maxAgeMs ?? REGISTRY_MAX_AGE_MS)) {
+			removeDurableDescriptor(descriptor.durableId, root);
+			result.removedExpired++;
+		}
+	}
+	return result;
+}
 
 /**
  * Why a nickname lookup did not resolve, kept distinct because the sender must be

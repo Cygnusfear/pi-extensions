@@ -249,7 +249,7 @@ test("reconnecting pre-announcement tells queue until durable identity and retai
 	await bridge.onPeerAnnounce({ clientId: "reconnect-client", meshId: "durable-A", nickname: "Nova", name: "Build" });
 	expect(await Promise.all([first, concurrent])).toEqual([1, 1]);
 	expect(creates).toBe(0);
-	expect([...routes.entries()]).toEqual([["durable-A", { topicId: 1, title: "Build Nova" }]]);
+	expect([...routes.entries()]).toMatchObject([["durable-A", { topicId: 1, title: "Build Nova" }]]);
 });
 
 test("queued pre-announcement create failure stays durable-only and a later durable tell retries", async () => {
