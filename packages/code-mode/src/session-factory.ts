@@ -139,7 +139,10 @@ export function createCodeModeSession(opts?: CreateSessionOptions): CodeModeSess
 		// reference. Not frozen: executeInSession reassigns process.cwd on every call.
 		process: {
 			env: buildSandboxEnv(globalThis.process.env, {
-				sandboxEnvNames: opts?.sandboxEnvNames,
+				// buildSandboxEnv's option is `extraNames`; passing the session
+				// option under its own name silently dropped every explicit host
+				// grant (the PI_* allowlist was a no-op). kal-fq41qj60.
+				extraNames: opts?.sandboxEnvNames,
 			}),
 			cwd: () => globalThis.process.cwd(),
 			platform: globalThis.process.platform,

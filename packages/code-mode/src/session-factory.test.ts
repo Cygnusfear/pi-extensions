@@ -111,6 +111,29 @@ describe("createCodeModeSession", () => {
 			fs.rmSync(tmpHome, { recursive: true, force: true });
 		}
 	});
+
+	test("V5: sandboxEnvNames grants exactly the listed names into the session env (kal-fq41qj60)", () => {
+		// Regression: the option used to be forwarded under the wrong key
+		// (sandboxEnvNames instead of buildSandboxEnv's extraNames), so every
+		// explicit host grant — the extension's PI_* allowlist — was silently
+		// absent from the VM. One allowed name proves the mapping; one unlisted
+		// name proves it stays exact (no wholesale pass-through).
+		const allowed = "PI_TEST_SANDBOX_ENV_ALLOWED";
+		const denied = "PI_TEST_SANDBOX_ENV_DENIED";
+		process.env[allowed] = "granted-value";
+		process.env[denied] = "must-not-leak";
+		try {
+			const sess = createCodeModeSession({ sandboxEnvNames: [allowed] });
+			const env = (sess.context as any).process.env as Record<string, string>;
+			expect(env[allowed]).toBe("granted-value");
+			expect(denied in env).toBe(false);
+			// The default allowlist still applies alongside explicit grants.
+			expect(typeof env.PATH).toBe("string");
+		} finally {
+			delete process.env[allowed];
+			delete process.env[denied];
+		}
+	});
 });
 
 describe("executeInSession — error modes", () => {
