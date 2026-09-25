@@ -359,20 +359,26 @@ declare function Write(input: {
 }): Promise<void>;
 
 /**
- * Edit a file by replacing exact text.
- * The oldText must match exactly (including whitespace).
- * Returns whether the match was found.
+ * Apply a batch of exact text replacements atomically.
+ * Each edits[].oldText must match exactly once in the original file (including whitespace); edits may not overlap.
+ * All anchors are validated before a single write. On failure, matched is false and failures identify the edit index, match count, and reason.
  */
 declare function Edit(input: {
   /** Path to the file (relative to cwd or absolute) */
   path: string;
   /** Working directory override */
   cwd?: string;
-  /** Exact text to find */
-  oldText: string;
-  /** Replacement text */
-  newText: string;
-}): Promise<{ matched: boolean }>;
+  /** Non-empty list of exact replacements, all matched against the original file */
+  edits: Array<{ oldText: string; newText: string }>;
+}): Promise<{
+  matched: boolean;
+  changed?: boolean;
+  /** Number of content-changing replacements; successful no-op entries are not counted. */
+  applied?: number;
+  path?: string;
+  error?: string;
+  failures?: Array<{ index: number; matches: number; reason: string; anchorPreview: string }>;
+}>;
 
 /**
  * Find files by glob pattern.

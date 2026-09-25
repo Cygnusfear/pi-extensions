@@ -1123,13 +1123,11 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     Edit: async ({
       path: filePath,
       cwd: explicitCwd,
-      oldText,
-      newText,
+      edits,
     }: {
       path: string;
       cwd?: string;
-      oldText: string;
-      newText: string;
+      edits: Array<{ oldText: string; newText: string }>;
     }) => {
       if (isLocked()) throw new Error(lockError("Edit"));
       const base = explicitCwd ? resolvePath(explicitCwd, cwd) : cwd;
@@ -1145,16 +1143,66 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         });
         if (!approved) throw new Error(gitGuardError(reason));
       }
-      const content = fs.readFileSync(resolved, "utf-8");
-      if (!content.includes(oldText)) {
-        return { matched: false };
+      if (!Array.isArray(edits) || edits.length === 0) {
+        return { matched: false, path: resolved, error: "Edit expects a non-empty edits[] array of { oldText, newText } entries." };
       }
-      // Replace first occurrence only
-      const updated = content.replace(oldText, () => newText);
+      const content = fs.readFileSync(resolved, "utf-8");
+
+      const previewAnchor = (value: unknown): string =>
+        typeof value === "string" ? value.replace(/\s+/g, " ").slice(0, 80) : "";
+      const failures: Array<{ index: number; matches: number; reason: string; anchorPreview: string }> = [];
+      const located: Array<{ index: number; start: number; end: number; oldText: string; newText: string }> = [];
+      for (let index = 0; index < edits.length; index++) {
+        const edit = edits[index];
+        const anchorPreview = previewAnchor(edit?.oldText);
+        if (!edit || typeof edit !== "object" || typeof edit.oldText !== "string" || edit.oldText.length === 0 || typeof edit.newText !== "string") {
+          failures.push({ index, matches: 0, reason: "oldText must be a non-empty string and newText must be a string", anchorPreview });
+          continue;
+        }
+        const positions: number[] = [];
+        let from = 0;
+        while (from <= content.length - edit.oldText.length) {
+          const at = content.indexOf(edit.oldText, from);
+          if (at < 0) break;
+          positions.push(at);
+          from = at + 1; // Count overlapping occurrences too: they are ambiguous anchors.
+        }
+        if (positions.length !== 1) {
+          failures.push({
+            index,
+            matches: positions.length,
+            reason: positions.length === 0 ? "anchor not found" : "anchor must occur exactly once in the original file",
+            anchorPreview,
+          });
+          continue;
+        }
+        const start = positions[0];
+        located.push({ index, start, end: start + edit.oldText.length, oldText: edit.oldText, newText: edit.newText });
+      }
+      const ordered = [...located].sort((a, b) => a.start - b.start);
+      for (let i = 1; i < ordered.length; i++) {
+        const previous = ordered[i - 1];
+        const current = ordered[i];
+        if (previous.end > current.start) {
+          failures.push({
+            index: current.index,
+            matches: 1,
+            reason: `edit overlaps edit[${previous.index}]`,
+            anchorPreview: previewAnchor(current.oldText),
+          });
+        }
+      }
+      if (failures.length > 0) return { matched: false, path: resolved, failures };
+      const changedEdits = located.filter((edit) => edit.oldText !== edit.newText);
+      if (changedEdits.length === 0) return { matched: true, changed: false, applied: 0 };
+      let updated = content;
+      for (const edit of [...changedEdits].sort((a, b) => b.start - a.start)) {
+        updated = updated.slice(0, edit.start) + edit.newText + updated.slice(edit.end);
+      }
       await runEditHooks({ phase: "pre", toolName: "Edit", filePaths: [resolved], cwd, sessionManager, signal });
       fs.writeFileSync(resolved, updated, "utf-8");
       await runEditHooks({ phase: "post", toolName: "Edit", filePaths: [resolved], cwd, sessionManager, signal });
-      return { matched: true };
+      return { matched: true, changed: true, applied: changedEdits.length };
     },
 
     Glob: async ({ pattern, path: searchPath }: { pattern: string; path?: string }) => {
