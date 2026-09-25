@@ -311,21 +311,46 @@ function readModelFromSession(sessionFile: string | null): string | null {
 
 // ── Checkpoint runner ──
 
-async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
-	return new Promise<void>((resolve) => {
-		const child = spawn(gitAiBin, ["checkpoint", "agent-v1", "--hook-input", "stdin"], {
-			stdio: ["pipe", "pipe", "pipe"],
-			windowsHide: true,
-		});
+interface CheckpointSpawnResult {
+	started: boolean;
+	error?: Error;
+}
 
-		child.on("close", () => { resolve(); });
-		child.on("error", () => { resolve(); });
+function runCheckpoint(gitAiBin: string, payload: string): Promise<CheckpointSpawnResult> {
+	return new Promise((resolve) => {
+		let settled = false;
+		let started = false;
+		let watchdog: ReturnType<typeof setTimeout> | undefined;
+		const finish = (error?: Error) => {
+			if (settled) return;
+			settled = true;
+			if (watchdog !== undefined) clearTimeout(watchdog);
+			resolve(error ? { started, error } : { started });
+		};
 
-		// Ensure stdin is flushed before closing
-		child.stdin.on("error", () => { /* ignore write-after-close if process exits fast */ });
-		child.stdin.write(payload, () => { child.stdin.end(); });
+		try {
+			const child = spawn(gitAiBin, ["checkpoint", "agent-v1", "--hook-input", "stdin"], {
+				stdio: ["pipe", "pipe", "pipe"],
+				windowsHide: true,
+			});
 
-		setTimeout(() => { child.kill(); resolve(); }, 5000);
+			// "spawn" is the ONLY proof the executable started. Bun also emits
+			// "close" (code -2) after a spawn ENOENT, so close must not imply
+			// started — the error/close path below distinguishes the two.
+			child.once("spawn", () => { started = true; });
+			child.once("close", () => finish());
+			child.once("error", (error) => finish(error));
+
+			// Ensure stdin is flushed before closing.
+			child.stdin.on("error", () => { /* ignore write-after-close if process exits fast */ });
+			watchdog = setTimeout(() => {
+				child.kill();
+				finish();
+			}, 5000);
+			child.stdin.write(payload, () => { child.stdin.end(); });
+		} catch (error) {
+			finish(error instanceof Error ? error : new Error(String(error)));
+		}
 	});
 }
 
@@ -333,7 +358,10 @@ async function runCheckpoint(gitAiBin: string, payload: string): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
 	const gitAiBin = resolveGitAiBin();
-	let gitAiAvailable = false;
+	type GitAiAvailability = "unknown" | "checking" | "available" | "unavailable";
+	let gitAiAvailability: GitAiAvailability = "unknown";
+	let gitAiAvailabilityCheck: Promise<CheckpointSpawnResult | null> | undefined;
+	let unavailableWarningLogged = false;
 
 	// ── Commit hook env vars ──
 	// Point core.hooksPath at our bundled hook dispatcher via GIT_CONFIG_*
@@ -367,12 +395,9 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
-		try {
-			await execFileAsync(gitAiBin, ["--version"], { timeout: 2000, windowsHide: true });
-			gitAiAvailable = true;
-		} catch {
-			gitAiAvailable = false;
-		}
+		gitAiAvailability = "unknown";
+		gitAiAvailabilityCheck = undefined;
+		unavailableWarningLogged = false;
 
 		// Capture sessionManager for later refreshes + prime commit env.
 		sessionManagerRef = (ctx as any)?.sessionManager ?? null;
@@ -411,23 +436,23 @@ export default function (pi: ExtensionAPI) {
 	// ── Shared checkpoint emitter ──
 	// Used by both the direct pi tool_* event handlers (non-code-mode edits) and
 	// the edit-hooks registry (code-mode sandbox edits). One path for both.
-	async function emitCheckpoint(params: {
+	type CheckpointParams = {
 		phase: "PreToolUse" | "PostToolUse";
 		toolName: string;
 		toolInput: Record<string, unknown>;
 		filePaths: string[];
 		toolCwd: string;
 		sessionManager: any;
-	}): Promise<void> {
-		if (!gitAiAvailable) return;
+	};
+
+	async function buildCheckpointPayload(params: CheckpointParams): Promise<string | null> {
 		const repoDir = await findGitRepo(params.toolCwd);
-		if (!repoDir) return;
+		if (!repoDir) return null;
 
 		const sessionFile = params.sessionManager?.getSessionFile?.() ?? null;
 		const sessionId = params.sessionManager?.getSessionId?.() ?? "unknown";
 		const sessionName = params.sessionManager?.getSessionName?.() ?? null;
-
-		const payload = buildAgentV1Payload({
+		return buildAgentV1Payload({
 			eventName: params.phase,
 			repoDir,
 			sessionId,
@@ -438,8 +463,78 @@ export default function (pi: ExtensionAPI) {
 			sessionFile,
 			filePaths: params.filePaths,
 		});
+	}
 
-		await runCheckpoint(gitAiBin, payload);
+	function markGitAiUnavailable(error?: Error): void {
+		gitAiAvailability = "unavailable";
+		if (unavailableWarningLogged) return;
+		unavailableWarningLogged = true;
+		console.warn(
+			"[git-ai] Unable to start a checkpoint; attribution is disabled for this session:",
+			error?.message ?? "git-ai did not spawn",
+		);
+	}
+
+	/**
+	 * Make git-ai usable for this call, proving availability with the first real
+	 * checkpoint spawn instead of a separate startup probe.
+	 *
+	 * Returns true when the caller may proceed to emit its own checkpoint.
+	 * "checking" waiters share the first attempt's outcome; when that attempt
+	 * found no git repo (so availability is still unknown) they retry with their
+	 * own params, bounded by the state machine. Reading the state through this
+	 * helper also keeps callers outside TypeScript's literal narrowing, which
+	 * cannot see mutations made from the shared async attempt.
+	 */
+	async function ensureGitAiAvailable(params: CheckpointParams): Promise<boolean> {
+		const state = gitAiAvailability;
+		if (state === "unavailable") return false;
+		if (state === "available") return true;
+
+		if (state === "checking") {
+			const check = gitAiAvailabilityCheck;
+			if (!check) return ensureGitAiAvailable(params);
+			const result = await check;
+			if (result === null) return ensureGitAiAvailable(params);
+			return result.started;
+		}
+
+		// unknown: claim the first attempt BEFORE any await so concurrent edits
+		// share one availability result instead of each spawning the (possibly
+		// missing or non-executable) binary. The attempt is itself a checkpoint:
+		// on success its payload was already delivered, so the caller must not
+		// emit a duplicate.
+		gitAiAvailability = "checking";
+		const attempt = (async (): Promise<CheckpointSpawnResult | null> => {
+			const payload = await buildCheckpointPayload(params);
+			if (payload === null) {
+				gitAiAvailability = "unknown";
+				return null;
+			}
+			const result = await runCheckpoint(gitAiBin, payload);
+			if (result.started) gitAiAvailability = "available";
+			else markGitAiUnavailable(result.error);
+			return result;
+		})();
+		gitAiAvailabilityCheck = attempt;
+		await attempt;
+		return false;
+	}
+
+	async function emitCheckpoint(params: CheckpointParams): Promise<void> {
+		const state = gitAiAvailability;
+		if (state === "unknown" || state === "checking") {
+			// Handshake path: the first real spawn proves availability. When this
+			// call IS the proving checkpoint (unknown → claimed), its payload was
+			// already emitted by the attempt itself.
+			if (!(await ensureGitAiAvailable(params))) return;
+		} else if (state !== "available") {
+			return;
+		}
+		const payload = await buildCheckpointPayload(params);
+		if (payload === null) return;
+		const result = await runCheckpoint(gitAiBin, payload);
+		if (!result.started) markGitAiUnavailable(result.error);
 	}
 
 	// ── Refresh commit env on every turn (picks up /model changes, mesh rename) ──

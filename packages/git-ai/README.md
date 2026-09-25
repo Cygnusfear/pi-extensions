@@ -73,4 +73,4 @@ git-ai search "authentication middleware"
    }
    ```
 
-The extension auto-detects the git-ai binary at `~/.local/bin/git-ai`, `~/.git-ai/bin/git-ai`, or via `GIT_AI_BIN` env var. If git-ai is not found, the extension silently disables itself.
+The extension auto-detects the git-ai binary at `~/.local/bin/git-ai`, `~/.git-ai/bin/git-ai`, or via `GIT_AI_BIN` env var. Availability is determined by the first real checkpoint spawn: if that spawn fails, the extension warns once and disables attribution for the remainder of the session instead of retrying on every edit. A new session resets the state.
