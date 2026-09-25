@@ -1,0 +1,27 @@
+packages/code-mode-runtime/test/runtime.test.ts
+  s_e210abbd6699df::t_2e8f511a2b29cb 581
+packages/code-mode/extensions/code-mode.ts
+  s_e210abbd6699df::t_74f40592fe8d4a 1052
+packages/code-mode/extensions/code-mode.timeout.test.ts
+  s_e210abbd6699df::t_ec96d39b240c24 1-80
+packages/code-mode/extensions/code-mode.async.test.ts
+  s_e210abbd6699df::t_955119dbd57584 881
+packages/code-mode-runtime/src/index.ts
+  s_e210abbd6699df::t_8bb2a7f15ce18e 82,89-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d3dcd7660123491035f2e4833160b4c768fdb27a",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
