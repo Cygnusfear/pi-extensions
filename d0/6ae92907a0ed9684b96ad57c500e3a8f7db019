@@ -1,0 +1,28 @@
+packages/code-mode/src/deferred-squash.test.ts
+  s_e210abbd6699df::t_a2e50e1efaa674 258-285
+  s_e210abbd6699df::t_ebd42eeaf5fa9a 4
+  s_e210abbd6699df::t_f55708942d9697 286
+packages/code-mode/src/deferred-squash.ts
+  s_e210abbd6699df::t_030b823ac051bb 159-190
+packages/code-mode/extensions/code-mode.compaction-failure.test.ts
+  s_e210abbd6699df::t_c3d410dd013d7b 113
+  s_e210abbd6699df::t_7e783df56669b1 1-112,114-171
+packages/code-mode/extensions/code-mode.ts
+  s_e210abbd6699df::t_fe83a72ffa9d7c 47,329-331,1873-1879,1882
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d06ae92907a0ed9684b96ad57c500e3a8f7db019",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
