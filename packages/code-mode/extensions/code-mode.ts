@@ -44,6 +44,7 @@ import {
 } from "../src/context-usage";
 import {
 	awaitDeferredSquash,
+	buildCompactionFailureNotice,
 	type DeferredSquashContext,
 	type DeferredSquashOptions,
 } from "../src/deferred-squash";
@@ -324,6 +325,9 @@ let currentOuijaSessionFile: string | null = null;
 // When context usage exceeds the threshold (default 94%), only context-management
 // tools are allowed. The guard auto-disarms when usage drops back below threshold.
 let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
+
+/** Failed compaction attempts this session. A failure releases the guard and is never retried silently. */
+let compactionFailureCount = 0;
 
 function getSession(): CodeModeSession {
 	if (!session) session = createCodeModeSession({
@@ -1866,9 +1870,16 @@ export default function (
 				sendUserMessageAndWait(continuation, { deliverAs: "followUp" }),
 			);
 		} catch (error) {
+			compactionFailureCount += 1;
+			// The guard's only compliance path is compaction. Once compaction
+			// fails, keeping tools blocked is a dead end; release it so the agent
+			// can persist state and finish deliberately. Squash stays retryable,
+			// but repeated failures carry a distinct notice.
+			const releasedGuard = contextGuardEnabled;
+			contextGuardEnabled = false;
 			surfaceCodeModeInternalError(
 				pi,
-				"Deferred session.squash() failed.",
+				buildCompactionFailureNotice(compactionFailureCount, releasedGuard),
 				error,
 			);
 		}

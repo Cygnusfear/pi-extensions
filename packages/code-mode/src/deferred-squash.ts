@@ -156,3 +156,35 @@ export async function awaitDeferredSquash(
 		}
 	});
 }
+
+/**
+ * Build the distinct notice for a failed deferred compaction.
+ *
+ * The context guard's only compliance path is compaction. When compaction
+ * fails, continuing to block tools cannot help, so the caller releases the
+ * guard and uses this notice to say so. Attempt 2+ is deliberately distinct:
+ * the summariser token cap is not a transient retryable condition at the same
+ * conversation size.
+ */
+export function buildCompactionFailureNotice(
+	attempt: number,
+	releasedGuard: boolean,
+): string {
+	const safeAttempt = Math.max(1, Math.trunc(attempt));
+	if (safeAttempt > 1) {
+		return [
+			`Deferred session.squash() failed again (attempt ${safeAttempt}).`,
+			"The summariser cannot compact a conversation this large; retrying will not succeed.",
+			"The context guard remains released.",
+			"Save critical state outside the session, then finish the turn with done — a human must close the session.",
+		].join(" ");
+	}
+	return [
+		"Deferred session.squash() failed.",
+		releasedGuard
+			? "The context guard is now RELEASED for this session: compaction is its only compliance path and it just failed, so blocking tools further cannot help."
+			: "The context guard was already released.",
+		"Your $.ctx/store state is intact.",
+		"Retrying at this conversation size can hit the same summariser token cap; save critical state outside the session, then finish the turn with done — a human must close the session.",
+	].join(" ");
+}

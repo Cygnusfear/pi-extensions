@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	awaitDeferredSquash,
+	buildCompactionFailureNotice,
 	buildSquashContinuation,
 	type DeferredSquashOptions,
 	type DeferredSquashReadiness,
@@ -252,5 +253,34 @@ describe("awaitDeferredSquash", () => {
 				() => {},
 			),
 		).rejects.toThrow("sync failure");
+	});
+});
+
+describe("buildCompactionFailureNotice", () => {
+	test("first failure names the guard release and the saved state", () => {
+		const notice = buildCompactionFailureNotice(1, true);
+		expect(notice).toContain("Deferred session.squash() failed.");
+		expect(notice).toContain("context guard is now RELEASED");
+		expect(notice).toContain("$.ctx/store state is intact");
+		expect(notice).toContain("finish the turn with done");
+	});
+
+	test("an already-released guard is reported as such, not re-announced", () => {
+		const notice = buildCompactionFailureNotice(1, false);
+		expect(notice).toContain("context guard was already released");
+		expect(notice).not.toContain("is now RELEASED");
+	});
+
+	test("repeated failures say retrying cannot succeed and never say 'now RELEASED'", () => {
+		const notice = buildCompactionFailureNotice(3, false);
+		expect(notice).toContain("failed again (attempt 3)");
+		expect(notice).toContain("retrying will not succeed");
+		expect(notice).toContain("remains released");
+		expect(notice).not.toContain("is now RELEASED");
+	});
+
+	test("non-positive attempts are clamped to the first-failure notice", () => {
+		expect(buildCompactionFailureNotice(0, true)).toContain("context guard is now RELEASED");
+		expect(buildCompactionFailureNotice(-2, false)).toContain("context guard was already released");
 	});
 });
