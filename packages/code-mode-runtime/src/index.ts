@@ -79,15 +79,25 @@ function exact(
 	label: string,
 ): Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value))
-		throw new Error(label);
+		throw new Error(`${label}: expected a plain object`);
 	const object = value as Record<string, unknown>;
 	const actual = Object.keys(object).sort();
 	const expected = [...keys].sort();
 	if (
 		actual.length !== expected.length ||
 		actual.some((key, index) => key !== expected[index])
-	)
-		throw new Error(label);
+	) {
+		// Name the mismatch so an opaque protocol label is still actionable.
+		const unexpected = actual.filter((key) => !expected.includes(key));
+		const missing = expected.filter((key) => !actual.includes(key));
+		const detail = [
+			unexpected.length > 0 ? `unexpected key(s): ${unexpected.join(", ")}` : undefined,
+			missing.length > 0 ? `missing key(s): ${missing.join(", ")}` : undefined,
+		]
+			.filter((part): part is string => part !== undefined)
+			.join("; ");
+		throw new Error(`${label}: ${detail || "key set mismatch"}`);
+	}
 	return object;
 }
 function validOperationId(value: unknown): value is string {

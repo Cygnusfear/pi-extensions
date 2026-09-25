@@ -578,7 +578,7 @@ console.log(await fd({args:["-e","txt"]}));`,
 test("generated runner completes on the requested sleep event and rejects legacy deadline authority", async () => {
 	const workspace = await mkdtemp(join(tmpdir(), "code-mode-event-completion-"));
 	try {
-		expect(() => decodeCodeExecutionRequest({ ...request, timeoutMs: 1 })).toThrow("invalid_code_execution_request_v1");
+		expect(() => decodeCodeExecutionRequest({ ...request, timeoutMs: 1 })).toThrow("unexpected key(s): timeoutMs");
 		const result = await runRunner(
 			intent(`await sleep(20); console.log("event complete");`, { ...noTools, tools: ["sleep"] }),
 			workspace,

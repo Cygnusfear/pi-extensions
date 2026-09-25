@@ -878,7 +878,7 @@ describe("execute_code blocked-confirm fast-promote (git-safety integration)", (
 			const executeCode = pi.tools.get("execute_code");
 			const result = await executeCode.execute(
 				"tc-worker-no-promote",
-				{ code: "await new Promise((r) => setTimeout(r, 120)); console.log('worker finished');" },
+				{ thinking: "Teams-worker promotion check.", code: "await new Promise((r) => setTimeout(r, 120)); console.log('worker finished');" },
 				new AbortController().signal,
 				undefined,
 				makeExecuteCtx(),

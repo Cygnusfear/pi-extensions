@@ -1049,7 +1049,7 @@ export default function (
 			),
 		}),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			decodeCodeExecutionRequest({ version: 1, thinking: params.thinking, code: params.code, ...(params.timeout === undefined ? {} : { timeoutMs: params.timeout * 1000 }) });
+			decodeCodeExecutionRequest({ version: 1, thinking: params.thinking, code: params.code });
 			// Unbounded by default. If params.timeout is set, honor exactly — no cap.
 			// session-factory skips the timeout race entirely when timeoutMs is undefined.
 			const timeoutMs = params.timeout ? params.timeout * 1000 : undefined;
