@@ -1,0 +1,35 @@
+packages/git-ai/README.md
+  h_59730e3e3c55ed 76
+packages/git-ai/extensions/git-ai.test.ts
+  h_59730e3e3c55ed 1-18,20-143,151-202,230-256
+  s_2319421c2426ad::t_c0f9857025f485 19,144-150,203-224
+  s_2319421c2426ad::t_1e60bb1a426856 225-227
+packages/git-ai/extensions/git-ai.ts
+  h_59730e3e3c55ed 314-317,319-329,331-335,337-353,361-364,398-400,439,446-448,450,455,466-500,502-537
+packages/code-mode/src/session-factory.test.ts
+  s_2319421c2426ad::t_c563c13adcbfbe 114-136
+packages/code-mode/src/session-factory.ts
+  s_2319421c2426ad::t_f29fd86750f1b9 142-144
+  s_2319421c2426ad::t_0ab3b4a560587b 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1683d428e43d96647b3ebb0e43179e3e1d4edc7d",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  },
+  "sessions": {
+    "s_2319421c2426ad": {
+      "agent_id": {
+        "tool": "Cecilia Photon Payne",
+        "id": "aff4fa5b-9254-4b29-a043-1ad5977dae61",
+        "model": "qwencloud/qwen3.8-max"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
