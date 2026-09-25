@@ -1,0 +1,18 @@
+packages/git-ai/README.md
+  h_59730e3e3c55ed 76
+packages/git-ai/extensions/git-ai.test.ts
+  h_59730e3e3c55ed 1-223
+packages/git-ai/extensions/git-ai.ts
+  h_59730e3e3c55ed 314-317,319-329,331-335,337-353,361-364,398-400,439,446-448,450,455,466-500,502-537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "58082a52592f2c2cb7452c3fcab3bc68c1a70951",
+  "prompts": {},
+  "humans": {
+    "h_59730e3e3c55ed": {
+      "author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
