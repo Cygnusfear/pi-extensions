@@ -1,5 +1,12 @@
 import { runAgentLoop, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import {
+	createAssistantMessageEventStream,
+	type AssistantMessage,
+	type Model,
+	type ModelThinkingLevel,
+	type SimpleStreamOptions,
+	type ThinkingLevel,
+} from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Type } from "@sinclair/typebox";
 import { createCodeModeSession, executeInSession } from "@pi-extensions/code-mode/session-factory";
@@ -44,6 +51,37 @@ function errorFromUnknown(e: unknown): Error {
 	return e instanceof Error ? e : new Error(String(e));
 }
 
+/** Current Z.AI GLM reasoning APIs reject disabled thinking; RLM defaults those requests to low. */
+const ZAI_PROVIDER_IDS: ReadonlySet<string> = new Set(["zai", "zai-coding-cn"]);
+
+/** Explicit RLM level wins, then the agent-loop level, then the mandatory Z.AI low default. */
+export function resolveRlmReasoningLevel(
+	model: Model<any>,
+	requested?: ThinkingLevel,
+	inherited?: ModelThinkingLevel,
+): ThinkingLevel | undefined {
+	const selected = requested ?? inherited;
+	const compat = (model as Model<any> & { compat?: { thinkingFormat?: string } }).compat;
+	const usesZaiThinking = ZAI_PROVIDER_IDS.has(model.provider) || compat?.thinkingFormat === "zai";
+	if (model.reasoning && usesZaiThinking && (selected === undefined || selected === "off")) {
+		return "low";
+	}
+	return selected === "off" ? undefined : selected;
+}
+
+/** Build the pi-ai options used by RLM streamSimple, retaining caller settings. */
+export function buildRlmStreamOptions(
+	model: Model<any>,
+	options: SimpleStreamOptions | undefined,
+	requested?: ThinkingLevel,
+): SimpleStreamOptions {
+	const inherited = options?.reasoning as ModelThinkingLevel | undefined;
+	return {
+		...options,
+		reasoning: resolveRlmReasoningLevel(model, requested, inherited),
+	};
+}
+
 function formatExecutionError(error: Error, stdout: string): string {
 	const formatted = error.name && error.name !== "Error" ? error.name + ": " + error.message : error.message;
 	return stdout ? "stdout: " + stdout + "\n\nExecution error: " + formatted : formatted;
@@ -61,12 +99,27 @@ function executeCodeFromToolParams(toolParams: unknown): string {
 	return toolParams.code;
 }
 
-function completeFnStream(deps: RlmDeps, model: Model<any>, auth: { apiKey: string; headers?: Record<string, string> }) {
+function completeFnStream(
+	deps: RlmDeps,
+	model: Model<any>,
+	auth: { apiKey: string; headers?: Record<string, string> },
+	configuredReasoning?: ThinkingLevel,
+) {
 	return (_model: Model<any>, context: any, options: any) => {
 		const stream = createAssistantMessageEventStream();
 		void (async () => {
 			try {
-				const message = await deps.completeFn!(model, context, { apiKey: auth.apiKey, headers: auth.headers, signal: options?.signal });
+				const reasoning = resolveRlmReasoningLevel(
+					model,
+					configuredReasoning,
+					options?.reasoning,
+				);
+				const message = await deps.completeFn!(model, context, {
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					signal: options?.signal,
+					reasoning,
+				});
 				stream.push({ type: "start", partial: message });
 				stream.push({ type: message.stopReason === "error" || message.stopReason === "aborted" ? "error" : "done", reason: message.stopReason === "aborted" ? "aborted" : message.stopReason === "error" ? "error" : message.stopReason === "length" ? "length" : message.stopReason === "toolUse" ? "toolUse" : "stop", ...(message.stopReason === "error" || message.stopReason === "aborted" ? { error: message } : { message }) } as any);
 		} catch (e) {
@@ -193,8 +246,20 @@ export async function runRlmWithMonitor(deps: RlmDeps, opts: RlmOptions, depth =
 	const messages: AgentMessage[] = [{ role: "user", content: [{ type: "text", text: opts.task }], timestamp: Date.now() } as any];
 
 	const streamFn = deps.completeFn
-		? completeFnStream(deps, model, { apiKey: auth.apiKey, headers: auth.headers })
-		: ((streamModel: Model<any>, context: any, options: any) => streamSimple(streamModel, context, { ...options, apiKey: auth.apiKey, headers: auth.headers, signal: options?.signal }));
+		? completeFnStream(
+			deps,
+			model,
+			{ apiKey: auth.apiKey, headers: auth.headers },
+			opts.reasoning,
+		)
+		: ((streamModel: Model<any>, context: any, options: any) => {
+			return streamSimple(streamModel, context, {
+				...buildRlmStreamOptions(streamModel, options, opts.reasoning),
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				signal: options?.signal,
+			});
+		});
 
 	const swallowLateReturn = (reason: unknown) => {
 		if (isRlmReturnSignal(reason)) state.onReturn?.();

@@ -4,6 +4,15 @@ import { getSandboxFnNames } from "@pi-extensions/shared/sandbox-registry";
 import { MAX_ALLOWED_ITERATIONS } from "./constants";
 import type { RlmDeps, RlmOptions } from "./types";
 
+const RLM_REASONING_LEVELS: readonly string[] = [
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
+
 export function resolveModel(s: string): [provider: string, id: string] {
 	const slash = s.indexOf("/");
 	if (slash <= 0 || slash === s.length - 1) {
@@ -22,6 +31,10 @@ function availableToolNames(deps: RlmDeps): Set<string> {
 export function validateOptions(opts: RlmOptions, deps: RlmDeps): void {
 	if (!opts || typeof opts.task !== "string" || opts.task.trim().length === 0) throw new Error("rlm: task must be a non-empty string");
 	if (!Array.isArray(opts.tools) || opts.tools.some((t) => typeof t !== "string")) throw new Error("rlm: tools must be an array of strings");
+
+	if (opts.reasoning !== undefined && !RLM_REASONING_LEVELS.includes(opts.reasoning)) {
+		throw new Error("rlm: reasoning must be one of minimal, low, medium, high, xhigh, max");
+	}
 	const known = availableToolNames(deps);
 	for (const name of [...new Set(opts.tools)]) {
 		if (name === "rlm") continue;

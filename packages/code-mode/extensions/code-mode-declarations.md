@@ -1093,6 +1093,9 @@ export interface RlmOptions {
   tools: string[];
   /** Deliberate concrete-model override. When omitted, the central cheap `rlm` role is resolved at call time. */
   model?: string;
+
+  /** Provider-native thinking level; explicit level overrides the agent-loop setting. */
+  reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   /** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
   identity?: string | { name?: string; email?: string };
   maxIterations?: number;
@@ -1158,6 +1161,8 @@ export interface RlmHandle<T = RlmResult> extends PromiseLike<T> {
  * When model is omitted, rlm resolves the centrally configured `rlm` role, whose first line is a cheap
  * reconnaissance model. Set model only as a deliberate override for reasoning-heavy work; rlm never inherits
  * the parent session's frontier model. The sub-agent must finish by calling rlm.return({...}).
+
+ * Optional reasoning selects a provider-native thinking level. Explicit RLM reasoning overrides the agent-loop level. If neither is set, Z.AI reasoning-format models receive low because current GLM models reject disabled thinking.
  * Every RLM also receives `man` as a read-only documentation capability, even when it is not listed in tools.
  * Its initial prompt contains only declarations for the allowed surface; detailed and runtime-registered schemas
  * are resolved on demand with `man("name")` or `man("code-mode/<topic>")`. Documentation visibility never

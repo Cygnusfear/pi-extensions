@@ -1,15 +1,31 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	Context,
+	Model,
+	ProviderStreamOptions,
+	ThinkingLevel,
+} from "@earendil-works/pi-ai";
 import type { ParentSessionIdentity } from "@pi-extensions/shared/sandbox-registry";
 import type { ProviderLimitNotice } from "@pi-extensions/shared/alert-provenance";
 
-export type RlmCompleteFn = (model: Model<any>, request: Context, auth?: ProviderStreamOptions) => Promise<AssistantMessage>;
+export type RlmCompleteOptions = ProviderStreamOptions & {
+	reasoning?: ThinkingLevel;
+};
+export type RlmCompleteFn = (
+	model: Model<any>,
+	request: Context,
+	options?: RlmCompleteOptions,
+) => Promise<AssistantMessage>;
 
 export interface RlmOptions {
 	task: string;
 	tools: string[];
 	/** Deliberate concrete-model override. When omitted, the central `rlm` role is resolved at call time. */
 	model?: string;
+
+	/** Provider-native reasoning level. Z.AI mandatory-thinking models default to low when omitted. */
+	reasoning?: ThinkingLevel;
 	/** Optional human-readable worker identity. Used for progress snapshots and git-ai attribution. */
 	identity?: string | { name?: string; email?: string };
 	maxIterations?: number;
