@@ -1,0 +1,40 @@
+packages/code-mode/extensions/code-mode-declarations.md
+  s_e210abbd6699df::t_535ca934f7b0fc 1096-1098,1164
+  s_e210abbd6699df::t_cc7824816c39fc 1165
+packages/rlm/src/loop.ts
+  s_e210abbd6699df::t_614b7d0b6bfee8 57,66-68
+  s_e210abbd6699df::t_ffc4193dfaa72c 6
+  s_e210abbd6699df::t_5394488410cba8 7,54
+  s_e210abbd6699df::t_8d38c582c6b641 56,58-65,69-70,255,262
+  s_e210abbd6699df::t_e70ebbf9eca1b9 71-84
+  s_e210abbd6699df::t_3ce29884f5182e 257
+  s_e210abbd6699df::t_6d1138f14f350a 2-5,8-9,55,102-107,112-122,249-254,256,258-261
+packages/rlm/src/validate.ts
+  s_e210abbd6699df::t_20beab8d1b4a90 15,34
+  s_e210abbd6699df::t_fafa1a94539d47 35-37
+  s_e210abbd6699df::t_026b30556aabbf 7-14
+packages/rlm/src/types.ts
+  s_e210abbd6699df::t_38b688f1cd5817 2-8
+  s_e210abbd6699df::t_ab69e3b232f805 12-19
+  s_e210abbd6699df::t_a12b9aadf565ce 26-28
+packages/rlm/test/rlm-reasoning.test.ts
+  s_e210abbd6699df::t_6166bb61a9885f 1,4-75,84-121
+  s_e210abbd6699df::t_fee8cb59836045 3,76-83
+  s_e210abbd6699df::t_68378787913d7b 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2ffcc919b7d4cd31f3b113df004756ad595cac39",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "openrouter/openai/gpt-6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
