@@ -139,7 +139,7 @@ describe("code-mode reasoning", () => {
 
 	test("done is a zero-argument terminating tool", async () => {
 		const pi = makePi();
-		codeModeExt(pi as any);
+		codeModeExt(pi as any, { isTeamsWorker: () => false });
 		const done = pi.tools.get("done")!;
 		expect(done.parameters.properties).toEqual({});
 		expect(done.parameters.required).toBeUndefined();
