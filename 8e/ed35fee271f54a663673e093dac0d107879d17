@@ -1,0 +1,22 @@
+packages/code-mode/src/session-factory.ts
+  s_e210abbd6699df::t_68af1b3a198d99 1342
+packages/code-mode/src/sandbox-tools.ts
+  s_e210abbd6699df::t_0bf865e3011cf5 1262,1265-1267
+  s_e210abbd6699df::t_39fcb6877c138a 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8eed35fee271f54a663673e093dac0d107879d17",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "openrouter/openai/gpt-6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
