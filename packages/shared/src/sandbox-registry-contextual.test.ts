@@ -127,6 +127,24 @@ describe("contextual sandbox-fn registry", () => {
 		await expect(out.setResult).resolves.toBe(true);
 	});
 
+	test("V12: optional attachImage callback reaches contextual sandbox functions", async () => {
+		registerContextualSandboxFn(NAMESPACE + "hostimage", (ctx) => async () => {
+			if (!ctx.attachImage) return "missing";
+			return ctx.attachImage({ fileName: "shot.png", mimeType: "image/png", base64: "aGVsbG8=" });
+		});
+		try {
+			const bare = getSandboxFnsForCall(makeCtx());
+			expect(await (bare[NAMESPACE + "hostimage"] as () => Promise<string>)()).toBe("missing");
+
+			const ctx = makeCtx();
+			ctx.attachImage = async (image) => "attached " + image.fileName;
+			const fns = getSandboxFnsForCall(ctx);
+			expect(await (fns[NAMESPACE + "hostimage"] as () => Promise<string>)()).toBe("attached shot.png");
+		} finally {
+			unregisterSandboxFn(NAMESPACE + "hostimage");
+		}
+	});
+
 	test("V9c: unregisterSandboxFn removes both contextual and constant entries", () => {
 		registerContextualSandboxFn(NAMESPACE + "tmp1", () => () => "x");
 		registerSandboxFn(NAMESPACE + "tmp2", () => "y");

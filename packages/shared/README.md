@@ -48,9 +48,12 @@ Shared registry for sandbox-callable functions. Extensions register tool impleme
 | Export | Description |
 |--------|-------------|
 | `registerSandboxFn(name, fn, schema)` | Register a function for sandbox access |
+| `registerContextualSandboxFn(name, factory)` | Register a per-call function with the current `SandboxCallContext` |
 | `unregisterSandboxFn(name)` | Remove a registered function |
 | `getSandboxFns()` | Get all registered sandbox functions |
 | `getSandboxFnNames()` | Get all registered function names |
+
+`SandboxCallContext` is created per execution. Code-mode supplies an optional async `attachImage({ fileName, mimeType, base64 })` callback; contextual host bindings use it to attach images after code-mode applies the active model's budget and image-preparation rules.
 
 ### Session Nickname — `session-nickname.ts`
 

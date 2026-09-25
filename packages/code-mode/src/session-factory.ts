@@ -990,7 +990,7 @@ function safeString(fn: () => unknown): string | undefined {
 	}
 }
 
-function buildSandboxCallContext(deps: ExecutionDeps): SandboxCallContext {
+function buildSandboxCallContext(deps: ExecutionDeps, session: CodeModeSession): SandboxCallContext {
 	const sessionManager = deps.sessionManager;
 	const parentSession: ParentSessionIdentity | undefined = sessionManager
 		? {
@@ -1010,6 +1010,24 @@ function buildSandboxCallContext(deps: ExecutionDeps): SandboxCallContext {
 		sendMessage: deps.sendMessage as ((msg: unknown, opts?: unknown) => void) | undefined,
 		sendUserMessage: deps.sendUserMessage,
 		parentSession,
+		attachImage: async ({ fileName, mimeType, base64 }) => {
+			const {
+				formatImageAttachmentNote,
+				formatImageTooLargeError,
+				prepareImagesForAttachment,
+				resolveImageBudgetBytes,
+			} = await import("./image-prepare.ts");
+			const buffer = Buffer.from(base64, "base64");
+			const budgetBytes = resolveImageBudgetBytes(deps.model, deps.modelRegistry);
+			const prepared = await prepareImagesForAttachment(buffer, mimeType, budgetBytes);
+			if (!prepared || prepared.length === 0) {
+				return formatImageTooLargeError(fileName, buffer.length, budgetBytes);
+			}
+			for (const part of prepared) {
+				session.images.push({ data: part.data, mimeType: part.mimeType });
+			}
+			return formatImageAttachmentNote(fileName, prepared, buffer.length, budgetBytes);
+		},
 	};
 }
 
@@ -1032,7 +1050,7 @@ async function injectDefaultBindings(session: CodeModeSession, deps: ExecutionDe
 		deps.getContextUsage,
 		deps.contextGuardEnabled !== false,
 	);
-	const ctxFns = getSandboxFnsForCall(buildSandboxCallContext(deps));
+	const ctxFns = getSandboxFnsForCall(buildSandboxCallContext(deps, session));
 
 	// A host binding registered under a built-in's name claims that capability: the
 	// built-in is suppressed here, before anything reaches the vm context, so

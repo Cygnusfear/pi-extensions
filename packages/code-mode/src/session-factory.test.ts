@@ -561,6 +561,39 @@ describe("executeInSession — contextual sandbox-fn delivery", () => {
 		}
 	});
 
+	test("V10e: contextual attachImage prepares into only the active CodeModeSession", async () => {
+		const { registerContextualSandboxFn, unregisterSandboxFn } = await import("../../shared/src/sandbox-registry");
+		const imageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pPwAAAAASUVORK5CYII=";
+		registerContextualSandboxFn("__pe_tk4s_hostimage", (ctx) => async () => {
+			if (!ctx.attachImage) throw new Error("attachImage missing");
+			return ctx.attachImage({ fileName: "shot.png", mimeType: "image/png", base64: imageBase64 });
+		});
+		try {
+			const first = createCodeModeSession();
+			const second = createCodeModeSession();
+			const deps = makeDeps({
+				injectSessionApi: false,
+				injectConsoleWake: false,
+				hydrateBareGlobals: false,
+				injectRunbookRun: false,
+			});
+			const code = "console.log(await __pe_tk4s_hostimage())";
+
+			const firstResult = await executeInSession(first, code, deps);
+			expect(firstResult.error).toBeUndefined();
+			expect(firstResult.output).toContain("Image loaded: shot.png");
+			expect(first.images).toEqual([{ data: imageBase64, mimeType: "image/png" }]);
+			expect(second.images).toHaveLength(0);
+
+			const secondResult = await executeInSession(second, code, deps);
+			expect(secondResult.error).toBeUndefined();
+			expect(second.images).toEqual([{ data: imageBase64, mimeType: "image/png" }]);
+			expect(first.images).toEqual([{ data: imageBase64, mimeType: "image/png" }]);
+		} finally {
+			unregisterSandboxFn("__pe_tk4s_hostimage");
+		}
+	});
+
 	test("mesh.inbox is mirrored onto $.inbox as a non-destructive peek", async () => {
 		const { registerSandboxFn, unregisterSandboxFn } = await import("../../shared/src/sandbox-registry");
 		const pending = [{ from: "peer-1", preview: "hello" }];

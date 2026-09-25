@@ -362,6 +362,8 @@ All of these are available inside `execute_code` as typed async functions:
 | `tldrArch({ path })` | Detect architecture layers |
 | `tldrImpact({ func, path })` | Find all callers |
 
+Contextual host bindings can call the optional async `SandboxCallContext.attachImage({ fileName, mimeType, base64 })` callback. Code-mode applies the same model-budget, dimension, and tiling preparation used by built-in image reads, then adds only prepared image parts to the active session.
+
 ## Exact mai CLI arguments
 
 Use `maiCall({ argv })` for raw mai commands. `argv` is an exact child-process argument vector: each array element reaches mai unchanged, including whitespace, newlines, backslashes, quotes, empty strings, and text that resembles shell syntax.

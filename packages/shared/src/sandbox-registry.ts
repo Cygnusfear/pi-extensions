@@ -46,6 +46,12 @@ export interface SandboxContextUsage {
 	percent: number | null;
 }
 
+export interface SandboxImageAttachment {
+	readonly fileName: string;
+	readonly mimeType: string;
+	readonly base64: string;
+}
+
 export interface SandboxCallContext {
 	signal: AbortSignal;
 	cwd: string;
@@ -71,6 +77,8 @@ export interface SandboxCallContext {
 	sendUserMessage?: (msg: string, opts?: { deliverAs?: "followUp" | "steer" }) => void;
 	/** Parent session identity (resolved once by code-mode from its SessionManager). */
 	parentSession?: ParentSessionIdentity;
+	/** Attach a host image to this execute_code session after model-budget preparation. */
+	attachImage?: (image: SandboxImageAttachment) => Promise<string>;
 }
 
 function getRegistry(): Map<string, RegistryEntry> {
