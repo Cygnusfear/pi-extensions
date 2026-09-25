@@ -43,7 +43,7 @@ import {
   prepareImagesForAttachment,
   resolveImageBudgetBytes,
 } from "./image-prepare";
-import type { SandboxContext } from "./types";
+import { CODE_MODE_TIMEOUT_ABORT_CODE, type SandboxContext } from "./types";
 import { rtkDep } from "./rtk-dep";
 import { createMaiCall, type MaiCallInput } from "./mai-call";
 
@@ -1259,16 +1259,21 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     sleep: (ms: number): Promise<void> => {
       if (!signal) return new Promise<void>((resolve) => setTimeout(resolve, ms));
       return new Promise<void>((resolve) => {
-        if (signal.aborted) { resolve(); return; }
-        // Resolve early on abort instead of rejecting. The outer execute_code
-        // runner already races the whole VM against the abort signal and returns
-        // `Aborted` for the active turn. Rejecting here is redundant for normal
-        // foreground aborts and dangerous for detached background promises
-        // (e.g. $.monitor loops) because an interrupt can turn into an
-        // unhandled rejection that crashes Bun.
+        const settleOnAbort = () => {
+          const reason = signal.reason;
+          if (reason && typeof reason === "object" && (reason as { code?: unknown }).code === CODE_MODE_TIMEOUT_ABORT_CODE) {
+            // Stay suspended: resolving would run user code after the deadline;
+            // rejecting can be unhandled in detached monitor promises. The
+            // outer executeInSession timeout race returns the timeout error.
+            return;
+          }
+          // Ordinary aborts resolve so detached background helpers do not create unhandled rejections.
+          resolve();
+        };
+        if (signal.aborted) { settleOnAbort(); return; }
         const onAbort = () => {
           clearTimeout(timer);
-          resolve();
+          settleOnAbort();
         };
         const timer = setTimeout(() => {
           signal.removeEventListener("abort", onAbort);

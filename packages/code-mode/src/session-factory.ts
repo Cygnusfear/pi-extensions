@@ -19,6 +19,7 @@ import vm from "node:vm";
 import { Buffer } from "node:buffer";
 import * as acorn from "acorn";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { CODE_MODE_TIMEOUT_ABORT_CODE } from "./types";
 import type { CodeModeManual } from "./code-mode-manual";
 import { createPersistentStore } from "./persistent-store";
 import {
@@ -1339,7 +1340,7 @@ export async function executeInSession(
 			const timeoutPromise = new Promise<never>((_, reject) => {
 				timeoutHandle = setTimeout(
 					() => {
-						const timeoutError = new Error("Timed out after " + ms + "ms");
+						const timeoutError = Object.assign(new Error("Timed out after " + ms + "ms"), { code: CODE_MODE_TIMEOUT_ABORT_CODE });
 						if (!executionAbort.signal.aborted) executionAbort.abort(timeoutError);
 						timeoutRejectHandle = setTimeout(
 							() => reject(new Error("Execution timed out after " + ms / 1000 + "s")),

@@ -77,4 +77,27 @@ describe("execute_code timeout parameter", () => {
 		expect(text).toContain("timeout-path-ran");
 		expect(text).not.toContain("invalid_code_execution_request_v1");
 	});
+
+	test("timeout is enforced, not merely accepted", async () => {
+		const pi = makePi();
+		codeModeExt(pi, { isTeamsWorker: () => false });
+		const executeCode = pi.tools.get("execute_code");
+		const execute = executeCode.execute.bind(executeCode);
+		const wrapped = (id: string, params: any, ...rest: any[]) =>
+			execute(id, { thinking: "Timeout enforcement rationale.", ...params }, ...rest);
+
+		const t0 = Date.now();
+		const result = await wrapped(
+			"tc-timeout-2",
+			{ code: "await sleep(4000); console.log('NOT CUT');", timeout: 1 },
+			new AbortController().signal,
+			undefined,
+			makeExecuteCtx(),
+		);
+		const elapsed = Date.now() - t0;
+		const text = result.content.find((c: any) => c.type === "text")?.text ?? "";
+		expect(elapsed).toBeLessThan(3000);
+		expect(text).not.toContain("NOT CUT");
+		expect(text).toMatch(/timed out/i);
+	});
 });
