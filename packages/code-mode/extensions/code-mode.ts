@@ -1013,7 +1013,7 @@ export default function (
 			"Background bash: bashBgStart, bashBgStatus, bashBgLogs, bashBgStop, bashBgList. " +
 			"Team coordination: teams({ action, tasks?, name?, message?, ... }). " +
 			"Also available: session.messages(), session.tokens(), session.tags(), session.tag(), session.save(), session.load(). " +
-			"Namespaced callables: mesh.tell/ask/peers/view/broadcast/chat, editorOpen, editorState, gitAi. " +
+			"Namespaced callables: mesh.tell/ask/peers/view/broadcast/chat/reconnect, editorOpen, editorState, gitAi. " +
 			"Use console.log() to return results. Model-visible output is hard-capped; overflow is saved to /tmp with bounded Read guidance.",
 		parameters: Type.Object({
 			thinking: Type.String({

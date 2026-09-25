@@ -199,6 +199,58 @@ describe("pi-mesh native singleton (kal-kbu1f9xy)", () => {
     expect(await socketUp(sockPath(home))).toBe(true);
   });
 
+  run("a serving daemon is respected even when mesh.pid is missing or stale (no split-brain)", async () => {
+    const home = makeHome();
+    const first = spawnSidecar(home);
+    await waitSocketUp(home);
+    const firstPid = first.child.pid!;
+    expect(readPid(home)).toBe(firstPid);
+
+    // An operator tool (my mesh-restart) or a repair path removes the pidfile
+    // while the daemon serves. Requiring a live recorded pid turned a serving
+    // daemon into "down", so the next candidate unlinked its socket and bound a
+    // parallel one — two meshes, each with its own client set (2026-09-25).
+    rmSync(pidPath(home), { force: true });
+    const second = spawnSidecar(home);
+    expect((await waitExit(second.exited)).code).toBe(0);
+    expect(alive(firstPid)).toBe(true);
+    expect(await socketUp(sockPath(home))).toBe(true);
+
+    // Same with a recorded pid that is alive but stale: the connect probe
+    // still wins over the pidfile record, so a healthy daemon is never nuked.
+    const stalePid = await makeDeadPid();
+    writeFileSync(pidPath(home), String(stalePid));
+    const third = spawnSidecar(home);
+    expect((await waitExit(third.exited)).code).toBe(0);
+    expect(alive(firstPid)).toBe(true);
+    expect(await socketUp(sockPath(home))).toBe(true);
+  });
+
+  run("a daemon that loses its socket path to another listener exits instead of serving a ghost mesh", async () => {
+    const home = makeHome();
+    const first = spawnSidecar(home);
+    await waitSocketUp(home);
+    const firstPid = first.child.pid!;
+    expect(alive(firstPid)).toBe(true);
+
+    // Take the path: unlink the sidecar's socket and bind our own listener —
+    // the shape an operator rm plus a racing candidate produces. This daemon
+    // has no idle timeout, so only lost ownership can make it exit.
+    rmSync(sockPath(home), { force: true });
+    const usurper = createServer();
+    await new Promise<void>((resolve, reject) => {
+      usurper.once("error", reject);
+      usurper.listen(sockPath(home), () => resolve());
+    });
+    try {
+      const exit = await waitExit(first.exited, 10000);
+      expect(exit.code).toBe(0); // decided by ownership, not by idleness
+      expect(await socketUp(sockPath(home))).toBe(true); // the path has one owner
+    } finally {
+      await new Promise<void>((resolve) => usurper.close(() => resolve()));
+    }
+  }, 15000);
+
   run("stale socket file + dead pidfile: the new sidecar serves instead of exiting", async () => {
     const home = makeHome();
     await leaveStaleSocket(sockPath(home));

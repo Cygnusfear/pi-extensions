@@ -49,6 +49,17 @@ The sidecar is a **singleton daemon** — the first pi session spawns it, all su
 
 The native Rust sidecar manages a single Zenoh session and multiplexes all client connections through it.
 
+### Connection refresh (agents)
+
+The sidecar is a machine-level daemon: it keeps serving with zero connected clients and stops only on an explicit shutdown. A client restart does not stop it, and no client ever signals it — the daemon owns single-instance transitions (start lock, serving re-check, broken-holder disposal).
+
+If a session's own connection goes stale (peers cannot reach it, sends fail after a daemon or network hiccup), the agent can rejoin without touching anyone else's connection:
+
+```javascript
+await mesh.reconnect();   // drops this session's socket, rejoins, re-announces
+```
+`/mesh reconnect` does the same from the TUI. Reconnect never respawns a healthy daemon and never kills a process.
+
 ### Identity System
 
 Each session has a layered identity:

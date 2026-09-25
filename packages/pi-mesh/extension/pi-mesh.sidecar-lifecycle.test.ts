@@ -5,7 +5,7 @@ import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { killStraySidecars, PiMesh, sidecarPidsForHome } from "./pi-mesh.ts";
+import { PiMesh } from "./pi-mesh.ts";
 import { pidFileOf, pidsForScript, reapSidecars, sweepStaleSidecarHomes, sidecarPid } from "./sidecar-test-harness.ts";
 
 /**
@@ -281,50 +281,32 @@ describe("PiMesh sidecar lifecycle (kal-0suu3dur)", () => {
     }
   });
 
-  test("attribution: the sweep may kill the holder of its own HOME and only that one", async () => {
-    // Two HOMEs, one install path - the exact ambiguity that made the old
-    // machine-wide match unsafe. Attribution must resolve it before any signal
-    // is sent, so this asserts membership as well as outcome.
-    const homeA = makeRoot();
-    const homeB = mkdtempSync(join(tmpdir(), "pi-mesh-lifecycle-homeB-"));
-    mkdirSync(join(homeB, ".pi"), { recursive: true });
-    let pidA: number | null = null;
-    let pidB: number | null = null;
-    try {
-      const a = spawn(homeA.fakePath, ["{}"], { env: { ...process.env, HOME: homeA.home, FAKE_SIDECAR_OUT: "" }, stdio: "ignore", detached: true });
-      a.unref();
-      pidA = await waitSpawned(a);
-      const b = spawn(homeA.fakePath, ["{}"], { env: { ...process.env, HOME: homeB, FAKE_SIDECAR_OUT: "" }, stdio: "ignore", detached: true });
-      b.unref();
-      pidB = await waitSpawned(b);
-      expect(await until(() => socketUp(sockPathOf(homeA.home)) && socketUp(sockPathOf(homeB)), 6_000)).toBe(true);
+  test("reconnect() refreshes the connection on demand and reports a truthful status", async () => {
+    const root = makeRoot();
+    writeConfig(root.home, CONFIG_A);
+    const mesh = startMesh(root, "session-refresh");
+    await waitReady(mesh);
+    const pidBefore = sidecarPid(root.home);
+    const before = readJsonl(root.out, "events.jsonl").filter((e) => e.event === "ready");
+    expect(before.length).toBeGreaterThanOrEqual(1);
+    const lastBefore = String(before[before.length - 1]!.client_id);
 
-      // Membership first: A's view of "who serves A" must name A only.
-      const servingA = sidecarPidsForHome(homeA.home);
-      expect(servingA).toContain(pidA!);
-      expect(servingA).not.toContain(pidB!);
+    const status = await mesh.reconnect();
+    expect(status).toContain("mesh reconnected");
+    const reported = status.match(/client_id=([0-9a-f]{8})/)?.[1];
+    expect(reported).toBeTruthy();
+    // settle: the fake records the ready event on its own event loop.
+    await new Promise((r) => setTimeout(r, 250));
 
-      const res = killStraySidecars(homeA.fakePath, null, homeA.home);
-      expect(res.killed).toContain(pidA!);
-      expect(res.killed).not.toContain(pidB!);
-      expect(res.survivors).toEqual([]);
-
-      // B is untouched and still serving; A's socket is released.
-      expect(() => process.kill(pidB!, 0)).not.toThrow();
-      expect(await until(() => socketUp(sockPathOf(homeB)), 5_000)).toBe(true);
-      // The fixture leaves the socket FILE behind after SIGKILL, so file existence
-      // proves nothing here - only a connection attempt reflects the dead listener.
-      expect(await until(async () => !(await socketUp(sockPathOf(homeA.home))), 5_000)).toBe(true);
-    } finally {
-      for (const pid of [pidA, pidB]) {
-        if (pid !== null) {
-          try {
-            process.kill(pid, "SIGKILL");
-          } catch {}
-        }
-      }
-      rmSync(homeB, { recursive: true, force: true });
-    }
+    const afters = readJsonl(root.out, "events.jsonl").filter((e) => e.event === "ready");
+    expect(afters.length).toBeGreaterThan(before.length);
+    const lastAfter = String(afters[afters.length - 1]!.client_id);
+    expect(lastAfter).not.toBe(lastBefore);
+    // The status is truthful, not decorative: it reports the fresh client id.
+    expect(lastAfter.startsWith(reported!)).toBe(true);
+    // A serving daemon is reused: reconnect refreshes the socket, it does not respawn.
+    expect(sidecarPid(root.home)).toBe(pidBefore);
+    expect(pidsForScript(root.fakePath)).toHaveLength(1);
   });
 
   test("reconnects after sidecar death and re-subscribes on the fresh connection", async () => {

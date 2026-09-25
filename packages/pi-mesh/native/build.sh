@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+ROOT="$(pwd)"
 
 echo "Building pi-mesh sidecar binary (release)..."
 cargo build --release --bin pi-mesh
@@ -16,9 +17,12 @@ echo "Build complete: ${ARTIFACT}"
 ls -lh "${ARTIFACT}"
 
 # Copy to canonical location so pi-mesh extension finds it without needing target/
-DEST="$(dirname "$0")/pi-mesh"
+# Resolve the install path from an absolute root: "cd $(dirname $0)" above
+# makes $0-relative paths resolve under the NEW cwd, which silently failed the
+# install when the script was invoked relatively (bash packages/.../build.sh).
+DEST="${ROOT}/pi-mesh"
 if [[ "$(uname)" == "MINGW"* ]] || [[ "$(uname)" == "MSYS"* ]]; then
-    DEST="$(dirname "$0")/pi-mesh.exe"
+    DEST="${ROOT}/pi-mesh.exe"
 fi
 # Install via atomic rename (review kal-kcbh5uwv finding 2): cp over DEST in
 # place rewrites the inode of a RUNNING sidecar's mapped pages; macOS

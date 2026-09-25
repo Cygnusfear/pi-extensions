@@ -98,15 +98,12 @@ const readHolder = (): number | null => {
   }
 };
 
-const serving = async (): Promise<boolean> => {
-  try {
-    const pid = parseInt(readFileSync(pidPath, "utf8").trim(), 10);
-    if (!isAlive(pid)) return false;
-    return await socketConnectable(sockPath);
-  } catch {
-    return false;
-  }
-};
+// Mirrors the daemon: the connect probe alone decides. The pidfile is one
+// mutable record that a repair path or an operator tool can delete or
+// rewrite at any moment; requiring it to name a live pid once made a
+// serving daemon read as "down" and let a second candidate bind a parallel
+// socket (2026-09-25).
+const serving = async (): Promise<boolean> => socketConnectable(sockPath);
 
 record("spawns.jsonl", { event: "spawn", pid: process.pid, at: Date.now(), configArg });
 // Raw config argv — it is already a JSON document, so write it verbatim.

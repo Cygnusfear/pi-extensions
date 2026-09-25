@@ -1579,7 +1579,7 @@ interface TeamsSubscription extends PromiseLike<TeamsPollEvent> {
 // @code-mode-manual mesh | Mesh coordination
 
 /**
- * mesh — inter-session communication. Callable as peers(), plus tell/view/interrupt/broadcast/chat.
+ * mesh — inter-session communication. Callable as peers(), plus tell/view/interrupt/broadcast/chat/reconnect.
  *
  * @example
  * const peers = await mesh();                        // list peers
@@ -1636,6 +1636,14 @@ declare const mesh: {
 
   /** Leave a channel. */
   leaveChannel(params: { channelId: string }): Promise<string>;
+
+  /** Refresh this session's connection to the singleton mesh daemon — use it
+   *  when peers cannot reach you or your sends fail after a network or daemon
+   *  hiccup. Drops the current socket, rejoins, and re-announces; it never
+   *  signals a daemon process (the daemon owns single-instance transitions).
+   *  Resolves with a truthful status after the ready handshake or a bounded
+   *  timeout (~10s). */
+  reconnect(): Promise<string>;
 };
 
 /** @deprecated Use `mesh()` instead. */
@@ -1661,6 +1669,9 @@ declare const meshJoinChannel: typeof mesh.joinChannel;
 
 /** @deprecated Use `mesh.leaveChannel()` instead. */
 declare const meshLeaveChannel: typeof mesh.leaveChannel;
+
+/** @deprecated Use `mesh.reconnect()` instead. */
+declare const meshReconnect: typeof mesh.reconnect;
 
 /**
  * Get discovered skill paths. Returns root directories and actual skill directories.
