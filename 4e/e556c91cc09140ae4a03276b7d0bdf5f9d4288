@@ -1,0 +1,29 @@
+packages/code-mode/README.md
+  s_e210abbd6699df::t_392b9364f8f323 327
+packages/code-mode/src/sandbox-tools.edit.test.ts
+  s_e210abbd6699df::t_e7030186ad2d47 1-78,102-128,130-136,138-147
+  s_e210abbd6699df::t_740753f8e41f75 79-101,129,137
+packages/code-mode/extensions/code-mode-declarations.md
+  s_e210abbd6699df::t_b3a862a0f0dda9 372,376
+  s_e210abbd6699df::t_f36fc1dbc61314 362-364,371,373-375,377-379,381
+  s_e210abbd6699df::t_cf7f6d0538e422 380
+packages/code-mode/src/sandbox-tools.ts
+  s_e210abbd6699df::t_40f1323075977e 1130,1150-1152,1157,1191,1196-1197,1199,1205
+  s_e210abbd6699df::t_664bfad58f351c 1126,1146-1148,1153-1156,1158-1190,1192-1195,1198,1200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ee556c91cc09140ae4a03276b7d0bdf5f9d4288",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "openrouter/openai/gpt-6-luna"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
