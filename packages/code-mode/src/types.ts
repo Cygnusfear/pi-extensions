@@ -2,8 +2,6 @@
 
 import type { CodeModeManual } from "./code-mode-manual";
 
-/** Abort reason code used only when executeInSession reaches its caller-set deadline. */
-export const CODE_MODE_TIMEOUT_ABORT_CODE = "code_mode_timeout" as const;
 
 /**
  * Context passed into createToolBindings — cwd + accumulated images from readImage()

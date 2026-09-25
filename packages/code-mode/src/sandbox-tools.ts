@@ -43,7 +43,7 @@ import {
   prepareImagesForAttachment,
   resolveImageBudgetBytes,
 } from "./image-prepare";
-import { CODE_MODE_TIMEOUT_ABORT_CODE, type SandboxContext } from "./types";
+import type { SandboxContext } from "./types";
 import { rtkDep } from "./rtk-dep";
 import { createMaiCall, type MaiCallInput } from "./mai-call";
 
@@ -1259,21 +1259,12 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
     sleep: (ms: number): Promise<void> => {
       if (!signal) return new Promise<void>((resolve) => setTimeout(resolve, ms));
       return new Promise<void>((resolve) => {
-        const settleOnAbort = () => {
-          const reason = signal.reason;
-          if (reason && typeof reason === "object" && (reason as { code?: unknown }).code === CODE_MODE_TIMEOUT_ABORT_CODE) {
-            // Stay suspended: resolving would run user code after the deadline;
-            // rejecting can be unhandled in detached monitor promises. The
-            // outer executeInSession timeout race returns the timeout error.
-            return;
-          }
-          // Ordinary aborts resolve so detached background helpers do not create unhandled rejections.
-          resolve();
-        };
-        if (signal.aborted) { settleOnAbort(); return; }
+        if (signal.aborted) return; // already cancelled: keep user code suspended
         const onAbort = () => {
           clearTimeout(timer);
-          settleOnAbort();
+          // Do not settle: resolve would run user code after cancellation; reject
+          // can become unhandled in detached monitor promises. The outer runner
+          // owns reporting Aborted/Timed out for this execution.
         };
         const timer = setTimeout(() => {
           signal.removeEventListener("abort", onAbort);
