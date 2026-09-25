@@ -1,0 +1,20 @@
+packages/git-ai/extensions/git-ai.test.ts
+  s_2319421c2426ad::t_c0f9857025f485 19,144-150,203-224
+  s_2319421c2426ad::t_1e60bb1a426856 225-227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a9d927b2a99dd67f289eb3e805d559f34abc446",
+  "prompts": {},
+  "sessions": {
+    "s_2319421c2426ad": {
+      "agent_id": {
+        "tool": "Cecilia Photon Payne",
+        "id": "aff4fa5b-9254-4b29-a043-1ad5977dae61",
+        "model": "qwencloud/qwen3.8-max"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
