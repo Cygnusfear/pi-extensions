@@ -1,0 +1,21 @@
+packages/transcription-runtime/src/index.ts
+  s_e210abbd6699df::t_50d95b3e04e801 64-75,77,94-97,261-342,347,477-478
+packages/transcription-runtime/test/runtime.test.ts
+  s_e210abbd6699df::t_642cff50085571 4,146-226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a712e33889fcd816e68125d1bff9b11281fa444",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
