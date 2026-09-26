@@ -41,11 +41,11 @@ describe("context usage helpers", () => {
 			buildContextFooter({ getContextUsage: () => ({ tokens: percent * 2000, contextWindow: 200_000, percent }) });
 
 		expect(at(45)).toBeNull();
-		expect(at(60)).toBeNull();
-		expect(at(72)).toContain("CONTEXT CHECK ADVISED");
-		expect(at(82)).toContain("CONTEXT CHECK REQUIRED");
-		expect(at(91)).toContain("CONTEXT CHECK REQUIRED");
-		for (const footer of [at(72), at(82), at(91)]) {
+		expect(at(59)).toBeNull();
+		expect(at(62)).toContain("CONTEXT CHECK ADVISED");
+		expect(at(72)).toContain("CONTEXT CHECK REQUIRED");
+		expect(at(85)).toContain("CONTEXT CHECK REQUIRED");
+		for (const footer of [at(62), at(72), at(85)]) {
 			expect(footer).toContain(CONTEXT_CHECKER_CALL);
 			expect(footer).not.toContain("session.squash()");
 			expect(footer).not.toMatch(/\d+\.\d+%/);

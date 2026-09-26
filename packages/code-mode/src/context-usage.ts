@@ -8,7 +8,7 @@ export interface ContextUsageLike {
 
 export type GetContextUsage = () => ContextUsageLike | null | undefined;
 
-export const CONTEXT_GUARD_THRESHOLD = 0.94;
+export const CONTEXT_GUARD_THRESHOLD = 0.84;
 export const CONTEXT_CHECKER_CALL = "session.tokens()";
 export const CONTEXT_CHECK_INSTRUCTION =
 	"Run `session.tokens()` now. Context usage can change after compaction or a model switch; never act on an earlier percentage.";
@@ -47,15 +47,15 @@ export function buildContextFooter(
 	if (options?.suppressBecauseCompactionScheduled) return null;
 
 	const percent = getKnownContextPercent(readContextUsage(ctx.getContextUsage));
-	if (percent === undefined || percent < 70) return null;
+	if (percent === undefined || percent < 60) return null;
 
-	if (percent >= 90) {
+	if (percent >= 80) {
 		const guard = isContextGuardActive(options?.contextGuardEnabled ?? true, ctx.getContextUsage)
 			? " CONTEXT GUARD ACTIVE — save bounded narrative state before acting."
 			: "";
 		return `💀 CONTEXT CHECK REQUIRED — ${CONTEXT_CHECK_INSTRUCTION}${guard}`;
 	}
-	if (percent >= 80) {
+	if (percent >= 70) {
 		return `🚨 CONTEXT CHECK REQUIRED — ${CONTEXT_CHECK_INSTRUCTION}`;
 	}
 	return `🙈 CONTEXT CHECK ADVISED — ${CONTEXT_CHECK_INSTRUCTION}`;

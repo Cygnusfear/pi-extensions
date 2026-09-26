@@ -322,7 +322,7 @@ let pendingSquash: DeferredSquashOptions | null = null;
 let currentOuijaSessionFile: string | null = null;
 
 // ── Context Guard ─────────────────────────────────────────────────────────────
-// When context usage exceeds the threshold (default 94%), only context-management
+// When context usage exceeds the threshold (default 84%), only context-management
 // tools are allowed. The guard auto-disarms when usage drops back below threshold.
 let contextGuardEnabled = true; // default on, toggle with /context-guard on|off
 
@@ -890,7 +890,7 @@ export default function (
 	// ── /context-guard command ────────────────────────────────────────────────
 	pi.registerCommand("context-guard", {
 		description:
-			"Toggle context guard: at >94% context, block all non-essential tools. Usage: /context-guard on|off|status",
+			"Toggle context guard: at >84% context, block all non-essential tools. Usage: /context-guard on|off|status",
 		handler: async (args, ctx) => {
 			const sub = (args ?? "").trim().toLowerCase();
 			const getUsage = (ctx as any).getContextUsage as (() => any) | undefined;

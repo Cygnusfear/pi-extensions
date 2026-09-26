@@ -2,7 +2,7 @@
  * Regression: a failed deferred compaction must not leave the context guard as
  * a mechanical dead end.
  *
- * At >=94% usage the guard blocks every sandbox tool; session.squash() is the
+ * At >=84% usage the guard blocks every sandbox tool; session.squash() is the
  * only compliance path. When the host summariser fails because the
  * conversation is too large, the old handler surfaced an error and left the
  * guard active — tools blocked, compaction impossible, no agent-side recovery.
