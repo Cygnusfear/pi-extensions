@@ -1,7 +1,7 @@
 import { Bot, InputFile, InlineKeyboard, type Context } from "grammy";
 import { MeshClient, type InboundTell, type InboundChannel, type ReplyTarget } from "./mesh-client.ts";
 import { markdownToTelegramHtml } from "./format.ts";
-import { type Config, persistChatId, persistChatIdOrThrow } from "./config.ts";
+import { type Config, persistChatId, persistChatIdOrThrow, refreshTranscriptionEnv } from "./config.ts";
 import {
 	BridgeStateStore,
 	sentMessageRouteKey,
@@ -832,6 +832,9 @@ export class Bridge {
 	}
 
 	private async transcribeVoice(fileId: string, thread: Record<string, unknown> = {}): Promise<string> {
+		// Hot-swap point: a config.env edit (model list / provider order) applies
+		// to this voice note without a bridge restart.
+		refreshTranscriptionEnv();
 		const providers = availableTranscriptionProviders();
 		if (!providers.length) return "(voice transcription failed: no transcription providers configured)";
 		const buf = await this.tgDownload(fileId);
@@ -867,9 +870,18 @@ export class Bridge {
 					await this.bot.api.sendMessage(chatId, `⚠️ ${t.nickname} sent an image that hadn't finished rendering — skipped. Ask them to resend once it's done.`, thread).catch(() => {});
 					return;
 				}
-				const sent = await this.bot.api.sendPhoto(chatId, new InputFile(buf, fname), { ...thread, caption: cap });
-				this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
-				console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
+				try {
+					const sent = await this.bot.api.sendPhoto(chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+					this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? "photo");
+					console.log(`[bridge] sent photo: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
+				} catch (photoErr) {
+					// Telegram refuses photos with extreme dimensions (PHOTO_INVALID_DIMENSIONS). A tall render is
+					// still a file the hooman asked for — deliver it as a document instead of letting the mesh
+					// receipt claim success for a message nobody received.
+					const asDoc = await this.bot.api.sendDocument(chatId, new InputFile(buf, fname), { ...thread, caption: cap });
+					this.trackSent(asDoc.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? fname);
+					console.log(`[bridge] photo rejected (${(photoErr as Error).message.slice(0, 70)}) → sent as document: ${t.attachment} (${buf.length}b) → topic ${topic ?? "(main)"}`);
+				}
 			} else {
 				const sent = await this.bot.api.sendDocument(chatId, new InputFile(t.attachment), { ...thread, caption: cap });
 				this.trackSent(sent.message_id, chatId, { meshId: t.fromMeshId, clientId: t.fromClientId, nickname: t.nickname }, t.text ?? fname);
