@@ -279,41 +279,25 @@ session.tag("before-refactor");      // bookmark current position
 
 session.save("ctx", { goal: "...", decisions: [...] });  // survives reload
 const ctx = session.load("ctx");     // restore
-
 session.entries();                   // all session entries (messages, tags, compactions, custom)
-session.preCompact();                // build outline for review (no compaction)
-session.pin(["id5", "id12"]);        // pin messages verbatim into $.pinned
-session.squash();                    // compact — $ (including $.pinned, $.ctx) survives
+session.preCompact();                // optional outline aid; never required
+session.pin(["id5", "id12"]);        // optional reference aid; never required
+session.squash();                    // the one command — compact ($ and $.ctx survive)
 ```
 
-### Context management — three-phase squash
+### Context management — one command
 
-When context fills up, model quality degrades. Squash proactively. You have two preservation modes — use both when they apply.
-
-1. **Pin by reference (default).** Pick messages from the outline by ID. They land in `$.pinned` verbatim. Zero output-token cost.
-2. **Narrative synthesis (when needed).** Write a thick `$.ctx` string for things reference can't express — dead ends, synthesized takeaways, next-step instructions.
-
+When context fills up, model quality degrades. Squash proactively with a single command that always works, at any session size (large histories are summarised in bounded chunks).
 ```javascript
-// Phase 1 — review what's about to be lost
-session.preCompact();
-// $.preCompact = { outline: "[id123 · user] ...", messageCount: 42 }
-
-// Phase 2a — REFERENCE: pin specific messages by ID (no rewrite)
-session.pin(["id5", "id12", "id18"]);
-// $.pinned = [{ id, role, content, timestamp }, ...]  survives squash
-
-// Phase 2b — NARRATIVE: synthesize only the delta pins can't carry
 $.ctx = `AUTH REFACTOR — mid-stream
 Gotcha: refreshTokens.token_hash — NOT token — wasted 20 min on this
 Dead end: tried session-based approach, FK violations; back to JWT.
 Next: Write rotation logic at src/auth.ts:142`;
 
-// Phase 3 — apply compaction. $.ctx automatically becomes the authoritative
-// handoff delivered before this short continuation instruction.
 session.squash({ continue: "Continue at src/auth.ts:142." });
 ```
 
-`$` (including `$.pinned`, `$.ctx`) and `session.save()` all survive compaction. A non-empty `$.ctx` is additionally frozen at `session.squash()` time and injected before the first post-compaction continuation, so the resumed model receives the narrative instead of relying on a long `continue` string. The handoff is capped at 16KiB UTF-8 and rejects rather than truncating. Never put secrets in `$.ctx`; `$.pinned`, other `$` values, and `session.save()` records are deliberately not auto-injected. Pass `handoff: { text: "..." }` only to override the designated `$.ctx` narrative.
+A non-empty `$.ctx` is the designated narrative handoff: it is frozen at `session.squash()` time and injected before the first post-compaction continuation, so the resumed model receives the narrative instead of relying on a long `continue` string. It is capped at 16KiB UTF-8 and rejects rather than truncating. Never put secrets in `$.ctx`. `$` and `session.save()` records survive compaction; pass `handoff: { text: "..." }` only to override the designated `$.ctx` narrative. `session.preCompact()` and `session.pin([...])` remain available as optional aids, but they are never required and do not affect compaction.
 
 ## Available sandbox functions
 

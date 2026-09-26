@@ -937,16 +937,16 @@ declare const session: {
   /** Load previously saved data from the session file */
   load(key: string): unknown;
 
-  /** Build an outline of the current session and stash it in $.preCompact for review.
-   *  Does NOT compact. Outline lines are prefixed with entry IDs so you can pin specific
-   *  messages by id before calling session.squash(). */
+  /** Optional legacy review aid: build an outline of the current session and
+   *  stash it in $.preCompact. Does NOT compact and is never required —
+   *  session.squash() alone always works. */
   preCompact(): void;
 
-  /** Pin specific messages by ID into $.pinned for verbatim preservation across squash.
-   *  Prefer this over re-typing a narrative into $.ctx — zero output-token cost.
-   *  Pass IDs from $.preCompact.outline or session.messages(). Unknown IDs are skipped.
-   *  Pinned entries merge into $.pinned (dedup by id, preserves order-of-pin).
-   *  Returns a short status string. */
+  /** Optional legacy helper: store copies of messages in $.pinned for your
+   *  own reference. Pinning does NOT affect compaction — session.squash()
+   *  alone always works. Pass IDs from session.messages(); unknown IDs are
+   *  skipped. Entries merge into $.pinned (dedup by id, preserves
+   *  order-of-pin). Returns a short status string. */
   pin(ids: string[]): string;
 
   /**

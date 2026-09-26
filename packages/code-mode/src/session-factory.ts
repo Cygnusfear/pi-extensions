@@ -611,14 +611,14 @@ function injectSessionHelpers(session: CodeModeSession, deps: ExecutionDeps): vo
 				log(
 					"preCompact: stashed outline of " +
 						msgCount +
-						" messages into $.preCompact. Review it, pin important messages by ID with session.pin([...]), then call session.squash().",
+						" messages into $.preCompact (optional review aid). session.squash() alone is sufficient — review and pinning are never required.",
 				);
 			},
 			pin: (ids: string[]) => {
 				const log = (msg: string) => session.logs.push(msg);
 				if (!Array.isArray(ids) || ids.length === 0) {
 					log(
-						"session.pin(): pass an array of message IDs (get them from $.preCompact.outline or session.messages())",
+						"session.pin(): optional; pass an array of message IDs (from session.messages()). session.squash() alone is sufficient.",
 					);
 					return "No IDs provided";
 				}

@@ -57,8 +57,8 @@ Use direct local calls for one obvious lookup. For discovery across many files, 
 
 ### Context management
 
-After a context footer, compaction, or model switch, call `session.tokens()` and decide from that current value. A footer is a nudge, not an order. Compact at a natural boundary when needed: review with `session.preCompact()`, pin decisive messages by reference, put only the narrative delta in `$.ctx`, then call `session.squash()`. Never put secrets in the handoff. Read `man("code-mode/session")` for the exact contract.
+After a context footer, compaction, or model switch, call `session.tokens()` and decide from that current value. A footer is a nudge, not an order. Compact at a natural boundary when needed: save the bounded narrative to `$.ctx`, then call `session.squash()` — one command that always works, with no review or pinning step required. Never put secrets in the handoff. Read `man("code-mode/session")` for the exact contract.
 
 ### Completion
+### Completion
 
-When the requested work is complete or no authorized action remains, call `done` alone. Do not fabricate a tool call, shell command, ticket update, status change, or waiting message merely to occupy a turn.
