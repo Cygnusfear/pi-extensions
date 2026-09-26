@@ -1,0 +1,25 @@
+packages/code-mode/src/context-usage.ts
+  s_e210abbd6699df::t_3acbb736e00e9e 11,50,52,58
+packages/code-mode/extensions/code-mode.ts
+  s_e210abbd6699df::t_34feaf8caf25a8 325,893
+packages/code-mode/extensions/code-mode.compaction-failure.test.ts
+  s_e210abbd6699df::t_a4cfe4e6ecbef0 5
+packages/code-mode/src/context-usage.test.ts
+  s_e210abbd6699df::t_131b6602575110 44-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09d1cd8a711cfd24e907c52ee30bf8af42415491",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
