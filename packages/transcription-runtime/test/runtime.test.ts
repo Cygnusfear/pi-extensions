@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	createTranscriptionProviders,
+	type TranscriptionCredentials,
 	type TranscriptionProvider,
 	TranscriptionProviderError,
 	transcribeWithFallback,
@@ -141,5 +142,86 @@ describe("transcription runtime", () => {
 		expect(result).toContain("code=insufficient_quota");
 		expect(result).not.toContain("private");
 		expect(result.length).toBeLessThan(300);
+	});
+
+	test("expands OPENROUTER_TRANSCRIPTION_MODELS into one provider per model, in order, and sends that model", async () => {
+		const sent: string[] = [];
+		const fetcher: typeof fetch = async (_input, init) => {
+			sent.push(String((init?.body as FormData).get("model")));
+			return Response.json({ text: "<|speaker:0|> first  words " });
+		};
+		const providers = createTranscriptionProviders(
+			{
+				OPENROUTER_API_KEY: "secret",
+				OPENROUTER_TRANSCRIPTION_MODELS: "fish-audio/transcribe-1-pro,google/gemini-3.5-transcribe",
+			},
+			fetcher,
+		);
+		expect(providers.map((provider) => provider.name)).toEqual([
+			"OpenRouter fish-audio transcribe-1-pro",
+			"OpenRouter google gemini-3.5-transcribe",
+		]);
+		// Names must satisfy the runtime validation, so a successful chain proves it.
+		expect(await transcribeWithFallback(providers, Uint8Array.of(1))).toBe("first words");
+		expect(sent).toEqual(["fish-audio/transcribe-1-pro"]);
+	});
+
+	test("orders the chain by TRANSCRIPTION_PROVIDER_ORDER and leaves the default order alone", () => {
+		const namesFor = (credentials: TranscriptionCredentials): string[] =>
+			createTranscriptionProviders(credentials, async () => Response.json({ text: "x" })).map(
+				(provider) => provider.name,
+			);
+		const allKeys: TranscriptionCredentials = {
+			OPENAI_API_KEY: "a",
+			GROQ_API_KEY: "b",
+			ZAI_API_KEY: "c",
+			OPENROUTER_API_KEY: "d",
+		};
+		expect(namesFor(allKeys)).toEqual(["OpenAI", "Groq", "Z.ai", "OpenRouter"]);
+		expect(namesFor({ ...allKeys, TRANSCRIPTION_PROVIDER_ORDER: "OpenRouter,OpenAI" })).toEqual([
+			"OpenRouter",
+			"OpenAI",
+			"Groq",
+			"Z.ai",
+		]);
+		expect(
+			namesFor({
+				...allKeys,
+				OPENROUTER_TRANSCRIPTION_MODELS: "fish-audio/transcribe-1-pro",
+				TRANSCRIPTION_PROVIDER_ORDER: "OpenRouter",
+			}),
+		).toEqual(["OpenRouter fish-audio transcribe-1-pro", "OpenAI", "Groq", "Z.ai"]);
+	});
+
+	test("drops unusable model ids and keeps every composed name inside the runtime limits", () => {
+		const providers = createTranscriptionProviders(
+			{
+				OPENROUTER_API_KEY: "k",
+				OPENROUTER_TRANSCRIPTION_MODELS: "ok-model,bad model!,another/model,ok-model",
+			},
+			async () => Response.json({ text: "x" }),
+		);
+		expect(providers.map((provider) => provider.name)).toEqual([
+			"OpenRouter ok-model",
+			"OpenRouter another model",
+		]);
+		expect(providers.every((provider) => provider.name.length <= 64)).toBe(true);
+	});
+
+	test("treats a marker-only transcript as empty and falls through to the next provider", async () => {
+		const provider = createTranscriptionProviders(
+			{ OPENAI_API_KEY: "secret" },
+			async () => Response.json({ text: "<|speaker:7|>" }),
+		)[0];
+		if (!provider) throw new Error("provider_missing");
+		await expect(provider.transcribe(Uint8Array.of(1))).rejects.toMatchObject({
+			metadata: { code: "empty_transcription" },
+		});
+		expect(
+			await transcribeWithFallback(
+				[provider, { name: "second", transcribe: async () => "recovered" }],
+				Uint8Array.of(1),
+			),
+		).toBe("recovered");
 	});
 });

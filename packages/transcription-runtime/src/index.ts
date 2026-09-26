@@ -61,8 +61,20 @@ async function boundedResponseText(
 	}
 }
 
+/** Speaker tags from multi-speaker providers (fish-audio) are not part of the
+ *  transcript: strip the exact <|speaker:N|> form and collapse the whitespace
+ *  it leaves behind. A marker-only response normalises to empty and is
+ *  rejected as empty_transcription, so the chain falls through. */
+const SPEAKER_TAG = /<\|speaker:\d+\|>/gu;
+function normaliseTranscript(text: string): string {
+	return text
+		.replace(SPEAKER_TAG, " ")
+		.replace(/[ \t]+/gu, " ")
+		.replace(/ *\n */gu, "\n")
+		.trim();
+}
 function requireTranscript(value: unknown): string {
-	const text = typeof value === "string" ? value.trim() : "";
+	const text = typeof value === "string" ? normaliseTranscript(value) : "";
 	if (!text)
 		throw new TranscriptionProviderError(
 			"response did not contain a transcription",
@@ -79,6 +91,10 @@ export interface TranscriptionCredentials {
 	GROQ_API_KEY?: string | undefined;
 	ZAI_API_KEY?: string | undefined;
 	OPENROUTER_API_KEY?: string | undefined;
+	/** Comma-separated OpenRouter transcription models; replaces the built-in OpenRouter entry with one provider per model. */
+	OPENROUTER_TRANSCRIPTION_MODELS?: string | undefined;
+	/** Comma-separated provider names (exact or prefix) that lead the chain, in order. */
+	TRANSCRIPTION_PROVIDER_ORDER?: string | undefined;
 }
 export interface TranscriptionInput {
 	bytes: Uint8Array;
@@ -242,11 +258,93 @@ function validFilename(value: string): boolean {
 	);
 }
 
+/** The built-in OpenRouter entry that OPENROUTER_TRANSCRIPTION_MODELS replaces. */
+const OPENROUTER_NAME = "OpenRouter";
+const OPENROUTER_CREDENTIAL = "OPENROUTER_API_KEY" as const;
+/** Comma-separated env list -> trimmed, order-preserving, conflict-free entries. */
+function parseEnvList(value: string | undefined): string[] {
+	if (typeof value !== "string") return [];
+	const seen = new Set<string>();
+	const entries: string[] = [];
+	for (const raw of value.split(",")) {
+		const entry = raw.trim();
+		if (!entry || seen.has(entry)) continue;
+		seen.add(entry);
+		entries.push(entry);
+	}
+	return entries;
+}
+
+/** Model ids as they are valid on the wire (fish-audio/transcribe-1-pro). */
+const TRANSCRIPTION_MODEL_ID = /^[A-Za-z0-9._:/-]{1,128}$/u;
+
+/** Provider names are constrained by validProviders: charset [A-Za-z0-9._ -],
+ *  at most TRANSCRIPTION_LIMITS.providerNameBytes, unique. A model id contains
+ *  "/" and may exceed the cap, so the display name is derived from it: illegal
+ *  characters become spaces and the result is cut to the byte budget. */
+function providerNameForModel(model: string): string {
+	const legal = model.replace(/[^A-Za-z0-9._ -]+/gu, " ").replace(/\s+/gu, " ").trim();
+	const name = legal ? `${OPENROUTER_NAME} ${legal}` : OPENROUTER_NAME;
+	return name.slice(0, TRANSCRIPTION_LIMITS.providerNameBytes).trimEnd();
+}
+
+/** The configured provider chain: the built-in SPECS, with the OpenRouter entry
+ *  expanded to one entry per OPENROUTER_TRANSCRIPTION_MODELS value when that
+ *  list is set, then reordered by TRANSCRIPTION_PROVIDER_ORDER. Both env vars
+ *  are opt-in: with neither set this returns exactly SPECS. */
+function resolveProviderSpecs(credentials: TranscriptionCredentials): ProviderSpec[] {
+	const models = parseEnvList(credentials.OPENROUTER_TRANSCRIPTION_MODELS).filter((model) =>
+		TRANSCRIPTION_MODEL_ID.test(model),
+	);
+	const specs: ProviderSpec[] = SPECS.flatMap((spec) => {
+		if (models.length === 0 || spec.key !== OPENROUTER_CREDENTIAL) return [spec];
+		// Reserve the slots the other providers occupy: the runtime caps the total
+		// number of providers, and an over-long list must not invalidate the chain.
+		const budget = Math.max(1, TRANSCRIPTION_LIMITS.providers - (SPECS.length - 1));
+		const names = new Set<string>();
+		const expanded: ProviderSpec[] = [];
+		for (const model of models.slice(0, budget)) {
+			const name = providerNameForModel(model);
+			if (names.has(name)) continue;
+			names.add(name);
+			expanded.push({ ...spec, name, model });
+		}
+		return expanded;
+	});
+	const order = parseEnvList(credentials.TRANSCRIPTION_PROVIDER_ORDER);
+	if (order.length === 0) return specs;
+	// An entry selects a spec by exact name or by prefix: "OpenRouter" covers
+	// every "OpenRouter <model>". Listed providers lead in the listed order;
+	// unlisted ones keep their relative order after them. Case-insensitive so an
+	// env typo in casing does not silently reorder the chain.
+	const lowered = order.map((entry) => entry.toLowerCase());
+	const rank = (name: string): number => {
+		const candidate = name.toLowerCase();
+		for (let index = 0; index < lowered.length; index++) {
+			const entry = lowered[index] as string;
+			if (candidate === entry) return index;
+			if (candidate.startsWith(`${entry} `) || candidate.startsWith(`${entry}:`)) return index;
+		}
+		return Number.POSITIVE_INFINITY;
+	};
+	return specs
+		.map((spec, index) => ({ spec, index }))
+		.sort((left, right) => {
+			const leftRank = rank(left.spec.name);
+			const rightRank = rank(right.spec.name);
+			if (leftRank !== rightRank) return leftRank < rightRank ? -1 : 1;
+			return left.index - right.index;
+		})
+		.map(({ spec }) => spec);
+}
+
+
+
 export function createTranscriptionProviders(
 	credentials: TranscriptionCredentials,
 	fetcher: typeof fetch = fetch,
 ): TranscriptionProvider[] {
-	return SPECS.flatMap((spec) => {
+	return resolveProviderSpecs(credentials).flatMap((spec) => {
 		const key = credentials[spec.key]?.trim();
 		if (!key) return [];
 		return [
@@ -376,5 +474,7 @@ function createDefaultCredentials(): TranscriptionCredentials {
 		GROQ_API_KEY: processEnv.GROQ_API_KEY,
 		ZAI_API_KEY: processEnv.ZAI_API_KEY,
 		OPENROUTER_API_KEY: processEnv.OPENROUTER_API_KEY,
+		OPENROUTER_TRANSCRIPTION_MODELS: processEnv.OPENROUTER_TRANSCRIPTION_MODELS,
+		TRANSCRIPTION_PROVIDER_ORDER: processEnv.TRANSCRIPTION_PROVIDER_ORDER,
 	};
 }
