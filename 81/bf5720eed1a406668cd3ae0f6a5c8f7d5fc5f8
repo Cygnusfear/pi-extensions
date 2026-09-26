@@ -1,0 +1,34 @@
+packages/mesh-telegram-bridge/src/config.ts
+  s_e210abbd6699df::t_726290f788588e 1,46,51-54,56-92
+  s_e210abbd6699df::t_abb8a144e406a8 21-31,42-45,55,143
+  s_b478fe36784bff::t_6c2bdc140b6795 93
+packages/mesh-telegram-bridge/src/bridge.ts
+  s_e210abbd6699df::t_37da685af14e88 4,835-837
+packages/mesh-telegram-bridge/src/config.test.ts
+  s_e210abbd6699df::t_c11072a7c34e7a 2-5,24-59
+  s_e210abbd6699df::t_17cadffe32a61e 60-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81bf5720eed1a406668cd3ae0f6a5c8f7d5fc5f8",
+  "prompts": {},
+  "sessions": {
+    "s_b478fe36784bff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58e4e866-becd-4f5a-b7ac-a96dcc0cc14a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
