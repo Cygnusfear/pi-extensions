@@ -203,15 +203,23 @@ fn main() {
     let mut bound_ino: Option<u64> = None;
 
     let outcome = rt.block_on(async {
-        // Parse config from argv[1] if provided, otherwise default.
+        // Parse config from argv[1] if provided. A supplied-but-unparseable
+        // config REFUSES to start: silently falling back to the default puts
+        // a healthy-looking sidecar on the wrong mesh (an isolated fleet
+        // sidecar joining the hub), and the signal must be in the outcome,
+        // not in a log line a healthy start hides (kal-na9u4nvm).
         let config_str = std::env::args().nth(1).unwrap_or_default();
         let config = if config_str.is_empty() {
             zenoh::Config::default()
         } else {
-            zenoh::Config::from_json5(&config_str).unwrap_or_else(|e| {
-                eprintln!("pi-mesh: bad config: {e}");
-                zenoh::Config::default()
-            })
+            match zenoh::Config::from_json5(&config_str) {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("pi-mesh: bad config: {e}");
+                    eprintln!("pi-mesh: refusing to start with the default config");
+                    std::process::exit(2);
+                }
+            }
         };
 
         // Serialize startup across concurrent candidates (kal-kbu1f9xy):

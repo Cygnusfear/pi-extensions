@@ -199,6 +199,14 @@ describe("pi-mesh native singleton (kal-kbu1f9xy)", () => {
     expect(await socketUp(sockPath(home))).toBe(true);
   });
 
+  run("a malformed config argument refuses to start instead of silently falling back to the default", async () => {
+    const home = makeHome();
+    const spawned = spawnSidecar(home, '{"connect": broken json');
+    const exit = await waitExit(spawned.exited, 10000);
+    expect(exit.code).not.toBe(0); // refusal must be the OUTCOME, not a log line
+    expect(await socketUp(sockPath(home))).toBe(false);
+  });
+
   run("a serving daemon is respected even when mesh.pid is missing or stale (no split-brain)", async () => {
     const home = makeHome();
     const first = spawnSidecar(home);
