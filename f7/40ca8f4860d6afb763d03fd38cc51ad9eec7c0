@@ -1,0 +1,21 @@
+packages/pi-mesh/native/src/main.rs
+  s_e210abbd6699df::t_b5c9a1c93ab257 206-210,215-222
+packages/pi-mesh/extension/pi-mesh.native-singleton.test.ts
+  s_e210abbd6699df::t_00423aa6ab2a70 202-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f740ca8f4860d6afb763d03fd38cc51ad9eec7c0",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-v4-pro"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
