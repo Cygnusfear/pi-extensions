@@ -1,0 +1,21 @@
+packages/code-mode/extensions/code-mode.ts
+  s_2319421c2426ad::t_47d13c1c01ada6 23,1052-1075
+packages/code-mode/extensions/code-mode.limits.test.ts
+  s_2319421c2426ad::t_1685526dc75651 1-106
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf5a5605451cdb7eb49a52ed4c659c69d2ae0c4f",
+  "prompts": {},
+  "sessions": {
+    "s_2319421c2426ad": {
+      "agent_id": {
+        "tool": "Cecilia Photon Payne",
+        "id": "aff4fa5b-9254-4b29-a043-1ad5977dae61",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
