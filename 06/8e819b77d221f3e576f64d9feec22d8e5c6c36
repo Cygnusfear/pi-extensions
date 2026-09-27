@@ -1,0 +1,21 @@
+packages/pi-mesh/extension/pi-mesh.roster-identity.test.ts
+  s_b478fe36784bff::t_5f15b32051d1c4 1-168
+packages/pi-mesh/extension/pi-mesh.ts
+  s_b478fe36784bff::t_ff3cc2595f87ad 249-276,979-994,996-1026,1239-1241,1243,1363-1375,1377-1385,2664,2676,2783
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "068e819b77d221f3e576f64d9feec22d8e5c6c36",
+  "prompts": {},
+  "sessions": {
+    "s_b478fe36784bff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58e4e866-becd-4f5a-b7ac-a96dcc0cc14a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
