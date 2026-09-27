@@ -7,15 +7,25 @@ import { safeJsonParse } from "@pi-extensions/shared/safe-json";
 // process table for a short TTL.  All workers polling within the same
 // cycle share a single subprocess call.
 
-const PROCESS_TABLE_CACHE_TTL_MS = 2_000;
+export const PROCESS_TABLE_CACHE_TTL_MS = 2_000;
 
 let _cachedRows: ProcessRow[] | null = null;
 let _cachedAt = 0;
 let _pendingFetch: Promise<ProcessRow[]> | null = null;
 
 function fetchProcessTableSync(): ProcessRow[] {
+  return readProcessTable(PROCESS_TABLE_CACHE_TTL_MS) ?? [];
+}
+
+/**
+ * Read the process table with an explicit freshness requirement. A cache TTL of
+ * 0 bypasses the cache entirely, and a failed `ps` returns null: "no
+ * observation" is a different answer from "the process is gone", and only the
+ * caller may decide which one it needs.
+ */
+function readProcessTable(cacheTtlMs: number): ProcessRow[] | null {
   const now = Date.now();
-  if (_cachedRows && now - _cachedAt < PROCESS_TABLE_CACHE_TTL_MS) return _cachedRows;
+  if (cacheTtlMs > 0 && _cachedRows && now - _cachedAt < cacheTtlMs) return _cachedRows;
   try {
     const output = execFileSync("ps", ["-ax", "-o", "pid=,ppid=,pcpu=,etime=,state=,comm="], {
       encoding: "utf8",
@@ -25,7 +35,7 @@ function fetchProcessTableSync(): ProcessRow[] {
     _cachedAt = now;
     return _cachedRows;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -555,6 +565,21 @@ export function isReusedWorkerPid(
  */
 export function sampleWorkerProcessSnapshot(workerPid: number): WorkerProcessSnapshot {
   const rows = fetchProcessTableSync();
+  return deriveWorkerProcessSnapshot(rows, workerPid);
+}
+
+/**
+ * Observation-strength snapshot for liveness decisions. It bypasses the table
+ * cache, because absence from a table sampled BEFORE the question was asked says
+ * nothing about a process that started moments ago — and that is exactly the
+ * window Bun's premature child "exit" event lands in. Returns null when no
+ * observation could be made at all (the process table could not be read);
+ * callers must treat that as unknown, never as "dead".
+ */
+export function sampleWorkerProcessSnapshotFresh(workerPid: number): WorkerProcessSnapshot | null {
+  if (!Number.isFinite(workerPid) || workerPid <= 0) return null;
+  const rows = readProcessTable(0);
+  if (!rows) return null;
   return deriveWorkerProcessSnapshot(rows, workerPid);
 }
 

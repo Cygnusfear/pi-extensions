@@ -15,12 +15,14 @@ import {
   sliceSessionViewEntries,
 } from "../shared/src/session-view.ts";
 import {
+  PROCESS_TABLE_CACHE_TTL_MS,
   evaluateIdleState,
   scanMeaningfulSessionActivity,
   formatRuntimeSummary,
   isReusedWorkerPid,
   sampleWorkerProcessSnapshot,
   sampleWorkerProcessSnapshotAsync,
+  sampleWorkerProcessSnapshotFresh,
 } from "./activity.js";
 import {
   LEASE_HEARTBEAT_INTERVAL_MS,
@@ -63,6 +65,9 @@ const AMBIENT_CHAT_BATCH_MS = Number.isFinite(ambientChatBatchMsRaw) && ambientC
 
 /** Mesh "message" event payload — direct tells. */
 type MessageHandler = (inbound: InboundMeshMessage) => void;
+
+/** Verdict of a process-liveness check. Only "dead" may settle an attempt. */
+type AttemptProcessLiveness = "alive" | "dead" | "unconfirmed";
 
 interface WorkerExitAssessment {
   /** The worker's DECLARED terminal status (team_finish → durable mesh finish → handle). */
@@ -140,6 +145,15 @@ export function assessWorkerExit(
     classification,
     reason,
   };
+}
+
+/**
+ * Coordinator-facing reason for a declaration that superseded a provisional
+ * "missing finish" assessment: the exit was mis-assessed, and the verdict was
+ * recovered from the worker session instead of being lost.
+ */
+export function recoveredAfterMisAssessedExitSummary(summary: string): string {
+  return `declared after a mis-assessed exit; verdict recovered: ${summary}`;
 }
 
 /**
@@ -566,6 +580,16 @@ const FINISH_REAP_GRACE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_GRACE_MS ??
 /** Settle time between SIGTERM → SIGKILL → explicit exit-pipeline drive. */
 const FINISH_REAP_KILL_SETTLE_MS = Number(process.env.PI_TEAMS_FINISH_REAP_SETTLE_MS ?? "5000");
 export const FINISH_EXIT_SETTLE_MS = 1500;
+/**
+ * Re-check cadence for a child "exit" the leader could not confirm. Bun fires
+ * that event prematurely for workers 2+ in rapid spawns while the process keeps
+ * running, so an unconfirmed exit is only a CANDIDATE: it settles once an
+ * independent observation confirms the incarnation is gone. The re-check runs
+ * for as long as that takes — the real exit event is not guaranteed to fire
+ * again — and it is also where a declaration written after the exit event is
+ * recovered.
+ */
+export const EXIT_RECHECK_INTERVAL_MS = 2_000;
 
 function isTerminalV2Lifecycle(lifecycle: import("./v2/state.ts").WorkerLifecycleState | null): boolean {
 	return lifecycle === "done"
@@ -714,6 +738,8 @@ export class TeamLeader {
   private meshMessageHandler?: MessageHandler;
 
   private static readonly STALE_RESTORE_PRUNE_MS = 60_000;
+  /** Cadence of the unconfirmed-exit re-check (EXIT_RECHECK_INTERVAL_MS). */
+  private exitRecheckIntervalMs = EXIT_RECHECK_INTERVAL_MS;
 
   constructor(pi: ExtensionAPI, private readonly workerSpawnDependencies?: WorkerSpawnDependencies) {
     this.pi = pi;
@@ -986,11 +1012,44 @@ export class TeamLeader {
     };
   }
 
-  /** PID liveness is valid only while the recorded process birth still matches. */
+  /** Conservative (cached-table) "might this incarnation still be running" probe
+   *  for wait, terminate and prune paths. It answers "is it worth acting on this
+   *  pid", never "is it safe to settle this attempt":
+   *    - a pid the shared table cannot vouch for — absence from a table that may
+   *      predate the incarnation — reports alive, because acting on it is safe
+   *      and silently skipping it is not (a coordinator kill would no-op);
+   *    - only positive evidence (the pid now belongs to a younger process) or an
+   *      absence the table could actually have observed reports not-alive.
+   *  Settlement decisions use attemptProcessLiveness(), where absence must be
+   *  confirmed by a cache-bypassing observation first. */
   private isAttemptProcessAlive(worker: Pick<WorkerHandle, "pid" | "spawnedAt">): boolean {
     if (!worker.pid || worker.pid <= 0) return false;
     const snapshot = sampleWorkerProcessSnapshot(worker.pid);
-    return snapshot.rootAlive && !isReusedWorkerPid(snapshot, worker.spawnedAt, Date.now());
+    if (!snapshot.rootAlive) {
+      // The shared table is cached for PROCESS_TABLE_CACHE_TTL_MS, so an
+      // incarnation younger than that cannot have been in a table that reports it
+      // missing — the absence is not yet an observation about this process.
+      return Date.now() - worker.spawnedAt < PROCESS_TABLE_CACHE_TTL_MS;
+    }
+    return !isReusedWorkerPid(snapshot, worker.spawnedAt, Date.now());
+  }
+
+  /**
+   * Liveness with three outcomes instead of a boolean. Only "dead" may settle an
+   * attempt, and "dead" requires positive evidence from a process table sampled
+   * AFTER the question was asked: the recorded pid is absent, or it is occupied
+   * by a process born materially after this incarnation (the pid was reused). An
+   * unrecorded pid, an unreadable process table, and absence from a cached table
+   * that may predate the incarnation are "unconfirmed" — Bun's premature child
+   * "exit" event lands exactly in that window, and defaulting it to "dead" is how
+   * a live worker loses its verdict.
+   */
+  private attemptProcessLiveness(worker: Pick<WorkerHandle, "pid" | "spawnedAt">): AttemptProcessLiveness {
+    if (!worker.pid || worker.pid <= 0) return "unconfirmed";
+    const snapshot = sampleWorkerProcessSnapshotFresh(worker.pid);
+    if (!snapshot) return "unconfirmed";
+    if (!snapshot.rootAlive) return "dead";
+    return isReusedWorkerPid(snapshot, worker.spawnedAt, Date.now()) ? "dead" : "alive";
   }
 
   private unwireMeshMessageEvents() {
@@ -2212,11 +2271,15 @@ export class TeamLeader {
       });
       if (provisional?.provisional) {
         const correctionId = createLeaderEventId(identity, "outcome_corrected", provisional.eventId, { declarationEventId: eventId });
+        // The superseded assessment claimed the worker exited without a finish.
+        // The declaration now proves that exit was mis-assessed, so the
+        // coordinator-facing reason says what actually happened instead of
+        // repeating a claim the recovered verdict contradicts.
         this.appendLifecycleFact({
           schemaVersion: 4, ...identity, eventId: correctionId, kind: "outcome_corrected",
           sourceLeaderEpoch: this.leaderEpoch,
           occurredAt: Date.now(),
-          payload: { provisionalEventId: provisional.eventId, declarationEventId: eventId, summary: `Outcome corrected: ${summary}` },
+          payload: { provisionalEventId: provisional.eventId, declarationEventId: eventId, summary: recoveredAfterMisAssessedExitSummary(summary) },
         });
       }
     } catch (error) {
@@ -2225,6 +2288,9 @@ export class TeamLeader {
     }
     worker.terminalStatus = status;
     worker.terminalSummary = summary;
+    // Keep the handle honest too: the widget, teams_status and the subscription
+    // fallbacks read lastNote, and they must not repeat a superseded reason.
+    if (provisional?.provisional) worker.lastNote = recoveredAfterMisAssessedExitSummary(summary);
     const recoveredAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
     if (recoveredAttempt) this.beginSettledAttemptEffects(recoveredAttempt);
     if (this.mesh && worker.durableMeshId) {
@@ -2235,6 +2301,38 @@ export class TeamLeader {
     }
     this.schedulePendingDelivery(true);
     return true;
+  }
+
+  /**
+   * Persist and ack a declaration the worker already wrote, unless this attempt
+   * already carries one. Appending the same fact twice is idempotent on its
+   * eventId, but the effects recovery drives (settlement, cleanup, ack, delivery)
+   * must run only for the transition that first observes the declaration.
+   */
+  private tryRecoverPendingWorkerFinish(worker: WorkerHandle): boolean {
+    if (this.lifecycleStore?.attempt(worker.workerInstanceId)?.declaration) return false;
+    return this.recoverPendingWorkerFinish(worker);
+  }
+
+  /**
+   * Defer a child "exit" the leader could not confirm. The attempt stays
+   * unsettled and is re-checked on EXIT_RECHECK_INTERVAL_MS until an independent
+   * observation confirms the incarnation is gone — for as long as that takes. A
+   * worker that runs for many minutes must not be settled on a premature event,
+   * and because the real exit event is not guaranteed to fire again a bounded
+   * attempt count would not release the worker either: it would only stop
+   * watching. A genuinely dead worker is released by the confirming observation
+   * on the next re-check.
+   */
+  private deferUnconfirmedWorkerExit(name: string, worker: WorkerHandle, exitCode: number | null, signal: string | undefined): void {
+    worker.exitRecheckAttempts = (worker.exitRecheckAttempts ?? 0) + 1;
+    const deferredIncarnation = { attemptId: worker.workerInstanceId, spawnedAt: worker.spawnedAt };
+    setTimeout(() => {
+      // A respawn replaces the incarnation this exit belonged to; the stale
+      // re-check must neither settle nor defer the replacement.
+      if (worker.workerInstanceId !== deferredIncarnation.attemptId || worker.spawnedAt !== deferredIncarnation.spawnedAt) return;
+      void this.handleWorkerExit(name, worker, exitCode, false, signal);
+    }, this.exitRecheckIntervalMs);
   }
 
   private async handleWorkerExit(
@@ -2254,22 +2352,37 @@ export class TeamLeader {
     if (!this.workers.has(name)) {
       this.workers.set(name, worker);
     }
-    if (this.lifecycleStore?.attempt(worker.workerInstanceId)?.process.phase === "exited") return;
+    // A worker can persist its declaration AFTER its exit was recorded: the
+    // "exit" event that would have driven recovery has already fired and will not
+    // fire again, and nothing else re-reads the worker session. Recovery is
+    // therefore attempted BEFORE this early return — a provisional assessment must
+    // never be final while a declaration can still be recovered.
+    // recoverPendingWorkerFinish persists the declaration, acks the worker and
+    // supersedes the provisional assessment with outcome_corrected, which is what
+    // re-delivers a truthful outcome to the coordinator.
+    const recordedAttempt = this.lifecycleStore?.attempt(worker.workerInstanceId);
+    if (recordedAttempt?.process.phase === "exited") {
+      this.tryRecoverPendingWorkerFinish(worker);
+      return;
+    }
 
     // Bun bug: fires child.on("exit") prematurely for workers 2+ in rapid spawns.
-    // The process is actually still alive and running. If we detect it's alive,
-    // bail out — the REAL exit event will fire when the process truly exits.
-    if (!observedDead && this.isAttemptProcessAlive(worker)) {
-      // Bun can fire child "exit" prematurely; the process is still alive. The
-      // real exit event is NOT guaranteed to fire again, so actually schedule a
-      // bounded re-check instead of hoping (a dropped exit = a coordinator that
-      // never learns its worker finished).
-      const attempts = (worker.exitRecheckAttempts ?? 0) + 1;
-      worker.exitRecheckAttempts = attempts;
-      if (attempts <= 30) {
-        setTimeout(() => void this.handleWorkerExit(name, worker, exitCode, false, signal), 2000);
+    // The process is actually still alive and running, so the event is only a
+    // CANDIDATE exit: it settles once an independent observation confirms the
+    // incarnation is gone. Everything the leader cannot confirm is deferred and
+    // re-checked, and that re-check is also where a declaration written after the
+    // exit event is recovered.
+    if (!observedDead) {
+      const liveness = this.attemptProcessLiveness(worker);
+      if (liveness !== "dead") {
+        // The attempt is not settling now, so recovering a declaration the worker
+        // already wrote cannot reorder the canonical process_exited → declaration
+        // sequence. A worker whose exit was mis-assessed is exactly the case that
+        // must not wait for its process to die: it can outlive the event by minutes.
+        this.tryRecoverPendingWorkerFinish(worker);
+        this.deferUnconfirmedWorkerExit(name, worker, exitCode, signal);
+        return;
       }
-      return;
     }
     // v1c: the incarnation is confirmed dead — free its activation lease so a
     // resume/revive of this session can re-acquire (recovery below re-acquires a
@@ -2760,7 +2873,13 @@ export class TeamLeader {
     const snapshot = await sampleWorkerProcessSnapshotAsync(worker.pid);
     const incarnationStartedAt = worker.attempts?.at(-1)?.spawnedAt ?? worker.spawnedAt;
     const pidReused = isReusedWorkerPid(snapshot, incarnationStartedAt, now);
-    if (!snapshot.rootAlive || pidReused) {
+    // Absence is only an observation about THIS incarnation once the table that
+    // reported it could have postdated it: the shared process table is cached for
+    // PROCESS_TABLE_CACHE_TTL_MS, and a table warmed by the previous spawn does
+    // not yet contain a pid born after it. PID reuse is positive evidence and
+    // always settles; unconfirmed absence waits for the next poll.
+    const absenceConfirmed = now - incarnationStartedAt >= PROCESS_TABLE_CACHE_TTL_MS;
+    if (pidReused || (!snapshot.rootAlive && absenceConfirmed)) {
       if ((worker.status === "running" || worker.status === "spawning") && !isTerminalV2Lifecycle(this.getV2WorkerLifecycle(name))) {
         // observedDead bypasses handleWorkerExit's process.kill(pid,0) guard:
         // for PID reuse that guard sees the unrelated replacement process alive.
@@ -2768,6 +2887,9 @@ export class TeamLeader {
       }
       return;
     }
+    // A table that cannot yet be trusted to postdate the incarnation reported an
+    // absence it cannot prove; leave the worker alone until the next poll.
+    if (!snapshot.rootAlive) return;
 
     worker.hasActiveChildProcess = snapshot.hasActiveChildProcess;
     worker.activeChildProcessCount = snapshot.activeChildProcessCount;
