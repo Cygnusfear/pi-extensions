@@ -251,6 +251,34 @@ const WHO_POLL_INTERVAL_MS = 50;
 /** Bounded wait for a reconnect() handshake before reporting it as timed out. */
 const RECONNECT_TIMEOUT_MS = 10_000;
 
+/** The stable session identity a roster entry belongs to (pe-rp4pdsnq):
+ *  durable meshId, falling back to the pi sessionId, falling back to the
+ *  ephemeral clientId. Nicknames are deliberately NOT part of it — two
+ *  identities sharing a nickname are two peers. */
+export function peerIdentityKey(p: PeerInfo): string {
+  return p.meshId || p.sessionId || p.id;
+}
+
+/** peerIdentityKey over a whole roster, bridging the one gap in the fallback
+ *  chain: a freshly started client announces once BEFORE its identity resolves
+ *  (no meshId yet, only its sessionId), while a live or stale client of the
+ *  same session already announced the meshId. An entry without a meshId whose
+ *  sessionId matches an entry WITH one is keyed by that meshId (the freshest,
+ *  if a sessionId ever maps to several). */
+function rosterIdentityKeyer(entries: Iterable<PeerInfo>): (p: PeerInfo) => string {
+  const meshIdBySession = new Map<string, { meshId: string; lastSeen: number }>();
+  for (const e of entries) {
+    if (!e.meshId || !e.sessionId) continue;
+    const ex = meshIdBySession.get(e.sessionId);
+    if (!ex || e.lastSeen > ex.lastSeen) meshIdBySession.set(e.sessionId, { meshId: e.meshId, lastSeen: e.lastSeen });
+  }
+  return (p) => {
+    if (p.meshId) return p.meshId;
+    const bridged = p.sessionId ? meshIdBySession.get(p.sessionId)?.meshId : undefined;
+    return bridged ?? peerIdentityKey(p);
+  };
+}
+
 export class PiMesh {
   private sock: Socket | null = null;
   private peerMap: Map<string, PeerInfo> = new Map();
@@ -953,8 +981,54 @@ export class PiMesh {
     return this.myIdentity;
   }
 
+  /** The live roster: ONE entry per session identity (pe-rp4pdsnq).
+   *
+   *  peerMap is keyed by the ephemeral sidecar clientId, so a session that
+   *  reconnects (client restart, sidecar restart, mesh.reconnect()) holds a
+   *  second raw entry until the stale one ages out of the eviction sweep
+   *  (90s cutoff, 30s cadence — up to ~120s). One identity can also
+   *  LEGITIMATELY have several live clients at once (a presence process
+   *  subscribing on behalf of a sleeping agent, plus the agent's own child).
+   *  Either way, iterating peers() and telling each entry must never fan out
+   *  twice to one identity, so the raw per-client entries are collapsed here
+   *  by peerIdentityKey (meshId → sessionId → clientId), keeping the freshest
+   *  client (highest lastSeen) — its clientId stays PeerInfo.id.
+   *
+   *  The raw per-client entries are kept, not replaced, because a message's
+   *  `from` is the SENDING client's id, which may be the non-freshest live
+   *  client: sender lookups go through peerByClientId(), not peers(). */
   peers(): PeerInfo[] {
-    return Array.from(this.peerMap.values());
+    const keyOf = rosterIdentityKeyer(this.peerMap.values());
+    const best = new Map<string, PeerInfo>();
+    for (const p of this.peerMap.values()) {
+      const key = keyOf(p);
+      const ex = best.get(key);
+      if (!ex || p.lastSeen > ex.lastSeen) best.set(key, p);
+    }
+    return Array.from(best.values());
+  }
+
+  /** The raw roster entry for one sidecar clientId (the `from` of an inbound
+   *  message), even when a fresher client of the same identity is the one
+   *  peers() shows. Falls back to a match on meshId/sessionId. */
+  peerByClientId(id: string | undefined | null): PeerInfo | undefined {
+    if (!id) return undefined;
+    const direct = this.peerMap.get(id);
+    if (direct) return direct;
+    return this.peers().find((p) => p.meshId === id || p.sessionId === id);
+  }
+
+  /** True when a client OTHER than `peer`'s own is present for `peer`'s
+   *  identity. `peer` need not be in peerMap (a fresh announce, or an entry
+   *  just evicted); it takes part in the keying so a meshId-less first
+   *  announce is bridged to its session's meshId. */
+  private _identityPresent(peer: PeerInfo): boolean {
+    const keyOf = rosterIdentityKeyer([...this.peerMap.values(), peer]);
+    const key = keyOf(peer);
+    for (const [clientId, p] of this.peerMap) {
+      if (clientId !== peer.id && keyOf(p) === key) return true;
+    }
+    return false;
   }
 
   /** kal-1dymeveg: peers(), but when the roster is still empty (a fresh
@@ -1167,8 +1241,11 @@ export class PiMesh {
       meshId: ann.meshId,
       zmxSession: ann.zmxSession,
     };
+    // pe-rp4pdsnq: a new client for an identity that is already present (a
+    // reconnect, or a second legitimate live client) is not a join.
+    const identityAlreadyPresent = this._identityPresent(peer);
     this.peerMap.set(key, peer);
-    if (!existing) this._emit("peer-join", peer);
+    if (!existing && !identityAlreadyPresent) this._emit("peer-join", peer);
 
     // ── Nickname conflict detection ──────────────────────────────────────
     if (this.myIdentity && ann.nickname && ann.nickname === this.myIdentity.nickname) {
@@ -1288,15 +1365,29 @@ export class PiMesh {
 
   private _startStalePeerEviction(): void {
     if (this.stalePeerTimer) clearInterval(this.stalePeerTimer);
-    this.stalePeerTimer = setInterval(() => {
-      const cutoff = Date.now() - 90_000;
-      for (const [id, peer] of this.peerMap) {
-        if (peer.lastSeen < cutoff) {
-          this.peerMap.delete(id);
-          this._emit("peer-leave", peer);
-        }
+    this.stalePeerTimer = setInterval(() => this._evictStalePeers(Date.now()), 30_000);
+  }
+
+  /** Drop client entries not seen for 90s. pe-rp4pdsnq: a stale client going
+   *  away while another client of the same identity is still present is not a
+   *  leave — peer-leave fires only when the identity's last client goes. */
+  private _evictStalePeers(now: number): void {
+    const cutoff = now - 90_000;
+    const evicted: PeerInfo[] = [];
+    for (const [id, peer] of this.peerMap) {
+      if (peer.lastSeen < cutoff) {
+        this.peerMap.delete(id);
+        evicted.push(peer);
       }
-    }, 30_000);
+    }
+    const keyOf = rosterIdentityKeyer([...this.peerMap.values(), ...evicted]);
+    const left = new Set<string>();
+    for (const peer of evicted) {
+      const key = keyOf(peer);
+      if (left.has(key) || this._identityPresent(peer)) continue;
+      left.add(key);
+      this._emit("peer-leave", peer);
+    }
   }
 }
 
@@ -2603,7 +2694,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         // We pass the sender's DURABLE mesh id (resolved from the ephemeral
         // clientId via peers) so the handler can authorize by durable identity.
         // Ack 'delivered' when requested so the sender knows it was accepted.
-        const controlFrom = mesh.peers().find((p) => p.id === msg.from)?.meshId ?? msg.from;
+        const controlFrom = mesh.peerByClientId(msg.from)?.meshId ?? msg.from;
         if (routeControlTell(msg.payload, controlFrom)) {
           if (deliveryId && originalFrom && ackRequested) {
             mesh.sendTellReceipt(
@@ -2615,7 +2706,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           }
           return;
         }
-        const senderPeer = mesh.peers().find((p) => p.id === msg.from);
+        const senderPeer = mesh.peerByClientId(msg.from);
         const senderLabel = senderPeer
           ? getPeerLabel(senderPeer)
           : (msg.from?.slice(0, 8) ?? "unknown");
@@ -2722,7 +2813,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         if (isTeamsLifecyclePayload(msg.payload)) return; // teams lifecycle events rendered by teams extension
         if (deafened) return; // /mesh deafen — drop channel chatter silently
 
-        const senderPeer = mesh.peers().find((p) => p.id === msg.from || p.sessionId === msg.from);
+        const senderPeer = mesh.peerByClientId(msg.from);
         const senderLabel = senderPeer
           ? getPeerLabel(senderPeer)
           : (msg.from?.slice(0, 8) ?? "unknown");
