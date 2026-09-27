@@ -34,8 +34,13 @@ export type DeferredSquashResult =
 
 export interface DeferredSquashContext {
 	mode: SquashMode;
-	getCompactionReadiness(): DeferredSquashReadiness;
-	compact(options: {
+	/** Host builds differ: newer extension hosts answer whether the branch
+	 *  can be compacted before compaction starts; older or packaged hosts
+	 *  predating this API expose only compact(). Optional on purpose —
+	 *  calling it unconditionally was a TypeError in production. */
+	getCompactionReadiness?(): DeferredSquashReadiness;
+	/** Absent on a host build that cannot compact at all; guarded at the call site. */
+	compact?(options: {
 		onComplete?: () => void;
 		onError?: (error: Error) => void;
 	}): void;
@@ -117,8 +122,18 @@ export async function awaitDeferredSquash(
 	options: DeferredSquashOptions,
 	sendContinuation: (text: string) => Promise<void> | void,
 ): Promise<DeferredSquashResult> {
-	const readiness = ctx.getCompactionReadiness();
-	if (!readiness.canCompact) {
+	// Feature-detect the host surface instead of assuming it: an older or
+	// packaged host build may expose neither readiness nor compact, and a
+	// missing method must read as an honest refusal, never a TypeError.
+	if (typeof ctx.compact !== "function") {
+		throw new Error(
+			"session.squash(): this host build exposes no compaction surface (ctx.compact is missing)",
+		);
+	}
+	const compact = ctx.compact; // narrowed once; the closure must not re-read the optional field
+	const readiness =
+		typeof ctx.getCompactionReadiness === "function" ? ctx.getCompactionReadiness() : undefined;
+	if (readiness && !readiness.canCompact) {
 		return { status: "skipped", reason: readiness.reason };
 	}
 
@@ -138,7 +153,7 @@ export async function awaitDeferredSquash(
 		};
 
 		try {
-			ctx.compact({
+			compact({
 				onComplete: () => {
 					void (async () => {
 						try {

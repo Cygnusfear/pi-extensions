@@ -284,3 +284,42 @@ describe("buildCompactionFailureNotice", () => {
 		expect(buildCompactionFailureNotice(-2, false)).toContain("context guard was already released");
 	});
 });
+
+	test("schedules compaction when the host exposes no readiness method", async () => {
+		// Host-version skew: older or packaged hosts have no getCompactionReadiness.
+		// Calling it unconditionally was the production TypeError; the squash must
+		// still be scheduled and let the host decide.
+		let compactCalls = 0;
+		const ctx = {
+			mode: "print" as const,
+			compact(options: { onComplete?: () => void }) {
+				compactCalls++;
+				options.onComplete?.();
+			},
+		};
+		expect(await awaitDeferredSquash(ctx, {}, () => {})).toEqual({ status: "compacted" });
+		expect(compactCalls).toBe(1);
+	});
+
+	test("refuses honestly when the host exposes no compaction surface at all", async () => {
+		await expect(awaitDeferredSquash({ mode: "print" }, {}, () => {})).rejects.toThrow(
+			/host build exposes no compaction surface/,
+		);
+	});
+
+	test("still skips without scheduling when the host reports it cannot compact", async () => {
+		let compactCalls = 0;
+		const result = await awaitDeferredSquash(
+			{
+				mode: "print",
+				getCompactionReadiness: () => ({ canCompact: false, reason: "too-small" }),
+				compact() {
+					compactCalls++;
+				},
+			},
+			{},
+			() => {},
+		);
+		expect(result).toEqual({ status: "skipped", reason: "too-small" });
+		expect(compactCalls).toBe(0);
+	});
