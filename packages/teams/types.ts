@@ -49,7 +49,9 @@ export interface WorkerHandle {
 	lastSeenCommentCount: number;
 	lastStuckWarningAt?: number;
 	exitCode?: number | null;
-	/** Bounded re-check counter for the Bun premature child-exit workaround. */
+	/** Diagnostic re-check counter for the Bun premature child-exit workaround.
+	 *  Unbounded by design: the re-check runs until an observation confirms the
+	 *  incarnation is gone, however long that takes. */
 	exitRecheckAttempts?: number;
 	spawnError?: string;
 	attempts?: WorkerAttempt[];

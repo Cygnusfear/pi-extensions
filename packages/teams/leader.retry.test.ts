@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableStreamAbort, getRecoverableToolRetry } from "./leader.ts";
+import { TeamLeader, assessWorkerExit, endedWithUnresolvedCompaction, getRecoverableStreamAbort, getRecoverableToolRetry, recoveredAfterMisAssessedExitSummary } from "./leader.ts";
 import type { SpawnConfig, WorkerHandle } from "./types.js";
 import {
 	LIFECYCLE_FACT_ENTRY_TYPE,
@@ -298,6 +298,375 @@ describe("assessWorkerExit", () => {
 		expect(result.reason).toContain("without explicit team_finish");
 	});
 });
+// ───────────────────────────────────────────────────────────────────────────
+// Bun premature child-exit settlement (pe-ltanf0de / pe-bkhz61he)
+//
+// Evidence: a worker settled 1.56 s after spawn with a PROVISIONAL
+// assessment_missing_finish while its process stayed alive for another 13
+// minutes; it then appended a valid finish-pending entry and called
+// team_finish, whose finish envelopes were never acked because
+// handleWorkerExit early-returned on the already-recorded "exited" phase.
+// ───────────────────────────────────────────────────────────────────────────
+
+function makeMeshStub() {
+	const tells: Array<{ id: string; message: any }> = [];
+	const mesh = {
+		tell: (id: string, message: unknown) => { tells.push({ id, message: message as any }); },
+		tellAndWaitForReceipt: async () => ({ phase: "delivered" as const }),
+		ask: async () => ({}),
+		stop: () => {},
+		on: () => {},
+		off: () => {},
+		peers: () => [],
+		self: () => ({ id: "coordinator" }),
+	};
+	return { tells, mesh };
+}
+
+async function waitForCondition(predicate: () => boolean, timeoutMs = 3000, label = "condition"): Promise<void> {
+	const started = Date.now();
+	while (Date.now() - started < timeoutMs) {
+		if (predicate()) return;
+		await Bun.sleep(10);
+	}
+	throw new Error("Timed out waiting for " + label);
+}
+
+function coordinatorFacts(sessionEntries: any[]): LifecycleFact[] {
+	return sessionEntries
+		.filter((entry) => entry.type === "custom" && entry.customType === LIFECYCLE_FACT_ENTRY_TYPE)
+		.map((entry) => entry.data as LifecycleFact);
+}
+
+function writeFinishPendingEntry(
+	sessionFile: string,
+	identity: { coordinatorSessionId: string; teamId: string; workerId: string; attemptId: string },
+	summary: string,
+): string {
+	const eventId = createDeclarationEventId(identity, "done", summary);
+	fs.appendFileSync(sessionFile, JSON.stringify({
+		type: "custom",
+		customType: WORKER_FINISH_PENDING_ENTRY_TYPE,
+		data: { schemaVersion: 1, ...identity, status: "done", summary, eventId, createdAt: Date.now() },
+	}) + "\n");
+	return eventId;
+}
+
+function makePrematureWorker(sessionDir: string, sessionFile: string, overrides: Partial<WorkerHandle> = {}): WorkerHandle {
+	return {
+		workerId: "worker-premature",
+		workerInstanceId: "attempt-premature",
+		name: "premature-worker",
+		pid: undefined,
+		ticketId: "tk-premature",
+		ticketStatus: "open",
+		sessionDir,
+		sessionFile,
+		worktreePath: null,
+		hasTools: false,
+		status: "running",
+		spawnedAt: Date.now() - 100,
+		lastActivityAt: Date.now() - 100,
+		lastProcessActivityAt: Date.now() - 100,
+		hasActiveChildProcess: false,
+		activeChildProcessCount: 0,
+		lastSeenCommentCount: 0,
+		routeState: "linked",
+		...overrides,
+	};
+}
+
+describe("TeamLeader premature child-exit settlement", () => {
+	test("an exit the leader cannot confirm does not settle the worker", async () => {
+		const baseDir = makeTempDir("teams-premature-exit-defer-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "premature-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const { leader } = makeLeaderHarness(baseDir);
+		const events: any[] = [];
+		leader.notifyLLM = (event: any) => { events.push(event); };
+		leader.exitRecheckIntervalMs = 25;
+		// The spawn window: no pid is recorded yet, so nothing can confirm death.
+		const worker = makePrematureWorker(sessionDir, sessionFile);
+
+		await leader.handleWorkerExit(worker.name, worker, 0, false);
+
+		// The defect: this used to record a provisional assessment_missing_finish and
+		// settle the worker 1.5 s after spawn while the process was still running.
+		expect(leader.getAttemptHistory({ attemptId: "attempt-premature" })[0]?.assessment).toBeUndefined();
+		expect(leader.getAttemptHistory({ attemptId: "attempt-premature" })[0]?.process.phase).not.toBe("exited");
+		expect(events).toHaveLength(0);
+		expect(worker.status).toBe("running");
+		// The exit was deferred with a re-check, not dropped.
+		expect(worker.exitRecheckAttempts ?? 0).toBeGreaterThanOrEqual(1);
+	});
+
+	test("a declaration written after the exit event is recovered and acked by the periodic re-check", async () => {
+		const baseDir = makeTempDir("teams-premature-exit-recover-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "late-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const identity = {
+			coordinatorSessionId: "leader-test-session",
+			teamId: "team-late",
+			workerId: "worker-late",
+			attemptId: "attempt-late",
+		};
+		// The worker exists canonically — spawn intent and process start were durably
+		// recorded and the process is still alive. Only its EXIT was reported early,
+		// so no exit fact exists yet.
+		const spawnRequested: LifecycleFact = {
+			schemaVersion: 4, ...identity,
+			eventId: createRootEventId("spawn_requested", identity),
+			kind: "spawn_requested", occurredAt: 1,
+			payload: {
+				name: "late-declare-worker", ticketId: "tk-late", persistent: false,
+				sessionMode: { kind: "fresh" }, sessionDir, workerSessionFile: sessionFile, worktreePath: null,
+			},
+		};
+		const processStarted: LifecycleFact = {
+			schemaVersion: 4, ...identity,
+			eventId: "process-started-late", kind: "process_started", occurredAt: 2,
+			payload: {
+				pid: process.pid, processBirth: { startedAt: Date.now() },
+				sessionMode: { kind: "fresh" }, sessionDir, workerSessionFile: sessionFile,
+			},
+		};
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir, [spawnRequested, processStarted].map((data) => ({
+			type: "custom", customType: LIFECYCLE_FACT_ENTRY_TYPE, data,
+		})));
+		leader.exitRecheckIntervalMs = 25;
+		const { tells, mesh } = makeMeshStub();
+		(leader as any).mesh = mesh;
+		const worker = makePrematureWorker(sessionDir, sessionFile, {
+			workerId: "worker-late",
+			workerInstanceId: "attempt-late",
+			name: "late-declare-worker",
+			// Alive: the premature exit must be deferred, not believed.
+			pid: process.pid,
+			ticketId: "tk-late",
+			durableMeshId: "worker-late-durable",
+		});
+
+		await leader.handleWorkerExit(worker.name, worker, 0, false);
+		// The exit was not confirmed, so nothing was settled and nothing assessed.
+		expect(leader.getAttemptHistory({ attemptId: "attempt-late" })[0]?.assessment).toBeNull();
+		expect(leader.getAttemptHistory({ attemptId: "attempt-late" })[0]?.process.phase).toBe("running");
+		// The exit event will never fire again: the declaration is written AFTER it.
+		const summary = "verdict recovered after the mis-assessed exit";
+		const declarationEventId = writeFinishPendingEntry(sessionFile, identity, summary);
+
+		await waitForCondition(
+			() => Boolean(leader.getAttemptHistory({ attemptId: "attempt-late" })[0]?.declaration),
+			3000,
+			"declaration recovered by the periodic re-check",
+		);
+
+		const attempt = leader.getAttemptHistory({ attemptId: "attempt-late" })[0]!;
+		expect(attempt.declaration).toMatchObject({ kind: "done", summary, eventId: declarationEventId });
+		// Nothing was ever mis-assessed in this flow, so nothing may claim a correction.
+		expect(coordinatorFacts(sessionEntries).filter((fact) => fact.kind === "outcome_corrected")).toHaveLength(0);
+		// The worker's bounded finish retry gets its durable ack.
+		const acks = tells.filter((entry) => entry.message?.type === "leader.ack");
+		expect(acks).toHaveLength(1);
+		expect(acks[0]!.message.payload).toMatchObject({ eventId: declarationEventId, phase: "persisted" });
+
+		// Stop the re-check chain now that its behaviour has been asserted.
+		worker.spawnedAt = -1;
+	});
+
+	test("a declaration recovered after a mis-assessed exit supersedes the provisional assessment truthfully", async () => {
+		const baseDir = makeTempDir("teams-premature-exit-correct-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const workerSessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(workerSessionFile, JSON.stringify({ type: "session", version: 3, id: "late-declare-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const { leader, sessionEntries, sendMessageLog } = makeLeaderHarness(baseDir);
+		const events: any[] = [];
+		leader.notifyLLM = (event: any) => { events.push(event); };
+		const { tells, mesh } = makeMeshStub();
+		(leader as any).mesh = mesh;
+		const worker = makePrematureWorker(sessionDir, workerSessionFile, {
+			workerId: "worker-mis-assessed",
+			workerInstanceId: "attempt-mis-assessed",
+			name: "mis-assessed-worker",
+			pid: 999999, // observably gone, so THIS exit is confirmed and settles
+			ticketId: "tk-mis-assessed",
+			routeState: "dead",
+			durableMeshId: "worker-mis-assessed-durable",
+		});
+
+		// The premature settlement: the attempt is assessed as a missing finish while
+		// the worker is (in reality) still producing its verdict. This is the exact
+		// assessment the coordinator received 1.56 s after spawn.
+		await leader.handleWorkerExit(worker.name, worker, 0, false);
+		const settled = leader.getAttemptHistory({ attemptId: "attempt-mis-assessed" })[0]!;
+		expect(settled.process.phase).toBe("exited");
+		expect(settled.assessment?.kind).toBe("missing_finish");
+		expect(settled.assessment?.provisional).toBe(true);
+		expect(events.map((event) => event.type)).toEqual(["warning"]);
+		expect(events[0]!.reason).toContain("no tool calls or substantive output");
+
+		// The worker finally writes its verdict. The "exit" event that would have
+		// driven recovery already fired and will not fire again.
+		const summary = "Six-pass review of pe-rp4pdsnq roster";
+		const identity = {
+			coordinatorSessionId: settled.coordinatorSessionId,
+			teamId: settled.teamId,
+			workerId: settled.workerId,
+			attemptId: settled.attemptId,
+		};
+		const declarationEventId = writeFinishPendingEntry(workerSessionFile, identity, summary);
+
+		await leader.handleWorkerExit(worker.name, worker, 0, false);
+
+		const attempt = leader.getAttemptHistory({ attemptId: "attempt-mis-assessed" })[0]!;
+		expect(attempt.declaration).toMatchObject({ kind: "done", summary, eventId: declarationEventId });
+		expect(attempt.assessment?.kind).toBe("missing_finish");
+		expect(worker.lastNote).toBe(recoveredAfterMisAssessedExitSummary(summary));
+
+		const corrections = coordinatorFacts(sessionEntries).filter((fact) => fact.kind === "outcome_corrected");
+		expect(corrections).toHaveLength(1);
+		expect((corrections[0]!.payload as any).summary).toBe(recoveredAfterMisAssessedExitSummary(summary));
+
+		// The coordinator-facing reason for the recovered case is the truthful one, and
+		// the superseded provisional claim is never delivered as the worker's outcome:
+		// a worker that declared a completed verdict is not reported as having produced
+		// nothing.
+		const delivered = fs.readFileSync(sendMessageLog, "utf-8").trim().split("\n")
+			.map((line) => String(JSON.parse(line)[0].content))
+			.join("\n");
+		expect(delivered).toContain("declared after a mis-assessed exit; verdict recovered");
+		expect(delivered).toContain(summary);
+		expect(delivered).not.toContain("no tool calls or substantive output in session");
+		expect(delivered).not.toContain("warning · mis-assessed-worker");
+		expect(leader.getCurrentTerminalEvent("mis-assessed-worker", "warning", attempt.attemptId)).toBeNull();
+		const terminal = leader.getCurrentTerminalEvent("mis-assessed-worker", "completed", attempt.attemptId);
+		expect(terminal?.type).toBe("completed");
+		expect((terminal as any).result).toContain("declared after a mis-assessed exit; verdict recovered");
+
+		// Recovery is idempotent: a later exit event must not re-settle or re-declare.
+		// (The durable ack belongs to the still-addressable worker — the deferred
+		// path asserted above — because teardown clears the handle's mesh address.)
+		await leader.handleWorkerExit(worker.name, worker, 0, false);
+		expect(coordinatorFacts(sessionEntries).filter((fact) => fact.kind === "declaration_done")).toHaveLength(1);
+		expect(coordinatorFacts(sessionEntries).filter((fact) => fact.kind === "outcome_corrected")).toHaveLength(1);
+		expect(tells).toHaveLength(0);
+	});
+
+	test("a genuinely dead worker is settled by the confirming observation, not stranded", async () => {
+		const baseDir = makeTempDir("teams-premature-exit-dead-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "dead-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const { leader } = makeLeaderHarness(baseDir);
+		leader.exitRecheckIntervalMs = 25;
+		const events: any[] = [];
+		leader.notifyLLM = (event: any) => { events.push(event); };
+		const worker = makePrematureWorker(sessionDir, sessionFile, {
+			workerId: "worker-alive-then-dead",
+			workerInstanceId: "attempt-alive-then-dead",
+			name: "alive-then-dead-worker",
+			ticketId: "tk-alive-then-dead",
+			spawnedAt: Date.now(),
+		});
+
+		// A live incarnation the leader CAN observe: the premature exit is deferred.
+		const child = Bun.spawn(["sleep", "30"], { stdio: ["ignore", "ignore", "ignore"] });
+		worker.pid = child.pid;
+		try {
+			await leader.handleWorkerExit(worker.name, worker, 0, false);
+			expect(leader.getAttemptHistory({ attemptId: "attempt-alive-then-dead" })[0]?.assessment).toBeUndefined();
+			expect(events).toHaveLength(0);
+
+			// Kill it: the next re-check observes the absence and releases the worker.
+			child.kill("SIGKILL");
+			await waitForCondition(
+				() => Boolean(leader.getAttemptHistory({ attemptId: "attempt-alive-then-dead" })[0]?.assessment),
+				5000,
+				"settlement after the process really died",
+			);
+			const attempt = leader.getAttemptHistory({ attemptId: "attempt-alive-then-dead" })[0]!;
+			expect(attempt.assessment?.kind).toBe("missing_finish");
+			expect(attempt.process.phase).toBe("exited");
+		} finally {
+			try { child.kill("SIGKILL"); } catch {}
+		}
+	});
+
+	test("an authoritative death observation (launch failure) still settles immediately", async () => {
+		const baseDir = makeTempDir("teams-authoritative-death-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "launch-failure-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const { leader } = makeLeaderHarness(baseDir);
+		const worker = makePrematureWorker(sessionDir, sessionFile, {
+			workerId: "worker-launch-failure",
+			workerInstanceId: "attempt-launch-failure",
+			name: "launch-failure-worker",
+			// Alive on purpose: launch.onFailure is authoritative and must not be
+			// second-guessed by the liveness workaround.
+			pid: process.pid,
+			ticketId: "tk-launch-failure",
+			status: "spawning",
+			spawnedAt: Date.now(),
+			routeState: "pending",
+			spawnError: "spawn_error: executable not found",
+		});
+
+		await leader.handleWorkerExit(worker.name, worker, null, true);
+
+		const attempt = leader.getAttemptHistory({ attemptId: "attempt-launch-failure" })[0]!;
+		expect(attempt.process.phase).toBe("exited");
+		expect(attempt.assessment).toBeDefined();
+		expect(attempt.assessment?.provisional).toBe(false);
+	});
+
+	test("the activity poll does not settle an incarnation younger than the process-table cache", async () => {
+		const baseDir = makeTempDir("teams-activity-absence-");
+		const sessionDir = path.join(baseDir, "session");
+		fs.mkdirSync(sessionDir, { recursive: true });
+		const sessionFile = path.join(sessionDir, "worker.jsonl");
+		fs.writeFileSync(sessionFile, JSON.stringify({ type: "session", version: 3, id: "activity-session", timestamp: new Date().toISOString(), cwd: process.cwd() }) + "\n");
+
+		const { leader, sessionEntries } = makeLeaderHarness(baseDir);
+		const worker = makePrematureWorker(sessionDir, sessionFile, {
+			workerId: "worker-activity",
+			workerInstanceId: "attempt-activity",
+			name: "activity-worker",
+			pid: 999999, // genuinely absent from the process table
+			ticketId: "tk-activity",
+			spawnedAt: Date.now(), // younger than the cached table can account for
+			lastActivityAt: Date.now(),
+			lastProcessActivityAt: Date.now(),
+		});
+
+		await (leader as any).refreshWorkerActivity(worker.name, worker);
+		await Bun.sleep(150);
+		expect(coordinatorFacts(sessionEntries).filter((fact) => fact.kind === "process_exited")).toHaveLength(0);
+		expect(leader.getAttemptHistory({ attemptId: "attempt-activity" })[0]?.process.phase ?? "spawning").not.toBe("exited");
+
+		// Once the incarnation is older than the table's staleness the absence is a
+		// real observation and the worker settles.
+		worker.spawnedAt = Date.now() - 5_000;
+		await (leader as any).refreshWorkerActivity(worker.name, worker);
+		await waitForCondition(
+			() => leader.getAttemptHistory({ attemptId: "attempt-activity" })[0]?.process.phase === "exited",
+			5000,
+			"settlement once absence is confirmable",
+		);
+	});
+});
+
 
 describe("TeamLeader malformed tool JSON recovery", () => {
 	test("retries once by resuming the worker session with escape guidance", async () => {
