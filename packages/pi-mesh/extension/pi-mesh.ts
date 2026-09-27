@@ -6,7 +6,12 @@
  * If the sidecar isn't running, we spawn it on demand.
  */
 
-import { createSurfacedDeliveryGuard, surfacedDeliveryPath } from "./inbound-dedup.ts";
+import {
+  createSurfacedDeliveryGuard,
+  selectFreshDrained,
+  surfacedDeliveryPath,
+  tellContentKey,
+} from "./inbound-dedup.ts";
 import { tellAttempts } from "./tell-target.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
@@ -1828,6 +1833,16 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       const durableId = mesh.getIdentity()?.id;
       return durableId ? surfacedDeliveryPath(durableId) : undefined;
     },
+    // Loud, every time (pe-hbdmvoav): a guard that cannot read or write its history is
+    // exactly the state that re-surfaces mail after a restart. stderr for the operator,
+    // and a session entry so the failure sits in session.jsonl next to any duplicate
+    // it causes, where the next investigator will look.
+    onError: (message) => {
+      console.error(message);
+      try {
+        pi.appendEntry("mesh_surfaced_guard_error", { message, at: Date.now() });
+      } catch {}
+    },
   });
   const pendingAsks: Array<{
     requestId: number;
@@ -2180,8 +2195,13 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // mailbox, and the revive drain is where it came back a second time - seen by
       // several agents, not just this one. Same guard as the live path, which is why
       // it has to persist across the restart that triggers the replay.
-      const fresh = drained.filter((d) => !(d.deliveryId && surfacedDeliveries.has(d.deliveryId)));
-      for (const d of fresh) if (d.deliveryId) surfacedDeliveries.remember(d.deliveryId);
+      //
+      // pe-hbdmvoav: the decision is made AND written before anything surfaces
+      // (selectFreshDrained -> claim), and it is keyed on the deliveryId and on the
+      // tell's content (sender + send time + payload hash), because one logical tell
+      // has arrived here under four deliveryIds minted in the same millisecond by a
+      // sender fan-out. Duplicates inside this one drain collapse the same way.
+      const { fresh } = selectFreshDrained(drained, surfacedDeliveries);
 
       if (fresh.length > 0) {
         const blob = formatReviveDrainBatch(
@@ -2195,7 +2215,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
             display: true,
             details: {
               count: fresh.length,
-              tells: drained.map((d) => ({
+              // Only what was surfaced: listing suppressed ids here made every later
+              // grep of session.jsonl count them as extra deliveries.
+              tells: fresh.map((d) => ({
                 from: d.fromId,
                 senderLabel: d.senderLabel,
                 topic: d.topic,
@@ -2555,15 +2577,26 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       // Idle → deliver immediately.
       mesh.on("message", (inbound) => {
         const { message: msg, deliveryId, ackRequested, preempt, originalFrom } = inbound;
-        // Already surfaced: this is a redelivery (sender retry or mailbox replay).
-        // Ack it so the retry stops, render nothing - the human saw it once.
-        if (deliveryId && surfacedDeliveries.has(deliveryId)) {
-          if (originalFrom && ackRequested) {
-            mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"));
+        // Already surfaced: this is a redelivery (sender retry, mailbox replay, or the
+        // same tell re-sent under a new id by a sender fan-out - pe-hbdmvoav). Ack it so
+        // a retry stops, render nothing - the human saw it once. claim() records the
+        // decision durably BEFORE anything below can surface it.
+        if (deliveryId) {
+          const claim = surfacedDeliveries.claim({
+            deliveryId,
+            contentKey: tellContentKey({
+              from: originalFrom ?? msg.from,
+              sentAt: msg.timestamp,
+              payload: msg.payload,
+            }),
+          });
+          if (!claim.fresh) {
+            if (originalFrom && ackRequested) {
+              mesh.sendTellReceipt(originalFrom, buildTellReceiptAck(deliveryId, mesh.self().id, "delivered"));
+            }
+            return;
           }
-          return;
         }
-        if (deliveryId) surfacedDeliveries.remember(deliveryId);
         if (isTeamsLifecyclePayload(msg.payload)) return;
         // Control-plane: a mesh:control tell is a harness command (setModel, …),
         // not conversation. Route it to its handler and never surface to the LLM.
