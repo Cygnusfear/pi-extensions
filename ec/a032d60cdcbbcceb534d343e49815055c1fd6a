@@ -1,0 +1,23 @@
+packages/pi-mesh/extension/inbound-dedup.ts
+  s_b478fe36784bff::t_451323ef9e2a35 9-18,20,23,28-31,44-53,55-58,60-83,91-97,99-100,107-112,120-132,134-145,149-156,158,160-165,167-194,197-205,209,211-213,215-217,221-224,228,232,235-252,255-258,262-296
+packages/pi-mesh/extension/inbound-dedup.test.ts
+  s_b478fe36784bff::t_fc74b3aedcb4f8 2,5-6,71-234
+packages/pi-mesh/extension/pi-mesh.ts
+  s_b478fe36784bff::t_57f64d367d9228 9-14,1836-1845,2198-2204,2218-2220,2580-2597
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eca032d60cdcbbcceb534d343e49815055c1fd6a",
+  "prompts": {},
+  "sessions": {
+    "s_b478fe36784bff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "58e4e866-becd-4f5a-b7ac-a96dcc0cc14a",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
