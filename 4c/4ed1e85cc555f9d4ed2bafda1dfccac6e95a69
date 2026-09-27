@@ -1,0 +1,28 @@
+packages/pi-mesh/extension/pi-mesh.roster.test.ts
+  s_e210abbd6699df::t_9212c02b00dee7 1-59,61,75-76,95,100,102-161
+  s_7f5cf50e563962::t_f613597d3c4f60 60,62-74,77-94,96-99,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4c4ed1e85cc555f9d4ed2bafda1dfccac6e95a69",
+  "prompts": {},
+  "sessions": {
+    "s_7f5cf50e563962": {
+      "agent_id": {
+        "tool": "Neta Apollo Zaldarriaga",
+        "id": "01a0e492-2036-707e-855f-d5c46c4fb5cf",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": null
+    },
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
