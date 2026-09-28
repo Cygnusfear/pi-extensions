@@ -1,0 +1,23 @@
+packages/teams/activity.async-probe.test.ts
+  s_e210abbd6699df::t_ba9a4fb15f821c 1,14,21,26-29,33-35,42-43
+  s_e210abbd6699df::t_6316babfe10866 5-11,19-20,30-32,37-40,44-45
+  s_e210abbd6699df::t_9aaad0e746f2bb 12-13,41
+  s_e210abbd6699df::t_c8c329cce2ef63 23
+  s_e210abbd6699df::t_2c6543f55be145 2-4,15-18,22,24-25,36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72f2d3add08dec20f982ef035b18dc25d5391ca0",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
