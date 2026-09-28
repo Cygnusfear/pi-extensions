@@ -22,9 +22,9 @@ is the one who merges. Five things a contributor is expected to get right:
 
 ## The pin (if you build for the kaliv3 fleet)
 
-The kaliv3 runner pins this repository at a specific revision (currently `17f7caa8`),
-while `main` moves ahead of it (currently `72f2d3ad`). Cloning `main` is expected and
-fine — just know that the fleet is not running it. **Bumping the pin is the
+The kaliv3 runner pins this repository at a specific revision (ask the coordinator for the
+current one, or read the runner config), and `main` normally sits AHEAD of that pin.
+Cloning `main` is expected and fine — just never assume the fleet runs what `main` has. **Bumping the pin is the
 coordinator's decision, never a builder's**: never align the fleet to your own branch,
 and never assume a commit is deployed because it is on `main`.
 
