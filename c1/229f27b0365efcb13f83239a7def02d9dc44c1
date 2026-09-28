@@ -1,0 +1,19 @@
+CONTRIBUTING.md
+  s_e210abbd6699df::t_e3e4c51e844fef 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c1229f27b0365efcb13f83239a7def02d9dc44c1",
+  "prompts": {},
+  "sessions": {
+    "s_e210abbd6699df": {
+      "agent_id": {
+        "tool": "Juan Conjunction Wechsler",
+        "id": "6fd20eff-7b9c-410f-9415-02e3282a7c74",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
