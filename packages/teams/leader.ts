@@ -2871,6 +2871,10 @@ export class TeamLeader {
     void this.handleTicketChange(worker);
 
     const snapshot = await sampleWorkerProcessSnapshotAsync(worker.pid);
+    // No process table at all (ps failed): that is no observation about this
+    // worker, so this cycle settles nothing. Absence only counts when a table
+    // that could postdate the incarnation reported it. (pe-jy0szn6e F1)
+    if (!snapshot) return;
     const incarnationStartedAt = worker.attempts?.at(-1)?.spawnedAt ?? worker.spawnedAt;
     const pidReused = isReusedWorkerPid(snapshot, incarnationStartedAt, now);
     // Absence is only an observation about THIS incarnation once the table that

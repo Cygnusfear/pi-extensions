@@ -11,7 +11,7 @@ export const PROCESS_TABLE_CACHE_TTL_MS = 2_000;
 
 let _cachedRows: ProcessRow[] | null = null;
 let _cachedAt = 0;
-let _pendingFetch: Promise<ProcessRow[]> | null = null;
+let _pendingFetch: Promise<ProcessRow[] | null> | null = null;
 
 function fetchProcessTableSync(): ProcessRow[] {
   return readProcessTable(PROCESS_TABLE_CACHE_TTL_MS) ?? [];
@@ -39,23 +39,39 @@ function readProcessTable(cacheTtlMs: number): ProcessRow[] | null {
   }
 }
 
-async function fetchProcessTableAsync(): Promise<ProcessRow[]> {
+async function fetchProcessTableAsync(): Promise<ProcessRow[] | null> {
   const now = Date.now();
   if (_cachedRows && now - _cachedAt < PROCESS_TABLE_CACHE_TTL_MS) return _cachedRows;
-  // Coalesce concurrent callers onto a single subprocess
+  // Coalesce concurrent callers onto a single subprocess. The clear happens in a
+  // finally AFTER an await, so it cannot run before the assignment below has
+  // completed — a callback that fires synchronously (a test double, or any future
+  // shim) would otherwise overwrite the clear and strand a resolved promise in
+  // _pendingFetch, making every later call return the old observation.
   if (_pendingFetch) return _pendingFetch;
-  _pendingFetch = new Promise<ProcessRow[]>((resolve) => {
-    execFile("ps", ["-ax", "-o", "pid=,ppid=,pcpu=,etime=,state=,comm="], {
-      encoding: "utf8",
-    }, (err, stdout) => {
-      _pendingFetch = null;
-      if (err) { resolve([]); return; }
+  const pending = (async (): Promise<ProcessRow[] | null> => {
+    try {
+      const stdout = await new Promise<string>((resolve, reject) => {
+        execFile("ps", ["-ax", "-o", "pid=,ppid=,pcpu=,etime=,state=,comm="], {
+          encoding: "utf8",
+        }, (err, out) => (err ? reject(err) : resolve(out)));
+      });
       _cachedRows = parseProcessTable(stdout);
       _cachedAt = Date.now();
-      resolve(_cachedRows);
-    });
-  });
-  return _pendingFetch;
+      return _cachedRows;
+    } catch {
+      // A failed ps is NO OBSERVATION, not an empty process table. Resolving []
+      // made every pid derive rootAlive:false, and the activity poll then settled
+      // every worker older than the cache TTL on one transient execFile failure
+      // (EMFILE/fork pressure — the nightly-spawn regime that produced
+      // pe-ltanf0de). The sync path has always returned null for exactly this
+      // reason; the async path must not disagree with it. (pe-jy0szn6e F1)
+      return null;
+    } finally {
+      _pendingFetch = null;
+    }
+  })();
+  _pendingFetch = pending;
+  return pending;
 }
 
 export interface ProcessRow {
@@ -587,8 +603,11 @@ export function sampleWorkerProcessSnapshotFresh(workerPid: number): WorkerProce
  * Async variant — non-blocking, coalesces concurrent callers onto one
  * subprocess.  All workers in the same poll cycle share a single `ps -ax`.
  */
-export async function sampleWorkerProcessSnapshotAsync(workerPid: number): Promise<WorkerProcessSnapshot> {
+export async function sampleWorkerProcessSnapshotAsync(workerPid: number): Promise<WorkerProcessSnapshot | null> {
   const rows = await fetchProcessTableAsync();
+  // null = the process table could not be read at all. Callers must treat that as
+  // unknown and skip the cycle, exactly as sampleWorkerProcessSnapshotFresh does.
+  if (!rows) return null;
   return deriveWorkerProcessSnapshot(rows, workerPid);
 }
 
