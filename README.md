@@ -142,3 +142,8 @@ Each package is independently installable, testable, and removable via `~/.pi/ag
 | [defaults](packages/defaults/)                   | Directory-aware read, AGENTS.md discovery, git rebase helper, auto naming |
 | [cwd](packages/cwd/)                             | Change session base directory (`/cwd <path>`)                             |
 | [code-review-guard](packages/code-review-guard/) | Injects code health prompt after code-reading tool results                |
+
+## Contributing
+
+How changes land on `main`, the kaliv3 pin, jailed builder shells and the evidence
+standard: see [CONTRIBUTING.md](CONTRIBUTING.md).
