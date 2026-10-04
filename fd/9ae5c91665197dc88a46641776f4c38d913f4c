@@ -1,0 +1,26 @@
+packages/mesh-model-control/extensions/control-authorization.test.ts
+  s_7cf39782525820::t_6ddfe1c0ccf360 1-57
+packages/mesh-model-control/extensions/control-authorization.handler.test.ts
+  s_7cf39782525820::t_fd7d15bba582e9 1,6,11-17,19-26,39-45,49-54,58-59,61-71,77-78
+  s_7cf39782525820::t_52be5c8798a5b0 2-5,7-10,18,27-38,46-48,55-57,60,72-76
+packages/mesh-model-control/extensions/mesh-model-control.ts
+  s_7cf39782525820::t_9cade9801dd174 20-23,73-92
+packages/mesh-model-control/extensions/control-authorization.ts
+  s_7cf39782525820::t_2ec59784bb12a4 1-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd9ae5c91665197dc88a46641776f4c38d913f4c",
+  "prompts": {},
+  "sessions": {
+    "s_7cf39782525820": {
+      "agent_id": {
+        "tool": "Aomawa Quasar Walkowicz",
+        "id": "49d1ffd4-51fa-493b-bc26-7011b956d021",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
