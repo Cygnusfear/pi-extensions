@@ -646,7 +646,7 @@ export function registerProviderKeyRouter(
 				// The UI notification remains the authoritative fallback.
 			}
 		}
-		if (abort) ctx.abort();
+		if (abort) ctx.abort(`provider-key-router: keys exhausted for ${ring.stored.label}`);
 		if (event) emitHandled(event, ring, "all-keys-exhausted");
 	}
 
@@ -711,7 +711,7 @@ export function registerProviderKeyRouter(
 				`Provider key health routing failed closed for ${ring.stored.label}: ${error instanceof Error ? error.message : String(error)}`,
 				"error",
 			);
-			ctx.abort();
+			ctx.abort(`provider-key-router: routing failed closed for ${ring.stored.label}`);
 			emitHandled(event, ring, "all-keys-exhausted");
 			return "exhausted";
 		}
@@ -1203,7 +1203,7 @@ export function registerProviderKeyRouter(
 				`Could not persist ${ring.stored.label} key failure; request aborted: ${error instanceof Error ? error.message : String(error)}`,
 				"error",
 			);
-			ctx.abort();
+			ctx.abort(`provider-key-router: could not persist key failure for ${ring.stored.label}`);
 			emitHandled(event, ring, "all-keys-exhausted");
 			return true;
 		}

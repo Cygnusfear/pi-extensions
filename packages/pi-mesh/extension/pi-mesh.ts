@@ -2780,7 +2780,7 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         let aborted: boolean | undefined;
         if (plan.action === "preempt-abort") {
           aborted = plan.abortFirst && !!currentCtx;
-          if (aborted) currentCtx?.abort();
+          if (aborted) currentCtx?.abort(`mesh preempt-abort from ${msg.from ?? "unknown"}`);
         }
         // Append a bottom signature so an agent who only reads the END of the
         // message still sees the real mesh sender (see default-prompt identity
