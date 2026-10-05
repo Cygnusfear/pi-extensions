@@ -19,7 +19,7 @@
  * Routes (slice 1):
  *   GET  /                          → index of all frontpages
  *   GET  /healthz                   → { ok: true, version: 2, pid }
- *   GET  /page/:slug                → tldraw shell HTML
+ *   GET  /page/:slug                → document HTML with an annotation overlay
  *   GET  /page/:slug/embed          → raw frontpage HTML (with layout-shim injected)
  *   GET  /api/page/:slug            → meta + sections summary
  *   GET  /client/bundle.js          → bundled tldraw client
@@ -27,42 +27,123 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash, randomUUID } from "node:crypto";
 import { injectBeforeBodyClose } from "./html-inject.ts";
+import { withAnnotationLayer } from "./document-page.ts";
+import { readClientRelease } from "./client-release.ts";
+import { RESTORE_BLOCKED, listFrontpages } from "./index-entries.ts";
+import { annotationOffset, toDocumentCoordinates, contentAnchor, referenceAnchor, anchorPosition, type ContentAnchor } from "./annotation-coordinates.ts";
+import { createAnnotationSchema, emptyAnnotationSnapshot, normalizeAnnotationSnapshot } from "./annotation-schema.ts";
+import { getIndexAbove, type IndexKey } from "@tldraw/utils";
+import type { TLStoreSnapshot } from "@tldraw/tlschema";
+import {
+	isWritable,
+	assertPageSlug,
+	isPageSlug,
+	documentPath,
+	InvalidPageSlug,
+	moveArtifactsAside,
+	readLifecycle,
+	renderBanner,
+	restoreArtifacts,
+	writeLifecycle,
+} from "./lifecycle.ts";
 
 // ---- paths ----
 const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(SCRIPT_DIR, "..");
 const CLIENT_DIST = path.join(PKG_ROOT, "dist-client");
+const clientRelease = await readClientRelease(CLIENT_DIST);
 
 const PORT = Number(process.env.FRONTPAGE_PORT ?? 39288);
 const HOST = process.env.FRONTPAGE_HOST ?? "127.0.0.1";
 
 function pagePath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.html`);
+	return documentPath(STORE_DIR, slug, ".html");
 }
 function metaPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.meta.json`);
+	return documentPath(STORE_DIR, slug, ".meta.json");
 }
 
 // ---- Hono app ----
 const app = new Hono();
+const annotationSchema = createAnnotationSchema();
+for (const route of ["/page/:slug", "/page/:slug/*", "/api/page/:slug", "/api/page/:slug/*"]) {
+	app.use(route, async (c, next) => {
+		try { assertPageSlug(c.req.param("slug") ?? ""); }
+		catch (error) { if (error instanceof InvalidPageSlug) return c.json({ error: error.message }, 400); throw error; }
+		await next();
+	});
+}
+
+// A write for a page that has no content would leave files behind for a
+// document that does not exist - a mistyped or hostile slug could otherwise
+// fill the store one request at a time. Reads are unaffected: an empty record
+// set is an honest answer, a created file is not.
+for (const route of ["/api/page/:slug", "/api/page/:slug/*"]) {
+	app.use(route, async (c, next) => {
+		if (c.req.method === "GET" || c.req.method === "HEAD") return next();
+		const slug = c.req.param("slug") ?? "";
+		if (!fs.existsSync(pagePath(slug))) return c.json({ error: "no page '" + slug + "'" }, 404);
+		await next();
+	});
+}
 
 app.get("/", async (c) => {
-	const entries = await listFrontpages();
-	const rows = entries
-		.map(
-			(e) =>
-				`<li><a href="/page/${encodeURIComponent(e.slug)}">${escapeHtml(e.title)}</a> <span class="muted">${e.slug}</span></li>`,
-		)
-		.join("\n");
-	return c.html(indexHtml(rows, entries.length));
+	const view = c.req.query("retired") === "1" ? "retired" : c.req.query("attention") === "1" ? "attention" : "current";
+	const entries = await listFrontpages(STORE_DIR);
+	const live: string[] = [];
+	const retired: string[] = [];
+	const attention: string[] = [];
+	for (const entry of entries) {
+		const link = entry.servable
+			? '<a href="/page/' + encodeURIComponent(entry.slug) + '">' + escapeHtml(entry.title) + "</a>"
+			: "<span>" + escapeHtml(entry.title) + "</span>";
+		const slug = '<span class="muted">' + escapeHtml(entry.slug) + "</span>";
+		// An artifact that cannot be read as a normal page is a human decision
+		// waiting to happen, which outranks whether it is current. Reporting it
+		// here is the only way it can ever be reconciled.
+		if (entry.problem !== undefined) {
+			attention.push(
+				'<li class="retired">' + link + " " + slug +
+				' <span class="chip chip--retired">needs attention</span> ' +
+				escapeHtml(entry.problem) + "</li>",
+			);
+			continue;
+		}
+		const state = await readLifecycle(STORE_DIR, entry.slug);
+		if (state.status === "current") {
+			live.push("<li>" + link + " " + slug + "</li>");
+			continue;
+		}
+		const detail: string[] = [];
+		if (state.reason !== undefined) detail.push(state.reason);
+		if (state.supersededBy !== undefined) detail.push("replaced by " + state.supersededBy);
+		if (state.by !== undefined) detail.push("by " + state.by);
+		retired.push(
+			'<li class="retired">' + link + " " + slug +
+			' <span class="chip chip--' + escapeHtml(state.status) + '">' + escapeHtml(state.status) + "</span> " +
+			escapeHtml(detail.join(" - ")) + "</li>",
+		);
+	}
+	// The index is the working set, and only the working set. Listing retired
+	// pages here puts the old pile back in front of the operator, which is the
+	// problem the lifecycle rule was supposed to end. They are one deliberate
+	// click away, and each keeps its own tombstone and banner.
+	const links: string[] = ['<a href="/">current pages</a>'];
+	if (retired.length > 0) links.push('<a href="/?retired=1">not current (' + retired.length + ")</a>");
+	if (attention.length > 0) links.push('<a href="/?attention=1">needs attention (' + attention.length + ")</a>");
+	const header = '<p class="muted">' + links.join(" - ") + "</p>";
+	const rows = view === "retired" ? retired : view === "attention" ? attention : live;
+	return c.html(indexHtml(header + rows.join("\n"), rows.length));
 });
 
 app.get("/healthz", (c) => c.json({ ok: true, version: 2, port: PORT, pid: process.pid }));
@@ -73,7 +154,7 @@ app.get("/page/:slug", async (c) => {
 	if (!exists) {
 		return c.html(`<h1>No frontpage '${escapeHtml(slug)}'</h1><p><a href="/">← index</a></p>`, 404);
 	}
-	return c.html(shellHtml(slug));
+	return serveDocument(c, slug, true);
 });
 
 interface SectionDiffOnDisk {
@@ -193,8 +274,204 @@ function frontpageDismissDiff() {
 	return annotated.replace(/<body([^>]*)>/i, (m) => `${m}${pillHtml}`);
 }
 
-app.get("/page/:slug/embed", async (c) => {
+
+
+// ---- Page lifecycle ----
+//
+// The rule for retired pages, enforced rather than decorative: a page that is
+// not current stops accepting writes, and a purge moves the artifacts aside and
+// leaves a tombstone that says who decided it and why.
+app.post("/api/page/:slug/lifecycle", async (c) => {
 	const slug = c.req.param("slug");
+	return withAnnotationWrite(slug, async () => {
+	try {
+		const body = (await c.req.json()) as {
+			status?: unknown;
+			reason?: unknown;
+			supersededBy?: unknown;
+			author?: unknown;
+		};
+		const status = typeof body.status === "string" ? body.status : "";
+		if (status !== "current" && status !== "superseded" && status !== "archived" && status !== "purged") {
+			return c.json({ ok: false, code: "invalid", error: "status must be current, superseded, archived or purged" }, 400);
+		}
+		const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+		if (status !== "current" && reason.length === 0) {
+			return c.json({ ok: false, code: "invalid", error: "a reason is required, so the state is never ambiguous" }, 400);
+		}
+		const supersededBy = typeof body.supersededBy === "string" ? body.supersededBy.trim() : "";
+		if (status === "superseded") {
+			if (supersededBy.length === 0) {
+				return c.json({ ok: false, code: "invalid", error: "a superseded page must name its replacement" }, 400);
+			}
+			if (!(await fsp.stat(pagePath(supersededBy)).catch(() => null))) {
+				// A pointer to a page that does not exist is precisely the ambiguous
+				// leftover this rule exists to prevent.
+				return c.json({ ok: false, code: "invalid", error: "no such replacement page: " + supersededBy }, 400);
+			}
+			if (supersededBy === slug) {
+				return c.json({ ok: false, code: "invalid", error: "a page cannot replace itself" }, 400);
+			}
+		}
+		const author = typeof body.author === "string" && body.author.trim().length > 0 ? body.author.trim() : "operator";
+		const previous = await readLifecycle(STORE_DIR, slug);
+		let moved: string[] = [];
+		if (status === "purged" && previous.status !== "purged") {
+			moved = await moveArtifactsAside(STORE_DIR, slug);
+		}
+		if (previous.status === "purged" && status !== "purged") {
+			moved = await restoreArtifacts(STORE_DIR, slug);
+		}
+		await writeLifecycle(STORE_DIR, slug, {
+			status,
+			...(reason.length > 0 ? { reason } : {}),
+			...(supersededBy.length > 0 ? { supersededBy } : {}),
+			by: author,
+			since: Date.now(),
+		});
+		return c.json({ ok: true, slug, status, previousStatus: previous.status, artifactsMoved: moved });
+	} catch (e) {
+		return c.json({ ok: false, error: String(e) }, e instanceof InvalidPageSlug ? 400 : 500);
+	}
+	});
+});
+
+// A retired page does not accept new writes. Silently accepting them is how the
+// pile of pages nobody knows about grows in the first place.
+async function refuseWriteToRetiredPage(c: Context, slug: string): Promise<Response | null> {
+	const state = await readLifecycle(STORE_DIR, slug);
+	if (isWritable(state)) return null;
+	return c.json(
+		{
+			ok: false,
+			code: "retired",
+			error:
+				"this page is " +
+				state.status +
+				(state.reason === undefined ? "" : " (" + state.reason + ")") +
+				"; it no longer accepts writes",
+		},
+		409,
+	);
+}
+
+// ---- Change log ----
+//
+// One row per edit, newest first: when, who, the note the editor wrote, and
+// which sections that edit touched. The section effect is derived from the specs
+// stored with each history entry, so it records what actually changed rather
+// than a claim about it. This is the operator's "what is updated" surface,
+// rendered into the document instead of living in an agent transcript.
+interface ChangelogRow {
+	ts: number;
+	author: string;
+	note: string;
+	added: string[];
+	changed: string[];
+	removed: string[];
+}
+
+function sectionMap(meta: unknown): Map<string, string> {
+	const spec = (meta as { spec?: { sections?: Array<Record<string, unknown>> } } | undefined)?.spec;
+	const map = new Map<string, string>();
+	for (const section of spec?.sections ?? []) {
+		const id = typeof section.id === "string" ? section.id : "";
+		if (!id) continue;
+		map.set(id, JSON.stringify(section));
+	}
+	return map;
+}
+
+async function readChangelog(slug: string): Promise<ChangelogRow[]> {
+	const entries = await readHistory(slug);
+	const rows: ChangelogRow[] = [];
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (!entry) continue;
+		const previous = entries[index - 1];
+		const before = sectionMap(previous ? previous.meta : undefined);
+		const after = sectionMap(entry.meta);
+		const added: string[] = [];
+		const changed: string[] = [];
+		const removed: string[] = [];
+		for (const [id, body] of after) {
+			const prior = before.get(id);
+			if (prior === undefined) added.push(id);
+			else if (prior !== body) changed.push(id);
+		}
+		for (const id of before.keys()) {
+			if (!after.has(id)) removed.push(id);
+		}
+		rows.push({ ts: entry.ts, author: entry.author, note: entry.note ?? "", added, changed, removed });
+	}
+	return rows;
+}
+
+function renderChangelog(rows: readonly ChangelogRow[]): string {
+	if (rows.length === 0) return "";
+	const newest = rows[rows.length - 1];
+	const when = newest ? new Date(newest.ts).toISOString().replace("T", " ").slice(0, 16) + "Z" : "";
+	const items = rows
+		.slice()
+		.reverse()
+		.map((row) => {
+			const stamp = new Date(row.ts).toISOString().replace("T", " ").slice(0, 16) + "Z";
+			const effect = [
+				row.added.length > 0 ? row.added.length + " added" : "",
+				row.changed.length > 0 ? row.changed.length + " updated" : "",
+				row.removed.length > 0 ? row.removed.length + " removed" : "",
+			]
+				.filter((part) => part.length > 0)
+				.join(", ");
+			return (
+				'<li class="fp-cl__row">' +
+				'<span class="fp-cl__when">' + escapeHtml(stamp) + "</span>" +
+				'<span class="fp-cl__who">' + escapeHtml(row.author) + "</span>" +
+				'<span class="fp-cl__note">' + escapeHtml(row.note.length > 0 ? row.note : "(no note given)") + "</span>" +
+				(effect.length > 0 ? '<span class="fp-cl__effect">' + escapeHtml(effect) + "</span>" : "") +
+				"</li>"
+			);
+		})
+		.join("");
+	return (
+		'<details class="fp-cl">' +
+		'<summary class="fp-cl__summary">' +
+		'<span class="fp-cl__tag">CHANGED</span>' +
+		'<span class="fp-cl__latest">' + escapeHtml(newest && newest.note.length > 0 ? newest.note : "Last edit") + "</span>" +
+		'<span class="fp-cl__meta">' + escapeHtml(newest ? newest.author : "") + " · " + escapeHtml(when) + "</span>" +
+		'<span class="fp-cl__count">' + rows.length + (rows.length === 1 ? " edit" : " edits") + "</span>" +
+		"</summary>" +
+		'<ol class="fp-cl__list">' + items + "</ol>" +
+		"</details>"
+	);
+}
+
+/** A document waiting on an interrupted restore is still readable, so it is
+ *  served with the reason and the preserved journal rather than a bare error. */
+function renderRestoreBlocked(slug: string, reason: string): string {
+	return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+		'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+		'<title>' + escapeHtml(slug) + ' needs attention</title>' +
+		'<style>body{margin:0;padding:48px 24px;font:16px/1.6 system-ui,sans-serif;color:#16181d;background:#fafaf7}' +
+		'main{max-width:60ch;margin:0 auto}h1{font-size:22px;line-height:1.3;margin:0 0 12px}' +
+		'code{background:#f0efe9;padding:2px 6px;border-radius:4px}</style></head><body><main>' +
+		'<h1>' + escapeHtml(slug) + ' is waiting on an interrupted restore</h1>' +
+		'<p>' + escapeHtml(reason) + '</p>' +
+		'<p>The document itself is intact and nothing was discarded. Its restore journal is kept as ' +
+		'<code>' + escapeHtml(slug) + '.restore-intent.json</code>; finish or remove that file deliberately, then reload.</p>' +
+		'<p><a href="/">All current pages</a></p>' +
+		'</main></body></html>';
+}
+
+async function serveDocument(c: Context, slug: string, annotations: boolean): Promise<Response> {
+	// This read is also the repair path for an interrupted restore, and a repair
+	// that cannot complete must say why instead of failing the whole page.
+	try {
+		await withAnnotationWrite(slug, async () => {});
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		return c.html(renderRestoreBlocked(slug, reason), 503);
+	}
 	try {
 		const html = await fsp.readFile(pagePath(slug), "utf8");
 		const diff = await readJsonOrEmpty<SectionDiffOnDisk | null>(diffPath(slug), null);
@@ -202,74 +479,236 @@ app.get("/page/:slug/embed", async (c) => {
 		const withDiff = injectDiffMarkers(html, diff)
 			.replace("/api/page/${slug}/dismiss-diff", `/api/page/${encodeURIComponent(slug)}/dismiss-diff`);
 		const injected = injectBeforeBodyClose(withDiff, LAYOUT_BOUNDS_SHIM);
-		return c.html(injected);
+		// The change log travels with the document, so a shared or exported copy
+		// still says what was edited, by whom, and when.
+		const withChangelog = renderChangelog(await readChangelog(slug));
+		const banner = renderBanner(await readLifecycle(STORE_DIR, slug), slug);
+		const withBanner = banner.length > 0 ? injectBeforeBodyClose(injected, banner) : injected;
+		const document = withChangelog.length > 0 ? injectBeforeBodyClose(withBanner, withChangelog) : withBanner;
+		c.header("Cache-Control", "no-store");
+		return c.html(annotations ? withAnnotationLayer(document, slug, clientRelease.id) : document);
 	} catch {
 		return c.html("Not found", 404);
 	}
-});
+}
+app.get("/page/:slug/embed", (c) => serveDocument(c, c.req.param("slug"), false));
 
-// Canvas vision: the browser POSTs a PNG of the whole tldraw canvas (frontpage
-// frame + the hooman's drawings) on every change; frontpage_read returns it so
-// the agent can SEE handwriting/arrows the text mapping can't convey.
+// The image is evidence for the saved annotations, never a previous/deleted drawing.
 app.post("/api/page/:slug/canvas-image", async (c) => {
 	const slug = c.req.param("slug");
-	try {
+	return withAnnotationWrite(slug, async () => {
+		const retired = await refuseWriteToRetiredPage(c, slug);
+		if (retired) return retired;
+		const current = await readAnnotationSnapshot(slug);
+		if (c.req.header("x-frontpage-snapshot-version") !== snapshotVersion(current)) return c.json({ error: "image belongs to an older annotation snapshot" }, 409);
 		const buf = Buffer.from(await c.req.arrayBuffer());
-		if (buf.length === 0) return c.json({ ok: false, error: "empty body" }, 400);
+		if (!buf.length) return c.json({ error: "empty image" }, 400);
 		await fsp.writeFile(canvasImagePath(slug), buf);
 		return c.json({ ok: true, bytes: buf.length });
-	} catch (e) {
-		return c.json({ ok: false, error: String(e) }, 500);
-	}
+	});
 });
-
-app.get("/api/page/:slug/canvas-image", async (c) => {
-	const slug = c.req.param("slug");
+app.get("/api/page/:slug/canvas-image", (c) => withAnnotationWrite(c.req.param("slug"), async () => {
 	try {
-		const buf = await fsp.readFile(canvasImagePath(slug));
-		return c.body(buf, 200, { "content-type": "image/png" });
-	} catch {
-		return c.text("Not found", 404);
-	}
-});
+		const buf = await fsp.readFile(canvasImagePath(c.req.param("slug")));
+		return c.body(buf, 200, { "content-type": "image/png", "cache-control": "no-store" });
+	} catch { return c.text("No current annotation image", 404); }
+}));
 
-// Decision Points: the page POSTs the hooman's answer to a 'decision' block;
-// frontpage_read reads it back. Persisted as <slug>.decisions.json keyed by
-// section id -> { chosenKey?, text?, at }. Mirrors the canvas-image round-trip.
-type StoredDecision = { chosenKey?: string; text?: string; at: number };
+// Decision Points: the page POSTs the operator's answer to a 'decision' block.
+//
+// An answer is stored with a fingerprint of the exact question it answered and
+// the revision it was written against. That buys three things the previous
+// version did not have:
+//   - a write prepared against an older revision is refused instead of racing a
+//     newer one, so the UI cannot be honest about a save the store disagrees with
+//   - an answer to a question that has since changed reads back as stale, so it
+//     is never presented as the answer to the question on screen now
+//   - an option the question does not offer is refused rather than stored
+type DecisionSection = {
+	id?: string;
+	type?: string;
+	prompt?: string;
+	options?: Array<{ key?: string; label?: string; detail?: string; recommended?: boolean }>;
+	allowText?: boolean;
+};
+
+type StoredDecision = {
+	chosenKey?: string;
+	text?: string;
+	at: number;
+	/** Fingerprint of the question this answer was given to. */
+	questionFingerprint?: string;
+	/** Project revision the answer was written against. */
+	revision?: number;
+};
+
+function decisionFingerprint(section: DecisionSection): string {
+	return createHash("sha256")
+			.update(
+				JSON.stringify({
+					prompt: section.prompt ?? "",
+					options: (section.options ?? []).map((option) => ({
+						key: option.key,
+						label: option.label,
+						detail: option.detail,
+						recommended: option.recommended,
+					})),
+					allowText: section.allowText !== false,
+				}),
+				"utf8",
+			)
+			.digest("hex");
+}
+
+async function decisionSection(slug: string, id: string): Promise<DecisionSection | undefined> {
+	const meta = await readJsonOrEmpty<{ spec?: { sections?: DecisionSection[] } }>(metaPath(slug), {});
+	const sections = meta.spec?.sections ?? [];
+	return sections.find((section) => section.type === "decision" && section.id === id);
+}
+
+async function projectRevision(slug: string): Promise<number | undefined> {
+	const meta = await readJsonOrEmpty<{ currentRevision?: number }>(metaPath(slug), {});
+	return typeof meta.currentRevision === "number" ? meta.currentRevision : undefined;
+}
+
 app.post("/api/page/:slug/decision", async (c) => {
 	const slug = c.req.param("slug");
-	try {
-		const body = (await c.req.json()) as { id?: unknown; chosenKey?: unknown; text?: unknown; clear?: unknown };
-		const id = typeof body.id === "string" ? body.id : "";
-		if (!id) return c.json({ ok: false, error: "missing id" }, 400);
-		let store: Record<string, StoredDecision> = {};
-		try { store = JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8")); } catch { /* none yet */ }
-		if (body.clear === true) {
-			delete store[id];
-		} else {
-			const entry: StoredDecision = { at: Date.now() };
-			if (typeof body.chosenKey === "string") entry.chosenKey = body.chosenKey;
-			if (typeof body.text === "string" && body.text.trim()) entry.text = body.text.trim();
+	// Read-modify-write of the answer store: two answers posted together must
+	// not lose one another.
+	return withAnnotationWrite(slug, async () => {
+		try {
+			const retiredAnswer = await refuseWriteToRetiredPage(c, slug);
+			if (retiredAnswer) return retiredAnswer;
+			const body = (await c.req.json()) as {
+				id?: unknown;
+				chosenKey?: unknown;
+				text?: unknown;
+				clear?: unknown;
+				expectedRevision?: unknown;
+			};
+			const id = typeof body.id === "string" ? body.id : "";
+			if (!id) return c.json({ ok: false, error: "missing id", code: "invalid" }, 400);
+
+			const revision = await projectRevision(slug);
+			if (body.expectedRevision !== undefined && body.expectedRevision !== null) {
+				if (typeof body.expectedRevision !== "number") {
+					return c.json({ ok: false, error: "expectedRevision must be a number", code: "invalid" }, 400);
+				}
+				if (revision !== undefined && body.expectedRevision !== revision) {
+					return c.json(
+						{
+							ok: false,
+							code: "stale-write",
+							error:
+								"this page was loaded at revision " +
+								body.expectedRevision +
+								" and the document is now at revision " +
+								revision +
+								"; reload before answering",
+						},
+						409,
+					);
+				}
+			}
+
+			const section = await decisionSection(slug, id);
+			if (!section) {
+				return c.json({ ok: false, code: "not-found", error: "no decision block " + id }, 404);
+			}
+
+			let store: Record<string, StoredDecision> = {};
+			try {
+				store = JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8"));
+			} catch {
+				/* none yet */
+			}
+
+			if (body.clear === true) {
+				delete store[id];
+				await writeJsonAtomic(decisionsPath(slug), store);
+				return c.json({ ok: true, cleared: true, revision });
+			}
+
+			const entry: StoredDecision = {
+				at: Date.now(),
+				questionFingerprint: decisionFingerprint(section),
+				...(revision === undefined ? {} : { revision }),
+			};
+			if (typeof body.chosenKey === "string" && body.chosenKey.length > 0) {
+				const offered = (section.options ?? []).some((option) => option.key === body.chosenKey);
+				if (!offered) {
+					return c.json(
+						{ ok: false, code: "invalid", error: "option " + body.chosenKey + " is not offered by " + id },
+						400,
+					);
+				}
+				entry.chosenKey = body.chosenKey;
+			}
+			if (typeof body.text === "string" && body.text.trim()) {
+				if (section.allowText === false) {
+					return c.json({ ok: false, code: "invalid", error: id + " does not take a written answer" }, 400);
+				}
+				entry.text = body.text.trim();
+			}
 			if (entry.chosenKey === undefined && entry.text === undefined) {
-				return c.json({ ok: false, error: "empty answer" }, 400);
+				return c.json({ ok: false, code: "invalid", error: "empty answer" }, 400);
 			}
 			store[id] = entry;
+			await writeJsonAtomic(decisionsPath(slug), store);
+			return c.json({ ok: true, answer: entry, revision });
+		} catch (e) {
+			return c.json({ ok: false, error: String(e) }, 500);
 		}
-		await fsp.writeFile(decisionsPath(slug), JSON.stringify(store, null, 2), "utf8");
-		return c.json({ ok: true });
-	} catch (e) {
-		return c.json({ ok: false, error: String(e) }, 500);
-	}
+	});
 });
 
+// Reads back every stored answer, flagged against the question currently on the
+// page. A flag the operator can see beats an answer that quietly stopped
+// meaning what it said.
 app.get("/api/page/:slug/decision", async (c) => {
 	const slug = c.req.param("slug");
+	const revision = await projectRevision(slug);
+	let store: Record<string, StoredDecision> = {};
 	try {
-		return c.json(JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8")));
+		store = JSON.parse(await fsp.readFile(decisionsPath(slug), "utf8"));
 	} catch {
-		return c.json({});
+		return c.json({ revision, answers: {} });
 	}
+	type AnswerView = StoredDecision & {
+		stale?: boolean;
+		unverified?: boolean;
+		reason?: string;
+		currentFingerprint?: string;
+	};
+	const out: Record<string, AnswerView> = {};
+	for (const [id, entry] of Object.entries(store)) {
+		const section = await decisionSection(slug, id);
+		if (!section) {
+			out[id] = { ...entry, stale: true, reason: "this question is no longer part of the document" };
+			continue;
+		}
+		const current = decisionFingerprint(section);
+		if (entry.questionFingerprint === undefined) {
+			out[id] = {
+				...entry,
+				unverified: true,
+				reason: "stored before answers were fingerprinted; confirm it still answers this question",
+				currentFingerprint: current,
+			};
+			continue;
+		}
+		if (entry.questionFingerprint !== current) {
+			out[id] = {
+				...entry,
+				stale: true,
+				reason: "the question changed since this was answered",
+				currentFingerprint: current,
+			};
+			continue;
+		}
+		out[id] = { ...entry, currentFingerprint: current };
+	}
+	return c.json({ revision, answers: out });
 });
 
 app.post("/api/page/:slug/dismiss-diff", async (c) => {
@@ -300,22 +739,22 @@ app.get("/api/page/:slug", async (c) => {
 // ---- Persistence: tldraw canvas state + section layout ----
 
 function tldrawPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.tldraw.json`);
+	return documentPath(STORE_DIR, slug, ".tldraw.json");
 }
 function layoutPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.layout.json`);
+	return documentPath(STORE_DIR, slug, ".layout.json");
 }
 function historyPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.history.jsonl`);
+	return documentPath(STORE_DIR, slug, ".history.jsonl");
 }
 function canvasImagePath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.canvas.png`);
+	return documentPath(STORE_DIR, slug, ".canvas.png");
 }
 function decisionsPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.decisions.json`);
+	return documentPath(STORE_DIR, slug, ".decisions.json");
 }
 function diffPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.diff.json`);
+	return documentPath(STORE_DIR, slug, ".diff.json");
 }
 
 // Cap on history entries kept per slug. ~50 entries × ~20KB/entry = ~1MB max
@@ -337,6 +776,8 @@ interface HistoryEntry {
 	html?: string;
 	/** Spec + artifact-id sidecar at this point. */
 	meta?: unknown;
+	/** The changelog entry for this edit, written by whoever made it. */
+	note?: string;
 }
 
 async function readHistory(slug: string): Promise<HistoryEntry[]> {
@@ -356,10 +797,7 @@ async function readHistory(slug: string): Promise<HistoryEntry[]> {
 async function writeHistory(slug: string, entries: HistoryEntry[]): Promise<void> {
 	const trimmed = entries.slice(-HISTORY_MAX_ENTRIES);
 	const text = trimmed.map((e) => JSON.stringify(e)).join("\n") + (trimmed.length > 0 ? "\n" : "");
-	const p = historyPath(slug);
-	const tmp = `${p}.${process.pid}.tmp`;
-	await fsp.writeFile(tmp, text, "utf8");
-	await fsp.rename(tmp, p);
+	await writeFileAtomic(historyPath(slug), text);
 }
 
 async function readSurfaceState(slug: string): Promise<{ html?: string; meta?: unknown }> {
@@ -367,17 +805,19 @@ async function readSurfaceState(slug: string): Promise<{ html?: string; meta?: u
 		fsp.readFile(pagePath(slug), "utf8").catch(() => undefined),
 		fsp.readFile(metaPath(slug), "utf8").then((t) => JSON.parse(t) as unknown).catch(() => undefined),
 	]);
-	return { html, meta };
+	return { ...(html === undefined ? {} : { html }), meta };
 }
 
-async function appendHistoryEntry(slug: string, snapshot: unknown, author: string): Promise<{ appended: boolean; reason?: string }> {
+async function appendHistoryEntry(slug: string, snapshot: unknown, author: string, note?: string): Promise<{ appended: boolean; reason?: string }> {
 	const entries = await readHistory(slug);
 	const last = entries[entries.length - 1];
 	const now = Date.now();
 	const surface = await readSurfaceState(slug);
 	const shapeCount = countShapes(snapshot);
-	const entry: HistoryEntry = { ts: now, author, shapeCount, snapshot, html: surface.html, meta: surface.meta };
-	if (last && last.author === author && now - last.ts < HISTORY_COALESCE_MS) {
+	const entry: HistoryEntry = { ts: now, author, shapeCount, snapshot, ...surface };
+	if (note && note.trim()) entry.note = note.trim();
+	const sameEdit = !!last && last.author === author && (last.note ?? '') === (note ?? '');
+	if (sameEdit && last && now - last.ts < HISTORY_COALESCE_MS) {
 		entries[entries.length - 1] = entry;
 		await writeHistory(slug, entries);
 		return { appended: false, reason: "coalesced into previous entry" };
@@ -398,11 +838,23 @@ function countShapes(snapshot: unknown): number {
 	return n;
 }
 
-async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+/** Unique temp name so concurrent writers in this process never share a
+ *  path; the exclusive flag turns a name collision into an error rather than
+ *  a silent clobber, and a failed write removes only its own temp file. */
+async function writeFileAtomic(filePath: string, text: string): Promise<void> {
 	await fsp.mkdir(path.dirname(filePath), { recursive: true });
-	const tmp = `${filePath}.${process.pid}.tmp`;
-	await fsp.writeFile(tmp, JSON.stringify(data), "utf8");
-	await fsp.rename(tmp, filePath);
+	const tmp = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		await fsp.writeFile(tmp, text, { encoding: "utf8", flag: "wx" });
+		await fsp.rename(tmp, filePath);
+	} catch (error) {
+		await fsp.rm(tmp, { force: true }).catch(() => {});
+		throw error;
+	}
+}
+
+async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
+	await writeFileAtomic(filePath, JSON.stringify(data));
 }
 
 async function readJsonOrEmpty<T>(filePath: string, fallback: T): Promise<T> {
@@ -413,26 +865,74 @@ async function readJsonOrEmpty<T>(filePath: string, fallback: T): Promise<T> {
 	}
 }
 
+function snapshotVersion(snapshot: unknown): string | null {
+	return snapshot === null ? null : createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+}
+const pageWrites = new Map<string, Promise<unknown>>();
+/** Serialize writes per page so concurrent requests for one slug never
+ *  interleave their read-modify-write cycles. */
+function withPageWrite<T>(slug: string, action: () => Promise<T>): Promise<T> {
+	const previous = pageWrites.get(slug) ?? Promise.resolve();
+	const next = previous.catch(() => {}).then(() => action());
+	pageWrites.set(slug, next);
+	void next.finally(() => { if (pageWrites.get(slug) === next) pageWrites.delete(slug); }).catch(() => {});
+	return next;
+}
+/** A page write that must first finish an interrupted restore. */
+function withAnnotationWrite<T>(slug: string, action: () => Promise<T>): Promise<T> {
+	return withPageWrite(slug, async () => {
+		await recoverPendingRestore(slug);
+		return action();
+	});
+}
+async function readAnnotationSnapshot<T = unknown>(slug: string): Promise<T | null> {
+	const raw = await fsp.readFile(tldrawPath(slug), "utf8").catch((error: NodeJS.ErrnoException) => {
+		if (error.code === "ENOENT") return null;
+		throw error;
+	});
+	return raw === null ? null : JSON.parse(raw) as T;
+}
 app.get("/api/page/:slug/tldraw", async (c) => {
 	const slug = c.req.param("slug");
-	const data = await readJsonOrEmpty<Record<string, unknown> | null>(tldrawPath(slug), null);
-	return c.json({ slug, snapshot: data });
+	// A failed/corrupt load must not be mistaken for an empty canvas.
+	try {
+		return await withAnnotationWrite(slug, async () => {
+			const snapshot = await readAnnotationSnapshot(slug);
+			const lifecycle = await readLifecycle(STORE_DIR, slug);
+			return c.json({ slug, snapshot, version: snapshotVersion(snapshot), editable: isWritable(lifecycle) });
+		});
+	} catch (error) {
+		// Say which of the two it is: annotations that cannot be read, or an
+		// interrupted restore that cannot finish.
+		const reason = error instanceof Error ? error.message : String(error);
+		return c.json({ error: reason, code: "annotations-unavailable" }, 500);
+	}
 });
-
 app.put("/api/page/:slug/tldraw", async (c) => {
 	const slug = c.req.param("slug");
-	const body = await c.req.json().catch(() => null);
-	if (!body || typeof body !== "object" || !("snapshot" in body)) {
-		return c.json({ error: "expected { snapshot: ..., author?: string }" }, 400);
-	}
-	const snapshot = (body as { snapshot: unknown }).snapshot;
-	// Browser PUTs default to "hooman" — these come from interactive editing.
-	const author = typeof (body as { author?: unknown }).author === "string"
-		? (body as { author: string }).author
-		: "hooman";
-	await writeJsonAtomic(tldrawPath(slug), snapshot);
-	const histResult = await appendHistoryEntry(slug, snapshot, author);
-	return c.json({ ok: true, slug, savedAt: Date.now(), historyAppended: histResult.appended });
+	const retired = await refuseWriteToRetiredPage(c, slug);
+	if (retired) return retired;
+	const body = await c.req.json().catch(() => null) as { snapshot?: unknown; expectedVersion?: string | null; author?: string } | null;
+	if (!body || !body.snapshot || !("expectedVersion" in body)) return c.json({ error: "expected { snapshot, expectedVersion }" }, 400);
+	return withAnnotationWrite(slug, async () => {
+		const retired = await refuseWriteToRetiredPage(c, slug);
+		if (retired) return retired;
+		const current = await readAnnotationSnapshot(slug);
+		if (body.expectedVersion !== snapshotVersion(current)) return c.json({ error: "Annotations changed elsewhere. Your draft is kept; reload to review it before saving." }, 409);
+		// Never store a snapshot that cannot be read back: the page would then
+		// fail on every later read with no way to tell why.
+		try {
+			normalizeAnnotationSnapshot(body.snapshot, annotationSchema);
+		} catch (error) {
+			return c.json({ error: error instanceof Error ? error.message : String(error), code: "snapshot-unreadable" }, 400);
+		}
+		const version = snapshotVersion(body.snapshot);
+		await writeJsonAtomic(tldrawPath(slug), body.snapshot);
+		// Never return an image of deleted or previous drawings as current evidence.
+		await fsp.rm(canvasImagePath(slug), { force: true });
+		const histResult = await appendHistoryEntry(slug, body.snapshot, body.author ?? "hooman");
+		return c.json({ ok: true, slug, version, savedAt: Date.now(), historyAppended: histResult.appended });
+	});
 });
 
 app.get("/api/page/:slug/layout", async (c) => {
@@ -471,8 +971,10 @@ app.put("/api/page/:slug/layout", async (c) => {
 				: [];
 			return { id: s.id as string, x: s.x as number, y: s.y as number, w: s.w as number, h: s.h as number, items };
 		});
-	await writeJsonAtomic(layoutPath(slug), { sections, updatedAt: Date.now() });
-	return c.json({ ok: true, slug, count: sections.length, itemCount: sections.reduce((n, s) => n + s.items.length, 0) });
+	return withAnnotationWrite(slug, async () => {
+		await writeJsonAtomic(layoutPath(slug), { sections, updatedAt: Date.now() });
+		return c.json({ ok: true, slug, count: sections.length, itemCount: sections.reduce((n, s) => n + s.items.length, 0) });
+	});
 });
 
 // ---- Spatial mapping: which section does each tldraw shape refer to? ----
@@ -494,45 +996,6 @@ interface SectionBounds {
 	w: number;
 	h: number;
 	items?: BoundsItem[];
-}
-
-function sectionForPoint(px: number, py: number, sections: SectionBounds[]): { id: string; reason: string } | null {
-	if (sections.length === 0) return null;
-	// Inside-bounds wins. Tie-break by smallest area (most specific section).
-	const containing = sections
-		.filter((s) => px >= s.x && px <= s.x + s.w && py >= s.y && py <= s.y + s.h)
-		.sort((a, b) => a.w * a.h - b.w * b.h);
-	if (containing[0]) return { id: containing[0].id, reason: "geometric-overlap" };
-	// Otherwise nearest section by distance to nearest edge.
-	let best: { id: string; d: number } | null = null;
-	for (const s of sections) {
-		const dx = Math.max(s.x - px, 0, px - (s.x + s.w));
-		const dy = Math.max(s.y - py, 0, py - (s.y + s.h));
-		const d = Math.hypot(dx, dy);
-		if (!best || d < best.d) best = { id: s.id, d };
-	}
-	return best ? { id: best.id, reason: "nearest-section" } : null;
-}
-
-/** Find the most specific item (within the given section) the point lands on.
- *  Inside-bounds wins; tie-break by smallest area. Falls back to nearest
- *  item by edge distance, but ONLY if the distance is small enough to be
- *  meaningful (within 80px of an item edge). Returns null otherwise. */
-function itemForPoint(px: number, py: number, items: BoundsItem[]): { item: BoundsItem; reason: string } | null {
-	if (items.length === 0) return null;
-	const containing = items
-		.filter((i) => px >= i.x && px <= i.x + i.w && py >= i.y && py <= i.y + i.h)
-		.sort((a, b) => a.w * a.h - b.w * b.h);
-	if (containing[0]) return { item: containing[0], reason: "inside-item" };
-	let best: { item: BoundsItem; d: number } | null = null;
-	for (const it of items) {
-		const dx = Math.max(it.x - px, 0, px - (it.x + it.w));
-		const dy = Math.max(it.y - py, 0, py - (it.y + it.h));
-		const d = Math.hypot(dx, dy);
-		if (!best || d < best.d) best = { item: it, d };
-	}
-	if (best && best.d <= 80) return { item: best.item, reason: "nearest-item" };
-	return null;
 }
 
 // Default footprint for sticky-note shapes (no explicit w/h on props).
@@ -566,50 +1029,42 @@ function shapeFootprint(type: string, props: Record<string, unknown>): { w: numb
 }
 
 /** Map a canvas point to its section + best-effort item attribution. */
-function attributePoint(pageCx: number, pageCy: number, sections: SectionBounds[]) {
-	const secRef = sectionForPoint(pageCx, pageCy, sections);
-	if (!secRef) return { section: null, item: null, reason: null };
-	const section = sections.find((s) => s.id === secRef.id);
-	const itemRef = section?.items ? itemForPoint(pageCx, pageCy, section.items) : null;
-	return {
-		section: secRef.id,
-		sectionReason: secRef.reason,
-		item: itemRef
-			? { idx: itemRef.item.idx, tag: itemRef.item.tag, cls: itemRef.item.cls, text: itemRef.item.text }
-			: null,
-		itemReason: itemRef?.reason ?? null,
-	};
+function unassigned(reason: string) {
+	return { section: null, sectionReason: reason, item: null, itemReason: null };
+}
+function attributeAnchor(value: unknown, sections: SectionBounds[]) {
+	if (!value || typeof value !== "object") return unassigned("no verified content target");
+	const anchor = value as ContentAnchor;
+	if (!anchorPosition(anchor, sections)) return unassigned("target changed, missing or ambiguous");
+	const section = sections.find(s => s.id === anchor.section)!;
+	const item = anchor.item ? section.items?.find(i => i.tag === anchor.item!.tag && i.text === anchor.item!.text) : undefined;
+	return { section: section.id, sectionReason: "stored-content-anchor", item: item ? { idx: item.idx, tag: item.tag, cls: item.cls, text: item.text } : null, itemReason: item ? "unique-unchanged-item" : null };
+}
+function attributePoint(x: number, y: number, sections: SectionBounds[]) {
+	const anchor = contentAnchor({ x, y }, { x, y }, sections);
+	if (!anchor) return unassigned("no unambiguous geometry");
+	const section = sections.find(s => s.id === anchor.section)!;
+	const overlap = x >= section.x && x <= section.x + section.w && y >= section.y && y <= section.y + section.h;
+	return { ...attributeAnchor(anchor, sections), sectionReason: overlap ? "geometric-overlap" : "inferred-nearest-section", itemReason: anchor.item ? "inside-item" : null };
+}
+function legacyAncestor(shape: Record<string, unknown>, store: Record<string, unknown>): boolean {
+	let current = shape;
+	const seen = new Set<unknown>();
+	while (current) {
+		if ((current.meta as Record<string, unknown> | undefined)?.frontpageLegacy || seen.has(current.id)) return true;
+		seen.add(current.id);
+		const parent = current.parentId;
+		if (typeof parent !== "string" || parent.startsWith("page:")) return false;
+		const next = store[parent];
+		if (!next || typeof next !== "object") return true;
+		current = next as Record<string, unknown>;
+	}
+	return false;
 }
 
-/** Resolve an arrow endpoint to canvas coords. tldraw arrows have
- *  props.start = { type: "binding"|"point", x?, y?, boundShapeId?, normalizedAnchor? }
- *  When bound, coords are relative to the bound shape's position. When free,
- *  coords are relative to the arrow shape's x/y. */
-function resolveArrowEndpoint(
-	endpoint: { type?: string; x?: number; y?: number; boundShapeId?: string; normalizedAnchor?: { x: number; y: number } } | undefined,
-	arrowX: number,
-	arrowY: number,
-	store: Record<string, unknown>,
-): { x: number; y: number } | null {
-	if (!endpoint) return null;
-	if (endpoint.type === "binding" && typeof endpoint.boundShapeId === "string") {
-		const target = store[endpoint.boundShapeId] as { x?: number; y?: number; props?: { w?: number; h?: number } } | undefined;
-		if (!target) return null;
-		const tw = target.props?.w ?? 0;
-		const th = target.props?.h ?? 0;
-		const ax = endpoint.normalizedAnchor?.x ?? 0.5;
-		const ay = endpoint.normalizedAnchor?.y ?? 0.5;
-		return { x: (target.x ?? 0) + tw * ax, y: (target.y ?? 0) + th * ay };
-	}
-	if (typeof endpoint.x === "number" && typeof endpoint.y === "number") {
-		return { x: arrowX + endpoint.x, y: arrowY + endpoint.y };
-	}
-	return null;
-}
-
-function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array<Record<string, unknown>> {
+function extractAnnotations(snapshot: unknown, sections: SectionBounds[], slug: string): Array<Record<string, unknown>> {
 	// Tldraw v3 `getSnapshot()` returns { document: { store, schema }, session }.
-	const snap = snapshot as { document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> } | null;
+	const snap = toDocumentCoordinates(snapshot, slug) as { document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> } | null;
 	const store = snap?.document?.store ?? snap?.store;
 	if (!store) return [];
 	const shapes = Object.values(store).filter(
@@ -617,12 +1072,7 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 			typeof r === "object" && r !== null && (r as { typeName?: string }).typeName === "shape",
 	);
 
-	// Embed shape gives us the canvas → page offset.
-	const embed = shapes.find((s) => s.type === "frontpage-embed") as
-		| { x?: number; y?: number; props?: { w?: number; h?: number } }
-		| undefined;
-	const offsetX = embed?.x ?? 0;
-	const offsetY = embed?.y ?? 0;
+	const { x: offsetX, y: offsetY } = annotationOffset(snap);
 
 	const out: Array<Record<string, unknown>> = [];
 	for (const s of shapes) {
@@ -631,16 +1081,29 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 		const sx = typeof s.x === "number" ? (s.x as number) : 0;
 		const sy = typeof s.y === "number" ? (s.y as number) : 0;
 		const props = (s.props as Record<string, unknown>) ?? {};
+		const meta = (s.meta as Record<string, unknown>) ?? {};
+		const legacy = legacyAncestor(s, store);
+		const flat = typeof s.parentId === "string" && s.parentId.startsWith("page:") && !(s.rotation as number);
 
 		// Arrow gets special treatment: it has TWO endpoints, possibly bound
 		// to other shapes. Each endpoint maps to its own section + item.
 		if (type === "arrow") {
-			const startProp = props.start as { type?: string; x?: number; y?: number; boundShapeId?: string; normalizedAnchor?: { x: number; y: number } } | undefined;
-			const endProp = props.end as typeof startProp;
-			const startCanvas = resolveArrowEndpoint(startProp, sx, sy, store);
-			const endCanvas = resolveArrowEndpoint(endProp, sx, sy, store);
-			const startPage = startCanvas ? { x: startCanvas.x - offsetX, y: startCanvas.y - offsetY } : null;
-			const endPage = endCanvas ? { x: endCanvas.x - offsetX, y: endCanvas.y - offsetY } : null;
+			const endpoint = (terminal: "start" | "end") => {
+				if (legacy) return { ref: unassigned("historical or ambiguous"), point: null };
+				const prop = props[terminal] as { x?: number; y?: number; boundShapeId?: string } | undefined;
+				const bindings = Object.values(store).filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && (r as Record<string, unknown>).typeName === "binding" && (r as Record<string, unknown>).fromId === s.id && ((r as Record<string, unknown>).props as { terminal?: string } | undefined)?.terminal === terminal);
+				if (bindings.length > 1) return { ref: unassigned("ambiguous arrow binding"), point: null };
+				const targetId = bindings[0]?.toId ?? prop?.boundShapeId;
+				if (typeof targetId === "string") {
+					const target = store[targetId] as Record<string, unknown> | undefined;
+					return { ref: target && !legacyAncestor(target, store) ? { ...attributeAnchor((target.meta as Record<string, unknown> | undefined)?.frontpageAnchor, sections), boundShapeId: targetId } : unassigned("unverified bound target"), point: null };
+				}
+				const point = flat && typeof prop?.x === "number" && typeof prop.y === "number" ? { x: sx + prop.x - offsetX, y: sy + prop.y - offsetY } : null;
+				const key = terminal === "start" ? "frontpageFromAnchor" : "frontpageToAnchor";
+				return { ref: Object.hasOwn(meta, key) ? attributeAnchor(meta[key], sections) : point ? attributePoint(point.x, point.y, sections) : unassigned("unverified parent geometry"), point };
+			};
+			const from = endpoint("start");
+			const to = endpoint("end");
 			let label: string | null = null;
 			if (typeof props.text === "string" && (props.text as string).length > 0) label = props.text as string;
 			else if (props.richText && typeof props.richText === "object") {
@@ -652,10 +1115,10 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 				type: "arrow",
 				text: label,
 				color: typeof props.color === "string" ? (props.color as string) : null,
-				from: startPage ? attributePoint(startPage.x, startPage.y, sections) : null,
-				to: endPage ? attributePoint(endPage.x, endPage.y, sections) : null,
-				canvasFrom: startCanvas,
-				canvasTo: endCanvas,
+				from: from.ref,
+				to: to.ref,
+				canvasFrom: from.point,
+				canvasTo: to.point,
 				meta: (s.meta as Record<string, unknown>) ?? {},
 			});
 			continue;
@@ -665,14 +1128,14 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 		const { w, h } = shapeFootprint(type, props);
 		const pageCx = sx + w / 2 - offsetX;
 		const pageCy = sy + h / 2 - offsetY;
-		const attr = attributePoint(pageCx, pageCy, sections);
+		const attr = legacy ? unassigned("historical or ambiguous") : Object.hasOwn(meta, "frontpageAnchor") ? attributeAnchor(meta.frontpageAnchor, sections) : flat ? attributePoint(pageCx, pageCy, sections) : unassigned("unverified parent geometry");
 		let text: string | null = null;
 		if (typeof props.text === "string" && (props.text as string).length > 0) {
 			text = props.text as string;
 		} else if (props.richText && typeof props.richText === "object") {
 			const plain = extractRichText(props.richText).trim();
 			if (plain) text = plain;
-		} else if (Array.isArray(props.lines)) {
+		} else if (Array.isArray(props.lines) || Array.isArray(props.segments)) {
 			text = "[drawing]";
 		}
 
@@ -681,7 +1144,8 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 			type,
 			text,
 			canvasPosition: { x: sx, y: sy, w, h },
-			pageCentroid: { x: Math.round(pageCx), y: Math.round(pageCy) },
+			pageCentroid: flat && !legacy ? { x: Math.round(pageCx), y: Math.round(pageCy) } : null,
+			coordinateSpace: flat ? "page (estimated footprint)" : "parent-local",
 			refersToSection: attr.section,
 			refersToSectionReason: attr.sectionReason,
 			refersToItem: attr.item,
@@ -696,7 +1160,7 @@ function extractAnnotations(snapshot: unknown, sections: SectionBounds[]): Array
 app.get("/api/page/:slug/state", async (c) => {
 	const slug = c.req.param("slug");
 	const [snapshot, layout, meta] = await Promise.all([
-		readJsonOrEmpty<Record<string, unknown> | null>(tldrawPath(slug), null),
+		readAnnotationSnapshot<Record<string, unknown>>(slug),
 		readJsonOrEmpty<{ sections: SectionBounds[] }>(layoutPath(slug), { sections: [] }),
 		readJsonOrEmpty<{ slug: string; spec?: { sections?: Array<{ id?: string; label?: string; type: string }> } } | null>(metaPath(slug), null),
 	]);
@@ -711,7 +1175,7 @@ app.get("/api/page/:slug/state", async (c) => {
 		label: sectionLabels.get(s.id)?.label ?? null,
 		type: sectionLabels.get(s.id)?.type ?? null,
 	}));
-	const annotations = extractAnnotations(snapshot, layout.sections);
+	const annotations = extractAnnotations(snapshot, layout.sections, slug);
 	return c.json({ slug, sections, annotations, annotationCount: annotations.length });
 });
 
@@ -733,12 +1197,6 @@ function rid(): string {
 function shapeId(): string {
 	return `shape:agent-${rid()}`;
 }
-function fractionalIndex(): string {
-	// Tldraw uses fractional indices for shape ordering. "a40pq" is the format.
-	// We just generate a unique-ish low-priority index that sorts after most
-	// existing shapes.
-	return `a${rid().slice(0, 6)}`;
-}
 
 /** Resolve an anchor ({section,item?} | {x,y}) to PAGE-space coords, given the
  *  current layout.json bounds. Anchored shapes land OFFSET to the right of the
@@ -751,14 +1209,13 @@ function resolveAnchor(
 	if ("x" in anchor && "y" in anchor) {
 		return { x: anchor.x, y: anchor.y };
 	}
-	if (!anchor.section) return null;
-	const section = sections.find((s) => s.id === anchor.section);
-	if (!section) return null;
-	if (typeof anchor.item === "number" && section.items) {
-		const it = section.items.find((i) => i.idx === anchor.item);
-		if (it) return { x: it.x + it.w + offset, y: it.y };
-	}
-	return { x: section.x + section.w + offset, y: section.y };
+	const matches = sections.filter(s => s.id === anchor.section);
+	if (matches.length !== 1) return null;
+	const section = matches[0]!;
+	const targets = anchor.item === undefined ? [section] : section.items?.filter(i => i.idx === anchor.item) ?? [];
+	if (targets.length !== 1) return null;
+	const target = targets[0]!;
+	return { x: target.x + target.w + offset, y: target.y };
 }
 
 function richTextDoc(text: string): unknown {
@@ -768,7 +1225,7 @@ function richTextDoc(text: string): unknown {
 	};
 }
 
-function buildNoteRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string }): Record<string, unknown> {
+function buildNoteRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string; index: IndexKey }): Record<string, unknown> {
 	return {
 		typeName: "shape",
 		id: shapeId(),
@@ -779,7 +1236,7 @@ function buildNoteRecord(text: string, x: number, y: number, opts: { color?: str
 		opacity: 1,
 		meta: { author: opts.author ?? "agent" },
 		parentId: "page:page",
-		index: fractionalIndex(),
+		index: opts.index,
 		props: {
 			color: opts.color ?? "violet",
 			richText: richTextDoc(text),
@@ -796,7 +1253,7 @@ function buildNoteRecord(text: string, x: number, y: number, opts: { color?: str
 	};
 }
 
-function buildTextRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string }): Record<string, unknown> {
+function buildTextRecord(text: string, x: number, y: number, opts: { color?: string; size?: string; author?: string; index: IndexKey }): Record<string, unknown> {
 	return {
 		typeName: "shape",
 		id: shapeId(),
@@ -807,7 +1264,7 @@ function buildTextRecord(text: string, x: number, y: number, opts: { color?: str
 		opacity: 1,
 		meta: { author: opts.author ?? "agent" },
 		parentId: "page:page",
-		index: fractionalIndex(),
+		index: opts.index,
 		props: {
 			color: opts.color ?? "black",
 			size: opts.size ?? "s",
@@ -821,9 +1278,8 @@ function buildTextRecord(text: string, x: number, y: number, opts: { color?: str
 	};
 }
 
-function buildGeoRecord(geo: string, text: string, x: number, y: number, w: number, h: number, opts: { color?: string; author?: string }): Record<string, unknown> {
-	const validGeos = new Set(["rectangle", "ellipse", "diamond", "hexagon", "octagon", "pentagon", "rhombus", "star", "trapezoid", "triangle", "cloud", "check-box", "x-box", "arrow-right", "arrow-left", "arrow-up", "arrow-down", "heart"]);
-	const safeGeo = validGeos.has(geo) ? geo : "rectangle";
+function buildGeoRecord(geo: string, text: string, x: number, y: number, w: number, h: number, opts: { color?: string; author?: string; index: IndexKey }): Record<string, unknown> {
+	
 	return {
 		typeName: "shape",
 		id: shapeId(),
@@ -834,9 +1290,9 @@ function buildGeoRecord(geo: string, text: string, x: number, y: number, w: numb
 		opacity: 1,
 		meta: { author: opts.author ?? "agent" },
 		parentId: "page:page",
-		index: fractionalIndex(),
+		index: opts.index,
 		props: {
-			geo: safeGeo,
+			geo,
 			w, h,
 			color: opts.color ?? "violet",
 			labelColor: "black",
@@ -854,7 +1310,7 @@ function buildGeoRecord(geo: string, text: string, x: number, y: number, w: numb
 	};
 }
 
-function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: number }, text: string, opts: { color?: string; author?: string }): Record<string, unknown> {
+function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: number }, text: string, opts: { color?: string; author?: string; index: IndexKey }): Record<string, unknown> {
 	return {
 		typeName: "shape",
 		id: shapeId(),
@@ -866,13 +1322,14 @@ function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: 
 		opacity: 1,
 		meta: { author: opts.author ?? "agent" },
 		parentId: "page:page",
-		index: fractionalIndex(),
+		index: opts.index,
 		props: {
 			dash: "draw",
 			size: "s",
 			fill: "none",
 			color: opts.color ?? "violet",
 			labelColor: "black",
+			kind: "arc",
 			bend: 0,
 			start: { x: start.x, y: start.y },
 			end: { x: end.x, y: end.y },
@@ -889,28 +1346,34 @@ function buildArrowRecord(start: { x: number; y: number }, end: { x: number; y: 
 
 app.post("/api/page/:slug/clear-annotations", async (c) => {
 	const slug = c.req.param("slug");
-	const snap = await readJsonOrEmpty<{ document?: { store?: Record<string, unknown> } } | null>(tldrawPath(slug), null);
-	if (!snap) return c.json({ ok: true, slug, cleared: 0 });
-	const store = snap.document?.store;
-	if (!store) return c.json({ ok: true, slug, cleared: 0 });
-	let removed = 0;
-	for (const [id, rec] of Object.entries(store)) {
-		if (typeof rec === "object" && rec !== null) {
-			const r = rec as { typeName?: string; type?: string };
-			// Keep the frontpage-embed shape (the page itself), drop every
-			// other shape (notes, text, arrows, geo, drawings).
-			if (r.typeName === "shape" && r.type !== "frontpage-embed") {
+	return withAnnotationWrite(slug, async () => {
+		const retired = await refuseWriteToRetiredPage(c, slug);
+		if (retired) return retired;
+		const snap = await readAnnotationSnapshot<{ document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> }>(slug);
+		const store = snap?.document?.store ?? snap?.store;
+		if (!store) return c.json({ ok: true, slug, cleared: 0 });
+		let removed = 0;
+		for (const [id, record] of Object.entries(store)) {
+			const r = record as { typeName?: string; type?: string };
+			if (r.typeName === "binding" || r.typeName === "shape" && r.type !== "frontpage-embed") {
 				delete store[id];
-				removed++;
+				if (r.typeName === "shape") removed++;
 			}
 		}
-	}
-	await writeJsonAtomic(tldrawPath(slug), snap);
-	return c.json({ ok: true, slug, cleared: removed });
+		if (removed) {
+			await writeJsonAtomic(tldrawPath(slug), snap);
+			await fsp.rm(canvasImagePath(slug), { force: true });
+			await appendHistoryEntry(slug, snap, "agent", "Cleared annotations");
+			broadcastToSlug(slug, { type: "annotations", slug });
+		}
+		return c.json({ ok: true, slug, cleared: removed });
+	});
 });
 
 app.post("/api/page/:slug/annotate", async (c) => {
 	const slug = c.req.param("slug");
+	const retired = await refuseWriteToRetiredPage(c, slug);
+	if (retired) return retired;
 	const body = await c.req.json().catch(() => null);
 	if (!body || typeof body !== "object" || !Array.isArray((body as { shapes?: unknown }).shapes)) {
 		return c.json({ error: "expected { shapes: [...], author?: string }" }, 400);
@@ -918,29 +1381,34 @@ app.post("/api/page/:slug/annotate", async (c) => {
 	const shapes = (body as { shapes: AnnotateShapeInput[]; author?: string }).shapes;
 	const author = typeof (body as { author?: unknown }).author === "string" ? (body as { author: string }).author : "agent";
 
-	// Load layout for anchor resolution + current snapshot for store merge.
+	return withAnnotationWrite(slug, async () => {
+	const retired = await refuseWriteToRetiredPage(c, slug);
+	if (retired) return retired;
+// Load layout for anchor resolution + current snapshot for store merge.
 	const [layout, currentSnap] = await Promise.all([
 		readJsonOrEmpty<{ sections: SectionBounds[] }>(layoutPath(slug), { sections: [] }),
-		readJsonOrEmpty<{ document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> } | null>(tldrawPath(slug), null),
+		readAnnotationSnapshot<{ document?: { store?: Record<string, unknown> }; store?: Record<string, unknown> }>(slug),
 	]);
 
-	const snap = currentSnap ?? null;
-	if (!snap) {
-		return c.json({ error: "no canvas state yet — open the page in a browser first so the embed shape is created" }, 409);
+	if (!layout.sections.length) return c.json({ error: "Open the document once so its content layout is available" }, 409);
+	let snap: { document: TLStoreSnapshot };
+	try {
+		snap = currentSnap ? normalizeAnnotationSnapshot(toDocumentCoordinates(currentSnap, slug), annotationSchema) : emptyAnnotationSnapshot(annotationSchema);
+	} catch (error) {
+		// Annotations that cannot be read back must say so; nothing was replaced.
+		return c.json({ error: error instanceof Error ? error.message : String(error), code: "annotations-unreadable" }, 500);
 	}
-	const store = snap.document?.store ?? snap.store;
-	if (!store) {
-		return c.json({ error: "malformed canvas snapshot" }, 500);
-	}
+	const store = snap.document.store;
+	let lastIndex = Object.values(store).filter(record => record.typeName === "shape").map(record => record.index).sort().at(-1);
+	const nextIndex = () => lastIndex = getIndexAbove(lastIndex);
+	const addRecord = (record: Record<string, unknown>, meta: Record<string, unknown>) => {
+		record.meta = { ...record.meta as object, ...meta };
+		const validated = annotationSchema.types.shape.validate(record);
+		store[validated.id] = validated;
+		created.push(validated.id);
+	};
 
-	// Embed offset: agent specifies page-space coords; we add the embed's
-	// canvas position so shapes land relative to the page.
-	const embed = Object.values(store).find(
-		(r): r is Record<string, unknown> & { x?: number; y?: number } =>
-			typeof r === "object" && r !== null && (r as { typeName?: string }).typeName === "shape" && (r as { type?: string }).type === "frontpage-embed",
-	);
-	const ox = (embed?.x as number | undefined) ?? 0;
-	const oy = (embed?.y as number | undefined) ?? 0;
+	const { x: ox, y: oy } = annotationOffset(snap);
 
 	const created: string[] = [];
 	const skipped: Array<{ index: number; reason: string }> = [];
@@ -962,16 +1430,15 @@ app.post("/api/page/:slug/annotate", async (c) => {
 				const canvasX = pageXY.x + ox;
 				const canvasY = pageXY.y + oy;
 				const record = s.kind === "note"
-					? buildNoteRecord(s.text, canvasX, canvasY, { color: s.color, size: s.size, author })
-					: buildTextRecord(s.text, canvasX, canvasY, { color: s.color, size: s.size, author });
-				store[(record as { id: string }).id] = record;
-				created.push((record as { id: string }).id);
+					? buildNoteRecord(s.text, canvasX, canvasY, { ...(s.color === undefined ? {} : { color: s.color }), ...(s.size === undefined ? {} : { size: s.size }), author, index: nextIndex() })
+					: buildTextRecord(s.text, canvasX, canvasY, { ...(s.color === undefined ? {} : { color: s.color }), ...(s.size === undefined ? {} : { size: s.size }), author, index: nextIndex() });
+				const anchor = s.anchor && !s.xy ? referenceAnchor(s.anchor, pageXY, layout.sections) : contentAnchor(pageXY, pageXY, layout.sections);
+				addRecord(record, { frontpageAnchor: anchor });
 			} else if (s.kind === "geo") {
 				const canvasX = s.xy.x + ox;
 				const canvasY = s.xy.y + oy;
-				const record = buildGeoRecord(s.geo ?? "rectangle", s.text ?? "", canvasX, canvasY, s.w, s.h, { color: s.color, author });
-				store[(record as { id: string }).id] = record;
-				created.push((record as { id: string }).id);
+				const record = buildGeoRecord(s.geo ?? "rectangle", s.text ?? "", canvasX, canvasY, s.w, s.h, { ...(s.color === undefined ? {} : { color: s.color }), author, index: nextIndex() });
+				addRecord(record, { frontpageAnchor: contentAnchor(s.xy, s.xy, layout.sections) });
 			} else if (s.kind === "arrow") {
 				const startPage = "x" in s.from && "y" in s.from ? s.from : resolveAnchor(s.from, layout.sections, -10);
 				const endPage = "x" in s.to && "y" in s.to ? s.to : resolveAnchor(s.to, layout.sections, -10);
@@ -981,9 +1448,10 @@ app.post("/api/page/:slug/annotate", async (c) => {
 				}
 				const start = { x: startPage.x + ox, y: startPage.y + oy };
 				const end = { x: endPage.x + ox, y: endPage.y + oy };
-				const record = buildArrowRecord(start, end, s.text ?? "", { color: s.color, author });
-				store[(record as { id: string }).id] = record;
-				created.push((record as { id: string }).id);
+				const record = buildArrowRecord(start, end, s.text ?? "", { ...(s.color === undefined ? {} : { color: s.color }), author, index: nextIndex() });
+				const from = "section" in s.from ? referenceAnchor(s.from, startPage, layout.sections) : contentAnchor(startPage, startPage, layout.sections);
+				const to = "section" in s.to ? referenceAnchor(s.to, endPage, layout.sections) : contentAnchor(endPage, endPage, layout.sections);
+				addRecord(record, { frontpageFromAnchor: from, frontpageToAnchor: to });
 			} else {
 				skipped.push({ index: i, reason: `unknown shape kind: ${(s as { kind?: string }).kind ?? "(none)"}` });
 			}
@@ -992,17 +1460,21 @@ app.post("/api/page/:slug/annotate", async (c) => {
 		}
 	});
 
+	if (!created.length) return c.json({ ok: !skipped.length, slug, created: 0, createdIds: [], skipped }, skipped.length ? 400 : 200);
 	// Persist the merged snapshot AND record the agent write in history so
 	// the hooman can roll back if our placement clobbered something.
 	await writeJsonAtomic(tldrawPath(slug), snap);
 	await appendHistoryEntry(slug, snap, `agent:${author}`);
+	await fsp.rm(canvasImagePath(slug), { force: true });
+	broadcastToSlug(slug, { type: "annotations" });
 	return c.json({ ok: true, slug, created: created.length, createdIds: created, skipped });
+});
 });
 
 // ---- Live revision events (SSE) ----
 // Per-slug set of subscriber callbacks. When the page is revised (agent
 // frontpage_update), we broadcast so open browsers add the new version
-// side-by-side WITHOUT a manual refresh.
+// in place, keeping older versions in History.
 const sseClients = new Map<string, Set<(line: string) => void>>();
 
 function broadcastToSlug(slug: string, payload: Record<string, unknown>): number {
@@ -1023,7 +1495,8 @@ app.get("/api/page/:slug/events", (c) => {
 		const send = (line: string) => { void stream.write(line); };
 		set.add(send);
 		await stream.write(`data: ${JSON.stringify({ type: "hello", slug })}\n\n`);
-		const ka = setInterval(() => { void stream.write(": keepalive\n\n"); }, 20000);
+		// Must stay under Bun.serve's 10s idle timeout or the stream is dropped.
+		const ka = setInterval(() => { void stream.write(": keepalive\n\n"); }, 5000);
 		stream.onAbort(() => {
 			clearInterval(ka);
 			set?.delete(send);
@@ -1050,7 +1523,7 @@ app.post("/api/page/:slug/revised", async (c) => {
 	// freeze robust even if the extension's history POST response was missed.
 	if (priorTs === undefined) {
 		const entries = await readHistory(slug);
-		if (entries.length > 0) priorTs = entries[entries.length - 1].ts;
+		priorTs = entries.at(-1)?.ts;
 	}
 	const delivered = broadcastToSlug(slug, {
 		type: "revised",
@@ -1084,6 +1557,60 @@ app.get("/api/page/:slug/history/:ts", async (c) => {
 	return c.json(entry);
 });
 
+// Restore is not one atomic rename, because the state lives in several files.
+// Pretending otherwise is how a page comes back half-restored. So it is made
+// RECOVERABLE instead: an intent file is written first, the writes follow, and
+// any later read of the page finishes an interrupted restore from the history
+// entry, which is itself untouched. Idempotent, so re-running is safe.
+interface RestoreIntent {
+	ts: number;
+	by: string;
+	startedAt: number;
+}
+
+function restoreIntentPath(slug: string): string {
+	return documentPath(STORE_DIR, slug, ".restore-intent.json");
+}
+
+async function applyRestore(slug: string, entry: HistoryEntry, ts: number): Promise<number> {
+	let written = 0;
+	await writeJsonAtomic(tldrawPath(slug), entry.snapshot);
+	await fsp.rm(canvasImagePath(slug), { force: true });
+	written += 1;
+	if (typeof entry.html === "string") {
+		await writeFileAtomic(pagePath(slug), entry.html);
+		written += 1;
+	}
+	if (entry.meta !== undefined) {
+		await writeJsonAtomic(metaPath(slug), entry.meta);
+		written += 1;
+	}
+	void ts;
+	return written;
+}
+
+/** Finish a restore that was interrupted, if there was one. Cheap: one stat. */
+async function recoverPendingRestore(slug: string): Promise<{ ts: number; written: number } | null> {
+	const raw = await fsp.readFile(restoreIntentPath(slug), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return null; throw error; });
+	if (raw === null) return null;
+	let intent: RestoreIntent | null = null;
+	try {
+		intent = JSON.parse(raw) as RestoreIntent;
+	} catch {
+		intent = null;
+	}
+	if (!intent || typeof intent.ts !== "number") throw new Error(RESTORE_BLOCKED.journalUnreadable + "; it was preserved for recovery");
+	const lifecycle = await readLifecycle(STORE_DIR, slug);
+	if (!isWritable(lifecycle)) throw new Error(RESTORE_BLOCKED.documentNotWritable(lifecycle.status) + "; the journal was preserved");
+	const entries = await readHistory(slug);
+	const entry = entries.find(e => e.ts === intent.ts);
+	if (!entry) throw new Error(RESTORE_BLOCKED.versionMissing + "; the journal was preserved");
+	const written = await applyRestore(slug, entry, intent.ts);
+	await appendHistoryEntry(slug, entry.snapshot, `restore-from:${intent.ts}`, `Restored the version saved at ${new Date(intent.ts).toISOString()}`);
+	await fsp.rm(restoreIntentPath(slug), { force: true });
+	return { ts: intent.ts, written };
+}
+
 app.post("/api/page/:slug/restore", async (c) => {
 	const slug = c.req.param("slug");
 	const body = await c.req.json().catch(() => null);
@@ -1091,22 +1618,43 @@ app.post("/api/page/:slug/restore", async (c) => {
 		return c.json({ error: "expected { ts: number }" }, 400);
 	}
 	const ts = (body as { ts: number }).ts;
+	return withAnnotationWrite(slug, async () => {
+	const retired = await readLifecycle(STORE_DIR, slug);
+	if (!isWritable(retired)) {
+		return c.json({ ok: false, code: "retired", error: "this page is " + retired.status + "; it cannot be restored" }, 409);
+	}
 	const entries = await readHistory(slug);
 	const entry = entries.find((e) => e.ts === ts);
 	if (!entry) return c.json({ error: "no history entry with that ts" }, 404);
-	// Atomic surface restore: html + meta + tldraw all revert together.
-	// Skip files the entry doesn't carry (older entries without html/meta).
-	const writes: Array<Promise<unknown>> = [writeJsonAtomic(tldrawPath(slug), entry.snapshot)];
-	if (typeof entry.html === "string") {
-		writes.push(fsp.writeFile(pagePath(slug), entry.html, "utf8"));
+
+	// Intent first, writes second. Anything that dies between the two is
+	// finished by recoverPendingRestore on the next read of this page.
+	await writeJsonAtomic(restoreIntentPath(slug), { ts, by: "operator", startedAt: Date.now() } satisfies RestoreIntent);
+	let written: number;
+	try {
+		written = await applyRestore(slug, entry, ts);
+	} catch (error) {
+		return c.json(
+			{
+				ok: false,
+				code: "restore-incomplete",
+				error: String(error),
+				note: "the restore is journalled and will finish on the next read of this page",
+			},
+			500,
+		);
 	}
-	if (entry.meta !== undefined) {
-		writes.push(writeJsonAtomic(metaPath(slug), entry.meta));
-	}
-	await Promise.all(writes);
-	// Record the restore so the act-of-restoring is itself reversible.
-	await appendHistoryEntry(slug, entry.snapshot, `restore-from:${ts}`);
-	return c.json({ ok: true, slug, restoredTs: ts, shapeCount: entry.shapeCount, restoredFiles: writes.length });
+	await fsp.rm(restoreIntentPath(slug), { force: true });
+	// Record the restore so the act of restoring is itself reversible.
+	await appendHistoryEntry(
+		slug,
+		entry.snapshot,
+		`restore-from:${ts}`,
+		`Restored the version saved at ${new Date(ts).toISOString()}`,
+	);
+	broadcastToSlug(slug, { type: "revised", slug });
+	return c.json({ ok: true, slug, restoredTs: ts, shapeCount: entry.shapeCount, restoredFiles: written });
+	});
 });
 
 // Trigger a history snapshot from outside the canvas write path — used by
@@ -1114,17 +1662,21 @@ app.post("/api/page/:slug/restore", async (c) => {
 // land in history.
 app.post("/api/page/:slug/history", async (c) => {
 	const slug = c.req.param("slug");
-	const body = await c.req.json().catch(() => ({}));
-	const author = typeof (body as { author?: unknown }).author === "string"
-		? (body as { author: string }).author
-		: "agent";
-	const snap = await readJsonOrEmpty<unknown>(tldrawPath(slug), { document: { store: {} } });
-	const tsBefore = Date.now();
-	const result = await appendHistoryEntry(slug, snap, author);
-	// Return the ts of the entry we just created (the last one in the log).
-	const entries = await readHistory(slug);
-	const createdTs = entries.length > 0 ? entries[entries.length - 1].ts : tsBefore;
-	return c.json({ ok: true, slug, ts: createdTs, ...result });
+	// Read-modify-write of the history log.
+	return withAnnotationWrite(slug, async () => {
+		const body = await c.req.json().catch(() => ({}));
+		const author = typeof (body as { author?: unknown }).author === "string"
+			? (body as { author: string }).author
+			: "agent";
+		const snap = await readJsonOrEmpty<unknown>(tldrawPath(slug), { document: { store: {} } });
+		const tsBefore = Date.now();
+		const note = typeof (body as { note?: unknown }).note === "string" ? (body as { note: string }).note : undefined;
+		const result = await appendHistoryEntry(slug, snap, author, note);
+		// Return the ts of the entry we just created (the last one in the log).
+		const entries = await readHistory(slug);
+		const createdTs = entries.at(-1)?.ts ?? tsBefore;
+		return c.json({ ok: true, slug, ts: createdTs, ...result });
+	});
 });
 
 // Versioned embed: ?ts=<historyTs> returns the html from that history entry
@@ -1153,44 +1705,18 @@ app.get("/api/page/:slug/embed-versioned", async (c) => {
 app.get("/client/bundle.js", serveClientAsset("bundle.js", "application/javascript; charset=utf-8"));
 app.get("/client/bundle.css", serveClientAsset("bundle.css", "text/css; charset=utf-8"));
 
-function serveClientAsset(filename: string, contentType: string) {
-	return async (c: { body: (data: BodyInit, status?: number, headers?: Record<string, string>) => Response }) => {
-		const filePath = path.join(CLIENT_DIST, filename);
-		try {
-			const buf = await fsp.readFile(filePath);
-			return c.body(buf, 200, { "content-type": contentType, "cache-control": "no-cache" });
-		} catch {
-			return c.body(
-				`Client bundle missing at ${filePath}. Run \`bun run build-client\` in packages/frontpage.`,
-				500,
-				{ "content-type": "text/plain; charset=utf-8" },
-			);
-		}
+function serveClientAsset(filename: "bundle.js" | "bundle.css", contentType: string) {
+	return (c: Context) => {
+		const requested = c.req.query("v");
+		if (requested !== clientRelease.id) return c.text("This client release is no longer served. Reload the document.", 404);
+		return c.body(filename === "bundle.js" ? clientRelease.script : clientRelease.style, 200, {
+			"content-type": contentType,
+			"cache-control": "public, max-age=31536000, immutable",
+		});
 	};
 }
 
 // ---- HTML templates ----
-
-function shellHtml(slug: string): string {
-	const safeSlug = JSON.stringify(slug);
-	return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<title>${escapeHtml(slug)} — frontpage</title>
-<link rel="stylesheet" href="/client/bundle.css" />
-<style>
-  html, body, #root { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
-  body { background: #f7f6f3; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script>window.__FRONTPAGE_SLUG__ = ${safeSlug};</script>
-<script type="module" src="/client/bundle.js"></script>
-</body>
-</html>`;
-}
 
 function indexHtml(rows: string, count: number): string {
 	return `<!doctype html>
@@ -1323,6 +1849,8 @@ const LAYOUT_BOUNDS_SHIM = `
     pending = requestAnimationFrame(function () { pending = 0; reportBounds(); });
   }
   window.addEventListener('load', schedule);
+  window.addEventListener('resize', schedule);
+  window.addEventListener('frontpage:request-layout', schedule);
   // Re-measure when the CONTENT changes — observe the container, NOT
   // documentElement/body (those resize WITH the iframe, so observing them would
   // re-fire on our own resize). The container resizes only when content does.
@@ -1334,7 +1862,8 @@ const LAYOUT_BOUNDS_SHIM = `
   // the DOM after load. childList (NOT attributes — diagram zoom/pan churns
   // style constantly) catches the insert so we re-measure once it lands.
   if (window.MutationObserver) {
-    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    var content = document.querySelector('.container');
+    if (content) new MutationObserver(schedule).observe(content, { childList: true, subtree: true });
   }
   if (document.fonts && document.fonts.ready) { document.fonts.ready.then(schedule); }
   // A couple of safety re-measures for diagrams that render slightly late.
@@ -1347,24 +1876,6 @@ const LAYOUT_BOUNDS_SHIM = `
 `;
 
 // ---- helpers ----
-
-async function listFrontpages(): Promise<Array<{ slug: string; title: string }>> {
-	try {
-		const files = await fsp.readdir(STORE_DIR);
-		const metas = files.filter((f) => f.endsWith(".meta.json"));
-		const out: Array<{ slug: string; title: string }> = [];
-		for (const f of metas) {
-			try {
-				const meta = JSON.parse(await fsp.readFile(path.join(STORE_DIR, f), "utf8"));
-				out.push({ slug: meta.slug, title: meta.spec?.title ?? meta.slug });
-			} catch {}
-		}
-		out.sort((a, b) => a.title.localeCompare(b.title));
-		return out;
-	} catch {
-		return [];
-	}
-}
 
 function escapeHtml(s: string): string {
 	return s

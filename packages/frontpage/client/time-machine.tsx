@@ -17,12 +17,13 @@
  */
 
 import * as React from "react";
+import { historyStageSize, prepareHistorySnapshot } from "./history-snapshot.ts";
 import {
 	Tldraw,
 	type Editor,
 	type RecordProps,
 	type TLBaseShape,
-	type TLEditorComponents,
+	type TLComponents,
 	BaseBoxShapeUtil,
 	HTMLContainer,
 	T,
@@ -96,7 +97,7 @@ export function authorColor(author: string): string {
 	if (author.startsWith("restore-from:")) return "#0891b2"; // cyan — restore points
 	if (author.startsWith("agent:")) {
 		const name = author.slice(6) || "agent";
-		return AGENT_PALETTE[djb2(name) % AGENT_PALETTE.length];
+		return AGENT_PALETTE[djb2(name) % AGENT_PALETTE.length]!;
 	}
 	return "#9ca3af"; // grey — unknown
 }
@@ -261,20 +262,10 @@ export function TimeMachine({ slug, onClose }: TimeMachineProps) {
 	React.useEffect(() => {
 		if (!editorRef || !snapshot) return;
 		try {
-			loadSnapshot(editorRef.store, snapshot as Parameters<typeof loadSnapshot>[1]);
-			// Stamp every embed shape with the selected ts so iframes load
-			// the historical HTML for that version.
+			// The Time Machine editor is read-only, so the historical page is put
+			// into the snapshot instead of being created as a shape afterwards.
 			const ts = entries?.[selectedIdx]?.ts ?? 0;
-			const shapes = editorRef.getCurrentPageShapes();
-			for (const s of shapes) {
-				if (s.type === "frontpage-embed" || s.type === "versioned-embed") {
-					editorRef.updateShape({
-						id: s.id,
-						type: "versioned-embed",
-						props: { ...(s.props as Record<string, unknown>), ts },
-					});
-				}
-			}
+			loadSnapshot(editorRef.store, prepareHistorySnapshot(snapshot, slug, ts, historyStageSize()) as Parameters<typeof loadSnapshot>[1]);
 			editorRef.zoomToFit({ animation: { duration: 200 } });
 		} catch (err) {
 			console.warn("[time-machine] failed to load snapshot:", err);
@@ -299,10 +290,11 @@ export function TimeMachine({ slug, onClose }: TimeMachineProps) {
 	}, [entries, onClose]);
 
 	const restore = React.useCallback(async () => {
-		if (!entries || selectedIdx < 0) return;
+		const entry = entries?.[selectedIdx];
+		if (!entry) return;
 		setRestoring(true);
 		try {
-			const ts = entries[selectedIdx].ts;
+			const ts = entry.ts;
 			const r = await fetch(`/api/page/${encodeURIComponent(slug)}/restore`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -318,7 +310,7 @@ export function TimeMachine({ slug, onClose }: TimeMachineProps) {
 		}
 	}, [entries, selectedIdx, slug]);
 
-	const components = React.useMemo<TLEditorComponents>(
+	const components = React.useMemo<TLComponents>(
 		() => ({ Toolbar: null, StylePanel: null, MainMenu: null, HelpMenu: null, NavigationPanel: null, QuickActions: null, ActionsMenu: null, PageMenu: null, ZoomMenu: null, DebugPanel: null, DebugMenu: null, MenuPanel: null, SharePanel: null }),
 		[],
 	);
@@ -332,6 +324,7 @@ export function TimeMachine({ slug, onClose }: TimeMachineProps) {
 				position: "fixed",
 				inset: 0,
 				zIndex: 10000,
+				pointerEvents: "auto",
 				background:
 					"radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a14 60%, #050508 100%)",
 				display: "flex",

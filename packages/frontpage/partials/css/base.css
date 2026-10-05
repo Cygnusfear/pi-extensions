@@ -1,5 +1,6 @@
 /* ============ RESET + BASE ============ */
 * { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 :root {
   --bg: #ffffff;
@@ -506,3 +507,40 @@ body {
 .fp-decisions-chip__count { background: var(--fp-coral); color: #fff; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
 .fp-decisions-chip__next { color: var(--text-dim); font-weight: 500; }
 @media (max-width: 768px) { .fp-decisions-chip { right: 14px; bottom: 14px; } }
+
+/* Decision write honesty: the only line that may claim a save is this one, and
+   it says so only after the server confirmed it. */
+.fp-decision__state { margin: 0; padding: 0 22px 18px; font-size: 14px; line-height: 1.45; color: var(--text-dim); }
+.fp-decision__state:empty { display: none; }
+.fp-decision__state--ok { color: var(--fp-ok); }
+.fp-decision__state--fail { color: var(--fp-coral); font-weight: 600; }
+.fp-decision__state--stale { color: #8a5a00; font-weight: 600; }
+.fp-decision--needs-review .fp-decision__card { border-color: #e0b64a; box-shadow: 0 6px 20px rgba(224, 182, 74, .18); }
+.fp-decision__submit:disabled, .fp-decision__change:disabled { opacity: .6; cursor: default; }
+
+/* Change log: one row per edit, pinned so the latest edit is always visible
+   without scrolling, expandable into the full history. */
+.fp-cl { position: fixed; left: 16px; bottom: 16px; z-index: 40; max-width: min(30rem, calc(100vw - 32px)); background: rgba(255,255,255,.97); border: 1px solid var(--fp-hairline, #d9d9d9); border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.14); font-size: 13px; color: var(--ink, #16181d); }
+.fp-cl__summary { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; list-style: none; }
+.fp-cl__summary::-webkit-details-marker { display: none; }
+.fp-cl__tag { flex: 0 0 auto; font: 700 10px/1 ui-monospace, monospace; letter-spacing: .1em; color: var(--fp-coral, #c8452f); border: 1px solid currentColor; border-radius: 999px; padding: 3px 7px; }
+.fp-cl__latest { flex: 1 1 auto; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-cl__meta, .fp-cl__count { flex: 0 0 auto; color: var(--text-dim, #6b7280); font-size: 12px; }
+.fp-cl__list { list-style: none; margin: 0; padding: 0 12px 10px; max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--fp-hairline, #d9d9d9); }
+.fp-cl__row { display: grid; grid-template-columns: 8.5rem 1fr; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+.fp-cl__row:last-child { border-bottom: none; }
+.fp-cl__when { color: var(--text-dim, #6b7280); font-family: ui-monospace, monospace; font-size: 11px; }
+.fp-cl__who { font-weight: 600; }
+.fp-cl__note { grid-column: 2; }
+.fp-cl__effect { grid-column: 2; color: var(--text-dim, #6b7280); font-size: 12px; }
+@media (max-width: 560px) { .fp-cl { left: 8px; right: 8px; bottom: 8px; max-width: none; } .fp-cl__row { grid-template-columns: 1fr; } .fp-cl__note, .fp-cl__effect { grid-column: 1; } }
+
+/* Lifecycle: a retired page says so where it cannot be missed. */
+.fp-lifecycle { display: block; margin: 0 0 20px; padding: 12px 16px; border: 1px solid var(--fp-coral, #c8452f); border-left-width: 4px; border-radius: 8px; background: #fff; font-size: 14px; line-height: 1.5; color: var(--ink, #16181d); }
+.fp-lifecycle--archived { border-color: #b08900; }
+.fp-lifecycle--purged { border-color: #6b7280; }
+.fp-lifecycle a { color: var(--fp-coral, #c8452f); font-weight: 600; }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 999px; font: 700 10px/1.6 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; border: 1px solid currentColor; }
+.chip--superseded { color: #c8452f; } .chip--archived { color: #b08900; } .chip--purged { color: #6b7280; }
+li.retired { opacity: .8; }
+li.section-head { margin-top: 14px; font: 700 11px/1.6 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim, #6b7280); }

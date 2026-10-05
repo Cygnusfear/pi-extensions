@@ -859,7 +859,8 @@ function frontpageBuildScript(): string {
 async function ensureClientBundleBuilt(
 	spawnProcess: FrontpageSpawn,
 ): Promise<void> {
-	if (fs.existsSync(frontpageClientBundle())) return;
+	const directory = path.dirname(frontpageClientBundle());
+	if (["bundle.js", "bundle.css", "release-id"].every(file => fs.existsSync(path.join(directory, file)))) return;
 	const scriptPath = frontpageBuildScript();
 	if (!fs.existsSync(scriptPath)) return;
 	await new Promise<void>((resolve) => {
@@ -980,6 +981,7 @@ function frontpagePageUrl(slug: string): string {
 async function triggerHistorySnapshot(
 	slug: string,
 	author: string,
+	note?: string,
 ): Promise<number | null> {
 	try {
 		const r = await fetch(
@@ -987,7 +989,7 @@ async function triggerHistorySnapshot(
 			{
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ author }),
+				body: JSON.stringify(note ? { author, note } : { author }),
 			},
 		);
 		if (!r.ok) return null;
@@ -1225,6 +1227,7 @@ function registerFrontpage(
 			void triggerHistorySnapshot(
 				spec.slug,
 				`agent:${getStableNickname() ?? "frontpage_create"}`,
+			"page created",
 			);
 
 			// Opt-in: default false (agents typically follow up with frontpage_open;
@@ -1458,7 +1461,7 @@ function registerFrontpage(
 			// 1. Snapshot the PRE-update surface (OLD html + meta + canvas-with-
 			//    annotations) into history FIRST, while the old content is still
 			//    on disk. priorTs identifies that frozen version.
-			const priorTs = await triggerHistorySnapshot(params.slug, authorTag);
+			const priorTs = await triggerHistorySnapshot(params.slug, authorTag, params.note);
 			// 2. NOW write the new content to disk.
 			const html = render(withIds);
 			await fsp.writeFile(filePath, html, "utf8");

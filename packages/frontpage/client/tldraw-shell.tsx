@@ -1,206 +1,28 @@
-/**
- * Frontpage v2/v3/v4 tldraw client shell.
- *
- * - Renders a tldraw canvas with the frontpage HTML embedded as a custom shape.
- * - Persists canvas snapshot to the server (debounced).
- * - Restores snapshot on mount.
- * - Forwards section/item bounding boxes from the iframe shim.
- * - Smaller default shape size ("s").
- * - Sticker dropdown integrated into tldraw's toolbar (no overlay panel).
- * - History panel (Time Machine).
- */
-
+/** The frontpage document is the page; tldraw renders only its annotations. */
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import {
-	Tldraw,
-	BaseBoxShapeUtil,
-	Box,
-	HTMLContainer,
-	type TLBaseShape,
-	type RecordProps,
-	T,
-	type TLEditorComponents,
-	type Editor,
-	getSnapshot,
-	loadSnapshot,
-	DefaultSizeStyle,
-	DefaultFontStyle,
-	createShapeId,
-	DefaultToolbar,
-	DefaultToolbarContent,
-	TldrawUiDropdownMenuRoot,
-	TldrawUiDropdownMenuTrigger,
-	TldrawUiDropdownMenuContent,
-	TldrawUiDropdownMenuItem,
-	TldrawUiButton,
-	TldrawUiButtonIcon,
-	useEditor,
-} from "tldraw";
+import { Tldraw, BaseBoxShapeUtil, type TLBaseShape, type RecordProps, type TLComponents, type Editor, type TLShapeId, type TLShape, getSnapshot, loadSnapshot, getArrowInfo, getArrowBindings, type TLArrowShape, DefaultSizeStyle, DefaultFontStyle, createShapeId, DefaultToolbar, DefaultToolbarContent, TldrawUiDropdownMenuRoot, TldrawUiDropdownMenuTrigger, TldrawUiDropdownMenuContent, TldrawUiButton, TldrawUiButtonIcon, useEditor } from "tldraw";
 import "tldraw/tldraw.css";
+import { legacyEmbedProps } from "../server-process/annotation-schema.ts";
 import { TimeMachine } from "./time-machine.tsx";
+import { downloadHtml } from "./export-html.ts";
+import { mergeDraft } from "./draft-merge.ts";
+import { toDocumentCoordinates, contentAnchor, anchorPosition, type LayoutSection, type ContentAnchor } from "../server-process/annotation-coordinates.ts";
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-// ---- custom shape: frontpage-embed ----
-
-type FrontpageEmbedShape = TLBaseShape<
-	"frontpage-embed",
-	{ w: number; h: number; slug: string; ts: number; label: string }
->;
-
-class FrontpageEmbedShapeUtil extends BaseBoxShapeUtil<FrontpageEmbedShape> {
-	static override type = "frontpage-embed" as const;
-	static override props: RecordProps<FrontpageEmbedShape> = {
-		w: T.number,
-		h: T.number,
-		slug: T.string,
-		// ts=0 → live (current /embed). ts>0 → frozen at that history version
-		// (embed-versioned?ts=). Freezing is how the hooman's annotations stay
-		// pinned: the doc they sit on never changes again.
-		ts: T.number,
-		label: T.string,
-	};
-
-	getDefaultProps(): FrontpageEmbedShape["props"] {
-		return { w: 1200, h: 1500, slug: "", ts: 0, label: "" };
-	}
-
-	override canResize = () => true;
-	override hideResizeHandles = () => false;
-	override hideRotateHandle = () => true;
-	override canEdit = () => true;
-	override canBind = () => true;
-
-	component(shape: FrontpageEmbedShape) {
-		const { slug, ts, label } = shape.props;
-		const url = ts > 0
-			? `/api/page/${encodeURIComponent(slug)}/embed-versioned?ts=${ts}`
-			: `/page/${encodeURIComponent(slug)}/embed`;
-		const frozen = ts > 0;
-		// Interactive ONLY when this embed is in tldraw's EDITING state — the one
-		// mechanism that suspends the active tool (pen/select) and routes native
-		// pointer events to the shape's DOM. A raw pointer-events flip is not
-		// enough: the draw tool captures pointers canvas-wide. Editing is toggled
-		// by the global "Interact / Draw" button (and double-click / Escape).
-		// getEditingShapeId() is reactive, so this re-renders when editing changes.
-		const interactive = !frozen && this.editor.getEditingShapeId() === shape.id;
-		return (
-			<HTMLContainer
-				id={shape.id}
-				style={{
-					width: shape.props.w,
-					height: shape.props.h,
-					pointerEvents: interactive ? "all" : "none",
-					overflow: "hidden",
-					background: "#fafaf7",
-					boxShadow: frozen ? "0 2px 12px rgba(0,0,0,0.06)" : interactive ? "0 6px 28px rgba(255,56,92,0.22)" : "0 4px 24px rgba(0,0,0,0.10)",
-					borderRadius: 6,
-					border: frozen ? "1px solid #d8d8d8" : interactive ? "2px solid #FF385C" : "2px solid #1f6feb",
-					opacity: frozen ? 0.96 : 1,
-				}}
-			>
-				{label ? (
-					<div style={{
-						position: "absolute", top: 0, left: 0, right: 0,
-						padding: "4px 10px",
-						font: "600 11px -apple-system, BlinkMacSystemFont, sans-serif",
-						letterSpacing: "0.06em",
-						color: frozen ? "#666" : "#fff",
-						background: frozen ? "#ededed" : "#1f6feb",
-						borderBottom: frozen ? "1px solid #ddd" : "none",
-						zIndex: 2,
-						pointerEvents: "none",
-						textTransform: "uppercase",
-					}}>{label}</div>
-				) : null}
-				<iframe
-					src={url}
-					title={`${slug}${frozen ? "@" + ts : " (live)"}`}
-					style={{ width: "100%", height: "100%", border: 0, display: "block", background: "white", pointerEvents: interactive ? "auto" : "none", marginTop: label ? 24 : 0 }}
-				/>
-			</HTMLContainer>
-		);
-	}
-
-	indicator(shape: FrontpageEmbedShape) {
-		return <rect width={shape.props.w} height={shape.props.h} rx={6} ry={6} />;
-	}
-
-	// Exported representation (editor.toImage). The live iframe can't be
-	// rasterized into the SVG export, so the embed renders as a LABELED FRAME —
-	// enough spatial reference for the agent to see where the hooman's drawings
-	// sit relative to each version. The drawings themselves export natively.
-	override toSvg(shape: FrontpageEmbedShape) {
-		const { w, h, slug, label, ts } = shape.props;
-		const frozen = ts > 0;
-		const accent = frozen ? "#9aa0a6" : "#1f6feb";
-		const barFill = frozen ? "#ededed" : "#1f6feb";
-		const barText = frozen ? "#666666" : "#ffffff";
-		return (
-			<g>
-				<rect x={0} y={0} width={w} height={h} rx={6} ry={6} fill="#fafaf7" stroke={accent} strokeWidth={frozen ? 1 : 2} />
-				<rect x={0} y={0} width={w} height={24} fill={barFill} />
-				<text x={10} y={16} fontFamily="-apple-system, sans-serif" fontSize={11} fontWeight={600} fill={barText}>{(label || slug).toUpperCase()}</text>
-				<text x={w / 2} y={h / 2} textAnchor="middle" fontFamily="-apple-system, sans-serif" fontSize={22} fill="#c2c2c2">{slug}</text>
-				<text x={w / 2} y={h / 2 + 28} textAnchor="middle" fontFamily="-apple-system, sans-serif" fontSize={13} fill="#d4d4d4">frontpage embed</text>
-			</g>
-		);
-	}
+// Kept as a schema adapter for legacy history only. It never renders HTML.
+type LegacyEmbedShape = TLBaseShape<"frontpage-embed", { w: number; h: number; slug: string; ts: number; label: string }>;
+class LegacyEmbedShapeUtil extends BaseBoxShapeUtil<LegacyEmbedShape> {
+static override type = "frontpage-embed" as const;
+static override props: RecordProps<LegacyEmbedShape> = legacyEmbedProps;
+getDefaultProps(): LegacyEmbedShape["props"] { return { w: 1200, h: 1500, slug: "", ts: 0, label: "" }; }
+component() { return null; }
+indicator() { return null; }
 }
-
-// ---- persistence helpers ----
-
-function debounce<TArgs extends unknown[]>(fn: (...args: TArgs) => void, ms: number) {
-	let h: ReturnType<typeof setTimeout> | null = null;
-	return (...args: TArgs) => {
-		if (h) clearTimeout(h);
-		h = setTimeout(() => fn(...args), ms);
-	};
-}
-
-async function loadServerSnapshot(slug: string): Promise<unknown | null> {
-	try {
-		const r = await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`);
-		if (!r.ok) return null;
-		const body = (await r.json()) as { snapshot?: unknown | null };
-		return body.snapshot ?? null;
-	} catch { return null; }
-}
-
-async function postCanvasImage(slug: string, blob: Blob): Promise<void> {
-	try {
-		await fetch(`/api/page/${encodeURIComponent(slug)}/canvas-image`, {
-			method: "POST",
-			headers: { "content-type": "image/png" },
-			body: blob,
-		});
-	} catch (err) {
-		console.error("[frontpage] postCanvasImage failed:", err);
-	}
-}
-
-async function postSnapshot(slug: string, snapshot: unknown): Promise<boolean> {
-	try {
-		const r = await fetch(`/api/page/${encodeURIComponent(slug)}/tldraw`, {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ snapshot }),
-		});
-		return r.ok;
-	} catch (err) {
-		console.error("[frontpage] snapshot save failed:", err);
-		return false;
-	}
-}
-
-async function postLayout(slug: string, sections: unknown[]): Promise<void> {
-	try {
-		await fetch(`/api/page/${encodeURIComponent(slug)}/layout`, {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ sections }),
-		});
-	} catch {}
-}
+const LEGACY_SHAPE_UTILS = [LegacyEmbedShapeUtil];
+/** Page elements that own their own pointer input; the annotation layer stays out of them. */
+const UI_OWNED = ".tlui-layout, .fp-controls";
+const annotationVisibility = (shape: TLShape) => shape.type === "frontpage-embed" || shape.meta.frontpageLegacy ? "hidden" as const : "inherit" as const;
 
 // ---- sticker catalog ----
 
@@ -296,312 +118,365 @@ function StickerToolbarItem() {
 	);
 }
 
-/** Toolbar item — opens the full-screen Time Machine. */
-function TimeMachineToolbarItem({ onClick }: { onClick: () => void }) {
-	return (
-		<TldrawUiButton
-			type="tool"
-			title="Time Machine — browse and restore prior versions"
-			onClick={onClick}
-		>
-			<span style={{ fontSize: 16, lineHeight: 1 }}>⏰</span>
-		</TldrawUiButton>
-	);
+// The HTML document owns layout and scrolling. This root owns annotations only.
+function installOverlayStyles(): void {
+	if (document.getElementById("frontpage-annotation-styles")) return;
+	const style = document.createElement("style");
+	style.id = "frontpage-annotation-styles";
+	style.textContent = `
+#frontpage-annotations { position: fixed; inset: 0; z-index: 10000; pointer-events: none; }
+#frontpage-annotations .fp-overlay { position: absolute; inset: 0; }
+#frontpage-annotations .tl-background { display: none; }
+#frontpage-annotations .tl-container, #frontpage-annotations .tl-canvas { background: transparent; }
+#frontpage-annotations .fp-controls { position: absolute; top: 12px; right: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 24px); pointer-events: auto; align-items: center; font: 13px system-ui, sans-serif; }
+#frontpage-annotations .fp-controls button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fff; color: #222; cursor: pointer; font: inherit; }
+#frontpage-annotations .fp-controls button[aria-pressed="true"] { background: #222; color: #fff; }
+#frontpage-annotations .fp-controls button:disabled { opacity: .5; cursor: wait; }
+#frontpage-annotations .fp-save-state { background: #fff; color: #333; padding: 6px 8px; border-radius: 8px; max-width: 38ch; }
+#frontpage-annotations .fp-save-state[data-state="failed"] { color: #9b1c1c; }
+`;
+	document.head.append(style);
 }
 
-// (History UI moved to ./time-machine.tsx — full-screen Apple Time Machine-
-// style overlay with z-stacked previews, vertical timeline rail, and
-// color-coded author markers.)
-
-// ---- app shell ----
-
+type SaveState = "loading" | "saving" | "saved" | "failed";
 function App({ slug }: { slug: string }) {
-	const [editor, setEditor] = React.useState<Editor | null>(null);
-	const [interacting, setInteracting] = React.useState(false);
-	const [showTimeMachine, setShowTimeMachine] = React.useState(false);
+	const [annotating, setAnnotating] = React.useState(false);
+	const [history, setHistory] = React.useState(false);
+	const [state, setState] = React.useState<SaveState>("loading");
+	const [canEdit, setCanEdit] = React.useState(true);
+	const [error, setError] = React.useState("");
+	const [legacyCount, setLegacyCount] = React.useState(0);
+	const [detachedCount, setDetachedCount] = React.useState(0);
+	const [draftFound, setDraftFound] = React.useState(false);
+	const [revisionPending, setRevisionPending] = React.useState(false);
+	const [exporting, setExporting] = React.useState(false);
+	const [exportError, setExportError] = React.useState("");
+	const editor = React.useRef<Editor | null>(null);
+	const layer = React.useRef<HTMLDivElement | null>(null);
+	const retry = React.useRef<() => void>(() => {});
+	const restoreDraft = React.useRef<() => void>(() => {});
+	const ready = React.useRef(false);
+	const editing = React.useRef(false);
+	const dirty = React.useRef(false);
+	const persisted = React.useRef(false);
+	const draftKey = "frontpage-draft:" + slug;
 
-	const handleMount = React.useCallback(
-		(ed: Editor) => {
-			let cancelled = false;
-			let hydrated = false; // gate saves until initial load completes
-			setEditor(ed);
+	React.useEffect(() => { installOverlayStyles(); }, []);
+	React.useEffect(() => {
+		editing.current = annotating;
+		editor.current?.updateInstanceState({ isReadonly: !annotating || !canEdit || !ready.current });
+		if (!annotating) editor.current?.selectNone();
+	}, [annotating, canEdit]);
 
-			// Keep the global Interact toggle label in sync with tldraw's editing
-			// state (so Escape / double-click also flip it).
-			const syncInteracting = () => setInteracting(ed.getEditingShapeId() != null);
-			const offEditing = ed.store.listen(syncInteracting);
-			syncInteracting();
+	const handleMount = React.useCallback((ed: Editor) => {
+		editor.current = ed;
+		let disposed = false;
+		let loadId = 0;
+		let writable = true;
+		let unlisten: (() => void) | undefined;
+		let version: string | null = null;
+		// The store as the server last had it, so a kept draft can be merged
+		// onto whatever the server has gained since instead of replacing it.
+		let base: unknown = null;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let saving = false;
+		let changed = 0;
+		let applying = false;
+		let sections: LayoutSection[] = [];
+		const changedShapes = new Set<TLShapeId>();
+		const camera = () => ed.setCamera({ x: -window.scrollX, y: -window.scrollY, z: 1 }, { force: true, immediate: true });
+		ed.setCameraOptions({ isLocked: true, wheelBehavior: "none", zoomSteps: [1] });
+		ed.updateInstanceState({ isReadonly: !editing.current });
+		ed.setStyleForNextShapes(DefaultSizeStyle, "s");
+		ed.setStyleForNextShapes(DefaultFontStyle, "draw");
+		camera();
+		window.addEventListener("scroll", camera, { passive: true });
+		window.addEventListener("resize", camera);
+		const wheel = (event: WheelEvent) => {
+			// Tldraw must not consume the document's wheel scrolling.
+			if (event.ctrlKey || event.target instanceof Element && event.target.closest(UI_OWNED)) return;
+			event.preventDefault();
+			event.stopPropagation();
+			const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+			window.scrollBy(event.deltaX * unit, event.deltaY * unit);
+		};
+		const element = layer.current;
+		element?.addEventListener("wheel", wheel, { capture: true, passive: false });
+		let drag: { id: number; x: number; y: number } | null = null;
+		const hand = (event: PointerEvent) => {
+			if (event.type === "pointerdown") {
+				if (!editing.current || event.target instanceof Element && event.target.closest(UI_OWNED) || !(event.button === 1 || event.button === 0 && ed.getCurrentToolId() === "hand")) return;
+				drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+				element?.setPointerCapture(event.pointerId);
+			} else if (!drag || event.pointerId !== drag.id) return;
+			event.preventDefault(); event.stopPropagation();
+			if (event.type === "pointermove" && drag) {
+				window.scrollBy(drag.x - event.clientX, drag.y - event.clientY);
+				drag.x = event.clientX; drag.y = event.clientY;
+			} else if (event.type !== "pointerdown") {
+				if (element?.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+				drag = null;
+			}
+		};
+		const dragEvents = ["pointerdown", "pointermove", "pointerup", "pointercancel"] as const;
+		for (const type of dragEvents) element?.addEventListener(type, hand, true);
 
-			// --- PERSISTENCE: attach FIRST, synchronously, before any async
-			// load that could throw and block listener attachment. ---
-			// CHANGE-DRIVEN save, debounced ~350ms. NO polling. store.listen
-			// fires on every store change → debounce → save. We never write
-			// unless something actually changed, and never write stale state
-			// on a timer. Gated behind `hydrated` so the initial loadSnapshot
-			// doesn't immediately re-write what we just loaded.
-			const doSave = () => {
-				if (!hydrated) return;
-				try {
-					void postSnapshot(slug, getSnapshot(ed.store));
-				} catch (err) {
-					console.error("[frontpage] getSnapshot/save threw:", err);
+		const updateCounts = () => {
+			const shapes = ed.getCurrentPageShapes();
+			setLegacyCount(shapes.filter(s => Boolean(s.meta.frontpageLegacy)).length);
+			setDetachedCount(shapes.filter(s => Boolean(s.meta.frontpageDetached)).length);
+			let extent = document.getElementById("frontpage-annotation-extent");
+			if (!extent) {
+				extent = document.createElement("div");
+				extent.id = "frontpage-annotation-extent";
+				extent.setAttribute("aria-hidden", "true");
+				extent.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;pointer-events:none";
+				document.body.append(extent);
+			}
+			const bounds = shapes.filter(s => !ed.isShapeHidden(s)).map(s => ed.getShapePageBounds(s)).filter(b => b !== undefined);
+			const origin = extent.getBoundingClientRect();
+			extent.style.width = Math.max(0, ...bounds.map(b => b.maxX - origin.left - window.scrollX)) + "px";
+			extent.style.height = Math.max(0, ...bounds.map(b => b.maxY - origin.top - window.scrollY)) + "px";
+		};
+		const attachChanged = () => {
+			applying = true;
+			for (const id of changedShapes) {
+				const shape = ed.getShape(id);
+				if (!shape || shape.type === "frontpage-embed" || shape.type === "group" || ed.isShapeHidden(shape)) continue;
+				if (shape.type === "arrow") {
+					const info = getArrowInfo(ed, shape.id);
+					if (!info) continue;
+					const transform = ed.getShapePageTransform(shape);
+					const from = transform.applyToPoint(info.start.handle);
+					const to = transform.applyToPoint(info.end.handle);
+					ed.updateShape({ id, type: "arrow", meta: { ...shape.meta, frontpageAnchor: null, frontpageFromAnchor: (info.bindings.start ? null : contentAnchor(from, from, sections)) as unknown as JsonValue, frontpageToAnchor: (info.bindings.end ? null : contentAnchor(to, to, sections)) as unknown as JsonValue } });
+					continue;
 				}
-			};
-			const saveSoon = debounce(doSave, 350);
-
-			// CANVAS VISION: export the whole canvas (frontpage frame + the
-			// hooman's drawings/handwriting/arrows) to a PNG whenever the canvas
-			// changes — change-driven + debounced, NO polling. Gated to when there
-			// is at least one drawing (a non-embed shape), so embed-only canvases
-			// don't burn exports. The agent reads this via frontpage_read to SEE
-			// handwriting/arrows the text mapping can't convey.
-			const exportCanvasImage = async () => {
-				if (!hydrated) return;
-				try {
-					const shapes = ed.getCurrentPageShapes();
-					const drawings = shapes.filter((s) => s.type !== "frontpage-embed");
-					if (drawings.length === 0) return;
-					// Export the REGION OF INTEREST (bounds of the hooman's drawings
-					// + padding), NOT the whole multi-version filmstrip — that can be
-					// 10000px+ tall and blow past Anthropic's image limits (8000px /
-					// 5MB). Focusing keeps the image small AND the handwriting legible.
-					let region: Box | null = null;
-					for (const s of drawings) {
-						const b = ed.getShapePageBounds(s);
-						if (!b) continue;
-						region = region ? region.union(b) : new Box(b.minX, b.minY, b.width, b.height);
-					}
-					if (!region) return;
-					region.expandBy(64);
-					// Cap the long edge ~1600px (Anthropic downscales >1568 anyway),
-					// allow up to 2x on small regions for crisp handwriting. The
-					// frontpage_read tool also hard-guarantees the final size.
-					const longEdge = Math.max(region.width, region.height);
-					const scale = Math.max(0.2, Math.min(2, 1600 / longEdge));
-					// Pass all shape ids + a bounds clip so the embed frame under the
-					// drawings renders too, clipped to the region.
-					const out = await ed.toImage(shapes.map((s) => s.id), {
-						format: "png", background: true, bounds: region, scale,
-					});
-					await postCanvasImage(slug, out.blob);
-				} catch (err) {
-					console.error("[frontpage] canvas image export failed:", err);
+				const bounds = ed.getShapePageBounds(shape);
+				if (!bounds || sections.length === 0) continue;
+				const anchor = contentAnchor({ x: bounds.midX, y: bounds.midY }, ed.getShapePageTransform(shape).applyToPoint({ x: 0, y: 0 }), sections);
+				ed.updateShape({ id, type: shape.type, meta: { ...shape.meta, frontpageAnchor: anchor as unknown as JsonValue, frontpageDetached: anchor ? false : "ambiguous section" } });
+			}
+			changedShapes.clear();
+			applying = false;
+			updateCounts();
+		};
+		const reflow = () => {
+			applying = true;
+			try { ed.store.mergeRemoteChanges(() => {
+			for (const shape of ed.getCurrentPageShapes().filter(s => s.type !== "arrow" && s.type !== "group")) {
+				const anchor = shape.meta.frontpageAnchor as unknown as ContentAnchor | undefined;
+				if (!anchor || ed.isShapeHidden(shape) || changedShapes.has(shape.id)) continue;
+				const world = anchorPosition(anchor, sections);
+				const point = world ? ed.getShapeParentTransform(shape).clone().invert().applyToPoint(world) : null;
+				if (!point) {
+					if (!shape.meta.frontpageDetached) ed.store.put([{ ...shape, meta: { ...shape.meta, frontpageDetached: "target changed or removed" } }]);
+				} else if (shape.x !== point.x || shape.y !== point.y || shape.meta.frontpageDetached) {
+					ed.store.put([{ ...shape, x: point.x, y: point.y, meta: { ...shape.meta, frontpageDetached: false } }]);
 				}
-			};
-			const exportImageSoon = debounce(() => { void exportCanvasImage(); }, 1200);
+			}
+			for (const shape of ed.getCurrentPageShapes().filter((s): s is TLArrowShape => s.type === "arrow")) {
+				if (ed.isShapeHidden(shape) || changedShapes.has(shape.id)) continue;
+				const bindings = getArrowBindings(ed, shape);
+				const inverse = ed.getShapePageTransform(shape).clone().invert();
+				const props: Partial<TLArrowShape["props"]> = {};
+				let detached = false;
+				for (const terminal of ["start", "end"] as const) {
+					if (bindings[terminal]) continue;
+					const anchor = shape.meta[terminal === "start" ? "frontpageFromAnchor" : "frontpageToAnchor"] as unknown as ContentAnchor | undefined;
+					if (!anchor) continue;
+					const point = anchorPosition(anchor, sections);
+					if (!point) { detached = true; continue; }
+					const local = inverse.applyToPoint(point);
+					props[terminal] = { x: local.x, y: local.y };
+				}
+				ed.store.put([{ ...shape, props: { ...shape.props, ...props }, meta: { ...shape.meta, frontpageDetached: detached ? "endpoint target changed or removed" : false } }]);
+			}
+			}); } finally { applying = false; }
+			updateCounts();
+		};
+		const layout = (event: MessageEvent) => {
+			if (event.source !== window || event.origin !== location.origin || event.data?.type !== "frontpage:layout" || !Array.isArray(event.data.sections)) return;
+			sections = event.data.sections as LayoutSection[];
+			if (ready.current) { reflow(); attachChanged(); }
+			void fetch("/api/page/" + encodeURIComponent(slug) + "/layout", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ sections }) }).catch(err => console.warn("[frontpage] layout save failed", err));
+		};
+		window.addEventListener("message", layout);
 
-			const unlisten = ed.store.listen(() => { saveSoon(); exportImageSoon(); });
-
-			// Apply default style + load saved snapshot (best-effort; cannot
-			// block persistence anymore since the listener is already live).
+		const exportDrawings = async (savedVersion: string) => {
+			const drawings = ed.getCurrentPageShapes().filter(s => s.type !== "frontpage-embed" && !s.meta.frontpageLegacy);
+			if (!drawings.length) return;
 			try {
-				ed.setStyleForNextShapes(DefaultSizeStyle, "s");
-				ed.setStyleForNextShapes(DefaultFontStyle, "draw");
-			} catch (err) { console.warn("[frontpage] setStyle failed:", err); }
-
-			(async () => {
-				let saved: unknown = null;
-				try {
-					saved = await loadServerSnapshot(slug);
-				} catch (err) { console.warn("[frontpage] load failed:", err); }
-				if (cancelled) return;
-				if (saved) {
-					try { loadSnapshot(ed.store, saved as Parameters<typeof loadSnapshot>[1]); }
-					catch (err) { console.warn("[frontpage] failed to load saved snapshot:", err); }
-				}
-				try {
-					// Normalize legacy embeds saved before the ts/label props
-					// existed → treat as the live current version.
-					for (const s of ed.getCurrentPageShapes()) {
-						if (s.type !== "frontpage-embed") continue;
-						const p = s.props as { ts?: number; label?: string };
-						if (p.ts === undefined || p.label === undefined) {
-							ed.updateShape({
-								id: s.id,
-								type: "frontpage-embed",
-								props: { ...(s.props as Record<string, unknown>), ts: p.ts ?? 0, label: p.label ?? "CURRENT" },
-							});
-						}
-					}
-					const existing = ed.getCurrentPageShapes().find((s) => s.type === "frontpage-embed");
-					if (!existing) {
-						ed.createShape<FrontpageEmbedShape>({ type: "frontpage-embed", x: 0, y: 0, props: { w: 1200, h: 1500, slug, ts: 0, label: "CURRENT" } });
-					}
-					if (!saved) ed.setCamera({ x: 40, y: 40, z: 1 }, { animation: { duration: 0 } });
-					ed.setStyleForNextShapes(DefaultSizeStyle, "s");
-				} catch (err) { console.warn("[frontpage] post-load setup failed:", err); }
-				// Initial hydration complete — NOW allow saves. Flush once so
-				// the embed shape (created above if missing) persists, giving
-				// annotate an embed to anchor against even before the first
-				// user edit.
-				hydrated = true;
-				doSave();
-			})();
-			const onMessage = (ev: MessageEvent) => {
-				const data = ev.data as { type?: string; sections?: unknown; documentHeight?: number };
-				if (!data || data.type !== "frontpage:layout" || !Array.isArray(data.sections)) return;
-				void postLayout(slug, data.sections as unknown[]);
-				// Resize the embed shape to match the iframe's actual content height.
-				// Adds 40px breathing room. Prevents the huge empty canvas area
-				// below the rendered page (was 8000px default; usually pages are
-				// 500-3000px tall).
-				if (typeof data.documentHeight === "number" && data.documentHeight > 0) {
-					// + 28 fixed pad for the version label ribbon, clamped to a
-					// sane floor. NOT derived from viewport, so no runaway.
-					// +48 pad (label ribbon + a little slack) so content never clips.
-					const targetH = Math.max(400, Math.round(data.documentHeight) + 48);
-					// Only the LIVE embed (ts===0) has the layout shim — the
-					// frozen PREVIOUS embeds use embed-versioned (no shim). So
-					// the height message is always about the live embed.
-					const live = ed.getCurrentPageShapes().find(
-						(s) => s.type === "frontpage-embed" && ((s.props as { ts?: number }).ts ?? 0) === 0,
-					);
-					if (live) {
-						const cur = (live.props as { h?: number }).h ?? 0;
-						if (Math.abs(cur - targetH) > 24) {
-							ed.updateShape({
-								id: live.id,
-								type: "frontpage-embed",
-								props: { ...(live.props as Record<string, unknown>), h: targetH },
-							});
-						}
-					}
-				}
-			};
-			window.addEventListener("message", onMessage);
-
-			// --- LIVE REVISION (SSE): when the agent runs frontpage_update,
-			// freeze the current live embed at the prior version (so the
-			// hooman's annotations stay pinned to the OLD content) and append
-			// a fresh live embed to the RIGHT showing the new content. No
-			// refresh required. ---
-			let es: EventSource | null = null;
+				const image = await ed.toImage(drawings.map(s => s.id), { format: "png", background: true, scale: 1 });
+				await fetch("/api/page/" + encodeURIComponent(slug) + "/canvas-image", { method: "POST", headers: { "content-type": "image/png", "x-frontpage-snapshot-version": savedVersion }, body: image.blob });
+			} catch (err) { console.warn("[frontpage] annotation image unavailable", err); }
+		};
+		const checkpoint = () => {
+			if (!ready.current || !dirty.current) return;
+			try { localStorage.setItem(draftKey, JSON.stringify({ base, snapshot: getSnapshot(ed.store), version })); }
+			catch (err) { console.warn("[frontpage] local draft storage unavailable", err); }
+		};
+		const save = async () => {
+			if (!ready.current || !writable || saving || disposed) return;
+			if (timer) clearTimeout(timer);
+			attachChanged();
+			checkpoint();
+			const generation = changed;
+			saving = true;
+			setState("saving");
 			try {
-				es = new EventSource(`/api/page/${encodeURIComponent(slug)}/events`);
-				es.onmessage = (ev) => {
-					let data: { type?: string; priorTs?: number; author?: string; summary?: string } | null = null;
-					try { data = JSON.parse(ev.data); } catch { return; }
-					if (!data || data.type !== "revised") return;
-
-					const allEmbeds = ed.getCurrentPageShapes().filter((s) => s.type === "frontpage-embed");
-					const liveEmbeds = allEmbeds.filter((s) => ((s.props as { ts?: number }).ts ?? 0) === 0);
-					if (liveEmbeds.length === 0) return;
-
-					// Reference geometry = the RIGHTMOST embed (the filmstrip grows
-					// left→right; the newest CURRENT goes furthest right). Y stays
-					// aligned to the embed strip so versions line up for comparison.
-					const rightmost = allEmbeds.reduce((a, b) => ((a as { x: number }).x >= (b as { x: number }).x ? a : b));
-					const rp = rightmost.props as { w: number; h: number };
-					const rightX = (rightmost as { x: number }).x;
-					const rightY = (rightmost as { y: number }).y;
-
-					// X position = past the right edge of ALL page shapes, not just
-					// embeds — the hooman draws notes/arrows/handwriting to the side
-					// of the embed, and a new version must never land on top of
-					// them. getShapePageBounds covers draw/arrow/note/geo shapes.
-					let maxRight = rightX + rp.w;
-					for (const s of ed.getCurrentPageShapes()) {
-						const b = ed.getShapePageBounds(s);
-						if (b && b.maxX > maxRight) maxRight = b.maxX;
+				const response = await fetch("/api/page/" + encodeURIComponent(slug) + "/tldraw", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ snapshot: getSnapshot(ed.store), expectedVersion: version }) });
+				const result = await response.json() as { version?: string; error?: string };
+				if (!response.ok || !result.version) throw new Error(result.error ?? "Annotation save refused (HTTP " + response.status + ")");
+				version = result.version;
+				base = getSnapshot(ed.store);
+				persisted.current = true;
+				if (generation === changed) {
+					dirty.current = false;
+					try { localStorage.removeItem(draftKey); } catch {}
+					setDraftFound(false);
+					setState("saved");
+					setError("");
+					void exportDrawings(version);
+				}
+			} catch (err) {
+				setState("failed");
+				setError(err instanceof Error ? err.message : String(err));
+				checkpoint();
+			} finally { saving = false; }
+			if (generation !== changed) void save();
+		};
+		const load = async () => {
+			const request = ++loadId;
+			ready.current = false;
+			unlisten?.();
+			ed.updateInstanceState({ isReadonly: true });
+			setState("loading");
+			try {
+				const response = await fetch("/api/page/" + encodeURIComponent(slug) + "/tldraw");
+				if (!response.ok) throw new Error("Annotations could not load (HTTP " + response.status + ")");
+				const body = await response.json() as { snapshot: unknown; version: string | null; editable: boolean };
+				if (disposed || request !== loadId) return;
+				writable = body.editable;
+				setCanEdit(writable);
+				version = body.version;
+				persisted.current = body.version !== null;
+				loadSnapshot(ed.store, toDocumentCoordinates(body.snapshot ?? getSnapshot(ed.store), slug) as Parameters<typeof loadSnapshot>[1]);
+				base = getSnapshot(ed.store);
+				camera();
+				ed.updateInstanceState({ isReadonly: !editing.current || !writable });
+				ready.current = true;
+				if (!editing.current) ed.selectNone();
+				for (const shape of ed.getCurrentPageShapes()) if (!shape.meta.frontpageAnchor && !shape.meta.frontpageLegacy) changedShapes.add(shape.id);
+				window.dispatchEvent(new Event("frontpage:request-layout"));
+				try { setDraftFound(Boolean(localStorage.getItem(draftKey))); } catch {}
+				updateCounts();
+				setState("saved");
+				setError("");
+				unlisten = ed.store.listen(({ changes }) => {
+					if (applying || !ready.current || !editing.current) return;
+					const shapes = [...Object.values(changes.added), ...Object.values(changes.updated).filter(([before, after]) => before.typeName === "binding" || before.typeName === "shape" && after.typeName === "shape" && (before.x !== after.x || before.y !== after.y || before.rotation !== after.rotation || before.parentId !== after.parentId || ed.isShapeOfType<TLArrowShape>(before, "arrow") && ed.isShapeOfType<TLArrowShape>(after, "arrow") && (JSON.stringify(before.props.start) !== JSON.stringify(after.props.start) || JSON.stringify(before.props.end) !== JSON.stringify(after.props.end)))).map(([, after]) => after)];
+					for (const record of shapes) {
+						if (record.typeName === "shape" && record.type !== "frontpage-embed") for (const id of ed.getShapeAndDescendantIds([record.id])) changedShapes.add(id);
+						else if (record.typeName === "binding" && record.type === "arrow") changedShapes.add(record.fromId);
 					}
+					if (!Object.keys(changes.added).length && !Object.keys(changes.updated).length && !Object.keys(changes.removed).length) return;
+					dirty.current = true;
+					changed++;
+					if (timer) clearTimeout(timer);
+					timer = setTimeout(() => { void save(); }, 350);
+				}, { scope: "document", source: "user" });
+			} catch (err) { if (!disposed && request === loadId) { setState("failed"); setError(err instanceof Error ? err.message : String(err)); } }
+		};
+		retry.current = () => { if (ready.current) void save(); else void load(); };
+		restoreDraft.current = () => {
+			try {
+				const raw = localStorage.getItem(draftKey);
+				if (!raw) return;
+				const draft = JSON.parse(raw) as { base?: unknown; snapshot: unknown; version: string | null };
+				let restored = draft.snapshot;
+				if (draft.version !== version) {
+					if (!draft.base) { setError("Annotations changed since this draft was written and it has no base to merge with. The draft is kept; reload to review the current version."); return; }
+					const merge = mergeDraft(draft.base, draft.snapshot, base);
+					if (merge.conflicts.length) { setError("This draft and the saved annotations both changed " + merge.conflicts.length + " item(s): " + merge.conflicts.slice(0, 3).join(", ") + ". The draft is kept; reload to compare before saving."); return; }
+					restored = merge.merged;
+				}
+				applying = true;
+				loadSnapshot(ed.store, restored as Parameters<typeof loadSnapshot>[1]);
+				applying = false;
+				reflow();
+				dirty.current = true;
+				changed++;
+				camera();
+				ed.updateInstanceState({ isReadonly: !editing.current });
+				setDraftFound(false);
+				void save();
+			} catch (err) { applying = false; setError(String(err)); }
+		};
+		const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty.current) { checkpoint(); event.preventDefault(); } };
+		window.addEventListener("beforeunload", beforeUnload);
+		window.addEventListener("pagehide", checkpoint);
+		void load();
+		const events = new EventSource("/api/page/" + encodeURIComponent(slug) + "/events");
+		events.onmessage = event => {
+			let data: { type?: string };
+			try { data = JSON.parse(event.data) as { type?: string }; } catch { return; }
+			if (data.type === "revised") {
+				if (dirty.current) setRevisionPending(true); else location.reload();
+			} else if (data.type === "annotations" && !dirty.current) {
+				unlisten?.();
+				void load();
+			}
+		};
+		return () => {
+			disposed = true;
+			checkpoint();
+			ready.current = false;
+			if (timer) clearTimeout(timer);
+			unlisten?.();
+			events.close();
+			window.removeEventListener("scroll", camera);
+			window.removeEventListener("resize", camera);
+			window.removeEventListener("message", layout);
+			window.removeEventListener("beforeunload", beforeUnload);
+			window.removeEventListener("pagehide", checkpoint);
+			element?.removeEventListener("wheel", wheel, true);
+			for (const type of dragEvents) element?.removeEventListener(type, hand, true);
+			document.getElementById("frontpage-annotation-extent")?.remove();
+			editor.current = null;
+		};
+	}, [slug, draftKey]);
 
-					// 1. Freeze EVERY live embed at the prior version (there
-					//    should be exactly one, but guard against dupes so we
-					//    never end up with two CURRENTs again).
-					if (typeof data.priorTs === "number" && data.priorTs > 0) {
-						for (const le of liveEmbeds) {
-							ed.updateShape({
-								id: le.id,
-								type: "frontpage-embed",
-								props: { ...(le.props as Record<string, unknown>), ts: data.priorTs, label: "PREVIOUS" },
-							});
-						}
-					}
-
-					// 2. Append ONE fresh live embed past the right edge of
-					//    EVERYTHING on the canvas (embeds + the hooman's drawings).
-					const gap = 120;
-					ed.createShape<FrontpageEmbedShape>({
-						type: "frontpage-embed",
-						x: maxRight + gap,
-						y: rightY,
-						props: { w: 1200, h: 1500, slug, ts: 0, label: "CURRENT" },
-					});
-					doSave();
-
-					// 3. Pan to fit the whole filmstrip.
-					try { ed.zoomToFit({ animation: { duration: 400 } }); } catch {}
-				};
-			} catch (err) { console.warn("[frontpage] SSE subscribe failed:", err); }
-
-			return () => {
-				cancelled = true;
-				window.removeEventListener("message", onMessage);
-				try { offEditing(); } catch {}
-				try { unlisten(); } catch {}
-				try { es?.close(); } catch {}
-				// Final flush on unmount so nothing is lost.
-				try { void postSnapshot(slug, getSnapshot(ed.store)); } catch {}
-			};
-		},
-		[slug],
-	);
-
-	const components = React.useMemo<TLEditorComponents>(
-		() => ({
-			Toolbar: (props) => (
-				<DefaultToolbar {...props}>
-					<DefaultToolbarContent />
-					<TimeMachineToolbarItem onClick={() => setShowTimeMachine(true)} />
-					<StickerToolbarItem />
-				</DefaultToolbar>
-			),
-		}),
-		[],
-	);
-
-	const toggleInteract = () => {
-		if (!editor) return;
-		if (editor.getEditingShapeId()) { editor.setEditingShape(null); return; }
-		const live = editor.getCurrentPageShapes().find(
-			(s) => s.type === "frontpage-embed" && (((s.props as { ts?: number }).ts ?? 0) === 0),
-		);
-		if (live) editor.setEditingShape(live.id);
+	const exportHtml = async () => {
+		if (!editor.current || !ready.current || dirty.current) { setExportError("Wait for annotations to save before exporting."); return; }
+		setExporting(true); setExportError("");
+		try { await downloadHtml(editor.current, slug); }
+		catch (err) { setExportError(err instanceof Error ? err.message : String(err)); }
+		finally { setExporting(false); }
 	};
 
-	return (
-		<>
-			<Tldraw shapeUtils={[FrontpageEmbedShapeUtil]} onMount={handleMount} components={components} />
-			{editor && (
-				<button
-					onClick={toggleInteract}
-					title={interacting ? "Exit interact mode — back to drawing" : "Interact with the page — click buttons & choices"}
-					style={{
-						position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)",
-						zIndex: 1000, cursor: "pointer",
-						font: "600 13px -apple-system, BlinkMacSystemFont, system-ui, sans-serif",
-						letterSpacing: "0.02em",
-						padding: "9px 18px", borderRadius: 24, border: "none",
-						background: interacting ? "#FF385C" : "#ffffff",
-						color: interacting ? "#fff" : "#222222",
-						boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
-						display: "flex", alignItems: "center", gap: 8,
-					}}
-				>
-					<span style={{ fontSize: 15 }}>{interacting ? "✏️" : "🖱"}</span>
-					{interacting ? "Done — back to drawing" : "Interact with the page"}
-				</button>
-			)}
-			{showTimeMachine && <TimeMachine slug={slug} onClose={() => setShowTimeMachine(false)} />}
-		</>
-	);
+	const components = React.useMemo<TLComponents>(() => ({
+		Toolbar: props => <DefaultToolbar {...props}><DefaultToolbarContent /><StickerToolbarItem /></DefaultToolbar>,
+		PageMenu: null, NavigationPanel: null, ZoomMenu: null,
+	}), []);
+	return <>
+		<div className="fp-overlay" ref={layer} style={{ pointerEvents: annotating ? "auto" : "none" }}>
+			<Tldraw shapeUtils={LEGACY_SHAPE_UTILS} onMount={handleMount} components={components} hideUi={!annotating} autoFocus={false} getShapeVisibility={annotationVisibility} />
+		</div>
+		<div className="fp-controls">
+			<button type="button" aria-pressed={annotating} disabled={!annotating && (!ready.current || !canEdit)} onClick={() => setAnnotating(value => !value)}>{annotating ? "Read page" : "Annotate"}</button>
+			<button type="button" onClick={() => setHistory(true)}>History{legacyCount ? " (" + legacyCount + " earlier annotations)" : ""}</button>
+			<button type="button" disabled={!ready.current || state !== "saved" || exporting} onClick={() => void exportHtml()} title="Download a read-only HTML snapshot with annotations">{exporting ? "Exporting…" : "Export HTML"}</button>
+			{exportError && <span role="alert" className="fp-save-state" data-state="failed">Export failed: {exportError}</span>}
+			<span className="fp-save-state" data-state={state} role="status" aria-live="polite">{state === "loading" ? "Loading annotations…" : state === "saving" ? "Saving…" : state === "failed" ? "Not saved: " + error : !canEdit ? "Read-only document" : persisted.current ? "Annotations saved" : "No annotations yet"}{detachedCount ? " · " + detachedCount + " need attachment" : ""}</span>
+			{state === "failed" && <button type="button" onClick={() => retry.current()}>Retry</button>}
+			{draftFound && <button type="button" disabled={!ready.current || !canEdit} onClick={() => restoreDraft.current()}>Restore unsaved draft</button>}
+			{revisionPending && <button type="button" onClick={() => location.reload()}>Document updated — reload</button>}
+		</div>
+		{history && <TimeMachine slug={slug} onClose={() => setHistory(false)} />}
+	</>;
 }
 
-const slug = ((globalThis as { __FRONTPAGE_SLUG__?: string }).__FRONTPAGE_SLUG__ ?? "");
-const rootEl = document.getElementById("root");
-if (rootEl && slug) {
-	const root = createRoot(rootEl);
-	root.render(<App slug={slug} />);
-} else if (rootEl) {
-	rootEl.textContent = "No slug provided (window.__FRONTPAGE_SLUG__ is empty).";
-}
+const rootEl = document.getElementById("frontpage-annotations");
+const slug = rootEl ? decodeURIComponent(rootEl.dataset.slug ?? "") : "";
+if (rootEl && slug) createRoot(rootEl).render(<App slug={slug} />);

@@ -1,5 +1,10 @@
 import { describe, test, expect } from "bun:test";
 import { injectBeforeBodyClose } from "../server-process/html-inject.ts";
+import { withAnnotationLayer } from "../server-process/document-page.ts";
+import { clientReleaseId, readClientRelease } from "../server-process/client-release.ts";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const SHIM = "<script>/*layout shim*/</script>";
 
@@ -49,4 +54,30 @@ describe("injectBeforeBodyClose — the script-leak regression", () => {
 		const out = injectBeforeBodyClose("<body>x</body >", SHIM);
 		expect(out).toBe("<body>x" + SHIM + "\n</body >");
 	});
+});
+
+test("document stays top-level HTML; a hostile slug cannot escape the annotation layer", () => {
+	const html = '<html><body><h1>The actual document</h1><section data-id="s1">Text</section></body></html>';
+	const result = withAnnotationLayer(html, '</script><iframe src="evil">', "test-release");
+	expect(result).toContain('<h1>The actual document</h1>');
+	expect(result).toContain('id="frontpage-annotations"');
+	expect(result).toContain('href="/client/bundle.css?v=test-release"');
+	// The slug travels as one encoded attribute value and nothing else, so it
+	// cannot close the attribute, open an element, or end a script.
+	expect(result).toContain('data-slug="%3C%2Fscript%3E%3Ciframe%20src%3D%22evil%22%3E"');
+	expect(result).not.toContain('<iframe');
+	expect(result).not.toContain('window.__FRONTPAGE_SLUG__');
+	expect(result.lastIndexOf('</body>')).toBeGreaterThan(result.indexOf('src="/client/bundle.js?v=test-release"'));
+});
+
+test("running release retains bytes; mixed publication is refused", async () => {
+	const dir = await mkdtemp(path.join(tmpdir(), "frontpage-release-"));
+	const js = new TextEncoder().encode("script"), css = new TextEncoder().encode("style");
+	try {
+		await Promise.all([writeFile(path.join(dir, "bundle.js"), js), writeFile(path.join(dir, "bundle.css"), css), writeFile(path.join(dir, "release-id"), clientReleaseId(js, css))]);
+		const release = await readClientRelease(dir);
+		await writeFile(path.join(dir, "bundle.js"), "different script");
+		expect(release.script.toString()).toBe("script");
+		await expect(readClientRelease(dir)).rejects.toThrow("incomplete or mixed");
+	} finally { await rm(dir, { recursive: true, force: true }); }
 });

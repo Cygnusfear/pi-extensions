@@ -14,6 +14,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { clientReleaseId } from "../server-process/client-release.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..");
@@ -53,6 +54,16 @@ if (!result.success) {
 	}
 	process.exit(1);
 }
+
+const script = result.outputs.find(output => path.basename(output.path) === "bundle.js");
+const style = result.outputs.find(output => path.basename(output.path) === "bundle.css");
+if (!script || !style) throw new Error("Client build must emit both bundle.js and bundle.css");
+const id = clientReleaseId(new Uint8Array(await script.arrayBuffer()), new Uint8Array(await style.arrayBuffer()));
+const publication = path.join(OUT, "release-id." + process.pid + ".tmp");
+try {
+	fs.writeFileSync(publication, id + String.fromCharCode(10));
+	fs.renameSync(publication, path.join(OUT, "release-id"));
+} finally { fs.rmSync(publication, { force: true }); }
 
 const bytes = result.outputs.reduce((sum, o) => sum + (o.size ?? 0), 0);
 console.log(`✅ Built ${result.outputs.length} output(s), ${(bytes / 1024).toFixed(1)}KB total`);

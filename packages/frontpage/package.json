@@ -1,6 +1,6 @@
 {
   "name": "@pi-extensions/frontpage",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "keywords": [
     "pi-package"
@@ -16,18 +16,24 @@
   },
   "dependencies": {
     "@pi-extensions/shared": "*",
-    "hono": "^4.6.14",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tldraw": "^3.6.2"
+    "@tldraw/tlschema": "3.15.6",
+    "@tldraw/utils": "3.15.6",
+    "@tldraw/validate": "3.15.6",
+    "hono": "4.12.23",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "tldraw": "3.15.6"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1"
+    "@types/bun": "^1.4.0",
+    "@types/react": "^18.3.29",
+    "@types/react-dom": "^18.3.7"
   },
   "scripts": {
     "build-client": "bun run scripts/build-client.ts",
-    "test": "bun test scripts/"
+    "typecheck": "bunx --bun tsc --noEmit",
+    "test": "bun test",
+    "serve": "bun run server-process/server.ts"
   },
   "files": [
     "extensions",
@@ -35,6 +41,8 @@
     "skills",
     "client",
     "dist-client",
-    "scripts/build-client.ts"
+    "server-process",
+    "scripts/build-client.ts",
+    "scripts/reconcile.ts"
   ]
 }
