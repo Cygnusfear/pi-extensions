@@ -184,8 +184,9 @@ app.get("/healthz", (c) => c.json({ ok: true, version: 2, port: PORT, pid: proce
 
 app.get("/page/:slug", async (c) => {
 	const slug = c.req.param("slug");
-	const exists = fs.existsSync(pagePath(slug));
-	if (!exists) {
+	// A purged page still exists: its content was moved aside, so the request
+	// goes on to serve its tombstone rather than a missing-page 404.
+	if (!(await documentExists(storeDir(), slug))) {
 		return c.html(`<h1>No frontpage '${escapeHtml(slug)}'</h1><p><a href="/">← index</a></p>`, 404);
 	}
 	return serveDocument(c, slug, true);
