@@ -1,0 +1,23 @@
+packages/frontpage/server-process/index-entries.test.ts
+  s_cdd7d18751e93f::t_134087c3539760 6,60-70
+packages/frontpage/server-process/index-entries.ts
+  s_cdd7d18751e93f::t_09a633f041c37d 3,121-127,131,142-146,151
+packages/frontpage/server-process/server.ts
+  s_cdd7d18751e93f::t_4ecad4b05a2ac5 53-54,525-530,534-553
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fe97ccc1ab12753884974c3e0b510f726cbd38f0",
+  "prompts": {},
+  "sessions": {
+    "s_cdd7d18751e93f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3dd8c84d-98ba-4599-aeed-b5264fa3b5fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
