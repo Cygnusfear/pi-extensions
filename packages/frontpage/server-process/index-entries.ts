@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { documentPath, isPageSlug, isWritable, readLifecycle } from "./lifecycle.ts";
+import { archiveDir, documentPath, isPageSlug, isWritable, readLifecycle } from "./lifecycle.ts";
 
 /** One vocabulary for why an interrupted restore cannot finish, shared by the
  *  reader that reports it and the index that lists the document as blocked. */
@@ -118,10 +118,17 @@ export async function readIndexMeta(dir: string, slug: string): Promise<IndexMet
  *  filename is the name, and anything that cannot be served says why. */
 export async function listFrontpages(dir: string): Promise<IndexEntry[]> {
 	const files = await fsp.readdir(dir).catch(() => [] as string[]);
-	const slugs = new Set<string>();
+	// A purge moves a page's content into purged/<slug>/ and leaves its rule at
+	// the root. Both halves are listed: a page that is not current is one
+	// deliberate click away, never invisible.
+	const archived = await fsp.readdir(path.join(dir, "purged"), { withFileTypes: true })
+		.then((entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name))
+		.catch(() => [] as string[]);
+	const slugs = new Set<string>(archived);
 	for (const file of files) {
 		if (file.endsWith(".html")) slugs.add(file.slice(0, -".html".length));
 		else if (file.endsWith(".meta.json")) slugs.add(file.slice(0, -".meta.json".length));
+		else if (file.endsWith(".lifecycle.json")) slugs.add(file.slice(0, -".lifecycle.json".length));
 	}
 	// Every artifact is described once, from what is actually on disk: its
 	// timestamps, who it says wrote it, and the one reason it cannot be treated
@@ -132,13 +139,16 @@ export async function listFrontpages(dir: string): Promise<IndexEntry[]> {
 			out.push({ slug, title: slug, servable: false, modified: 0, created: 0, problem: "name cannot be used as a page address" });
 			continue;
 		}
-		const [modified, born] = await Promise.all([lastModified(dir, slug), birthTime(dir, slug)]);
-		const meta = await readIndexMeta(dir, slug);
+		// An archived page keeps its records beside its content.
+		const home = archived.includes(slug) ? archiveDir(dir, slug) : dir;
+		const present = home === dir ? files : await fsp.readdir(home).catch(() => [] as string[]);
+		const [modified, born] = await Promise.all([lastModified(home, slug), birthTime(home, slug)]);
+		const meta = await readIndexMeta(home, slug);
 		const created = meta.state === "ok" && meta.createdAt !== undefined ? meta.createdAt : born;
 		let title = meta.state === "ok" ? meta.title : slug;
 		let servable = true;
 		let problem: string | undefined;
-		if (!files.includes(slug + ".html")) {
+		if (!present.includes(slug + ".html")) {
 			// An orphan still names the project it belongs to, which is what an
 			// operator needs in order to decide what to do with it.
 			servable = false;

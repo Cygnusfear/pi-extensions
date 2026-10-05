@@ -3,6 +3,7 @@ import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { listFrontpages } from "./index-entries.ts";
+import { moveArtifactsAside, readLifecycle, writeLifecycle } from "./lifecycle.ts";
 
 let dir = "";
 beforeEach(async () => { dir = await mkdtemp(path.join(tmpdir(), "frontpage-index-")); });
@@ -54,6 +55,17 @@ describe("index entries", () => {
 		expect(bySlug.get("orphan")?.problem).toBe("metadata with no page content");
 		expect(bySlug.get("")?.problem).toBe("name cannot be used as a page address");
 		expect(bySlug.get("orphan")?.servable).toBe(false);
+	});
+
+	test("a purged page is still listed, with the rule that purged it", async () => {
+		await page("gone", Date.now() - day, spec("gone", "Margaret Void Maudlin"));
+		await writeFile(path.join(dir, "gone.lifecycle.json"), JSON.stringify({ status: "purged", reason: "leftover", by: "Saul Accretion Sandage" }), "utf8");
+		await moveArtifactsAside(dir, "gone");
+		const entries = await listFrontpages(dir);
+		const gone = entries.find((e) => e.slug === "gone");
+		expect(gone).toBeDefined();
+		expect(gone?.author).toBe("Margaret Void Maudlin");
+		expect((await readLifecycle(dir, "gone")).status).toBe("purged");
 	});
 
 	test("a document that says it is called something else says so", async () => {

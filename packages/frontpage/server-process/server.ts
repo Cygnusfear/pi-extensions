@@ -50,6 +50,8 @@ import {
 	isPageSlug,
 	documentPath,
 	documentExists,
+	archiveDir,
+	type LifecycleState,
 	InvalidPageSlug,
 	moveArtifactsAside,
 	readLifecycle,
@@ -520,8 +522,34 @@ async function serveDocument(c: Context, slug: string, annotations: boolean): Pr
 		c.header("Cache-Control", "no-store");
 		return c.html(annotations ? withAnnotationLayer(document, slug, clientRelease.id) : document);
 	} catch {
+		// A purged page's content is not lost, it was moved aside by a decision.
+		// The page says so, and where the content is kept, instead of 404ing.
+		const state = await readLifecycle(storeDir(), slug);
+		if (state.status === "purged" && await fsp.stat(path.join(archiveDir(storeDir(), slug), slug + ".html")).then(() => true, () => false)) {
+			return c.html(renderTombstone(slug, state), 410);
+		}
 		return c.html("Not found", 404);
 	}
+}
+
+/** What a purged page shows instead of its content. */
+function renderTombstone(slug: string, state: LifecycleState): string {
+	const detail: string[] = [];
+	if (state.reason !== undefined) detail.push(state.reason);
+	if (state.by !== undefined) detail.push("decided by " + state.by);
+	if (state.since !== undefined) detail.push("on " + new Date(state.since).toLocaleString());
+	return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+		'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+		"<title>" + escapeHtml(slug) + " is not current</title>" +
+		'<style>body{margin:0;padding:48px 24px;font:16px/1.6 system-ui,sans-serif;color:#16181d;background:#fafaf7}' +
+		'main{max-width:60ch;margin:0 auto}h1{font-size:22px;line-height:1.3;margin:0 0 12px}' +
+		'code{background:#f0efe9;padding:2px 6px;border-radius:4px}</style></head><body><main>' +
+		"<h1>" + escapeHtml(slug) + " was purged</h1>" +
+		"<p>" + escapeHtml(detail.join(" · ")) + "</p>" +
+		"<p>Nothing was deleted. The page and its records are kept in " +
+		'<code>purged/' + escapeHtml(slug) + '/</code>, and posting <code>{"status":"current"}</code> to its lifecycle route puts them back.</p>' +
+		'<p><a href="/">All current pages</a></p>' +
+		"</main></body></html>";
 }
 app.get("/page/:slug/embed", (c) => serveDocument(c, c.req.param("slug"), false));
 
