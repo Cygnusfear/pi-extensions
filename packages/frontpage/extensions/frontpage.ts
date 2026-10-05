@@ -88,7 +88,12 @@ function formatMermaidFindingsSection(
 }
 
 // ---- storage paths ----
-const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
+/** Where pages live. The environment can point this at a scratch directory so
+ *  a test run never writes into the store the operator works in. */
+function storeDir(): string {
+	const override = process.env.FRONTPAGE_STORE_DIR;
+	return override !== undefined && override !== "" ? path.resolve(override) : path.join(os.homedir(), ".agent", "frontpage");
+}
 /**
  * Cap a PNG to Anthropic's image limits before it goes into a tool result.
  *
@@ -185,14 +190,14 @@ async function capPngForApi(
 }
 
 function pagePath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.html`);
+	return path.join(storeDir(), `${slug}.html`);
 }
 function metaPath(slug: string): string {
-	return path.join(STORE_DIR, `${slug}.meta.json`);
+	return path.join(storeDir(), `${slug}.meta.json`);
 }
 
 async function ensureStoreDir(): Promise<void> {
-	await fsp.mkdir(STORE_DIR, { recursive: true });
+	await fsp.mkdir(storeDir(), { recursive: true });
 }
 
 export interface Meta {
@@ -392,7 +397,7 @@ export function resolveMaiCwd(
 ): string {
 	const override = env.FRONTPAGE_MAI_CWD?.trim();
 	if (override) return path.resolve(override);
-	for (const candidate of [sessionCwd, STORE_DIR]) {
+	for (const candidate of [sessionCwd, storeDir()]) {
 		if (!candidate) continue;
 		const root = findGitRoot(candidate);
 		if (root) return root;
@@ -826,8 +831,16 @@ function missingParamError(
 // external packages (hono, react, tldraw) from extension code. The
 // subprocess has its own module resolution and imports whatever it needs.
 
-const FRONTPAGE_SERVER_PORT = 39288;
-const FRONTPAGE_SERVER_HOST = "127.0.0.1";
+/** Where the page server lives. Overridable so a test run talks to nothing
+ *  rather than to the server the operator is using. */
+function serverPort(): number {
+	const override = Number(process.env.FRONTPAGE_PORT ?? "");
+	return Number.isFinite(override) && override > 0 ? override : 39288;
+}
+function serverHost(): string {
+	const override = process.env.FRONTPAGE_HOST ?? "";
+	return override !== "" ? override : "127.0.0.1";
+}
 
 interface ServerProcessState {
 	child: ReturnType<FrontpageSpawn> | null;
@@ -876,7 +889,7 @@ async function probeServer(timeoutMs = 1500): Promise<boolean> {
 		const ctrl = new AbortController();
 		const t = setTimeout(() => ctrl.abort(), timeoutMs);
 		const resp = await fetch(
-			`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/healthz`,
+			`http://${serverHost()}:${serverPort()}/healthz`,
 			{ signal: ctrl.signal },
 		);
 		clearTimeout(t);
@@ -896,7 +909,7 @@ async function startFrontpageServer(
 		serverState.peerDetected = true;
 		return {
 			status: "peer-running",
-			message: `Frontpage server peer already on ${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}; not spawning.`,
+			message: `Frontpage server peer already on ${serverHost()}:${serverPort()}; not spawning.`,
 		};
 	}
 	const script = frontpageServerScript();
@@ -908,8 +921,8 @@ async function startFrontpageServer(
 		detached: false,
 		env: {
 			...process.env,
-			FRONTPAGE_PORT: String(FRONTPAGE_SERVER_PORT),
-			FRONTPAGE_HOST: FRONTPAGE_SERVER_HOST,
+			FRONTPAGE_PORT: String(serverPort()),
+			FRONTPAGE_HOST: serverHost(),
 		},
 	});
 	serverState.child = child;
@@ -927,7 +940,7 @@ async function startFrontpageServer(
 		if (await probeServer(400)) {
 			return {
 				status: "started",
-				message: `Frontpage server pid=${child.pid} on ${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}`,
+				message: `Frontpage server pid=${child.pid} on ${serverHost()}:${serverPort()}`,
 			};
 		}
 	}
@@ -966,14 +979,14 @@ function frontpageServerInfo(): {
 } {
 	return {
 		running: serverState.pid !== null || serverState.peerDetected,
-		port: FRONTPAGE_SERVER_PORT,
-		host: FRONTPAGE_SERVER_HOST,
+		port: serverPort(),
+		host: serverHost(),
 		pid: serverState.pid,
 	};
 }
 
 function frontpagePageUrl(slug: string): string {
-	return `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/page/${encodeURIComponent(slug)}`;
+	return `http://${serverHost()}:${serverPort()}/page/${encodeURIComponent(slug)}`;
 }
 
 /** Fire a history snapshot trigger. Returns the created entry's ts (or null
@@ -985,7 +998,7 @@ async function triggerHistorySnapshot(
 ): Promise<number | null> {
 	try {
 		const r = await fetch(
-			`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/history`,
+			`http://${serverHost()}:${serverPort()}/api/page/${encodeURIComponent(slug)}/history`,
 			{
 				method: "POST",
 				headers: { "content-type": "application/json" },
@@ -1010,7 +1023,7 @@ async function broadcastRevision(
 	author: string,
 	summary?: string,
 ): Promise<void> {
-	const url = `http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/revised`;
+	const url = `http://${serverHost()}:${serverPort()}/api/page/${encodeURIComponent(slug)}/revised`;
 	for (let attempt = 0; attempt < 6; attempt++) {
 		try {
 			const r = await fetch(url, {
@@ -1091,7 +1104,7 @@ async function writeSectionDiff(
 	slug: string,
 	diff: SectionDiff,
 ): Promise<void> {
-	const diffPath = path.join(STORE_DIR, `${slug}.diff.json`);
+	const diffPath = path.join(storeDir(), `${slug}.diff.json`);
 	await fsp.writeFile(diffPath, JSON.stringify(diff, null, 2), "utf8");
 }
 
@@ -1104,7 +1117,7 @@ async function writeSectionDiff(
 async function clearCanvasAnnotations(slug: string): Promise<void> {
 	try {
 		await fetch(
-			`http://${FRONTPAGE_SERVER_HOST}:${FRONTPAGE_SERVER_PORT}/api/page/${encodeURIComponent(slug)}/clear-annotations`,
+			`http://${serverHost()}:${serverPort()}/api/page/${encodeURIComponent(slug)}/clear-annotations`,
 			{
 				method: "POST",
 				headers: { "content-type": "application/json" },

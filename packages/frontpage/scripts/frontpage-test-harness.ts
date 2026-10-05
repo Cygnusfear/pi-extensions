@@ -4,6 +4,9 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
 	createFrontpageExtension,
 	type FrontpageSpawn,
@@ -24,6 +27,17 @@ export interface SpawnResponse {
 const toolContext = {} as ExtensionContext;
 
 export function createFrontpageTestHarness() {
+	// These tests drive the real tools, which write real pages. They go to a
+	// scratch directory: a test run must never touch the store the operator
+	// works in, and must not push its own pages to the top of the index.
+	const scratch = mkdtempSync(path.join(tmpdir(), "frontpage-test-store-"));
+	process.env.FRONTPAGE_STORE_DIR = scratch;
+	// And talk to nothing: a live server on the default port would accept these
+	// pages and write them into its own store.
+	process.env.FRONTPAGE_PORT = "1";
+	process.once("exit", () => {
+		try { rmSync(scratch, { recursive: true, force: true }); } catch { /* nothing to clean */ }
+	});
 	const spawnCalls: SpawnCall[] = [];
 	const tools = new Map<string, ToolDefinition>();
 	// Programmable per-call child result. Default: exit 0, no output.

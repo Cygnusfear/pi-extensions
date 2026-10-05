@@ -59,7 +59,12 @@ import {
 } from "./lifecycle.ts";
 
 // ---- paths ----
-const STORE_DIR = path.join(os.homedir(), ".agent", "frontpage");
+/** Where pages live. The environment can point this at a scratch directory so
+ *  a test run never writes into the store the operator works in. */
+function storeDir(): string {
+	const override = process.env.FRONTPAGE_STORE_DIR;
+	return override !== undefined && override !== "" ? path.resolve(override) : path.join(os.homedir(), ".agent", "frontpage");
+}
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(SCRIPT_DIR, "..");
 const CLIENT_DIST = path.join(PKG_ROOT, "dist-client");
@@ -69,10 +74,10 @@ const PORT = Number(process.env.FRONTPAGE_PORT ?? 39288);
 const HOST = process.env.FRONTPAGE_HOST ?? "127.0.0.1";
 
 function pagePath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".html");
+	return documentPath(storeDir(), slug, ".html");
 }
 function metaPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".meta.json");
+	return documentPath(storeDir(), slug, ".meta.json");
 }
 
 // ---- Hono app ----
@@ -94,7 +99,7 @@ for (const route of ["/api/page/:slug", "/api/page/:slug/*"]) {
 	app.use(route, async (c, next) => {
 		if (c.req.method === "GET" || c.req.method === "HEAD") return next();
 		const slug = c.req.param("slug") ?? "";
-		if (!(await documentExists(STORE_DIR, slug))) return c.json({ error: "no page '" + slug + "'" }, 404);
+		if (!(await documentExists(storeDir(), slug))) return c.json({ error: "no page '" + slug + "'" }, 404);
 		await next();
 	});
 }
@@ -119,7 +124,7 @@ app.onError((error, c) => {
 
 app.get("/", async (c) => {
 	const view = c.req.query("retired") === "1" ? "retired" : c.req.query("attention") === "1" ? "attention" : "current";
-	const entries = await listFrontpages(STORE_DIR);
+	const entries = await listFrontpages(storeDir());
 	const live: string[] = [];
 	const retired: string[] = [];
 	const attention: string[] = [];
@@ -145,7 +150,7 @@ app.get("/", async (c) => {
 			);
 			continue;
 		}
-		const state = await readLifecycle(STORE_DIR, entry.slug);
+		const state = await readLifecycle(storeDir(), entry.slug);
 		if (state.status === "current") {
 			live.push("<li>" + link + " " + slug + "</li>");
 			continue;
@@ -341,15 +346,15 @@ app.post("/api/page/:slug/lifecycle", async (c) => {
 			}
 		}
 		const author = typeof body.author === "string" && body.author.trim().length > 0 ? body.author.trim() : "operator";
-		const previous = await readLifecycle(STORE_DIR, slug);
+		const previous = await readLifecycle(storeDir(), slug);
 		let moved: string[] = [];
 		if (status === "purged" && previous.status !== "purged") {
-			moved = await moveArtifactsAside(STORE_DIR, slug);
+			moved = await moveArtifactsAside(storeDir(), slug);
 		}
 		if (previous.status === "purged" && status !== "purged") {
-			moved = await restoreArtifacts(STORE_DIR, slug);
+			moved = await restoreArtifacts(storeDir(), slug);
 		}
-		await writeLifecycle(STORE_DIR, slug, {
+		await writeLifecycle(storeDir(), slug, {
 			status,
 			...(reason.length > 0 ? { reason } : {}),
 			...(supersededBy.length > 0 ? { supersededBy } : {}),
@@ -366,7 +371,7 @@ app.post("/api/page/:slug/lifecycle", async (c) => {
 // A retired page does not accept new writes. Silently accepting them is how the
 // pile of pages nobody knows about grows in the first place.
 async function refuseWriteToRetiredPage(c: Context, slug: string): Promise<Response | null> {
-	const state = await readLifecycle(STORE_DIR, slug);
+	const state = await readLifecycle(storeDir(), slug);
 	if (isWritable(state)) return null;
 	return c.json(
 		{
@@ -509,7 +514,7 @@ async function serveDocument(c: Context, slug: string, annotations: boolean): Pr
 		// The change log travels with the document, so a shared or exported copy
 		// still says what was edited, by whom, and when.
 		const withChangelog = renderChangelog(await readChangelog(slug));
-		const banner = renderBanner(await readLifecycle(STORE_DIR, slug), slug);
+		const banner = renderBanner(await readLifecycle(storeDir(), slug), slug);
 		const withBanner = banner.length > 0 ? injectBeforeBodyClose(injected, banner) : injected;
 		const document = withChangelog.length > 0 ? injectBeforeBodyClose(withBanner, withChangelog) : withBanner;
 		c.header("Cache-Control", "no-store");
@@ -766,22 +771,22 @@ app.get("/api/page/:slug", async (c) => {
 // ---- Persistence: tldraw canvas state + section layout ----
 
 function tldrawPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".tldraw.json");
+	return documentPath(storeDir(), slug, ".tldraw.json");
 }
 function layoutPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".layout.json");
+	return documentPath(storeDir(), slug, ".layout.json");
 }
 function historyPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".history.jsonl");
+	return documentPath(storeDir(), slug, ".history.jsonl");
 }
 function canvasImagePath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".canvas.png");
+	return documentPath(storeDir(), slug, ".canvas.png");
 }
 function decisionsPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".decisions.json");
+	return documentPath(storeDir(), slug, ".decisions.json");
 }
 function diffPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".diff.json");
+	return documentPath(storeDir(), slug, ".diff.json");
 }
 
 // Cap on history entries kept per slug. ~50 entries × ~20KB/entry = ~1MB max
@@ -941,7 +946,7 @@ app.get("/api/page/:slug/tldraw", async (c) => {
 	// reader raises a reason-carrying failure and one handler reports it.
 	return withAnnotationWrite(slug, async () => {
 		const snapshot = await readAnnotationSnapshot(slug);
-		const lifecycle = await readLifecycle(STORE_DIR, slug);
+		const lifecycle = await readLifecycle(storeDir(), slug);
 		return c.json({ slug, snapshot, version: snapshotVersion(snapshot), editable: isWritable(lifecycle) });
 	});
 });
@@ -1606,7 +1611,7 @@ interface RestoreIntent {
 }
 
 function restoreIntentPath(slug: string): string {
-	return documentPath(STORE_DIR, slug, ".restore-intent.json");
+	return documentPath(storeDir(), slug, ".restore-intent.json");
 }
 
 async function applyRestore(slug: string, entry: HistoryEntry, ts: number): Promise<number> {
@@ -1650,7 +1655,7 @@ async function recoverPendingRestore(slug: string): Promise<{ ts: number; writte
 		intent = null;
 	}
 	if (!intent || typeof intent.ts !== "number") throw new Error(RESTORE_BLOCKED.journalUnreadable + "; it was preserved for recovery");
-	const lifecycle = await readLifecycle(STORE_DIR, slug);
+	const lifecycle = await readLifecycle(storeDir(), slug);
 	if (!isWritable(lifecycle)) throw new Error(RESTORE_BLOCKED.documentNotWritable(lifecycle.status) + "; the journal was preserved");
 	const entries = await readHistory(slug);
 	const entry = entries.find(e => e.ts === intent.ts);
@@ -1669,7 +1674,7 @@ app.post("/api/page/:slug/restore", async (c) => {
 	}
 	const ts = (body as { ts: number }).ts;
 	return withAnnotationWrite(slug, async () => {
-	const retired = await readLifecycle(STORE_DIR, slug);
+	const retired = await readLifecycle(storeDir(), slug);
 	if (!isWritable(retired)) {
 		return c.json({ ok: false, code: "retired", error: "this page is " + retired.status + "; it cannot be restored" }, 409);
 	}

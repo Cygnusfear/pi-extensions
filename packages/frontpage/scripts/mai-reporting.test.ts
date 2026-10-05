@@ -47,7 +47,9 @@ afterAll(() => {
 	for (const slug of createdSlugs) {
 		for (const suffix of [".html", ".meta.json", ".history.jsonl"]) {
 			rmSync(
-				path.join(os.homedir(), ".agent", "frontpage", slug + suffix),
+				// Same resolution the tools use, so this stays correct when a test run
+				// points the store at a scratch directory.
+				path.join(process.env.FRONTPAGE_STORE_DIR ?? path.join(os.homedir(), ".agent", "frontpage"), slug + suffix),
 				{ force: true },
 			);
 		}
