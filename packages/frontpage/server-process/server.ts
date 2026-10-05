@@ -28,6 +28,7 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { streamSSE } from "hono/streaming";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -48,6 +49,7 @@ import {
 	assertPageSlug,
 	isPageSlug,
 	documentPath,
+	documentExists,
 	InvalidPageSlug,
 	moveArtifactsAside,
 	readLifecycle,
@@ -92,10 +94,28 @@ for (const route of ["/api/page/:slug", "/api/page/:slug/*"]) {
 	app.use(route, async (c, next) => {
 		if (c.req.method === "GET" || c.req.method === "HEAD") return next();
 		const slug = c.req.param("slug") ?? "";
-		if (!fs.existsSync(pagePath(slug))) return c.json({ error: "no page '" + slug + "'" }, 404);
+		if (!(await documentExists(STORE_DIR, slug))) return c.json({ error: "no page '" + slug + "'" }, 404);
 		await next();
 	});
 }
+
+// Every failure answers with its reason. A bare "Internal Server Error" is a
+// dead end for whoever has to fix it, and this store has several ways for a
+// record to become unreadable: an unparseable file, a missing schema stamp, an
+// interrupted restore that cannot finish. Without this, each new failure mode
+// has to remember to catch itself, and the ones that forget look identical to a
+// crash.
+app.onError((error, c) => {
+	const reason = error instanceof Error ? error.message : String(error);
+	const status: ContentfulStatusCode = error instanceof ReaderFailure ? error.status : 500;
+	const code = error instanceof ReaderFailure ? error.code : "unexpected";
+	// A person looking at a page gets a page; a caller of the API gets JSON.
+	if (c.req.method === "GET" && c.req.path.startsWith("/page/")) {
+		return c.html(renderProblemPage(c.req.param("slug") ?? "this page", reason), status);
+	}
+	console.error("[frontpage-server]", c.req.method, c.req.path, "-", reason);
+	return c.json({ error: reason, code }, status);
+});
 
 app.get("/", async (c) => {
 	const view = c.req.query("retired") === "1" ? "retired" : c.req.query("attention") === "1" ? "attention" : "current";
@@ -107,7 +127,13 @@ app.get("/", async (c) => {
 		const link = entry.servable
 			? '<a href="/page/' + encodeURIComponent(entry.slug) + '">' + escapeHtml(entry.title) + "</a>"
 			: "<span>" + escapeHtml(entry.title) + "</span>";
-		const slug = '<span class="muted">' + escapeHtml(entry.slug) + "</span>";
+		const modifiedAgo = formatAgo(entry.modified);
+		const createdAgo = formatAgo(entry.created);
+		const stamps: string[] = [];
+		if (modifiedAgo.length > 0) stamps.push("last modified " + modifiedAgo);
+		if (createdAgo.length > 0) stamps.push("created " + createdAgo);
+		if (entry.author !== undefined) stamps.push("by " + entry.author);
+		const slug = '<span class="muted">' + escapeHtml(entry.slug) + (stamps.length > 0 ? " · " + stamps.join(" | ") : "") + "</span>";
 		// An artifact that cannot be read as a normal page is a human decision
 		// waiting to happen, which outranks whether it is current. Reporting it
 		// here is the only way it can ever be reconciled.
@@ -141,7 +167,8 @@ app.get("/", async (c) => {
 	const links: string[] = ['<a href="/">current pages</a>'];
 	if (retired.length > 0) links.push('<a href="/?retired=1">not current (' + retired.length + ")</a>");
 	if (attention.length > 0) links.push('<a href="/?attention=1">needs attention (' + attention.length + ")</a>");
-	const header = '<p class="muted">' + links.join(" - ") + "</p>";
+	const header = '<p class="muted">' + links.join(" - ") + " · sorted by last modified · generated " +
+		escapeHtml(new Date().toLocaleString()) + "</p>";
 	const rows = view === "retired" ? retired : view === "attention" ? attention : live;
 	return c.html(indexHtml(header + rows.join("\n"), rows.length));
 });
@@ -446,19 +473,19 @@ function renderChangelog(rows: readonly ChangelogRow[]): string {
 	);
 }
 
-/** A document waiting on an interrupted restore is still readable, so it is
- *  served with the reason and the preserved journal rather than a bare error. */
-function renderRestoreBlocked(slug: string, reason: string): string {
+/** A document that cannot be served right now is still a document, so it is
+ *  answered with a page that says what is wrong with it. */
+function renderProblemPage(slug: string, reason: string): string {
 	return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
 		'<meta name="viewport" content="width=device-width,initial-scale=1">' +
 		'<title>' + escapeHtml(slug) + ' needs attention</title>' +
 		'<style>body{margin:0;padding:48px 24px;font:16px/1.6 system-ui,sans-serif;color:#16181d;background:#fafaf7}' +
 		'main{max-width:60ch;margin:0 auto}h1{font-size:22px;line-height:1.3;margin:0 0 12px}' +
 		'code{background:#f0efe9;padding:2px 6px;border-radius:4px}</style></head><body><main>' +
-		'<h1>' + escapeHtml(slug) + ' is waiting on an interrupted restore</h1>' +
+		'<h1>' + escapeHtml(slug) + ' cannot be served as it is</h1>' +
 		'<p>' + escapeHtml(reason) + '</p>' +
-		'<p>The document itself is intact and nothing was discarded. Its restore journal is kept as ' +
-		'<code>' + escapeHtml(slug) + '.restore-intent.json</code>; finish or remove that file deliberately, then reload.</p>' +
+		'<p>The document itself is intact and nothing was discarded. Its files are kept beside it under the store; ' +
+		'finish or remove the file named above deliberately, then reload.</p>' +
 		'<p><a href="/">All current pages</a></p>' +
 		'</main></body></html>';
 }
@@ -470,7 +497,7 @@ async function serveDocument(c: Context, slug: string, annotations: boolean): Pr
 		await withAnnotationWrite(slug, async () => {});
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		return c.html(renderRestoreBlocked(slug, reason), 503);
+		return c.html(renderProblemPage(slug, reason), 503);
 	}
 	try {
 		const html = await fsp.readFile(pagePath(slug), "utf8");
@@ -885,28 +912,38 @@ function withAnnotationWrite<T>(slug: string, action: () => Promise<T>): Promise
 		return action();
 	});
 }
+/** A failure that can be explained to whoever asked. */
+class ReaderFailure extends Error {
+	readonly code: string;
+	readonly status: ContentfulStatusCode;
+	constructor(message: string, code: string, status: ContentfulStatusCode = 500) {
+		super(message);
+		this.code = code;
+		this.status = status;
+	}
+}
+
 async function readAnnotationSnapshot<T = unknown>(slug: string): Promise<T | null> {
 	const raw = await fsp.readFile(tldrawPath(slug), "utf8").catch((error: NodeJS.ErrnoException) => {
 		if (error.code === "ENOENT") return null;
-		throw error;
+		throw new ReaderFailure("The annotations on this page could not be read: " + error.message, "annotations-unreadable");
 	});
-	return raw === null ? null : JSON.parse(raw) as T;
+	if (raw === null) return null;
+	try {
+		return JSON.parse(raw) as T;
+	} catch {
+		throw new ReaderFailure("The annotations on this page are not readable JSON. Existing data was not replaced.", "annotations-unreadable");
+	}
 }
 app.get("/api/page/:slug/tldraw", async (c) => {
 	const slug = c.req.param("slug");
-	// A failed/corrupt load must not be mistaken for an empty canvas.
-	try {
-		return await withAnnotationWrite(slug, async () => {
-			const snapshot = await readAnnotationSnapshot(slug);
-			const lifecycle = await readLifecycle(STORE_DIR, slug);
-			return c.json({ slug, snapshot, version: snapshotVersion(snapshot), editable: isWritable(lifecycle) });
-		});
-	} catch (error) {
-		// Say which of the two it is: annotations that cannot be read, or an
-		// interrupted restore that cannot finish.
-		const reason = error instanceof Error ? error.message : String(error);
-		return c.json({ error: reason, code: "annotations-unavailable" }, 500);
-	}
+	// A failed or corrupt load must not be mistaken for an empty canvas; the
+	// reader raises a reason-carrying failure and one handler reports it.
+	return withAnnotationWrite(slug, async () => {
+		const snapshot = await readAnnotationSnapshot(slug);
+		const lifecycle = await readLifecycle(STORE_DIR, slug);
+		return c.json({ slug, snapshot, version: snapshotVersion(snapshot), editable: isWritable(lifecycle) });
+	});
 });
 app.put("/api/page/:slug/tldraw", async (c) => {
 	const slug = c.req.param("slug");
@@ -1573,6 +1610,19 @@ function restoreIntentPath(slug: string): string {
 }
 
 async function applyRestore(slug: string, entry: HistoryEntry, ts: number): Promise<number> {
+	// The same rule the annotation write path enforces, on the other writer: a
+	// snapshot that cannot be read back must not be stored. History written
+	// before that rule can carry such a version.
+	try {
+		normalizeAnnotationSnapshot(entry.snapshot, annotationSchema);
+	} catch (error) {
+		throw new ReaderFailure(
+			"The version saved at " + new Date(ts).toISOString() + " cannot be read back (" +
+			(error instanceof Error ? error.message : String(error)) + "), so it was not restored and nothing was changed.",
+			"snapshot-unreadable",
+			409,
+		);
+	}
 	let written = 0;
 	await writeJsonAtomic(tldrawPath(slug), entry.snapshot);
 	await fsp.rm(canvasImagePath(slug), { force: true });
@@ -1626,6 +1676,21 @@ app.post("/api/page/:slug/restore", async (c) => {
 	const entries = await readHistory(slug);
 	const entry = entries.find((e) => e.ts === ts);
 	if (!entry) return c.json({ error: "no history entry with that ts" }, 404);
+	// Refuse before anything is written. A version that cannot be read back must
+	// not be restored, and answering "restore-incomplete" would claim a journal
+	// is waiting when nothing was journalled at all.
+	try {
+		normalizeAnnotationSnapshot(entry.snapshot, annotationSchema);
+	} catch (error) {
+		return c.json(
+			{
+				error: "The version saved at " + new Date(ts).toISOString() + " cannot be read back (" +
+					(error instanceof Error ? error.message : String(error)) + "), so it was not restored. Nothing was changed.",
+				code: "snapshot-unreadable",
+			},
+			409,
+		);
+	}
 
 	// Intent first, writes second. Anything that dies between the two is
 	// finished by recoverPendingRestore on the next read of this page.
@@ -1876,6 +1941,16 @@ const LAYOUT_BOUNDS_SHIM = `
 `;
 
 // ---- helpers ----
+
+/** How long ago a page was last changed, in the roughest useful unit. */
+function formatAgo(ms: number): string {
+	if (ms <= 0) return "";
+	const diff = Date.now() - ms;
+	if (diff < 60_000) return "just now";
+	if (diff < 3_600_000) return Math.round(diff / 60_000) + "m ago";
+	if (diff < 86_400_000) return Math.round(diff / 3_600_000) + "h ago";
+	return Math.round(diff / 86_400_000) + "d ago";
+}
 
 function escapeHtml(s: string): string {
 	return s

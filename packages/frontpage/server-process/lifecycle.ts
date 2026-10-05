@@ -100,6 +100,14 @@ export function isWritable(state: LifecycleState): boolean {
 	return state.status === "current";
 }
 
+/** Does this document exist? A purge moves a page's artifacts aside instead of
+ *  deleting them and the move is reversible, so a purged page is still a page -
+ *  otherwise the un-purge path could never be reached. */
+export async function documentExists(dir: string, slug: string): Promise<boolean> {
+	if (await exists(documentPath(dir, slug, ".html"))) return true;
+	return exists(path.join(archiveDir(dir, slug), slug + ".html"));
+}
+
 export function archiveDir(dir: string, slug: string): string {
 	assertPageSlug(slug);
 	return path.join(dir, "purged", slug);

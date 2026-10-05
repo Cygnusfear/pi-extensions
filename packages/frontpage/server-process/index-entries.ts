@@ -45,14 +45,38 @@ export interface IndexEntry {
 	title: string;
 	/** True when /page/<slug> can actually serve this artifact. */
 	servable: boolean;
+	/** When the document last changed, newest first on the index. */
+	modified: number;
+	/** When it was created: its own record, else the page file's birth time. */
+	created: number;
+	/** Who the document says wrote it, when its metadata records one. */
+	author?: string;
 	/** Why this artifact cannot be treated as an ordinary current page. */
 	problem?: string;
+}
+
+/** The page's own records. Derived files are deliberately absent: viewing a
+ *  page rewrites .layout.json and .canvas.png, so counting them would make every
+ *  page look freshly modified. */
+const RECORD_SUFFIXES = [".html", ".meta.json", ".tldraw.json", ".decisions.json"] as const;
+
+/** When the page file itself was created, for documents whose metadata does
+ *  not record it. */
+async function birthTime(dir: string, slug: string): Promise<number> {
+	return fsp.stat(documentPath(dir, slug, ".html")).then((s) => s.birthtimeMs || s.ctimeMs, () => 0);
+}
+
+async function lastModified(dir: string, slug: string): Promise<number> {
+	const times = await Promise.all(
+		RECORD_SUFFIXES.map((suffix) => fsp.stat(documentPath(dir, slug, suffix)).then((s) => s.mtimeMs, () => 0)),
+	);
+	return Math.max(0, ...times);
 }
 
 export type IndexMeta =
 	| { state: "absent" }
 	| { state: "unreadable" }
-	| { state: "ok"; title: string; declaredSlug?: string };
+	| { state: "ok"; title: string; declaredSlug?: string; createdAt?: number; byline?: string };
 
 export function metaFile(dir: string, slug: string): string {
 	return documentPath(dir, slug, ".meta.json");
@@ -72,10 +96,18 @@ export async function readIndexMeta(dir: string, slug: string): Promise<IndexMet
 		return (error as NodeJS.ErrnoException).code === "ENOENT" ? { state: "absent" } : { state: "unreadable" };
 	}
 	try {
-		const meta = JSON.parse(raw) as { slug?: unknown; spec?: { title?: unknown } };
-		const title = typeof meta.spec?.title === "string" && meta.spec.title !== "" ? meta.spec.title : slug;
+		const meta = JSON.parse(raw) as { slug?: unknown; createdAt?: unknown; spec?: { title?: unknown } };
+		const spec = (meta.spec ?? {}) as { title?: unknown; byline?: unknown };
+		const title = typeof spec.title === "string" && spec.title !== "" ? spec.title : slug;
 		const declaredSlug = typeof meta.slug === "string" && meta.slug !== "" ? meta.slug : undefined;
-		return declaredSlug === undefined ? { state: "ok", title } : { state: "ok", title, declaredSlug };
+		const createdAt = typeof meta.createdAt === "number" && Number.isFinite(meta.createdAt) && meta.createdAt > 0 ? meta.createdAt : undefined;
+		return {
+			state: "ok",
+			title,
+			...(declaredSlug === undefined ? {} : { declaredSlug }),
+			...(createdAt === undefined ? {} : { createdAt }),
+			...(typeof spec.byline === "string" && spec.byline !== "" ? { byline: spec.byline } : {}),
+		};
 	} catch {
 		return { state: "unreadable" };
 	}
@@ -91,37 +123,51 @@ export async function listFrontpages(dir: string): Promise<IndexEntry[]> {
 		if (file.endsWith(".html")) slugs.add(file.slice(0, -".html".length));
 		else if (file.endsWith(".meta.json")) slugs.add(file.slice(0, -".meta.json".length));
 	}
+	// Every artifact is described once, from what is actually on disk: its
+	// timestamps, who it says wrote it, and the one reason it cannot be treated
+	// as an ordinary current page.
 	const out: IndexEntry[] = [];
 	for (const slug of slugs) {
 		if (!isPageSlug(slug)) {
-			out.push({ slug, title: slug, servable: false, problem: "name cannot be used as a page address" });
+			out.push({ slug, title: slug, servable: false, modified: 0, created: 0, problem: "name cannot be used as a page address" });
 			continue;
 		}
+		const [modified, born] = await Promise.all([lastModified(dir, slug), birthTime(dir, slug)]);
 		const meta = await readIndexMeta(dir, slug);
-		// An orphan still names the project it belongs to, which is what an
-		// operator needs in order to decide what to do with it.
-		const named = meta.state === "ok" ? meta.title : slug;
+		const created = meta.state === "ok" && meta.createdAt !== undefined ? meta.createdAt : born;
+		let title = meta.state === "ok" ? meta.title : slug;
+		let servable = true;
+		let problem: string | undefined;
 		if (!files.includes(slug + ".html")) {
-			out.push({ slug, title: named, servable: false, problem: "metadata with no page content" });
-			continue;
+			// An orphan still names the project it belongs to, which is what an
+			// operator needs in order to decide what to do with it.
+			servable = false;
+			problem = "metadata with no page content";
+		} else if (meta.state === "unreadable") {
+			title = slug;
+			problem = "metadata is not readable";
+		} else {
+			// A document that cannot be served at all outranks one whose metadata
+			// is merely unreadable, so this is asked first.
+			const blocked = await restoreIntentProblem(dir, slug);
+			if (blocked !== undefined) problem = "an interrupted restore is preserved here and " + blocked;
+			else if (meta.state === "ok" && meta.declaredSlug !== undefined && meta.declaredSlug !== slug) {
+				title = meta.title;
+				problem = "metadata names it " + meta.declaredSlug;
+			}
 		}
-		if (meta.state === "unreadable") {
-			out.push({ slug, title: slug, servable: true, problem: "metadata is not readable" });
-			continue;
-		}
-		// A document that cannot be served at all outranks one whose metadata is
-		// merely unreadable, so this is checked first.
-		const blocked = await restoreIntentProblem(dir, slug);
-		if (blocked !== undefined) {
-			out.push({ slug, title: named, servable: true, problem: "an interrupted restore is preserved here and " + blocked });
-			continue;
-		}
-		if (meta.state === "ok" && meta.declaredSlug !== undefined && meta.declaredSlug !== slug) {
-			out.push({ slug, title: meta.title, servable: true, problem: "metadata names it " + meta.declaredSlug });
-			continue;
-		}
-		out.push({ slug, title: named, servable: true });
+		const author = meta.state === "ok" ? meta.byline : undefined;
+		out.push({
+			slug,
+			title,
+			servable,
+			modified,
+			created,
+			...(author === undefined ? {} : { author }),
+			...(problem === undefined ? {} : { problem }),
+		});
 	}
-	out.sort((a, b) => a.title.localeCompare(b.title));
+	// What the operator touched last is what the operator wants to see first.
+	out.sort((a, b) => b.modified - a.modified || a.title.localeCompare(b.title));
 	return out;
 }
