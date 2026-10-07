@@ -147,7 +147,7 @@ export class MeshMcpClient {
 		}
 	}
 
-	private async #notify(method: string): Promise<void> {
+	async #notify(method: string): Promise<void> {
 		const response = await this.#send({ jsonrpc: "2.0", method });
 		this.#rememberSession(response);
 		if (!response.ok) {
@@ -155,7 +155,7 @@ export class MeshMcpClient {
 		}
 	}
 
-	private async #call(method: string, params: unknown): Promise<unknown> {
+	async #call(method: string, params: unknown): Promise<unknown> {
 		const result = await this.#rpc(method, params, { allowReinitialize: true });
 		if (result === undefined) throw new Error(method + " returned no result");
 		return result;
@@ -165,7 +165,7 @@ export class MeshMcpClient {
 	 * One request. The single place a session is rebuilt, and the only place a retry happens: after
 	 * a rebuild the request is sent once more and its failure is final.
 	 */
-	private async #rpc(
+	async #rpc(
 		method: string,
 		params: unknown,
 		options: { allowReinitialize: boolean },
@@ -197,7 +197,7 @@ export class MeshMcpClient {
 		);
 	}
 
-	private async #send(body: unknown): Promise<Response> {
+	async #send(body: unknown): Promise<Response> {
 		return this.fetchImpl(this.options.url, {
 			method: "POST",
 			headers: this.#headers(this.sessionId),
@@ -207,12 +207,12 @@ export class MeshMcpClient {
 	}
 
 	/** Every reply is inspected for the session header before its body matters. */
-	private #rememberSession(response: Response): void {
+	#rememberSession(response: Response): void {
 		const session = response.headers.get(SESSION_HEADER);
 		if (session !== null && session.length > 0) this.sessionId = session;
 	}
 
-	private #headers(session: string | undefined): Record<string, string> {
+	#headers(session: string | undefined): Record<string, string> {
 		return {
 			"content-type": "application/json",
 			// BOTH, by contract: the transport refuses a client that cannot read a stream.

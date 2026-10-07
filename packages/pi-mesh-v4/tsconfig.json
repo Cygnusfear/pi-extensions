@@ -10,5 +10,6 @@
     "noUncheckedIndexedAccess": true,
     "ignoreDeprecations": "5.0"
   },
-  "include": ["extension/**/*.ts"]
+  "include": ["extension/**/*.ts"],
+  "exclude": ["extension/**/*.test.ts"]
 }
