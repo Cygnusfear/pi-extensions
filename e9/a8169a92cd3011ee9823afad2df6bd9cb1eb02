@@ -1,0 +1,31 @@
+packages/explain/extensions/explain.ts
+  s_ff79aa8b23a101::t_fbdfcad172eaeb 13
+  s_ff79aa8b23a101::t_9206ef2ebaa9f0 141,151,161,172,249,262
+packages/shared/src/afk.test.ts
+  s_ff79aa8b23a101::t_11f7dff35f0e9d 10,12,15,21,25-27,33,39
+packages/code-mode/extensions/code-mode.ts
+  s_ff79aa8b23a101::t_cb9db37503766a 11,1206,1384,1483
+packages/shared/src/afk.ts
+  s_ff79aa8b23a101::t_2f67a253a349aa 28-29,67-72,78,80
+packages/shared/src/relay-to-hooman.test.ts
+  s_ff79aa8b23a101::t_830c36703ff5a6 1-57
+packages/shared/src/relay-to-hooman.ts
+  s_ff79aa8b23a101::t_20c0e2e83f98ad 21,76-88
+  s_ff79aa8b23a101::t_da0ea14c933e58 89-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e9a8169a92cd3011ee9823afad2df6bd9cb1eb02",
+  "prompts": {},
+  "sessions": {
+    "s_ff79aa8b23a101": {
+      "agent_id": {
+        "tool": "Guillermo Andromeda Aghanim",
+        "id": "d74fc9cf-4f97-4fbc-b64c-84d23ab6c0d6",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
