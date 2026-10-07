@@ -92,6 +92,7 @@ import {
   formatSentSuffix,
 } from "./inbound-format.ts";
 import { planInboundTell } from "./inbound-tell-plan.ts";
+import { createRunBoundaryDelivery } from "./run-boundary-delivery.ts";
 import {
   DEFAULT_MACHINE_MESH_CONFIG,
   loadMachineMeshConfig,
@@ -1836,7 +1837,19 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       getEntry: (id: string) => unknown;
     };
     abort: () => void;
+    /** The live run's abort signal — undefined when no run is in flight. Read only to route
+     *  a delivery across the run boundary; see runDelivery below. */
+    signal?: AbortSignal | undefined;
   } | null = null;
+
+  // ── Delivery across the run boundary ────────────────────────────────────────
+  // One router for every message pi-mesh hands to this session's agent WITH a wake. It hands
+  // the message over now when no run is live, and otherwise at agent_settled: pi would
+  // otherwise park it in the live run's queue, and an aborted run never drains that queue —
+  // the hooman got the interruption and never the text. run-boundary-delivery.ts carries the
+  // full rationale. A steering delivery bypasses this router on purpose; see the preempt
+  // branch in the inbound-tell handler.
+  const runDelivery = createRunBoundaryDelivery(() => currentCtx?.signal !== undefined);
 
   // Tail-bounded snapshot of THIS session for enriched tell receipts. Walks
   // parent pointers back from the leaf — O(window), with NO full-branch
@@ -2160,13 +2173,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           `${idx + 1}. ${MI.chat} ${MI.sep} #${channelId} ${MI.sep} ${senderLabel}${formatSentSuffix(MI.sep, sentAt)}: ${text}`,
       ),
     ].join("\n");
-    pi.sendMessage(
-      {
-        customType: "mesh-chat-batch",
-        content: blob,
-        display: false,
-      },
-      { deliverAs: "followUp", triggerTurn: true },
+    runDelivery.send(() =>
+      pi.sendMessage(
+        {
+          customType: "mesh-chat-batch",
+          content: blob,
+          display: false,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      ),
     );
   };
 
@@ -2192,67 +2207,74 @@ export default function piMeshExtension(pi: ExtensionAPI) {
       })),
       MI,
     );
-    pi.sendMessage(
-      {
-        customType: "mesh-inbound-ask-batch",
-        content: blob,
-        display: true,
-        details: {
-          count: batch.length,
-          asks: batch.map((ask) => ({
-            requestId: ask.requestId,
-            from: ask.fromId,
-            senderLabel: ask.senderLabel,
-            askId: ask.askId,
-            askReceiptRequested: ask.askReceiptRequested,
-          })),
+    runDelivery.send(() => {
+      pi.sendMessage(
+        {
+          customType: "mesh-inbound-ask-batch",
+          content: blob,
+          display: true,
+          details: {
+            count: batch.length,
+            asks: batch.map((ask) => ({
+              requestId: ask.requestId,
+              from: ask.fromId,
+              senderLabel: ask.senderLabel,
+              askId: ask.askId,
+              askReceiptRequested: ask.askReceiptRequested,
+            })),
+          },
         },
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
-    for (const ask of batch) {
-      if (ask.askId && ask.askReceiptRequested === "visible" && ask.fromId !== "unknown") {
-        mesh.sendTellReceipt(ask.fromId, buildMeshAskReceipt(ask.askId, mesh.self().id, "visible"));
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+      // The 'visible' receipt claims the agent has now seen the ask, so it travels with the
+      // delivery rather than with the decision to deliver.
+      for (const ask of batch) {
+        if (ask.askId && ask.askReceiptRequested === "visible" && ask.fromId !== "unknown") {
+          mesh.sendTellReceipt(ask.fromId, buildMeshAskReceipt(ask.askId, mesh.self().id, "visible"));
+        }
       }
-    }
+    });
   };
 
   const flushPendingTells = () => {
     if (agentBusy || activeTellMailbox.length === 0) return;
     const batch = activeTellMailbox.drain();
     const blob = formatPendingTellsBatch(MI, batch);
-    pi.sendMessage(
-      {
-        customType: "mesh-inbound-batch",
-        content: blob,
-        display: true,
-        details: {
-          count: batch.length,
-          tells: batch.map((t) => ({
-            from: t.fromId,
-            senderLabel: t.senderLabel,
-            topic: t.topic,
-            deliveryId: t.deliveryId,
-            ackRequested: t.ackRequested,
-          })),
+    // Delivery and the 'surfaced' receipts travel together: a receipt claims the agent is
+    // seeing these tells, so it must fire when the delivery actually reaches pi.
+    runDelivery.send(() => {
+      pi.sendMessage(
+        {
+          customType: "mesh-inbound-batch",
+          content: blob,
+          display: true,
+          details: {
+            count: batch.length,
+            tells: batch.map((t) => ({
+              from: t.fromId,
+              senderLabel: t.senderLabel,
+              topic: t.topic,
+              deliveryId: t.deliveryId,
+              ackRequested: t.ackRequested,
+            })),
+          },
         },
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
-    // Send 'surfaced' acks for queued tells that requested them — the agent is now seeing them.
-    // Enrich with a fresh snapshot (agent is idle at flush time, so receiverBusy: false).
-    const flushView = buildReceiverSnapshot();
-    for (const t of batch) {
-      if (t.deliveryId && t.originalFrom && isSurfacedReceiptRequested(t.ackRequested)) {
-        mesh.sendTellReceipt(
-          t.originalFrom,
-          buildTellReceiptAck(t.deliveryId, mesh.self().id, "surfaced", {
-            receiverBusy: false,
-            view: flushView,
-          }),
-        );
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+      // Enrich with a fresh snapshot (agent is idle at delivery time, so receiverBusy: false).
+      const flushView = buildReceiverSnapshot();
+      for (const t of batch) {
+        if (t.deliveryId && t.originalFrom && isSurfacedReceiptRequested(t.ackRequested)) {
+          mesh.sendTellReceipt(
+            t.originalFrom,
+            buildTellReceiptAck(t.deliveryId, mesh.self().id, "surfaced", {
+              receiverBusy: false,
+              view: flushView,
+            }),
+          );
+        }
       }
-    }
+    });
   };
 
   // ── v1c drain-before-live on revive (ADD-2) ────────────────────────────────
@@ -2299,39 +2321,42 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           MI,
           fresh.map((d) => ({ senderLabel: d.senderLabel, payloadText: d.payloadText, sentAt: d.sentAt })),
         );
-        pi.sendMessage(
-          {
-            customType: "mesh-revive-drain",
-            content: blob,
-            display: true,
-            details: {
-              count: fresh.length,
-              // Only what was surfaced: listing suppressed ids here made every later
-              // grep of session.jsonl count them as extra deliveries.
-              tells: fresh.map((d) => ({
-                from: d.fromId,
-                senderLabel: d.senderLabel,
-                topic: d.topic,
-                deliveryId: d.deliveryId,
-                ackRequested: d.ackRequested,
-              })),
+        // Delivery and the 'surfaced' receipts travel together: a receipt claims the
+        // hibernated mail has entered the turn context, so it fires with the delivery.
+        runDelivery.send(() => {
+          pi.sendMessage(
+            {
+              customType: "mesh-revive-drain",
+              content: blob,
+              display: true,
+              details: {
+                count: fresh.length,
+                // Only what was surfaced: listing suppressed ids here made every later
+                // grep of session.jsonl count them as extra deliveries.
+                tells: fresh.map((d) => ({
+                  from: d.fromId,
+                  senderLabel: d.senderLabel,
+                  topic: d.topic,
+                  deliveryId: d.deliveryId,
+                  ackRequested: d.ackRequested,
+                })),
+              },
             },
-          },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
-        // 'surfaced' acks — the hibernated mail has now entered the turn context.
-        const view = buildReceiverSnapshot();
-        for (const d of drained) {
-          if (d.deliveryId && d.originalFrom && isSurfacedReceiptRequested(d.ackRequested)) {
-            mesh.sendTellReceipt(
-              d.originalFrom,
-              buildTellReceiptAck(d.deliveryId, mesh.self().id, "surfaced", {
-                receiverBusy: false,
-                view,
-              }),
-            );
+            { deliverAs: "followUp", triggerTurn: true },
+          );
+          const view = buildReceiverSnapshot();
+          for (const d of drained) {
+            if (d.deliveryId && d.originalFrom && isSurfacedReceiptRequested(d.ackRequested)) {
+              mesh.sendTellReceipt(
+                d.originalFrom,
+                buildTellReceiptAck(d.deliveryId, mesh.self().id, "surfaced", {
+                  receiverBusy: false,
+                  view,
+                }),
+              );
+            }
           }
-        }
+        });
       }
     } finally {
       // Lift the barrier and surface any live tells that queued during the drain —
@@ -2354,6 +2379,12 @@ export default function piMeshExtension(pi: ExtensionAPI) {
     flushPendingAsks();
     flushPendingTells();
     scheduleAmbientChatFlush();
+  });
+
+  // The settled boundary. No run is live here, so a deferred delivery opens a fresh turn
+  // instead of being parked in a queue the run that just finished can no longer drain.
+  pi.on("agent_settled", () => {
+    runDelivery.drain();
   });
 
   pi.on("session_start", async (event, ctx) => {
@@ -2771,17 +2802,15 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           return;
         }
 
-        // preempt-abort | preempt-steer | surface → deliver now.
+        // preempt-abort | preempt-steer | surface → hand the message over.
         // NUCLEAR abort: only actually cancels when there is in-flight work
         // (plan.abortFirst, gated on agentBusy) AND a live session context. When
         // it cannot (idle peer, or ctx null mid-reload) it is a NO-OP — the ack's
         // aborted flag reports which happened so the sender never assumes a
         // cancellation that did not occur.
-        let aborted: boolean | undefined;
-        if (plan.action === "preempt-abort") {
-          aborted = plan.abortFirst && !!currentCtx;
-          if (aborted) currentCtx?.abort(`mesh preempt-abort from ${msg.from ?? "unknown"}`);
-        }
+        // `aborted` records the decision here; the abort itself fires below, AFTER the
+        // message has been routed across the run boundary.
+        const aborted = plan.action === "preempt-abort" ? plan.abortFirst && !!currentCtx : undefined;
         // Append a bottom signature so an agent who only reads the END of the
         // message still sees the real mesh sender (see default-prompt identity
         // block + inbound-format.ts).
@@ -2799,10 +2828,26 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           plan.deliverAs !== undefined
             ? { deliverAs: plan.deliverAs, triggerTurn: plan.triggerTurn }
             : {};
-        pi.sendMessage(
-          { customType: "mesh-inbound", content, display: true, details },
-          deliveryOptions,
-        );
+        const deliver = () =>
+          pi.sendMessage(
+            { customType: "mesh-inbound", content, display: true, details },
+            deliveryOptions,
+          );
+        // A steering tell is aimed AT the live run — it lands at that run's next reasoning
+        // boundary, and the loop polls the steering queue at the start of every turn. It is
+        // passed through rather than moved across the boundary.
+        if (plan.deliverAs === "steer") {
+          deliver();
+        } else {
+          // Routed BEFORE the run is cancelled, and never into the queue of the run we are
+          // about to kill: that queue is drained only by a run that reaches its post-run
+          // continuation, and an aborted run does not reach it. runDelivery holds the message
+          // until agent_settled, where triggerTurn opens the fresh turn the abort was supposed
+          // to make room for.
+          runDelivery.send(deliver);
+        }
+        // Cancelled last, so the run it stops can no longer take the message down with it.
+        if (aborted) currentCtx?.abort(`mesh preempt-abort from ${msg.from ?? "unknown"}`);
         sendAck(aborted);
       });
 
@@ -2881,8 +2926,9 @@ export default function piMeshExtension(pi: ExtensionAPI) {
         }
 
         const requestVisible = req.askReceiptRequested === "visible";
-        // Reached only when idle (the busy path returned above). A 'visible' waiter
-        // gets pi's default surface; otherwise wake a turn so the ask is read.
+        // No in-flight work (the busy path returned above), but "not busy" still includes the
+        // settle window of a run that just ended — pi would park the ask in that run's queue.
+        // A 'visible' waiter gets pi's default surface; otherwise wake a turn so the ask is read.
         const deliveryOptions: { deliverAs?: "followUp"; triggerTurn?: boolean } = requestVisible
           ? {}
           : { deliverAs: "followUp", triggerTurn: true };
@@ -2890,20 +2936,24 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           req.from.id !== "unknown"
             ? `Reply with: mesh_tell("${req.from.id}", { askId: "${req.askId}", response: "your reply" })`
             : "Reply with: mesh_tell";
-        pi.sendMessage(
-          {
-            customType: "mesh-inbound-ask",
-            content: formatInboundAskContent(MI, senderLabel, payloadText, replyHint, req.timestamp),
-            display: true,
-          },
-          deliveryOptions,
-        );
-        if (requestVisible && req.from.id !== "unknown") {
-          mesh.sendTellReceipt(
-            req.from.id,
-            buildMeshAskReceipt(req.askId, mesh.self().id, "visible"),
+        runDelivery.send(() => {
+          pi.sendMessage(
+            {
+              customType: "mesh-inbound-ask",
+              content: formatInboundAskContent(MI, senderLabel, payloadText, replyHint, req.timestamp),
+              display: true,
+            },
+            deliveryOptions,
           );
-        }
+          // The 'visible' receipt claims the agent has now seen the ask, so it travels with
+          // the delivery rather than with the decision to deliver.
+          if (requestVisible && req.from.id !== "unknown") {
+            mesh.sendTellReceipt(
+              req.from.id,
+              buildMeshAskReceipt(req.askId, mesh.self().id, "visible"),
+            );
+          }
+        });
       });
     } catch (e) {
       console.warn(`[pi-mesh] Failed to start: ${e}`);
