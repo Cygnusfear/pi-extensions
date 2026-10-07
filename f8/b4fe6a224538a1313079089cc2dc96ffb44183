@@ -1,0 +1,19 @@
+packages/pi-mesh-v4/extension/pi-mesh-v4.ts
+  s_7cf39782525820::t_dc5fa05cc727f7 1-224
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f8b4fe6a224538a1313079089cc2dc96ffb44183",
+  "prompts": {},
+  "sessions": {
+    "s_7cf39782525820": {
+      "agent_id": {
+        "tool": "Aomawa Quasar Walkowicz",
+        "id": "49d1ffd4-51fa-493b-bc26-7011b956d021",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
