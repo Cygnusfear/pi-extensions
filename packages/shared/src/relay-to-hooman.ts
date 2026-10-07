@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { readAfkState } from "./afk.ts";
 import { formatProviderLimitNotice, type ProviderLimitNotice } from "./alert-provenance.ts";
 
 const BRIDGE_CONFIG = join(homedir(), ".config", "mesh-telegram-bridge", "config.env");
@@ -70,6 +71,21 @@ export function relayToHooman(text: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Relay a message to the Hooman's Telegram while they are away.
+ *
+ * This is the /afk contract, and it is why the away notice no longer asks agents to reach
+ * the Hooman themselves: while the flag is on, what an agent explains is forwarded here, so
+ * there is nothing to remember and no extra turn to spend. The flag is read per call, so a
+ * /afk toggle takes effect on the next message.
+ *
+ * Returns true only when a tell was handed to the mesh — never throws.
+ */
+export function relayWhileAway(text: string): boolean {
+	if (!readAfkState().on) return false;
+	return relayToHooman(text);
 }
 
 /** Format structured producer-side provenance before relaying it to the Hooman. */

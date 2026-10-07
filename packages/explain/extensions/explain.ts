@@ -10,7 +10,7 @@
  * The working model gets a short confirmation — no parroting.
  */
 
-import { relayToHooman } from "../../shared/src/relay-to-hooman.ts";
+import { relayToHooman, relayWhileAway } from "../../shared/src/relay-to-hooman.ts";
 import { complete, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, getMarkdownTheme, serializeConversation } from "@earendil-works/pi-coding-agent";
@@ -138,6 +138,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       // Bypass communicator when disabled — show raw text directly
       if (!communicatorEnabled) {
+        relayWhileAway(params.text);
         return {
           content: [{ type: "text", text: "✓ Communicated to user." }],
           details: { explained: params.text, originalText: params.text, model: "off" },
@@ -147,6 +148,7 @@ export default function (pi: ExtensionAPI) {
       // Short messages don't need rewriting — pass through directly
       const lineCount = params.text.split("\n").length;
       if (lineCount < 6) {
+        relayWhileAway(params.text);
         return {
           content: [{ type: "text", text: "✓ Communicated to user." }],
           details: { explained: params.text, originalText: params.text, model: "passthrough" },
@@ -156,6 +158,7 @@ export default function (pi: ExtensionAPI) {
       // Find the communicator model
       const model = ctx.modelRegistry.find(communicatorProvider, communicatorModelId);
       if (!model) {
+        relayWhileAway(params.text);
         // Fallback: show raw text via renderResult
         return {
           content: [{ type: "text", text: "Communicated to user (communicator model not available, showed raw text)." }],
@@ -166,6 +169,7 @@ export default function (pi: ExtensionAPI) {
       // Get API key
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
       if (!auth.ok || !auth.apiKey) {
+        relayWhileAway(params.text);
         // Fallback: show raw text via renderResult
         return {
           content: [{ type: "text", text: "Communicated to user (no API key for communicator, showed raw text)." }],
@@ -242,6 +246,7 @@ export default function (pi: ExtensionAPI) {
 
         // Return short confirmation to the LLM — the full glm output is in details
         // and rendered to the user via renderResult (no sendMessage to avoid retriggering)
+        relayWhileAway(finalExplained);
         return {
           content: [{ type: "text", text: "✓ Communicated to user via communicator model." }],
           details: {
@@ -254,6 +259,7 @@ export default function (pi: ExtensionAPI) {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
 
+        relayWhileAway(params.text);
         // Fallback: show raw text via renderResult
         return {
           content: [{ type: "text", text: `Communicated to user (communicator error: ${errorMsg}, showed raw text).` }],

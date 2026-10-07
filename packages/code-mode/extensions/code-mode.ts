@@ -8,7 +8,7 @@
  * Inspired by: https://blog.cloudflare.com/code-mode/
  */
 
-import { withAfkContactBanner } from "@pi-extensions/shared/afk";
+import { withAfkAwayBanner } from "@pi-extensions/shared/afk";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -1203,7 +1203,7 @@ export default function (
 					const result = await executeInSession(sess, params.code, buildDeps(bgAbort.signal));
 					// Build the follow-up message body. Same shape as a sync result, plus
 					// a jobId tag so the agent can correlate.
-					const body = withAfkContactBanner(buildResultText(result.output, result.error));
+					const body = withAfkAwayBanner(buildResultText(result.output, result.error));
 					const status = result.error ? "failed" : "completed";
 					const durStr =
 						result.duration < 1000
@@ -1381,7 +1381,7 @@ export default function (
 				const jobId = nextAsyncJobId();
 				syncPromise
 					.then((result) => {
-						const body = withAfkContactBanner(buildResultText(result.output, result.error));
+						const body = withAfkAwayBanner(buildResultText(result.output, result.error));
 						const status = result.error ? "failed" : "completed";
 						const durStr =
 							result.duration < 1000
@@ -1480,7 +1480,7 @@ export default function (
 			// winner.kind === "result" — normal sync return path.
 			if (pendingExecution === syncMutex) pendingExecution = null;
 			const { output, error, duration } = winner.r;
-			const text = withAfkContactBanner(
+			const text = withAfkAwayBanner(
 				formatProgressiveOutput(buildResultText(output, error), {
 					filePrefix: "pi-codemode",
 				}).text,

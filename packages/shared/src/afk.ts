@@ -25,8 +25,8 @@ export const AFK_STATE_PATH =
 	process.env.PI_AFK_STATE_PATH?.trim() || join(homedir(), ".config", "mesh-telegram-bridge", "afk.json");
 
 /** Shown to agents in code-mode output while the Hooman is away. */
-export const AFK_CONTACT_BANNER =
-	"📞 Please contact the Hooman over mesh.tell so they can receive your message on Telegram where they are available now";
+export const AFK_AWAY_BANNER =
+	"📴 The Hooman is away — what you explain() is forwarded to their Telegram.";
 
 export interface AfkState {
 	on: boolean;
@@ -64,13 +64,18 @@ export function writeAfkState(state: AfkState): void {
 }
 
 /**
- * Append the contact banner to tool output while the Hooman is away.
+ * Append the away notice to tool output while the Hooman is away.
+ *
+ * The notice states a fact and asks for nothing. It used to tell agents to reach the Hooman
+ * over mesh.tell themselves; the explain tool now forwards what an agent explains to their
+ * Telegram while they are away (packages/explain/extensions/explain.ts), so the agent has
+ * nothing to remember and no turn to spend on it.
  *
  * Bottom, not top: the banner is a standing reminder, and the output above it is
  * what the caller asked for. Reading the flag per call keeps a /afk toggle live
  * without any cross-process plumbing.
  */
-export function withAfkContactBanner(text: string): string {
+export function withAfkAwayBanner(text: string): string {
 	if (!readAfkState().on) return text;
-	return `${text}\n\n${AFK_CONTACT_BANNER}`;
+	return `${text}\n\n${AFK_AWAY_BANNER}`;
 }
