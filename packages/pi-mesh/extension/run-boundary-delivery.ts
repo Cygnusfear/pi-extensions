@@ -18,6 +18,17 @@
  * the steering queue on purpose and the loop polls that queue at the start of every turn.
  */
 
+/**
+ * RECIPROCAL NOTE (kaliv3 v4 inbound seam, 2026-10-07). The fleet has its OWN copy of this decision —
+ * kaliv3 packages/runner/src/inbound-delivery.ts — because the runner cannot import pi-extensions: the fleet pins
+ * extensions as loaded FILES, not as a package dependency, and exporting this module would have dragged a
+ * PI_EXTENSIONS_PIN bump into the wake fix (ruled by Jackie, 2026-10-07T18:07Z). So the rule lives twice on purpose:
+ * here for the operator's session, there for a fleet session. Consolidation is a later lane riding a future pin bump,
+ * and when it happens the runner's copy is the thing to delete.
+ *
+ * WHY THE RULE EXISTS AT ALL, in one line, because it is the same in both places: a message handed to a RUNNING session
+ * is parked in that run's queue, and an ABORTED run never reaches the continuation that drains it.
+ */
 export interface RunBoundaryDelivery {
 	/**
 	 * Hand `deliver` to the session as soon as no run is live: immediately when the session
