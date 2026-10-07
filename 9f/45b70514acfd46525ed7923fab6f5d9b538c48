@@ -1,0 +1,25 @@
+packages/pi-mesh/extension/run-boundary-delivery.ts
+  s_ff79aa8b23a101::t_4ad5dda6e0e13f 1-48
+packages/pi-mesh/extension/run-boundary-delivery.test.ts
+  s_ff79aa8b23a101::t_982789ce94f616 1-44
+packages/pi-mesh/extension/pi-mesh.ts
+  s_ff79aa8b23a101::t_73cf4278fc542b 95,1840-1842,1845-1853,2176-2184,2210-2225,2227-2234,2236,2243-2260,2262-2275,2277,2324-2343,2345-2357,2359,2384-2389,2805,2832-2835,2841,2848,2850
+  s_ff79aa8b23a101::t_fbeb82d432eaba 2813,2831,2836-2840,2842-2847,2849,2929-2931,2939-2946,2948-2956
+  s_ff79aa8b23a101::t_127f8e5794b8a6 2811-2812
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9f45b70514acfd46525ed7923fab6f5d9b538c48",
+  "prompts": {},
+  "sessions": {
+    "s_ff79aa8b23a101": {
+      "agent_id": {
+        "tool": "Guillermo Andromeda Aghanim",
+        "id": "d74fc9cf-4f97-4fbc-b64c-84d23ab6c0d6",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
