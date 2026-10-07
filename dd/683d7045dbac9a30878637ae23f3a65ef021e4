@@ -1,0 +1,40 @@
+packages/pi-mesh-v4/extension/courier-loop.test.ts
+  s_7cf39782525820::t_9923dffcdbc5c1 1-166
+  s_7cf39782525820::t_5522cd06085c07 167-169
+packages/pi-mesh-v4/package.json
+  s_7cf39782525820::t_196d1483790535 1-13
+packages/pi-mesh-v4/tsconfig.json
+  s_7cf39782525820::t_cbe374d34e9b07 13-14
+  s_2c7f1b5d537f28::t_b9132d058caf0f 1-12
+packages/pi-mesh-v4/extension/mcp-client.ts
+  s_7cf39782525820::t_c92043cedf2b7a 1-292
+packages/pi-mesh-v4/extension/mcp-client.test.ts
+  s_7cf39782525820::t_84e6e3bd4e1c22 1-227
+  s_2c7f1b5d537f28::t_6a952b15df755e 228
+packages/pi-mesh-v4/extension/courier-loop.ts
+  s_7cf39782525820::t_93f861aefd0819 1-209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dd683d7045dbac9a30878637ae23f3a65ef021e4",
+  "prompts": {},
+  "sessions": {
+    "s_2c7f1b5d537f28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "282b44e3-a57f-45fd-9b13-79eff93a8c64",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_7cf39782525820": {
+      "agent_id": {
+        "tool": "Aomawa Quasar Walkowicz",
+        "id": "49d1ffd4-51fa-493b-bc26-7011b956d021",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
