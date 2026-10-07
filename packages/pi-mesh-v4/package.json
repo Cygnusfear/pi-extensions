@@ -1,0 +1,13 @@
+{
+  "name": "@pi-extensions/pi-mesh-v4",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./extension/pi-mesh-v4.ts",
+    "./extension/mcp-client.js": "./extension/mcp-client.ts"
+  },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "pi": { "extensions": ["./extension/pi-mesh-v4.ts"] },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.80.0" },
+  "dependencies": { "@sinclair/typebox": "*" }
+}
