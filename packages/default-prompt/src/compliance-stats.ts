@@ -56,6 +56,10 @@ export interface ComplianceObservation {
 	readonly cited: readonly string[];
 	/** Provider-reported cost for this check. */
 	readonly cost: number;
+	/** True when the classifier reported usage; a report must not invent spend it cannot see. */
+	readonly usageReported?: boolean;
+	/** Why a failed check failed, bounded and never containing message text. */
+	readonly note?: string;
 }
 
 export interface ModelStats {
@@ -72,6 +76,8 @@ export interface ComplianceStats {
 	readonly checks: number;
 	readonly failures: number;
 	readonly cost: number;
+	/** Observations that carried provider-reported usage. */
+	readonly usageReported: number;
 	readonly models: readonly ModelStats[];
 	/** Rule ID to times fired across every model. */
 	readonly ruleHits: Readonly<Record<string, number>>;
@@ -101,6 +107,7 @@ export function aggregateObservations(
 	let checks = 0;
 	let failures = 0;
 	let cost = 0;
+	let usageReported = 0;
 
 	for (const observation of observations) {
 		if (observation.ts < sinceMs) continue;
@@ -113,6 +120,7 @@ export function aggregateObservations(
 		perModel.set(observation.model, entry);
 		entry.cost += observation.cost;
 		cost += observation.cost;
+		if (observation.usageReported) usageReported += 1;
 
 		if (!observation.ok) {
 			failures += 1;
@@ -135,7 +143,7 @@ export function aggregateObservations(
 		.map(([model, entry]) => ({ model, ...entry }))
 		.sort((left, right) => right.checks - left.checks);
 
-	return { checks, failures, cost, models, ruleHits, ruleHitsByModel };
+	return { checks, failures, cost, usageReported, models, ruleHits, ruleHitsByModel };
 }
 
 /** Rule IDs from `allRuleIds` with no hit in the window. */
@@ -186,7 +194,11 @@ export function renderDailyReport(
 	const lines: string[] = [
 		`# Contract compliance — last ${options.days === 1 ? "24 hours" : `${options.days} days`}`,
 		"",
-		`Generated ${new Date(options.generatedAt).toISOString()} · ${stats.checks} checks · ${stats.models.length} model${stats.models.length === 1 ? "" : "s"} · $${stats.cost.toFixed(4)}${stats.failures > 0 ? ` · ${stats.failures} classifier failures` : ""}`,
+		`Generated ${new Date(options.generatedAt).toISOString()} · ${stats.checks} checks · ${stats.models.length} model${stats.models.length === 1 ? "" : "s"} · ${
+			stats.usageReported > 0
+				? `$${stats.cost.toFixed(4)} reported`
+				: "spend not reported by the classifier"
+		}${stats.failures > 0 ? ` · ${stats.failures} classifier failures` : ""}`,
 		"",
 		"## Most fired rules",
 		"",
@@ -217,7 +229,7 @@ export function renderDailyReport(
 		const modelTop = rankedHits(model.ruleHits, top);
 		const modelNever = allRuleIds.filter((id) => (model.ruleHits[id] ?? 0) === 0).length;
 		lines.push(
-			`### ${model.model} — ${model.checks} checks, ${model.flagged} flagged, ${model.cost.toFixed(4)}`,
+			`### ${model.model} — ${model.checks} checks, ${model.flagged} flagged`,
 			"",
 			modelTop.length > 0 ? `Fired: ${modelTop.join(", ")}` : "Fired: nothing",
 			`Never fired here: ${modelNever} of ${allRuleIds.length} rules`,
@@ -259,6 +271,10 @@ export function parseObservations(text: string): readonly ComplianceObservation[
 					fired: Array.isArray(parsed.fired) ? parsed.fired : [],
 					cited: Array.isArray(parsed.cited) ? parsed.cited : [],
 					cost: typeof parsed.cost === "number" ? parsed.cost : 0,
+					usageReported: parsed.usageReported === true,
+					...(typeof parsed.note === "string" && parsed.note.length > 0
+						? { note: parsed.note.slice(0, 200) }
+						: {}),
 				});
 			}
 		} catch {

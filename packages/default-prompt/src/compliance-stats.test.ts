@@ -20,6 +20,7 @@ function observation(overrides: Partial<ComplianceObservation> = {}): Compliance
 		fired: [],
 		cited: [],
 		cost: 0.0002,
+		usageReported: true,
 		...overrides,
 	};
 }
@@ -129,7 +130,20 @@ describe("report", () => {
 
 	test("reports the window and the spend", () => {
 		expect(report).toContain("last 24 hours");
-		expect(report).toContain("$0.0006");
+		expect(report).toContain("$0.0006 reported");
+	});
+
+	test("says spend is not reported rather than printing a zero it cannot see", () => {
+		const blind = aggregateObservations(
+			[observation({ usageReported: false, cost: 0 })],
+			now - DAY,
+		);
+		const text = renderDailyReport(blind, ["P06"], { P06: "context claims" }, {
+			days: 1,
+			generatedAt: now,
+		});
+		expect(text).toContain("spend not reported by the classifier");
+		expect(text).not.toContain("$0.0000");
 	});
 });
 

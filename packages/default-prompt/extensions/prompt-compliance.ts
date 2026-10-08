@@ -76,11 +76,30 @@ function boundedSignal(signal: AbortSignal | undefined): AbortSignal | undefined
 	return any ? any([signal, timeout]) : signal;
 }
 
-/** The model that wrote the message, for per-model hit tracking. */
-function agentModelId(ctx: unknown): string {
-	const model = (ctx as { model?: { provider?: unknown; id?: unknown } }).model;
-	if (model && typeof model.provider === "string" && typeof model.id === "string") {
-		return `${model.provider}/${model.id}`;
+/**
+ * The model that wrote the message, for per-model hit tracking.
+ *
+ * Read from the message itself — an assistant message carries the provider and
+ * model that produced it — because the session's current model is not
+ * guaranteed to be set at a turn boundary.
+ */
+function agentModelId(message: unknown, ctx: unknown): string {
+	if (message && typeof message === "object") {
+		const candidate = message as { provider?: unknown; model?: unknown };
+		if (
+			typeof candidate.provider === "string" &&
+			typeof candidate.model === "string"
+		) {
+			return `${candidate.provider}/${candidate.model}`;
+		}
+	}
+	const sessionModel = (ctx as { model?: { provider?: unknown; id?: unknown } }).model;
+	if (
+		sessionModel &&
+		typeof sessionModel.provider === "string" &&
+		typeof sessionModel.id === "string"
+	) {
+		return `${sessionModel.provider}/${sessionModel.id}`;
 	}
 	return "unknown";
 }
@@ -315,11 +334,12 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		}
 
 		const hoomanRequest = findLastMessageText(readMessages(event), "user");
-		const model = agentModelId(ctx);
+		const model = agentModelId(event.message, ctx);
 		const classifierId = `${COMPLIANCE_CLASSIFIER.provider}/${COMPLIANCE_CLASSIFIER.id}`;
 
 		let result = null;
 		let failed = false;
+		let failureNote: string | undefined;
 		try {
 			result = await host.classify(
 				COMPLIANCE_CLASSIFIER,
@@ -327,10 +347,12 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 					state: buildClassifierState(agentMessage, hoomanRequest, event.turnIndex),
 					questions,
 				},
-				{ signal: boundedSignal(ctx.signal) },
+				// Deliberately not ctx.signal: a turn boundary is exactly where that signal fires.
+				{ signal: boundedSignal(undefined) },
 			);
 		} catch (error) {
 			failed = true;
+			failureNote = error instanceof Error ? error.message : String(error);
 			record({
 				turnIndex: event.turnIndex,
 				messageChars: agentMessage.length,
@@ -359,6 +381,15 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			})),
 			cited: cited.map((violation) => violation.id),
 			cost,
+			usageReported: result?.usage !== undefined,
+			...(classifierError
+				? {
+						note: (result?.errorMessage ?? failureNote ?? "classifier error").slice(
+							0,
+							200,
+						),
+					}
+				: {}),
 		}).catch(() => undefined);
 
 		if (candidates.length > 0) {
