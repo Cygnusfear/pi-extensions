@@ -33,6 +33,13 @@ export function isNoMatchFailure(err: unknown): boolean {
 	return err instanceof DurableRouteError && err.reason === "no-match";
 }
 
+/** True only for the refusal that must NOT fall through to a mailbox or a topic:
+ *  several live sessions claim the address, so any fallback is a coin toss that
+ *  still reports 'sent'. */
+export function isAmbiguousFailure(err: unknown): boolean {
+	return err instanceof DurableRouteError && err.reason === "ambiguous";
+}
+
 export function selectRoute(peer: PeerInfo): string {
 	return peer.meshId ?? peer.id;
 }
@@ -119,11 +126,30 @@ export function resolveDurableTarget(peers: PeerInfo[], rawTarget: string): stri
 	const needle = rawTarget.trim();
 	const needleLower = needle.toLowerCase();
 
-	// 1. Exact ID / sessionId / durable meshId match
-	const byExact = peers.find(
-		(peer) => peer.id === needle || peer.sessionId === needle || peer.meshId === needle,
+	// 1. Exact ID / sessionId / durable meshId match.
+	//
+	// Two entries for ONE identity (a stale clientId from a restart, a presence
+	// child) are one peer and route normally - that is what dedupByIdentity is for.
+	// Two DIFFERENT identities claiming the same id are not a tie to break: a session
+	// resumed from another's file reuses its durable id, so picking either delivered
+	// to whichever subscribed first while the sender still saw 'sent'. Refuse, naming
+	// both, so the caller can fix the address.
+	const exact = dedupByIdentity(
+		peers.filter(
+			(peer) => peer.id === needle || peer.sessionId === needle || peer.meshId === needle,
+		),
 	);
-	if (byExact) return selectRoute(byExact);
+	if (exact.length === 1) {
+		const only = exact[0];
+		if (only) return selectRoute(only);
+	}
+	if (exact.length > 1) {
+		const matched = exact.map((peer) => `${peerLabel(peer)} (${peer.id.slice(0, 8)})`).join(", ");
+		throw new DurableRouteError(
+			"ambiguous",
+			`Session id '${needle}' is claimed by ${exact.length} live sessions: ${matched}. Address the intended one by nickname or by its own id.`,
+		);
+	}
 
 	// 2. Case-insensitive exact name/nickname match
 	const byLabel = dedupByIdentity(peers.filter((peer) => {

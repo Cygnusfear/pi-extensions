@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { resolveDurableTarget, resolveOfflineDurableTarget, selectRoute } from "./route-resolve.ts";
+import {
+	isAmbiguousFailure,
+	isNoMatchFailure,
+	resolveDurableTarget,
+	resolveOfflineDurableTarget,
+	selectRoute,
+} from "./route-resolve.ts";
 import type { PeerInfo } from "./types.ts";
 
 function peer(p: Partial<PeerInfo> & { id: string }): PeerInfo {
@@ -122,3 +128,56 @@ describe("resolveOfflineDurableTarget — nickname routing for offline peers (ka
 // and takes candidates, so these rules are pinned without touching the filesystem —
 // the same matcher both the delivery path and the refusal message use, so the two
 // cannot disagree about what "ambiguous" means.
+
+describe("resolveDurableTarget — an id claimed by TWO identities must refuse, not pick (live defect 2026-10-08)", () => {
+	// A session resumed from another's session file reuses that durable id, so two
+	// live sessions subscribe to the same id. Picking either delivered the tell to
+	// whoever consumed first while the sender still saw 'sent' — silent misdelivery.
+	const george = peer({
+		id: "client-george",
+		meshId: "durable-george",
+		sessionId: "shared-file-id",
+		nickname: "George Neutron Shields",
+	});
+	const fork = peer({
+		id: "client-fork",
+		meshId: "durable-fork",
+		sessionId: "shared-file-id",
+		nickname: "Alessandra Apollo Copernicus",
+	});
+
+	test("an exact id with two live claims throws ambiguous, naming both sessions", () => {
+		let thrown: unknown;
+		try {
+			resolveDurableTarget([george, fork], "shared-file-id");
+		} catch (e) {
+			thrown = e;
+		}
+		expect(isAmbiguousFailure(thrown)).toBe(true);
+		expect((thrown as Error).message).toContain("George Neutron Shields");
+		expect((thrown as Error).message).toContain("Alessandra Apollo Copernicus");
+	});
+
+	test("the refusal is NOT a no-match, so no mailbox or topic fallback may answer it", () => {
+		let thrown: unknown;
+		try {
+			resolveDurableTarget([george, fork], "shared-file-id");
+		} catch (e) {
+			thrown = e;
+		}
+		// This distinction is the fix: isNoMatchFailure(ambiguous) must stay false or
+		// the tell falls through to the shared durable mailbox and misdelivers anyway.
+		expect(isNoMatchFailure(thrown)).toBe(false);
+	});
+
+	test("each of the two identities stays reachable by its OWN id", () => {
+		expect(resolveDurableTarget([george, fork], "durable-george")).toBe("durable-george");
+		expect(resolveDurableTarget([george, fork], "durable-fork")).toBe("durable-fork");
+	});
+
+	test("one identity's duplicate entries are still one peer, not an ambiguity", () => {
+		const stale = peer({ id: "client-old", meshId: "durable-george", lastSeen: 1 });
+		const live = peer({ id: "client-new", meshId: "durable-george", lastSeen: 2 });
+		expect(resolveDurableTarget([stale, live], "durable-george")).toBe("durable-george");
+	});
+});

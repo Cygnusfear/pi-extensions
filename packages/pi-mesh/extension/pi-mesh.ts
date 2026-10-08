@@ -47,7 +47,7 @@ import {
 } from "./ask-protocol.ts";
 import { buildPendingAskBatchContent, splitExpiredPendingAsks } from "./ask-queue.ts";
 import { isIdentityReuseReason, resolveReuseNickname } from "./identity-pin.ts";
-import { isNoMatchFailure, resolveDurableTarget } from "./route-resolve.ts";
+import { isAmbiguousFailure, isNoMatchFailure, resolveDurableTarget } from "./route-resolve.ts";
 import { createRegistryIndex, pruneRegistry, type RegistryFailureReason } from "./durable-registry-index.ts";
 import {
   readZmxSession,
@@ -2485,6 +2485,20 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           const cmResolved = isNoMatchFailure(e)
             ? resolveRevivableTarget(params.sessionId)
             : ({ ok: false, reason: "none" }) as RevivableResolution;
+          if (isAmbiguousFailure(e)) {
+            // Several live sessions claim this id (a resumed fork reuses its parent's
+            // durable id). The deterministic topic would reach whichever subscribed
+            // first and the sender would still see 'sent', so refuse loudly instead.
+            const deliveryId = createDeliveryId();
+            const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+            return JSON.stringify({
+              sent: false,
+              sessionId: params.sessionId,
+              reason: "ambiguous",
+              message: e.message,
+              ack,
+            });
+          }
           const delivered = cmResolved.ok
             ? deliverToDurableMailbox(
                 cmResolved.durableId,
@@ -3050,6 +3064,20 @@ export default function piMeshExtension(pi: ExtensionAPI) {
           const offline = isNoMatchFailure(e)
             ? resolveRevivableTarget(sessionId)
             : ({ ok: false, reason: "none" }) as RevivableResolution;
+          if (isAmbiguousFailure(e)) {
+            // Several live sessions claim this id (a resumed fork reuses its parent's
+            // durable id). The deterministic topic would reach whichever subscribed
+            // first and the sender would still see 'sent', so refuse loudly instead.
+            const deliveryId = createDeliveryId();
+            const ack = buildTellReceiptAck(deliveryId, mesh.self().id, "undeliverable");
+            return JSON.stringify({
+              sent: false,
+              sessionId,
+              reason: "ambiguous",
+              message: e.message,
+              ack,
+            });
+          }
           const delivered = offline.ok
             ? deliverToDurableMailbox(offline.durableId, message, rendered, receiptMode)
             : null;
