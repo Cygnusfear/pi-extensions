@@ -75,7 +75,7 @@ function writeDiagnostics(record: Record<string, unknown>): void {
 		.mkdir(complianceStateDir(), { recursive: true })
 		.then(() =>
 			fs.writeFile(
-				path.join(complianceStateDir(), "last-check.json"),
+				path.join(complianceStateDir(), `last-check-${process.pid}.json`),
 				JSON.stringify({ ...record, pid: process.pid }, null, 2),
 				"utf8",
 			),
@@ -504,6 +504,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			turn: event.turnIndex,
 			chars: agentMessage.length,
 			usageReported: result?.usage !== undefined,
+			classifierSource: resolved.source,
 			...(classifierError
 				? {
 						note: (result?.errorMessage ?? failureNote ?? "classifier error").slice(

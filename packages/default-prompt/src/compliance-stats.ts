@@ -64,6 +64,8 @@ export interface ComplianceObservation {
 	readonly turn?: number;
 	/** Length of the message that was judged, for cost and duplication accounting. */
 	readonly chars?: number;
+	/** Which catalog lookup supplied the classifier entry for this check. */
+	readonly classifierSource?: string;
 }
 
 export interface ModelStats {
@@ -278,6 +280,9 @@ export function parseObservations(text: string): readonly ComplianceObservation[
 					usageReported: parsed.usageReported === true,
 					...(typeof parsed.turn === "number" ? { turn: parsed.turn } : {}),
 					...(typeof parsed.chars === "number" ? { chars: parsed.chars } : {}),
+					...(typeof parsed.classifierSource === "string"
+						? { classifierSource: parsed.classifierSource }
+						: {}),
 					...(typeof parsed.note === "string" && parsed.note.length > 0
 						? { note: parsed.note.slice(0, 200) }
 						: {}),
