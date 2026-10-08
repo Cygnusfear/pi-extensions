@@ -292,11 +292,25 @@ export function agentTurnText(message: unknown, transcript: unknown): string {
 	for (let index = transcript.length - 1; index >= 0; index--) {
 		const candidate = transcript[index];
 		if (!candidate || typeof candidate !== "object") continue;
-		if ((candidate as { role?: unknown }).role === "user") break;
+		const role = (candidate as { role?: unknown }).role;
+		// Only the agent's own output belongs to this turn. Anything addressed to
+		// the agent - the Hooman, a steer, a system note - ends the search, so the
+		// words of an earlier turn are never re-judged at a later boundary.
+		if (role !== "assistant" && role !== "toolResult") break;
 		const text = extractAgentMessage(candidate);
 		if (text.length > 0) return text;
 	}
 	return "";
+}
+
+/** Cheap identity for a piece of text, so the same words are not judged twice. */
+export function textFingerprint(text: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < text.length; index++) {
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `${text.length}:${(hash >>> 0).toString(16)}`;
 }
 
 /** Text of the most recent message with the given role, oldest-to-newest scan. */

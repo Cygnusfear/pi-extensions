@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { CheckableRule } from "./compliance-rules.ts";
 import {
 	agentTurnText,
+	textFingerprint,
 	buildClassifierState,
 	buildQuestions,
 	ComplianceCooldown,
@@ -115,6 +116,25 @@ describe("message extraction", () => {
 				transcript,
 			),
 		).toBe("Landed: parser fix.");
+	});
+
+	test("an inbound message ends the search, so an earlier turn's words are not re-judged", () => {
+		const transcript = [
+			{ role: "assistant", content: [{ type: "text", text: "previous turn words" }] },
+			{ role: "custom", customType: "prompt-compliance", content: "a steer" },
+			{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+		];
+		expect(
+			agentTurnText(
+				{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+				transcript,
+			),
+		).toBe("");
+	});
+
+	test("the same words get one fingerprint, different words get another", () => {
+		expect(textFingerprint("Landed: parser fix.")).toBe(textFingerprint("Landed: parser fix."));
+		expect(textFingerprint("Landed: parser fix.")).not.toBe(textFingerprint("Landed: parser test."));
 	});
 
 	test("does not reach back past the Hooman's message into an earlier turn", () => {

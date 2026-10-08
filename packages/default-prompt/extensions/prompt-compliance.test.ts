@@ -178,9 +178,21 @@ describe("prompt-compliance wiring", () => {
 	test("does not warn twice for the same rule inside the cooldown window", async () => {
 		const h = await harness({ classify: () => Promise.resolve(violationResult) });
 		await h.fire(turn({ turnIndex: 1 }));
-		await h.fire(turn({ turnIndex: 2 }));
+		await h.fire(
+			turn({
+				turnIndex: 2,
+				message: { role: "assistant", content: [{ type: "text", text: "Still the same violation, worded differently." }] },
+			}),
+		);
 		expect(h.classifyCalls.length).toBe(2);
 		expect(h.sent.length).toBe(1);
+	});
+
+	test("the same words re-found at a later boundary are not charged twice", async () => {
+		const h = await harness({ classify: () => Promise.resolve(violationResult) });
+		await h.fire(turn({ turnIndex: 1 }));
+		await h.fire(turn({ turnIndex: 2 }));
+		expect(h.classifyCalls.length).toBe(1);
 	});
 
 	test("/compliance off makes no classifier calls at all", async () => {
@@ -300,7 +312,12 @@ describe("live contract edits", () => {
 			h.contractPath,
 			firstContract + "\n- ALWAYS TELL ME A STORY WHEN YOU COMMIT.\n",
 		);
-		await h.fire(turn({ turnIndex: 2 }));
+		await h.fire(
+			turn({
+				turnIndex: 2,
+				message: { role: "assistant", content: [{ type: "text", text: "Second message after the contract changed." }] },
+			}),
+		);
 
 		expect(JSON.stringify(h.classifyCalls[1])).toContain("ALWAYS TELL ME A STORY WHEN YOU COMMIT");
 		expect(h.notifications.some((note) => note.text.includes("generic wording"))).toBe(true);
@@ -313,7 +330,12 @@ describe("live contract edits", () => {
 		});
 		await h.fire(turn({ turnIndex: 1 }));
 		writeFileSync(h.contractPath, firstContract.replace("NEVER WRITE LIKE TOLSTOY.", "NEVER WRITE LIKE TOLSTOY, EVER."));
-		await h.fire(turn({ turnIndex: 2 }));
+		await h.fire(
+			turn({
+				turnIndex: 2,
+				message: { role: "assistant", content: [{ type: "text", text: "Second message after the wording changed." }] },
+			}),
+		);
 		expect(JSON.stringify(h.classifyCalls[1])).toContain("NEVER WRITE LIKE TOLSTOY, EVER");
 	});
 });

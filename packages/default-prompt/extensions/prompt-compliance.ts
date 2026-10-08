@@ -43,6 +43,7 @@ import {
 	evaluateCalibration,
 	extractAgentMessage,
 	findLastMessageText,
+	textFingerprint,
 	formatWarning,
 	resolveClassifierHost,
 	selectViolations,
@@ -163,6 +164,8 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	const cooldown = new ComplianceCooldown();
 	const audit: AuditRecord[] = [];
 	let dailyReportChecked = false;
+	/** Fingerprint of the last judged message, so a boundary cannot re-charge for it. */
+	let lastJudged = "";
 
 	// The contract is read fresh whenever the file changes (see loadPack), so an
 	// edit takes effect on the next check. PI_COMPLIANCE_CONTRACT points the
@@ -431,6 +434,13 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		}
 
 		const agentMessage = agentTurnText(event.message, readMessages(event));
+		const fingerprint = textFingerprint(agentMessage);
+		if (agentMessage.length > 0 && fingerprint === lastJudged) {
+			diag.messageChars = agentMessage.length;
+			finish("already judged at an earlier boundary");
+			return;
+		}
+		lastJudged = fingerprint;
 		diag.messageChars = agentMessage.length;
 		diag.messageSource =
 			extractAgentMessage(event.message).length > 0 ? "final-message" : "turn-transcript";
