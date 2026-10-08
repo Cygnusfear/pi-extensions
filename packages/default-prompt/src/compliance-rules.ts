@@ -208,3 +208,61 @@ export function buildRulePack(
 
 	return { rules, skipped };
 }
+
+/** Wording used for a paragraph that was never registered, so a live contract still runs. */
+export function genericViolation(paragraph: ContractParagraph): string {
+	return `The message does or advises what this paragraph forbids: "${paragraph.label}".`;
+}
+
+export interface RuntimeRulePack {
+	/** Rules to ask about right now, derived from the contract file as it stands. */
+	readonly pack: RulePack;
+	/** Paragraphs checked without a registration, using their live text as criteria. */
+	readonly unregistered: readonly ContractParagraph[];
+	/** Registry entries that match no paragraph in the current contract. */
+	readonly staleKeys: readonly string[];
+}
+
+/**
+ * Build the pack for a live session.
+ *
+ * The contract is a file the Hooman edits while agents run, so this never
+ * throws and never disables checking: a paragraph that has not been registered
+ * yet is still checked, against its own live text, with generic violation
+ * wording. Unregistered paragraphs and stale registrations are reported so the
+ * registry can catch up — {@link buildRulePack} stays strict and is what the
+ * test suite uses to insist that it does.
+ *
+ * A paragraph whose text changed at the front reads as a new paragraph here,
+ * which is the honest reading: nobody has reviewed what it now means.
+ */
+export function buildRuntimeRulePack(
+	source: string,
+	registry: RuleRegistry,
+): RuntimeRulePack {
+	const paragraphs = parseContractParagraphs(source);
+	const rules: CheckableRule[] = [];
+	const skipped: SkippedParagraph[] = [];
+	const unregistered: ContractParagraph[] = [];
+	const consumed = new Set<string>();
+
+	for (const paragraph of paragraphs) {
+		const fingerprint = paragraphFingerprint(paragraph.text);
+		if (consumed.has(fingerprint)) continue;
+		consumed.add(fingerprint);
+
+		const registration = registry[fingerprint];
+		const { violation, outOfScope } = registration ?? {};
+		if (violation) {
+			rules.push({ ...paragraph, violation });
+		} else if (outOfScope) {
+			skipped.push({ ...paragraph, reason: outOfScope });
+		} else {
+			unregistered.push(paragraph);
+			rules.push({ ...paragraph, violation: genericViolation(paragraph) });
+		}
+	}
+
+	const staleKeys = Object.keys(registry).filter((key) => !consumed.has(key));
+	return { pack: { rules, skipped }, unregistered, staleKeys };
+}

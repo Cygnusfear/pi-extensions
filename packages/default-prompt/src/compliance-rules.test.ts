@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	buildRulePack,
+	buildRuntimeRulePack,
 	paragraphFingerprint,
 	parseContractParagraphs,
 	type CheckableRule,
@@ -129,5 +130,40 @@ describe("rule pack shape", () => {
 		expect(checkable("Bun supremacy") || checkable("bun supremacy")).toBe(true);
 		expect(skipped("REBASE BEFORE A MERGE")).toBe(true);
 		expect(skipped("SRP")).toBe(true);
+	});
+});
+
+describe("live contract edits", () => {
+	const edited = `${contract}\n\n- A BRAND NEW RULE THAT NOBODY HAS REGISTERED YET.\n`;
+
+	test("a paragraph nobody registered is still checked, against its own text", () => {
+		const built = buildRuntimeRulePack(edited, COMPLIANCE_REGISTRY);
+		expect(built.unregistered.map((paragraph) => paragraph.text)).toContain(
+			"- A BRAND NEW RULE THAT NOBODY HAS REGISTERED YET.",
+		);
+		const rule = built.pack.rules.find((candidate) =>
+			candidate.text.includes("A BRAND NEW RULE"),
+		);
+		expect(rule?.violation).toContain("does or advises what this paragraph forbids");
+	});
+
+	test("the strict builder still refuses the same file, so the registry has to catch up", () => {
+		expect(() => buildRulePack(edited, COMPLIANCE_REGISTRY)).toThrow(/unregistered/);
+	});
+
+	test("a registration with no paragraph is reported, not fatal", () => {
+		const built = buildRuntimeRulePack(contract.slice(contract.indexOf("## Prime directives")), {
+			...COMPLIANCE_REGISTRY,
+			"a paragraph that was deleted": { violation: "something" },
+		});
+		expect(built.staleKeys).toContain("a paragraph that was deleted");
+		expect(built.pack.rules.length).toBeGreaterThan(0);
+	});
+
+	test("registered paragraphs keep their curated wording", () => {
+		const built = buildRuntimeRulePack(contract, COMPLIANCE_REGISTRY);
+		const tolstoy = built.pack.rules.find((rule) => rule.text.includes("NEVER WRITE LIKE TOLSTOY"));
+		expect(tolstoy?.violation).toContain("long narrative");
+		expect(built.unregistered.length).toBe(0);
 	});
 });

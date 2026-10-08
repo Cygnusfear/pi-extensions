@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,14 +13,28 @@ interface Harness {
 	readonly notifications: Array<{ text: string; level: string }>;
 	/** Isolated state directory, so report/observation behaviour is per test. */
 	readonly stateDir: string;
+	/** Contract file this instance reads, when the test supplied one. */
+	readonly contractPath: string;
 	fire(event: unknown): Promise<void>;
 	command(args: string): Promise<void>;
 	setClassifier(result: unknown): void;
 }
 
-async function harness(options: { classify?: (model: unknown, context: unknown) => Promise<unknown> } = {}): Promise<Harness> {
+async function harness(
+	options: {
+		classify?: (model: unknown, context: unknown) => Promise<unknown>;
+		contract?: string;
+	} = {},
+): Promise<Harness> {
 	const stateDir = mkdtempSync(path.join(tmpdir(), "pi-compliance-harness-"));
 	process.env.PI_COMPLIANCE_STATE_DIR = stateDir;
+	const contractPath = path.join(stateDir, "contract.md");
+	if (options.contract === undefined) {
+		delete process.env.PI_COMPLIANCE_CONTRACT;
+	} else {
+		writeFileSync(contractPath, options.contract);
+		process.env.PI_COMPLIANCE_CONTRACT = contractPath;
+	}
 	const { default: register } = await import(
 		"../extensions/prompt-compliance.ts?test-bust=" + Math.random()
 	);
@@ -66,6 +80,7 @@ async function harness(options: { classify?: (model: unknown, context: unknown) 
 		sent,
 		notifications,
 		stateDir,
+		contractPath,
 		setClassifier(result) {
 			classifier = () => Promise.resolve(result);
 		},
@@ -239,5 +254,39 @@ describe("reload safety", () => {
 		);
 		second(secondPi as any);
 		expect(disposed).toBe(true);
+	});
+});
+
+describe("live contract edits", () => {
+	const firstContract = "---\ndescription: test contract\n---\n\n## Rules\n\n- NEVER WRITE LIKE TOLSTOY.\n";
+
+	test("a paragraph added to the contract is judged on the next check, no reload", async () => {
+		const h = await harness({
+			contract: firstContract,
+			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
+		});
+		await h.fire(turn({ turnIndex: 1 }));
+		expect(JSON.stringify(h.classifyCalls[0])).toContain("NEVER WRITE LIKE TOLSTOY");
+		expect(JSON.stringify(h.classifyCalls[0])).not.toContain("TELL ME A STORY");
+
+		writeFileSync(
+			h.contractPath,
+			firstContract + "\n- ALWAYS TELL ME A STORY WHEN YOU COMMIT.\n",
+		);
+		await h.fire(turn({ turnIndex: 2 }));
+
+		expect(JSON.stringify(h.classifyCalls[1])).toContain("ALWAYS TELL ME A STORY WHEN YOU COMMIT");
+		expect(h.notifications.some((note) => note.text.includes("generic wording"))).toBe(true);
+	});
+
+	test("editing an existing paragraph changes what the classifier is asked", async () => {
+		const h = await harness({
+			contract: firstContract,
+			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
+		});
+		await h.fire(turn({ turnIndex: 1 }));
+		writeFileSync(h.contractPath, firstContract.replace("NEVER WRITE LIKE TOLSTOY.", "NEVER WRITE LIKE TOLSTOY, EVER."));
+		await h.fire(turn({ turnIndex: 2 }));
+		expect(JSON.stringify(h.classifyCalls[1])).toContain("NEVER WRITE LIKE TOLSTOY, EVER");
 	});
 });

@@ -16,7 +16,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { buildRulePack, type RulePack } from "../src/compliance-rules.ts";
+import {
+	buildRuntimeRulePack,
+	type ContractParagraph,
+	type RulePack,
+} from "../src/compliance-rules.ts";
 import { COMPLIANCE_REGISTRY } from "../src/compliance-registry.ts";
 import { COMPLIANCE_FIXTURES } from "../src/compliance-fixtures.ts";
 import {
@@ -124,19 +128,31 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 
 	let enabled = true;
 	let threshold = COMPLIANCE_VIOLATION_THRESHOLD;
-	let cached: { mtimeMs: number; pack: RulePack; questions: Record<string, ClassifierQuestion> } | null = null;
+	let cached: {
+		mtimeMs: number;
+		pack: RulePack;
+		questions: Record<string, ClassifierQuestion>;
+		unregistered: readonly ContractParagraph[];
+		staleKeys: readonly string[];
+	} | null = null;
 	let contractError: string | null = null;
+	let unregisteredReported = false;
 	let unavailableReported = false;
 	const cooldown = new ComplianceCooldown();
 	const audit: AuditRecord[] = [];
 	let dailyReportChecked = false;
 
-	const contractPath = path.resolve(
-		path.dirname(fileURLToPath(import.meta.url)),
-		"..",
-		"prompts",
-		"default.md",
-	);
+	// The contract is read fresh whenever the file changes (see loadPack), so an
+	// edit takes effect on the next check. PI_COMPLIANCE_CONTRACT points the
+	// checker at a different contract file.
+	const contractPath =
+		process.env.PI_COMPLIANCE_CONTRACT ??
+		path.resolve(
+			path.dirname(fileURLToPath(import.meta.url)),
+			"..",
+			"prompts",
+			"default.md",
+		);
 
 	const loadPack = async (): Promise<typeof cached> => {
 		if (!existsSync(contractPath)) {
@@ -146,8 +162,14 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		const stat = await fs.stat(contractPath);
 		if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
 		const source = await fs.readFile(contractPath, "utf8");
-		const pack = buildRulePack(source, COMPLIANCE_REGISTRY);
-		cached = { mtimeMs: stat.mtimeMs, pack, questions: buildQuestions(pack.rules) };
+		const built = buildRuntimeRulePack(source, COMPLIANCE_REGISTRY);
+		cached = {
+			mtimeMs: stat.mtimeMs,
+			pack: built.pack,
+			questions: buildQuestions(built.pack.rules),
+			unregistered: built.unregistered,
+			staleKeys: built.staleKeys,
+		};
 		contractError = null;
 		return cached;
 	};
@@ -315,6 +337,9 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 								: "Rules: not loaded yet",
 							`Warnings this session: ${cooldown.warningCount}`,
 							contractError ? `Contract error: ${contractError}` : null,
+							cached && (cached.unregistered.length > 0 || cached.staleKeys.length > 0)
+								? `Registry behind the contract: ${cached.unregistered.length} unregistered, ${cached.staleKeys.length} stale (checked with generic wording)`
+								: null,
 							"Usage: /compliance on|off|status|audit|calibrate|threshold <0-1>",
 						]
 							.filter((line): line is string => Boolean(line))
@@ -326,8 +351,9 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	disposers.push(
-		pi.on("turn_end", async (event, ctx) => {
+	// The pinned pi types predate the unsubscribe contract, so the disposer is
+	// taken structurally: a host that returns nothing simply has nothing to release.
+	const disposeTurnEnd = pi.on("turn_end", async (event, ctx) => {
 		if (!enabled) return;
 
 		let pack: RulePack;
@@ -337,6 +363,15 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			if (!loaded) return;
 			pack = loaded.pack;
 			questions = loaded.questions;
+			if (loaded.unregistered.length > 0 && !unregisteredReported) {
+				unregisteredReported = true;
+				ctx.ui.notify(
+					`Contract checker: ${loaded.unregistered.length} paragraph(s) are new or edited and are being checked with generic wording until registered — ${loaded.unregistered
+						.map((paragraph) => paragraph.id)
+						.join(", ")}`,
+					"info",
+				);
+			}
 		} catch (error) {
 			contractError = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(
@@ -492,6 +527,8 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				// A report that cannot be written must never disturb a session.
 			}
 		}
-		}),
-	);
+		});
+	if (typeof disposeTurnEnd === "function") {
+		disposers.push(disposeTurnEnd as unknown as () => void);
+	}
 }
