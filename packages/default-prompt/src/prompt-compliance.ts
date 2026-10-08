@@ -11,9 +11,35 @@ export interface Violation {
  * `explain` rather than writing prose directly, and the words it authored are
  * still what the contract governs.
  */
-export const COMMUNICATION_TOOLS = ["explain", "notify"] as const;
+export const COMMUNICATION_TOOLS = [
+	"explain",
+	"notify",
+	"mesh_tell",
+	"mesh_chat",
+	"mesh_broadcast",
+	"mesh_interrupt",
+] as const;
 
-const COMMUNICATION_TEXT_FIELDS = ["text", "message", "content"] as const;
+const COMMUNICATION_TEXT_FIELDS = [
+	"text",
+	"message",
+	"content",
+	"body",
+	"subject",
+] as const;
+
+/** Words inside one argument, including the bridge's structured message form. */
+function textFromValue(value: unknown): string {
+	if (typeof value === "string") return value.trim();
+	if (!value || typeof value !== "object") return "";
+	const record = value as Record<string, unknown>;
+	const parts: string[] = [];
+	for (const field of ["subject", "text", "message", "body", "content"]) {
+		const inner = record[field];
+		if (typeof inner === "string" && inner.trim().length > 0) parts.push(inner.trim());
+	}
+	return parts.join(" — ");
+}
 
 function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
 	const name = typeof block.name === "string" ? block.name : "";
@@ -21,8 +47,8 @@ function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
 	const args = block.arguments;
 	if (!args || typeof args !== "object") return "";
 	for (const field of COMMUNICATION_TEXT_FIELDS) {
-		const value = (args as Record<string, unknown>)[field];
-		if (typeof value === "string" && value.trim().length > 0) return value;
+		const text = textFromValue((args as Record<string, unknown>)[field]);
+		if (text.length > 0) return text;
 	}
 	return "";
 }

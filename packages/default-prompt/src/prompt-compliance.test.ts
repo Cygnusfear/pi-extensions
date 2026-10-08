@@ -51,6 +51,36 @@ describe("message extraction", () => {
 		expect(extractAgentMessage(message)).toBe("I finished the trace.\n\nDeploy is blocked.");
 	});
 
+	test("reads mesh tells, including the bridge's structured message form", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "1", name: "mesh_tell", arguments: { sessionId: "peer-1", message: "Landed on main." } },
+				{
+					type: "toolCall",
+					id: "2",
+					name: "mesh_tell",
+					arguments: { sessionId: "hopper", message: { subject: "Blocked", body: "Staging key is missing." } },
+				},
+				{ type: "toolCall", id: "3", name: "mesh_chat", arguments: { channelId: "peers", message: "Handing the parse work over." } },
+			],
+		};
+		expect(extractAgentMessage(message)).toBe(
+			"Landed on main.\n\nBlocked — Staging key is missing.\n\nHanding the parse work over.",
+		);
+	});
+
+	test("mesh reads are not the agent speaking", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "1", name: "mesh_view", arguments: { sessionId: "peer-1" } },
+				{ type: "toolCall", id: "2", name: "mesh_inbox", arguments: {} },
+			],
+		};
+		expect(extractAgentMessage(message)).toBe("");
+	});
+
 	test("ignores tool calls that are not the agent talking to the Hooman", () => {
 		const message = {
 			role: "assistant",
