@@ -26,6 +26,7 @@ import { COMPLIANCE_FIXTURES } from "../src/compliance-fixtures.ts";
 import {
 	aggregateObservations,
 	appendObservation,
+	complianceStateDir,
 	neverHitRules,
 	readObservations,
 	renderDailyReport,
@@ -61,6 +62,26 @@ const REGISTRATION_KEY = "__piPromptComplianceTeardown";
 
 /** Verdicts kept for `/compliance audit`. */
 const AUDIT_LIMIT = 20;
+
+/**
+ * One small file, overwritten at every turn boundary, recording what the
+ * checker saw and what it decided.
+ *
+ * When a session produces no checks, this is the difference between "the
+ * extension never loaded" and "it ran and skipped for this reason".
+ */
+function writeDiagnostics(record: Record<string, unknown>): void {
+	void fs
+		.mkdir(complianceStateDir(), { recursive: true })
+		.then(() =>
+			fs.writeFile(
+				path.join(complianceStateDir(), "last-check.json"),
+				JSON.stringify({ ...record, pid: process.pid }, null, 2),
+				"utf8",
+			),
+		)
+		.catch(() => undefined);
+}
 
 interface AuditRecord {
 	readonly turnIndex: number;
@@ -354,13 +375,30 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	// The pinned pi types predate the unsubscribe contract, so the disposer is
 	// taken structurally: a host that returns nothing simply has nothing to release.
 	const disposeTurnEnd = pi.on("turn_end", async (event, ctx) => {
-		if (!enabled) return;
+		const diag: Record<string, unknown> = {
+			ts: Date.now(),
+			turn: (event as { turnIndex?: number }).turnIndex,
+			enabled,
+			messageRole: (event as { message?: { role?: unknown } }).message?.role,
+			contractPath,
+		};
+		const finish = (decision: string, extra: Record<string, unknown> = {}): void => {
+			writeDiagnostics({ ...diag, decision, ...extra });
+		};
+
+		if (!enabled) {
+			finish("disabled");
+			return;
+		}
 
 		let pack: RulePack;
 		let questions: Record<string, ClassifierQuestion>;
 		try {
 			const loaded = await loadPack();
-			if (!loaded) return;
+			if (!loaded) {
+				finish("contract unavailable", { contractError });
+				return;
+			}
 			pack = loaded.pack;
 			questions = loaded.questions;
 			if (loaded.unregistered.length > 0 && !unregisteredReported) {
@@ -379,11 +417,16 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				"warning",
 			);
 			enabled = false;
+			finish("contract failed", { contractError });
 			return;
 		}
 
 		const agentMessage = extractAgentMessage(event.message);
-		if (agentMessage.length === 0) return;
+		diag.messageChars = agentMessage.length;
+		if (agentMessage.length === 0) {
+			finish("no agent text in this message");
+			return;
+		}
 
 		const host = resolveClassifierHost(ctx.modelRegistry as unknown);
 		if (!host) {
@@ -395,6 +438,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				);
 			}
 			enabled = false;
+			finish("no classifier API in this build");
 			return;
 		}
 
@@ -527,6 +571,15 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				// A report that cannot be written must never disturb a session.
 			}
 		}
+
+		finish("checked", {
+			model,
+			rules: pack.rules.length,
+			classifierError,
+			fired: candidates.map((violation) => violation.id),
+			cited: cited.map((violation) => violation.id),
+			cost,
+		});
 		});
 	if (typeof disposeTurnEnd === "function") {
 		disposers.push(disposeTurnEnd as unknown as () => void);
