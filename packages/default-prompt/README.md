@@ -25,6 +25,39 @@ This keeps chat output short enough for harnesses that wrap long lines, while pr
 
 The same prompt also tells agents to use short Maiboard ticket links, preferably `ticket.terminalLink` (`http://127.0.0.1:39287/ticket/<ticketId>`) in terminal output, when they mention a specific mai ticket the Hooman may want to open.
 
+## Contract compliance checker
+
+`extensions/prompt-compliance.ts` classifies the agent's message to the Hooman against the paragraphs of `prompts/default.md` and steers a warning back when the message looks like it violates one.
+
+- **Detection** — every contract paragraph becomes a rule ID (`P07`) registered in `src/compliance-registry.ts` as either checkable (with the phrasing that describes a violation) or out of scope (with the reason a message alone cannot decide it). A paragraph with no entry, or an entry with no paragraph, fails the test suite, so a rule cannot go silently unchecked.
+- **Classifier** — `openrouter/perplexity/pplx-decider-v1.1-27b`, one bool question per checkable rule, probability threshold 0.9 by default. Measured: ~$0.0002 per check, ~1.2 s, no output tokens.
+- **Warning** — `pi.sendMessage(..., { deliverAs: "steer" })`, so the agent sees `⚠️ … P06 — NEVER TALK ABOUT AN UNVERIFIED CONTEXT WINDOW…` at its next reasoning step and corrects itself. No tool call is blocked and no turn is forced.
+- **Rate limiting** — one warning per turn, a 12-turn cooldown per rule, and a 40-warning session budget: a checker that nags is a quota leak.
+- **Fail-open** — a build without a classifier API, a provider error, or a contract that no longer matches the registry leaves the checker silent. It never fails a turn.
+
+The extension host is probed structurally for `classify`, because this package's pinned pi types predate classifier models.
+
+### Commands
+
+| Command | Effect |
+|---|---|
+| `/compliance` | status: enabled, threshold, rules loaded, warnings so far |
+| `/compliance on` / `off` | enable or silence it — off makes zero classifier calls |
+| `/compliance threshold 0.9` | move the verdict threshold |
+| `/compliance audit` | what fired in this session |
+| `/compliance report [days]` | hit report per model, plus never-fired rules |
+| `/compliance calibrate` | re-measure recall and false positives against the fixture set |
+
+### Hit tracking
+
+Every completed check appends one observation — models, rule IDs that fired, cost, never message text — to `~/.pi/agent/compliance/observations.jsonl` (redirect with `PI_COMPLIANCE_STATE_DIR`). A daily report is written once per day to `~/.pi/agent/compliance/report-<date>.md` and announced in the session.
+
+The report answers which rules fire often, on which model, and which rules no message has tripped. A never-fired rule is a candidate to **re-read, not to delete**: it may be doing its job by preventing the behaviour it names. The report states that where the numbers appear.
+
+### Calibration
+
+`src/compliance-fixtures.ts` holds the calibration set, run with `/compliance calibrate`. Last measured against the shipped pack: **6/6 planted violations caught, 0/3 clean messages flagged**, ~$0.0017 per run. Fixtures name rules by contract text, never by ordinal ID — inserting a paragraph in the contract renumbers every paragraph after it.
+
 ## Prompt Layer Order
 
 ```

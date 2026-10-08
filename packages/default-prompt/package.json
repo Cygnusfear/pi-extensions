@@ -7,7 +7,8 @@
 	],
 	"pi": {
 		"extensions": [
-			"./extensions/default-prompt.ts"
+			"./extensions/default-prompt.ts",
+			"./extensions/prompt-compliance.ts"
 		]
 	},
 	"peerDependencies": {
@@ -20,7 +21,7 @@
 		"@pi-extensions/canonical-agent-resources": "*"
 	},
 	"scripts": {
-		"test": "bun test extensions/default-prompt.test.ts test/compose-seam.test.ts"
+		"test": "bun test extensions/default-prompt.test.ts extensions/prompt-compliance.test.ts test/compose-seam.test.ts src/compliance-rules.test.ts src/prompt-compliance.test.ts src/compliance-stats.test.ts"
 	},
 	"files": [
 		"extensions",
