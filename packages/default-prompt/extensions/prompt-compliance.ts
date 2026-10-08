@@ -375,12 +375,20 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	// The pinned pi types predate the unsubscribe contract, so the disposer is
 	// taken structurally: a host that returns nothing simply has nothing to release.
 	const disposeTurnEnd = pi.on("turn_end", async (event, ctx) => {
+		const registry = ctx.modelRegistry as unknown as Record<string, unknown>;
+		const registryMethods = [
+			...Object.keys(registry ?? {}),
+			...Object.getOwnPropertyNames(Object.getPrototypeOf(registry ?? {})),
+		]
+			.filter((key) => typeof registry?.[key] === "function")
+			.slice(0, 40);
 		const diag: Record<string, unknown> = {
 			ts: Date.now(),
 			turn: (event as { turnIndex?: number }).turnIndex,
 			enabled,
 			messageRole: (event as { message?: { role?: unknown } }).message?.role,
 			contractPath,
+			registryMethods,
 		};
 		const finish = (decision: string, extra: Record<string, unknown> = {}): void => {
 			writeDiagnostics({ ...diag, decision, ...extra });
@@ -449,13 +457,12 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		let result = null;
 		let failed = false;
 		let failureNote: string | undefined;
+		const resolved = host.resolveClassifier
+			? await host.resolveClassifier(COMPLIANCE_CLASSIFIER)
+			: { model: COMPLIANCE_CLASSIFIER, source: "none" as const };
 		try {
 			result = await host.classify(
-				host.resolve?.(
-					"classifier",
-					COMPLIANCE_CLASSIFIER.provider,
-					COMPLIANCE_CLASSIFIER.id,
-				) ?? COMPLIANCE_CLASSIFIER,
+				resolved.model,
 				{
 					state: buildClassifierState(agentMessage, hoomanRequest, event.turnIndex),
 					questions,
@@ -578,6 +585,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 
 		finish("checked", {
 			model,
+			classifierSource: resolved.source,
 			rules: pack.rules.length,
 			classifierError,
 			fired: candidates.map((violation) => violation.id),

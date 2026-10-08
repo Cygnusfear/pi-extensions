@@ -171,28 +171,46 @@ describe("classifier host", () => {
 		expect(resolveClassifierHost({ classify: "not a function" })).toBeNull();
 	});
 
-	test("prefers the catalog entry the host resolves, when it can resolve one", () => {
-		const registry = {
-			getModelOfType(type: string, provider: string, id: string) {
-				return { type, provider, id, api: "typesafe-system-one", resolved: true };
-			},
-			classify() {
-				return Promise.resolve({ answers: {}, stopReason: "stop" });
-			},
-		};
-		const host = resolveClassifierHost(registry);
-		expect(host?.resolve?.("classifier", "openrouter", "perplexity/x")).toEqual({
+	test("resolves the classifier through the lookup the host actually has", async () => {
+		const entry = {
 			type: "classifier",
 			provider: "openrouter",
 			id: "perplexity/x",
 			api: "typesafe-system-one",
-			resolved: true,
+		};
+		const withFind = resolveClassifierHost({
+			findOfType: () => entry,
+			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
+		});
+		expect(await withFind?.resolveClassifier?.({ provider: "openrouter", id: "perplexity/x" })).toEqual({
+			model: entry,
+			source: "findOfType",
+		});
+
+		const withCatalog = resolveClassifierHost({
+			getAvailableOfType: async () => [entry],
+			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
+		});
+		expect(await withCatalog?.resolveClassifier?.({ provider: "openrouter", id: "perplexity/x" })).toEqual({
+			model: entry,
+			source: "getAvailableOfType",
 		});
 	});
 
-	test("has no resolve step when the host cannot look models up", () => {
-		const host = resolveClassifierHost({ classify: () => Promise.resolve({}) });
-		expect(host?.resolve).toBeUndefined();
+	test("falls back to the bare reference when no lookup finds the entry", async () => {
+		const host = resolveClassifierHost({
+			findOfType: () => undefined,
+			getAvailableOfType: async () => [],
+			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
+		});
+		const ref = { provider: "openrouter", id: "perplexity/x" };
+		expect(await host?.resolveClassifier?.(ref)).toEqual({ model: ref, source: "bare-ref" });
+	});
+
+	test("a host without lookup methods still classifies with the bare reference", async () => {
+		const host = resolveClassifierHost({ classify: () => Promise.resolve({ answers: {} }) });
+		const ref = { provider: "openrouter", id: "perplexity/x" };
+		expect(await host?.resolveClassifier?.(ref)).toEqual({ model: ref, source: "bare-ref" });
 	});
 
 	test("calls the host with its own receiver", async () => {

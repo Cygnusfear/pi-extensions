@@ -1,3 +1,32 @@
+export interface Violation {
+	readonly id: string;
+	readonly label: string;
+	readonly probability: number;
+	readonly violation: string;
+}
+
+/**
+ * Tools that publish the agent's words to the Hooman instead of putting them in
+ * the message body. In this environment an agent often speaks through
+ * `explain` rather than writing prose directly, and the words it authored are
+ * still what the contract governs.
+ */
+export const COMMUNICATION_TOOLS = ["explain", "notify"] as const;
+
+const COMMUNICATION_TEXT_FIELDS = ["text", "message", "content"] as const;
+
+function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
+	const name = typeof block.name === "string" ? block.name : "";
+	if (!(COMMUNICATION_TOOLS as readonly string[]).includes(name)) return "";
+	const args = block.arguments;
+	if (!args || typeof args !== "object") return "";
+	for (const field of COMMUNICATION_TEXT_FIELDS) {
+		const value = (args as Record<string, unknown>)[field];
+		if (typeof value === "string" && value.trim().length > 0) return value;
+	}
+	return "";
+}
+
 /**
  * prompt-compliance.ts
  *
@@ -87,6 +116,19 @@ export interface ClassifierModelRef {
 	readonly id: string;
 }
 
+/** Where a usable classifier entry came from, for diagnostics. */
+export type ClassifierSource =
+	| "findOfType"
+	| "getModelOfType"
+	| "getAvailableOfType"
+	| "bare-ref"
+	| "none";
+
+export interface ResolvedClassifier {
+	readonly model: unknown;
+	readonly source: ClassifierSource;
+}
+
 /** The classifier capability an extension host may expose. */
 export interface ClassifierHost {
 	classify(
@@ -95,20 +137,13 @@ export interface ClassifierHost {
 		options?: { readonly signal?: AbortSignal },
 	): Promise<ClassifierResult>;
 	/**
-	 * Look the catalog entry up by type.
+	 * Resolve the catalog entry for a classifier.
 	 *
-	 * A bare \`{ provider, id }\` is not enough for every host: some validate the
-	 * entry and answer "not a classifier model". Resolving through the catalog
-	 * first is what makes the call work on those hosts.
+	 * A bare \`{ provider, id }\` is not enough for every host: this one validates
+	 * the entry and answers "not a classifier model" when the lookup misses. The
+	 * resolver tries every lookup the host offers and reports which one worked.
 	 */
-	resolve?(type: "classifier", provider: string, id: string): unknown;
-}
-
-export interface Violation {
-	readonly id: string;
-	readonly label: string;
-	readonly probability: number;
-	readonly violation: string;
+	resolveClassifier?(ref: ClassifierModelRef): Promise<ResolvedClassifier>;
 }
 
 /**
@@ -120,47 +155,40 @@ export interface Violation {
  */
 export function resolveClassifierHost(registry: unknown): ClassifierHost | null {
 	if (!registry || typeof registry !== "object") return null;
-	const candidate = registry as { classify?: unknown };
+	const candidate = registry as Record<string, unknown>;
 	if (typeof candidate.classify !== "function") return null;
 	const classify = candidate.classify as ClassifierHost["classify"];
-	const getModelOfType = (candidate as { getModelOfType?: unknown }).getModelOfType;
+
+	const call = (method: string, ...args: unknown[]): unknown => {
+		const fn = candidate[method];
+		if (typeof fn !== "function") return undefined;
+		return (fn as (...inner: unknown[]) => unknown).call(registry, ...args);
+	};
+
 	return {
 		classify: (model, context, options) =>
 			classify.call(registry, model, context, options),
-		...(typeof getModelOfType === "function"
-			? {
-					resolve: (type: "classifier", provider: string, id: string) =>
-						(getModelOfType as (...args: unknown[]) => unknown).call(
-							registry,
-							type,
-							provider,
-							id,
-						),
+		resolveClassifier: async (ref) => {
+			for (const method of ["findOfType", "getModelOfType"] as const) {
+				try {
+					const found = call(method, "classifier", ref.provider, ref.id);
+					if (found) return { model: found, source: method };
+				} catch {
+					// Fall through to the next lookup.
 				}
-			: {}),
+			}
+			try {
+				const list = (await call("getAvailableOfType", "classifier", ref.provider)) as
+					| readonly { id?: unknown }[]
+					| undefined;
+				const found = list?.find((entry) => entry?.id === ref.id);
+				if (found) return { model: found, source: "getAvailableOfType" };
+			} catch {
+				// Fall through to the bare reference.
+			}
+			return { model: ref, source: "bare-ref" };
+		},
 	};
-}
-
-/**
- * Tools that publish the agent's words to the Hooman instead of putting them in
- * the message body. In this environment an agent often speaks through
- * \`explain\` rather than writing prose directly, and the words it authored are
- * still what the contract governs.
- */
-export const COMMUNICATION_TOOLS = ["explain", "notify"] as const;
-
-const COMMUNICATION_TEXT_FIELDS = ["text", "message", "content"] as const;
-
-function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
-	const name = typeof block.name === "string" ? block.name : "";
-	if (!(COMMUNICATION_TOOLS as readonly string[]).includes(name)) return "";
-	const args = block.arguments;
-	if (!args || typeof args !== "object") return "";
-	for (const field of COMMUNICATION_TEXT_FIELDS) {
-		const value = (args as Record<string, unknown>)[field];
-		if (typeof value === "string" && value.trim().length > 0) return value;
-	}
-	return "";
 }
 
 function textOfContent(content: unknown): string {
