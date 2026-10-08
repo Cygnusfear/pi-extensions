@@ -39,6 +39,28 @@ describe("message extraction", () => {
 		expect(extractAgentMessage(message)).toBe("first\n\nsecond");
 	});
 
+	test("reads text the agent published through explain or notify", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "1", name: "explain", arguments: { text: "I finished the trace." } },
+				{ type: "toolCall", id: "2", name: "notify", arguments: { message: "Deploy is blocked." } },
+			],
+		};
+		expect(extractAgentMessage(message)).toBe("I finished the trace.\n\nDeploy is blocked.");
+	});
+
+	test("ignores tool calls that are not the agent talking to the Hooman", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "1", name: "bash", arguments: { command: "npm install" } },
+				{ type: "toolCall", id: "2", name: "read", arguments: { path: "/tmp/x" } },
+			],
+		};
+		expect(extractAgentMessage(message)).toBe("");
+	});
+
 	test("refuses user and tool messages", () => {
 		expect(extractAgentMessage({ role: "user", content: "hi" })).toBe("");
 		expect(extractAgentMessage({ role: "toolResult", content: "out" })).toBe("");

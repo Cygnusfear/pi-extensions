@@ -121,15 +121,47 @@ export function resolveClassifierHost(registry: unknown): ClassifierHost | null 
 	};
 }
 
+/**
+ * Tools that publish the agent's words to the Hooman instead of putting them in
+ * the message body. In this environment an agent often speaks through
+ * \`explain\` rather than writing prose directly, and the words it authored are
+ * still what the contract governs.
+ */
+export const COMMUNICATION_TOOLS = ["explain", "notify"] as const;
+
+const COMMUNICATION_TEXT_FIELDS = ["text", "message", "content"] as const;
+
+function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
+	const name = typeof block.name === "string" ? block.name : "";
+	if (!(COMMUNICATION_TOOLS as readonly string[]).includes(name)) return "";
+	const args = block.arguments;
+	if (!args || typeof args !== "object") return "";
+	for (const field of COMMUNICATION_TEXT_FIELDS) {
+		const value = (args as Record<string, unknown>)[field];
+		if (typeof value === "string" && value.trim().length > 0) return value;
+	}
+	return "";
+}
+
 function textOfContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	const parts: string[] = [];
 	for (const block of content) {
 		if (!block || typeof block !== "object") continue;
-		const candidate = block as { type?: unknown; text?: unknown };
+		const candidate = block as {
+			type?: unknown;
+			text?: unknown;
+			name?: unknown;
+			arguments?: unknown;
+		};
 		if (candidate.type === "text" && typeof candidate.text === "string") {
 			parts.push(candidate.text);
+			continue;
+		}
+		if (candidate.type === "toolCall") {
+			const published = toolCallText(candidate);
+			if (published.length > 0) parts.push(published);
 		}
 	}
 	return parts.join("\n\n");
