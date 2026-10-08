@@ -1,0 +1,32 @@
+package.json
+  s_17acfa267dfe69::t_478f5981981617 2-86
+packages/default-prompt/extensions/prompt-compliance.ts
+  s_17acfa267dfe69::t_e078cd770bf52d 378-392,398-401,420,425-429,441,574-582
+  s_17acfa267dfe69::t_52ed69b211dc8f 66
+  s_17acfa267dfe69::t_b16dae0eee8c39 29,67-83
+  s_753c0ca6db70d2::t_1487ad19c052ea 84-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "77009964d19382773878e994b27fc7c8247c0b1f",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    },
+    "s_753c0ca6db70d2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6add6120-78c5-47e8-8703-47802578a5d8",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
