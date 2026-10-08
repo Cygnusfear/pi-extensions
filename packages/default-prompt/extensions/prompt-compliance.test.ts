@@ -214,3 +214,30 @@ describe("hit tracking", () => {
 		expect(summary?.text).toContain("Report:");
 	});
 });
+
+describe("reload safety", () => {
+	test("registering again tears down the previous registration", async () => {
+		let disposed = false;
+		const firstPi = {
+			on() {
+				return () => {
+					disposed = true;
+				};
+			},
+			registerCommand() {},
+			sendMessage() {},
+		};
+		const { default: first } = await import(
+			"../extensions/prompt-compliance.ts?test-bust=reload-first-" + Math.random()
+		);
+		first(firstPi as any);
+		expect(disposed).toBe(false);
+
+		const secondPi = { on() { return () => {}; }, registerCommand() {}, sendMessage() {} };
+		const { default: second } = await import(
+			"../extensions/prompt-compliance.ts?test-bust=reload-second-" + Math.random()
+		);
+		second(secondPi as any);
+		expect(disposed).toBe(true);
+	});
+});

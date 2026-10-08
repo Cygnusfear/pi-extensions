@@ -47,6 +47,14 @@ import {
 /** Bounded wait for one classification; a hung provider must not leak a promise per turn. */
 const CLASSIFIER_TIMEOUT_MS = 15_000;
 
+/**
+ * Key holding the teardown of the live registration.
+ *
+ * A reload must replace the checker, never stack a second copy of it: two
+ * copies would classify every message twice, warn twice, and double the spend.
+ */
+const REGISTRATION_KEY = "__piPromptComplianceTeardown";
+
 /** Verdicts kept for `/compliance audit`. */
 const AUDIT_LIMIT = 20;
 
@@ -105,6 +113,15 @@ function agentModelId(message: unknown, ctx: unknown): string {
 }
 
 export default function promptComplianceExtension(pi: ExtensionAPI) {
+	const previous = (globalThis as Record<string, unknown>)[REGISTRATION_KEY];
+	if (typeof previous === "function") {
+		try {
+			(previous as () => void)();
+		} catch {
+			// The previous registration is already gone; nothing to release.
+		}
+	}
+
 	let enabled = true;
 	let threshold = COMPLIANCE_VIOLATION_THRESHOLD;
 	let cached: { mtimeMs: number; pack: RulePack; questions: Record<string, ClassifierQuestion> } | null = null;
@@ -138,6 +155,18 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	const record = (entry: AuditRecord): void => {
 		audit.push(entry);
 		if (audit.length > AUDIT_LIMIT) audit.shift();
+	};
+
+	const disposers: Array<() => void> = [];
+	(globalThis as Record<string, unknown>)[REGISTRATION_KEY] = () => {
+		for (const dispose of disposers) {
+			if (typeof dispose !== "function") continue;
+			try {
+				dispose();
+			} catch {
+				// A handler that is already gone is not an error.
+			}
+		}
 	};
 
 	pi.registerCommand("compliance", {
@@ -297,7 +326,8 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("turn_end", async (event, ctx) => {
+	disposers.push(
+		pi.on("turn_end", async (event, ctx) => {
 		if (!enabled) return;
 
 		let pack: RulePack;
@@ -381,6 +411,8 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			})),
 			cited: cited.map((violation) => violation.id),
 			cost,
+			turn: event.turnIndex,
+			chars: agentMessage.length,
 			usageReported: result?.usage !== undefined,
 			...(classifierError
 				? {
@@ -460,5 +492,6 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				// A report that cannot be written must never disturb a session.
 			}
 		}
-	});
+		}),
+	);
 }

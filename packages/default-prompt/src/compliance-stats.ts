@@ -60,6 +60,10 @@ export interface ComplianceObservation {
 	readonly usageReported?: boolean;
 	/** Why a failed check failed, bounded and never containing message text. */
 	readonly note?: string;
+	/** Turn index the check ran on. */
+	readonly turn?: number;
+	/** Length of the message that was judged, for cost and duplication accounting. */
+	readonly chars?: number;
 }
 
 export interface ModelStats {
@@ -272,6 +276,8 @@ export function parseObservations(text: string): readonly ComplianceObservation[
 					cited: Array.isArray(parsed.cited) ? parsed.cited : [],
 					cost: typeof parsed.cost === "number" ? parsed.cost : 0,
 					usageReported: parsed.usageReported === true,
+					...(typeof parsed.turn === "number" ? { turn: parsed.turn } : {}),
+					...(typeof parsed.chars === "number" ? { chars: parsed.chars } : {}),
 					...(typeof parsed.note === "string" && parsed.note.length > 0
 						? { note: parsed.note.slice(0, 200) }
 						: {}),
