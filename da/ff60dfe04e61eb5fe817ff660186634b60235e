@@ -1,0 +1,20 @@
+packages/pi-mesh/extension/route-resolve.test.ts
+  s_7dc114a6bdf223::t_0aa928dfa586b4 2-6
+  s_7dc114a6bdf223::t_ff69a0289b3407 7-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "daff60dfe04e61eb5fe817ff660186634b60235e",
+  "prompts": {},
+  "sessions": {
+    "s_7dc114a6bdf223": {
+      "agent_id": {
+        "tool": "George Neutron Shields",
+        "id": "d44c64ab-13ed-4a3a-bfb2-8a01d0f637c6",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
