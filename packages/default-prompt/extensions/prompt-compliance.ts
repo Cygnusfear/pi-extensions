@@ -140,14 +140,27 @@ function agentModelId(message: unknown, ctx: unknown): string {
 }
 
 export default function promptComplianceExtension(pi: ExtensionAPI) {
+	const lifecycle: Record<string, unknown> = { pid: process.pid, key: REGISTRATION_KEY };
 	const previous = (globalThis as Record<string, unknown>)[REGISTRATION_KEY];
+	lifecycle.previousFound = typeof previous === "function";
 	if (typeof previous === "function") {
 		try {
 			(previous as () => void)();
+			lifecycle.tornDown = true;
 		} catch {
-			// The previous registration is already gone; nothing to release.
+			lifecycle.tornDown = false;
 		}
 	}
+	void fs
+		.mkdir(complianceStateDir(), { recursive: true })
+		.then(() =>
+			fs.appendFile(
+				path.join(complianceStateDir(), "registrations.jsonl"),
+				`${JSON.stringify({ ...lifecycle, ts: Date.now() })}\n`,
+				"utf8",
+			),
+		)
+		.catch(() => undefined);
 
 	let enabled = true;
 	let threshold = COMPLIANCE_VIOLATION_THRESHOLD;
