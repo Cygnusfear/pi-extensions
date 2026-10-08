@@ -66,6 +66,8 @@ export interface ComplianceObservation {
 	readonly chars?: number;
 	/** Which catalog lookup supplied the classifier entry for this check. */
 	readonly classifierSource?: string;
+	/** Process the check ran in; a fleet writes to one log. */
+	readonly pid?: number;
 }
 
 export interface ModelStats {
@@ -283,6 +285,7 @@ export function parseObservations(text: string): readonly ComplianceObservation[
 					...(typeof parsed.classifierSource === "string"
 						? { classifierSource: parsed.classifierSource }
 						: {}),
+					...(typeof parsed.pid === "number" ? { pid: parsed.pid } : {}),
 					...(typeof parsed.note === "string" && parsed.note.length > 0
 						? { note: parsed.note.slice(0, 200) }
 						: {}),

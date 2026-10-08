@@ -197,20 +197,25 @@ describe("classifier host", () => {
 		});
 	});
 
-	test("falls back to the bare reference when no lookup finds the entry", async () => {
+	test("falls back to a complete descriptor when no lookup finds the entry", async () => {
 		const host = resolveClassifierHost({
 			findOfType: () => undefined,
 			getAvailableOfType: async () => [],
 			classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }),
 		});
-		const ref = { provider: "openrouter", id: "perplexity/x" };
-		expect(await host?.resolveClassifier?.(ref)).toEqual({ model: ref, source: "bare-ref" });
+		const resolved = await host?.resolveClassifier?.({ provider: "openrouter", id: "perplexity/x" });
+		expect(resolved?.source).toBe("descriptor");
+		// The host asserts the model type before dispatch, so the fallback must
+		// carry one - a bare { provider, id } is rejected as a chat model.
+		expect((resolved?.model as { type?: string }).type).toBe("classifier");
+		expect((resolved?.model as { provider?: string }).provider).toBe("openrouter");
 	});
 
-	test("a host without lookup methods still classifies with the bare reference", async () => {
+	test("a host without lookup methods still gets something the classifier will accept", async () => {
 		const host = resolveClassifierHost({ classify: () => Promise.resolve({ answers: {} }) });
-		const ref = { provider: "openrouter", id: "perplexity/x" };
-		expect(await host?.resolveClassifier?.(ref)).toEqual({ model: ref, source: "bare-ref" });
+		const resolved = await host?.resolveClassifier?.({ provider: "openrouter", id: "perplexity/x" });
+		expect(resolved?.source).toBe("descriptor");
+		expect((resolved?.model as { type?: string }).type).toBe("classifier");
 	});
 
 	test("calls the host with its own receiver", async () => {

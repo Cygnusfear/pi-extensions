@@ -48,6 +48,24 @@ export const COMPLIANCE_CLASSIFIER = {
 } as const;
 
 /**
+ * Complete descriptor for the classifier, used when the session's registry
+ * cannot hand the catalog entry back.
+ *
+ * \`classify\` asserts the model type before dispatching, so a bare
+ * \`{ provider, id }\` is rejected as "not a classifier model" on hosts that skip
+ * the catalog lookup. This mirrors the registered catalog entry, verified
+ * against the live catalog; the registry lookup is still tried first so the
+ * entry stays authoritative when it is reachable.
+ */
+export const COMPLIANCE_CLASSIFIER_DESCRIPTOR = {
+	...COMPLIANCE_CLASSIFIER,
+	type: "classifier",
+	api: "typesafe-system-one",
+	baseUrl: "https://openrouter.ai/api/v1",
+};
+
+
+/**
  * Probability at or above which an answer counts as a violation.
  *
  * Measured on the fixture set in compliance-fixtures.ts against the shipped
@@ -121,7 +139,7 @@ export type ClassifierSource =
 	| "findOfType"
 	| "getModelOfType"
 	| "getAvailableOfType"
-	| "bare-ref"
+	| "descriptor"
 	| "none";
 
 export interface ResolvedClassifier {
@@ -186,7 +204,7 @@ export function resolveClassifierHost(registry: unknown): ClassifierHost | null 
 			} catch {
 				// Fall through to the bare reference.
 			}
-			return { model: ref, source: "bare-ref" };
+			return { model: COMPLIANCE_CLASSIFIER_DESCRIPTOR, source: "descriptor" };
 		},
 	};
 }

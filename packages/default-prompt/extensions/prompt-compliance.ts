@@ -505,6 +505,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			chars: agentMessage.length,
 			usageReported: result?.usage !== undefined,
 			classifierSource: resolved.source,
+			pid: process.pid,
 			...(classifierError
 				? {
 						note: (result?.errorMessage ?? failureNote ?? "classifier error").slice(
