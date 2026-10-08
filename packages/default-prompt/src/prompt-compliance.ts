@@ -90,10 +90,18 @@ export interface ClassifierModelRef {
 /** The classifier capability an extension host may expose. */
 export interface ClassifierHost {
 	classify(
-		model: ClassifierModelRef,
+		model: unknown,
 		context: ClassifierContext,
 		options?: { readonly signal?: AbortSignal },
 	): Promise<ClassifierResult>;
+	/**
+	 * Look the catalog entry up by type.
+	 *
+	 * A bare \`{ provider, id }\` is not enough for every host: some validate the
+	 * entry and answer "not a classifier model". Resolving through the catalog
+	 * first is what makes the call work on those hosts.
+	 */
+	resolve?(type: "classifier", provider: string, id: string): unknown;
 }
 
 export interface Violation {
@@ -115,9 +123,21 @@ export function resolveClassifierHost(registry: unknown): ClassifierHost | null 
 	const candidate = registry as { classify?: unknown };
 	if (typeof candidate.classify !== "function") return null;
 	const classify = candidate.classify as ClassifierHost["classify"];
+	const getModelOfType = (candidate as { getModelOfType?: unknown }).getModelOfType;
 	return {
 		classify: (model, context, options) =>
 			classify.call(registry, model, context, options),
+		...(typeof getModelOfType === "function"
+			? {
+					resolve: (type: "classifier", provider: string, id: string) =>
+						(getModelOfType as (...args: unknown[]) => unknown).call(
+							registry,
+							type,
+							provider,
+							id,
+						),
+				}
+			: {}),
 	};
 }
 

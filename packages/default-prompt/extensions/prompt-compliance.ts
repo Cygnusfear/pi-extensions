@@ -451,7 +451,11 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		let failureNote: string | undefined;
 		try {
 			result = await host.classify(
-				COMPLIANCE_CLASSIFIER,
+				host.resolve?.(
+					"classifier",
+					COMPLIANCE_CLASSIFIER.provider,
+					COMPLIANCE_CLASSIFIER.id,
+				) ?? COMPLIANCE_CLASSIFIER,
 				{
 					state: buildClassifierState(agentMessage, hoomanRequest, event.turnIndex),
 					questions,

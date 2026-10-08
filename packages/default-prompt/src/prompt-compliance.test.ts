@@ -171,6 +171,30 @@ describe("classifier host", () => {
 		expect(resolveClassifierHost({ classify: "not a function" })).toBeNull();
 	});
 
+	test("prefers the catalog entry the host resolves, when it can resolve one", () => {
+		const registry = {
+			getModelOfType(type: string, provider: string, id: string) {
+				return { type, provider, id, api: "typesafe-system-one", resolved: true };
+			},
+			classify() {
+				return Promise.resolve({ answers: {}, stopReason: "stop" });
+			},
+		};
+		const host = resolveClassifierHost(registry);
+		expect(host?.resolve?.("classifier", "openrouter", "perplexity/x")).toEqual({
+			type: "classifier",
+			provider: "openrouter",
+			id: "perplexity/x",
+			api: "typesafe-system-one",
+			resolved: true,
+		});
+	});
+
+	test("has no resolve step when the host cannot look models up", () => {
+		const host = resolveClassifierHost({ classify: () => Promise.resolve({}) });
+		expect(host?.resolve).toBeUndefined();
+	});
+
 	test("calls the host with its own receiver", async () => {
 		const seen: unknown[] = [];
 		const registry = {
