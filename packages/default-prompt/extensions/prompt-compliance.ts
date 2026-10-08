@@ -39,6 +39,7 @@ import {
 	COMPLIANCE_CLASSIFIER,
 	COMPLIANCE_VIOLATION_THRESHOLD,
 	ComplianceCooldown,
+	agentTurnText,
 	evaluateCalibration,
 	extractAgentMessage,
 	findLastMessageText,
@@ -429,8 +430,10 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		const agentMessage = extractAgentMessage(event.message);
+		const agentMessage = agentTurnText(event.message, readMessages(event));
 		diag.messageChars = agentMessage.length;
+		diag.messageSource =
+			extractAgentMessage(event.message).length > 0 ? "final-message" : "turn-transcript";
 		if (agentMessage.length === 0) {
 			finish("no agent text in this message");
 			return;

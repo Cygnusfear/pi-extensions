@@ -147,11 +147,32 @@ describe("prompt-compliance wiring", () => {
 		expect(h.sent.length).toBe(0);
 	});
 
-	test("skips turns whose message is not agent speech", async () => {
+	test("skips a turn where the agent never spoke to the Hooman", async () => {
 		const h = await harness();
-		await h.fire(turn({ message: { role: "user", content: "hello" } }));
-		await h.fire(turn({ message: { role: "assistant", content: [{ type: "toolCall", name: "bash" }] } }));
+		await h.fire(
+			turn({
+				message: { role: "user", content: "hello" },
+				context: { llmMessages: [{ role: "user", content: "hello" }] },
+			}),
+		);
+		await h.fire(
+			turn({
+				message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "bash", arguments: {} }] },
+				context: { llmMessages: [{ role: "user", content: "hello" }] },
+			}),
+		);
 		expect(h.classifyCalls.length).toBe(0);
+	});
+
+	test("judges the agent's words from earlier in a turn that ends on a tool call", async () => {
+		const h = await harness({ classify: () => Promise.resolve({ answers: {}, stopReason: "stop" }) });
+		await h.fire(
+			turn({
+				message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+			}),
+		);
+		expect(h.classifyCalls.length).toBe(1);
+		expect(JSON.stringify(h.classifyCalls[0])).toContain("All done, chef.");
 	});
 
 	test("does not warn twice for the same rule inside the cooldown window", async () => {
@@ -204,7 +225,13 @@ describe("hit tracking", () => {
 			? readFileSync(logPath, "utf8").trim().split("\n").length
 			: 0;
 		await h.fire(turn({ turnIndex: 90 }));
-		await h.fire(turn({ turnIndex: 91, message: { role: "user", content: "hello" } }));
+		await h.fire(
+			turn({
+				turnIndex: 91,
+				message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "bash", arguments: {} }] },
+				context: { llmMessages: [{ role: "user", content: "hello" }] },
+			}),
+		);
 		const lines = readFileSync(logPath, "utf8").trim().split("\n");
 		expect(lines.length).toBe(before + 1);
 		const entry = JSON.parse(lines[lines.length - 1]);

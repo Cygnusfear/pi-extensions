@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CheckableRule } from "./compliance-rules.ts";
 import {
+	agentTurnText,
 	buildClassifierState,
 	buildQuestions,
 	ComplianceCooldown,
@@ -69,6 +70,44 @@ describe("message extraction", () => {
 	test("returns empty for a message with no text", () => {
 		expect(extractAgentMessage({ role: "assistant", content: [{ type: "toolCall" }] })).toBe("");
 		expect(extractAgentMessage(undefined)).toBe("");
+	});
+
+	test("judges the agent's last words in a turn that ends on a tool call", () => {
+		const transcript = [
+			{ role: "user", content: "ship it" },
+			{ role: "assistant", content: [{ type: "text", text: "Landed: parser fix." }] },
+			{ role: "toolResult", content: "ok" },
+			{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+		];
+		expect(
+			agentTurnText(
+				{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+				transcript,
+			),
+		).toBe("Landed: parser fix.");
+	});
+
+	test("does not reach back past the Hooman's message into an earlier turn", () => {
+		const transcript = [
+			{ role: "assistant", content: [{ type: "text", text: "older turn words" }] },
+			{ role: "user", content: "new request" },
+			{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+		];
+		expect(
+			agentTurnText(
+				{ role: "assistant", content: [{ type: "toolCall", id: "1", name: "done", arguments: {} }] },
+				transcript,
+			),
+		).toBe("");
+	});
+
+	test("prefers the final message when it carries words", () => {
+		expect(
+			agentTurnText(
+				{ role: "assistant", content: [{ type: "text", text: "final words" }] },
+				[{ role: "assistant", content: [{ type: "text", text: "earlier words" }] }],
+			),
+		).toBe("final words");
 	});
 
 	test("finds the most recent message with a role", () => {

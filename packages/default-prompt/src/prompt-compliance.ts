@@ -250,6 +250,29 @@ export function extractAgentMessage(message: unknown): string {
 	return textOfContent(candidate.content).trim();
 }
 
+/**
+ * The agent's words for this turn.
+ *
+ * A turn frequently ends on a tool call - \`done\`, a ticket write, a render -
+ * with the agent's actual message to the Hooman sent earlier in the same turn.
+ * Judging only the final message would skip exactly those turns, so when the
+ * final message carries no text this walks back to the last assistant message
+ * with text, stopping at the Hooman's own message that opened the turn.
+ */
+export function agentTurnText(message: unknown, transcript: unknown): string {
+	const direct = extractAgentMessage(message);
+	if (direct.length > 0) return direct;
+	if (!Array.isArray(transcript)) return "";
+	for (let index = transcript.length - 1; index >= 0; index--) {
+		const candidate = transcript[index];
+		if (!candidate || typeof candidate !== "object") continue;
+		if ((candidate as { role?: unknown }).role === "user") break;
+		const text = extractAgentMessage(candidate);
+		if (text.length > 0) return text;
+	}
+	return "";
+}
+
 /** Text of the most recent message with the given role, oldest-to-newest scan. */
 export function findLastMessageText(
 	messages: unknown,
