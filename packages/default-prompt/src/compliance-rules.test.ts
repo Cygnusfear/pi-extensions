@@ -4,12 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	buildRulePack,
-	buildRuntimeRulePack,
 	paragraphHash,
 	parseContractParagraphs,
-	type CheckableRule,
+	violationCriterion,
 } from "./compliance-rules.ts";
-import { COMPLIANCE_REGISTRY } from "./compliance-registry.ts";
+import { COMPLIANCE_FIXTURES } from "./compliance-fixtures.ts";
 
 const contractPath = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -19,94 +18,73 @@ const contractPath = path.resolve(
 );
 const contract = readFileSync(contractPath, "utf8");
 
-describe("contract coverage", () => {
-	test("every directive carries a decision, so no rule is silently unchecked", () => {
-		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
-		const directives = parseContractParagraphs(contract).filter((paragraph) =>
-			/^-\s+\S/.test(paragraph.text),
-		);
-		// A directive is either judged or explicitly exempted; the strict builder
-		// refuses to build otherwise, which is the drift gate.
-		expect(pack.rules.length + pack.skipped.length).toBeGreaterThanOrEqual(directives.length);
-		expect(pack.rules.length).toBeGreaterThan(0);
-	});
-
-	test("prose can be edited or added freely, without touching the registry", () => {
-		const edited = contract + "\n\nA NEW PROSE PARAGRAPH THE HOOMAN WROTE AS EXPLANATION, NOT A RULE.\n";
-		// The strict builder is the drift gate: it must not demand a decision for prose.
-		expect(() => buildRulePack(edited, COMPLIANCE_REGISTRY)).not.toThrow();
-		const built = buildRuntimeRulePack(edited, COMPLIANCE_REGISTRY);
-		expect(
-			built.pack.skipped.some((paragraph) => paragraph.text.includes("A NEW PROSE PARAGRAPH")),
-		).toBe(true);
-		expect(built.pack.rules.some((rule) => rule.text.includes("A NEW PROSE PARAGRAPH"))).toBe(false);
-	});
-
-	test("rule ids are content-derived and distinct, so registrations cannot collide", () => {
+describe("the contract is the configuration", () => {
+	test("every paragraph is a rule, with a criterion derived from its own words", () => {
+		const pack = buildRulePack(contract);
 		const paragraphs = parseContractParagraphs(contract);
-		const ids = paragraphs.map((paragraph) => paragraph.id);
-		expect(new Set(ids).size).toBe(ids.length);
-		for (const paragraph of paragraphs) {
-			expect(paragraph.id).toMatch(/^[0-9a-f]{10}$/);
-			expect(paragraph.id).toBe(paragraphHash(paragraph.text));
-		}
-	});
-
-	test("every checkable rule carries violation phrasing and a citation label", () => {
-		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
+		expect(pack.rules.length).toBe(paragraphs.length);
+		expect(pack.rules.length).toBeGreaterThan(0);
 		for (const rule of pack.rules) {
-			expect(rule.violation.length).toBeGreaterThan(10);
-			expect(rule.label.length).toBeGreaterThan(0);
-			expect(rule.id).toMatch(/^[0-9a-f]{10}$/);
-		}
-		expect(new Set(pack.rules.map((rule) => rule.id)).size).toBe(pack.rules.length);
-	});
-
-	test("every out-of-scope paragraph records why it is not judged", () => {
-		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
-		for (const skipped of pack.skipped) {
-			expect(skipped.reason.length).toBeGreaterThan(10);
+			expect(rule.violation).toBe(violationCriterion(rule));
+			expect(rule.violation).toContain(rule.text);
 		}
 	});
-});
 
-describe("drift detection", () => {
-	const first = parseContractParagraphs(contract)[0];
-	const fingerprint = paragraphHash(first.text);
-
-	test("an unregistered paragraph fails the build", () => {
-		expect(() => buildRulePack(contract, {})).toThrow(/unregistered/);
+	test("nothing filters what gets judged: no list of checkable or exempt rules exists", () => {
+		// The module's whole surface: parse, hash, label, criterion, build.
+		const pack = buildRulePack(contract);
+		expect(pack.rules.length).toBe(parseContractParagraphs(contract).length);
+		expect(Object.keys(pack)).toEqual(["rules"]);
 	});
 
-	test("a registration that matches no paragraph fails the build", () => {
-		expect(() =>
-			buildRulePack(contract, {
-				...COMPLIANCE_REGISTRY,
-				"a paragraph that was deleted from the contract": {
-					violation: "something",
-				},
-			}),
-		).toThrow(/stale/);
+	test("editing any paragraph changes its rule, with no other file to touch", () => {
+		const edited = contract.replace(
+			"NEVER WRITE LIKE TOLSTOY",
+			"NEVER WRITE LIKE TOLSTOY, EVER, EVEN IN A HURRY",
+		);
+		const before = buildRulePack(contract).rules.find((rule) =>
+			rule.text.includes("NEVER WRITE LIKE TOLSTOY"),
+		);
+		const after = buildRulePack(edited).rules.find((rule) =>
+			rule.text.includes("NEVER WRITE LIKE TOLSTOY"),
+		);
+		expect(after?.text).toContain("EVER, EVEN IN A HURRY");
+		expect(after?.violation).toContain("EVER, EVEN IN A HURRY");
+		expect(after?.id).not.toBe(before?.id);
 	});
 
-	test("a registration must describe a violation or an out-of-scope reason, never both", () => {
-		expect(() =>
-			buildRulePack(contract, {
-				...COMPLIANCE_REGISTRY,
-				[fingerprint]: { violation: "x", outOfScope: "y" },
-			}),
-		).toThrow(/exactly one of violation or outOfScope/);
+	test("a paragraph added today is judged today", () => {
+		const edited = contract + "\n\n- A BRAND NEW RULE THE HOOMAN JUST WROTE.\n";
+		const added = buildRulePack(edited).rules.find((rule) =>
+			rule.text.includes("A BRAND NEW RULE"),
+		);
+		expect(added).toBeDefined();
+		expect(added?.violation).toContain("A BRAND NEW RULE THE HOOMAN JUST WROTE");
+	});
+
+	test("a rule id does not move when a paragraph is inserted above it", () => {
+		const target = parseContractParagraphs(contract).find((paragraph) =>
+			paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"),
+		);
+		const inserted = contract.replace(
+			"## Prime directives\n",
+			"## Prime directives\n\n- A NEW RULE ABOVE EVERYTHING ELSE.\n",
+		);
+		const same = parseContractParagraphs(inserted).find((paragraph) =>
+			paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"),
+		);
+		expect(same?.id).toBe(target?.id);
+		expect(same?.ordinal).toBeGreaterThan(target?.ordinal ?? 0);
 	});
 });
 
 describe("contract parsing", () => {
 	test("each prime-directive bullet is its own paragraph", () => {
-		const paragraphs = parseContractParagraphs(contract);
-		const tolstoy = paragraphs.find((paragraph) =>
+		const tolstoy = parseContractParagraphs(contract).find((paragraph) =>
 			paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"),
 		);
 		expect(tolstoy).toBeDefined();
-		expect(tolstoy?.text.length).toBeLessThan(200);
+		expect(tolstoy?.text.length).toBeLessThan(400);
 	});
 
 	test("frontmatter and headings are structure, not rules", () => {
@@ -116,77 +94,32 @@ describe("contract parsing", () => {
 	});
 
 	test("a fenced example stays attached to the rule that introduces it", () => {
-		const paragraphs = parseContractParagraphs(contract);
-		const asd = paragraphs.find((paragraph) =>
+		const asd = parseContractParagraphs(contract).find((paragraph) =>
 			paragraph.text.includes("Awaiting your call on whether"),
 		);
 		expect(asd?.text).toContain("R4-1");
 	});
 
-	test("a rule id does not move when a paragraph is inserted above it", () => {
-		const before = parseContractParagraphs(contract);
-		const target = before.find((paragraph) => paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"));
-		const inserted = contract.replace("## Prime directives\n", "## Prime directives\n\n- A NEW RULE ABOVE EVERYTHING ELSE.\n");
-		const after = parseContractParagraphs(inserted);
-		const same = after.find((paragraph) => paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"));
-		expect(target?.id).toBe(same?.id);
-		// Position is what moved; identity is what did not.
-		expect(same?.ordinal).toBeGreaterThan(target?.ordinal ?? 0);
+	test("ids are content hashes and are distinct", () => {
+		const paragraphs = parseContractParagraphs(contract);
+		const ids = paragraphs.map((paragraph) => paragraph.id);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const paragraph of paragraphs) {
+			expect(paragraph.id).toMatch(/^[0-9a-f]{10}$/);
+			expect(paragraph.id).toBe(paragraphHash(paragraph.text));
+		}
 	});
 });
 
-describe("rule pack shape", () => {
-	// Assertions key off rule text, not ordinals: the contract is edited often and
-	// inserting a paragraph renumbers everything after it.
-	test("message-level rules are checked and action-level rules are not", () => {
-		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
-		const checkable = (needle: string): boolean =>
-			(pack.rules as readonly CheckableRule[]).some((rule) =>
-				rule.text.includes(needle),
-			);
-		const skipped = (needle: string): boolean =>
-			pack.skipped.some((paragraph) => paragraph.text.includes(needle));
-
-		expect(checkable("NEVER WRITE LIKE TOLSTOY")).toBe(true);
-		expect(checkable("NEVER TALK ABOUT AN UNVERIFIED CONTEXT WINDOW")).toBe(true);
-		expect(checkable("OK GATING IS ILLEGAL")).toBe(true);
-		expect(checkable("Bun supremacy") || checkable("bun supremacy")).toBe(true);
-		expect(skipped("REBASE BEFORE A MERGE")).toBe(true);
-		expect(skipped("SRP")).toBe(true);
-	});
-});
-
-describe("live contract edits", () => {
-	const edited = `${contract}\n\n- A BRAND NEW RULE THAT NOBODY HAS REGISTERED YET.\n`;
-
-	test("a paragraph nobody registered is still checked, against its own text", () => {
-		const built = buildRuntimeRulePack(edited, COMPLIANCE_REGISTRY);
-		expect(built.unregistered.map((paragraph) => paragraph.text)).toContain(
-			"- A BRAND NEW RULE THAT NOBODY HAS REGISTERED YET.",
-		);
-		const rule = built.pack.rules.find((candidate) =>
-			candidate.text.includes("A BRAND NEW RULE"),
-		);
-		expect(rule?.violation).toContain("does, advises, or proposes exactly what this paragraph forbids");
-	});
-
-	test("the strict builder still refuses the same file, so the registry has to catch up", () => {
-		expect(() => buildRulePack(edited, COMPLIANCE_REGISTRY)).toThrow(/unregistered/);
-	});
-
-	test("a registration with no paragraph is reported, not fatal", () => {
-		const built = buildRuntimeRulePack(contract.slice(contract.indexOf("## Prime directives")), {
-			...COMPLIANCE_REGISTRY,
-			"a paragraph that was deleted": { violation: "something" },
-		});
-		expect(built.staleKeys).toContain("a paragraph that was deleted");
-		expect(built.pack.rules.length).toBeGreaterThan(0);
-	});
-
-	test("registered paragraphs keep their curated wording", () => {
-		const built = buildRuntimeRulePack(contract, COMPLIANCE_REGISTRY);
-		const tolstoy = built.pack.rules.find((rule) => rule.text.includes("NEVER WRITE LIKE TOLSTOY"));
-		expect(tolstoy?.violation).toContain("long narrative");
-		expect(built.unregistered.length).toBe(0);
+describe("calibration fixtures", () => {
+	test("every expectation names exactly one live rule", () => {
+		const rules = buildRulePack(contract).rules;
+		for (const fixture of COMPLIANCE_FIXTURES) {
+			for (const needle of fixture.expectRules) {
+				const matches = rules.filter((rule) => rule.text.includes(needle));
+				expect(matches.length).toBe(1);
+			}
+			expect(fixture.agentMessage.length).toBeGreaterThan(0);
+		}
 	});
 });

@@ -16,12 +16,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-	buildRuntimeRulePack,
-	type ContractParagraph,
-	type RulePack,
-} from "../src/compliance-rules.ts";
-import { COMPLIANCE_REGISTRY } from "../src/compliance-registry.ts";
+import { buildRulePack, type RulePack } from "../src/compliance-rules.ts";
 import { COMPLIANCE_FIXTURES } from "../src/compliance-fixtures.ts";
 import {
 	aggregateObservations,
@@ -168,11 +163,8 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		mtimeMs: number;
 		pack: RulePack;
 		questions: Record<string, ClassifierQuestion>;
-		unregistered: readonly ContractParagraph[];
-		staleKeys: readonly string[];
 	} | null = null;
 	let contractError: string | null = null;
-	let unregisteredReported = false;
 	let unavailableReported = false;
 	const cooldown = new ComplianceCooldown();
 	const audit: AuditRecord[] = [];
@@ -200,13 +192,11 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		const stat = await fs.stat(contractPath);
 		if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
 		const source = await fs.readFile(contractPath, "utf8");
-		const built = buildRuntimeRulePack(source, COMPLIANCE_REGISTRY);
+		const pack = buildRulePack(source);
 		cached = {
 			mtimeMs: stat.mtimeMs,
-			pack: built.pack,
-			questions: buildQuestions(built.pack.rules),
-			unregistered: built.unregistered,
-			staleKeys: built.staleKeys,
+			pack,
+			questions: buildQuestions(pack.rules),
 		};
 		contractError = null;
 		return cached;
@@ -371,22 +361,10 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 						[
 							`Contract checker: ${enabled ? "on" : "off"} | threshold ${threshold}`,
 							pack
-								? `Rules: ${pack.rules.length} judged, ${pack.skipped.length} not judged from a message`
+								? `Rules: ${pack.rules.length}, every one derived from the contract file`
 								: "Rules: not loaded yet",
-							pack && pack.skipped.length > 0
-								? `Not judged: ${pack.skipped
-										.slice(0, 6)
-										.map((paragraph) => paragraph.label.slice(0, 32))
-										.join(" · ")}${pack.skipped.length > 6 ? " …" : ""}`
-								: null,
-							cached && cached.unregistered.length > 0
-								? `Judging from the live text (derived criteria): ${cached.unregistered.length}`
-								: null,
 							`Warnings this session: ${cooldown.warningCount}`,
 							contractError ? `Contract error: ${contractError}` : null,
-							cached && (cached.unregistered.length > 0 || cached.staleKeys.length > 0)
-								? `Registry behind the contract: ${cached.unregistered.length} unregistered, ${cached.staleKeys.length} stale (checked with generic wording)`
-								: null,
 							"Usage: /compliance on|off|status|audit|calibrate|threshold <0-1>",
 						]
 							.filter((line): line is string => Boolean(line))
@@ -435,15 +413,6 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			}
 			pack = loaded.pack;
 			questions = loaded.questions;
-			if (loaded.unregistered.length > 0 && !unregisteredReported) {
-				unregisteredReported = true;
-				ctx.ui.notify(
-					`Contract checker: ${loaded.unregistered.length} paragraph(s) are new or edited and are being checked with generic wording until registered — ${loaded.unregistered
-						.map((paragraph) => paragraph.id)
-						.join(", ")}`,
-					"info",
-				);
-			}
 		} catch (error) {
 			contractError = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(

@@ -1,20 +1,13 @@
 /**
  * compliance-rules.ts
  *
- * Derives the compliance rule pack from the contract itself.
+ * The contract is the rules. Every paragraph of prompts/default.md becomes one
+ * rule whose criterion is derived from that paragraph's own words, so an edit
+ * is in force on the next check with no code change and no restart.
  *
- * The contract (prompts/default.md) is the single source of truth for what the
- * agent must do. This module slices it into IDed paragraphs so a classifier can
- * point at the exact paragraph an agent message violates, and so the rule pack
- * can never silently drift away from the text that is actually injected into
- * the agent's system prompt.
- *
- * Registration is explicit: every paragraph must be registered in
- * ./compliance-registry.ts as either checkable (with the phrasing that
- * describes a violation of it) or out of scope (with a reason). A paragraph
- * that is neither, or a registry entry that matches no paragraph, throws —
- * silently skipping a rule is the one failure mode this module exists to
- * prevent.
+ * There is deliberately nothing else here: no list of what is judged, no
+ * hand-written criteria, no exemptions. Anything of that kind would be a second
+ * configuration that can disagree with the file the Hooman edits.
  */
 
 import { createHash } from "node:crypto";
@@ -24,7 +17,7 @@ const HEADING_RE = /^#{1,6}\s+/;
 const FENCE_RE = /^\s*```/;
 const BULLET_RE = /^-\s+\S/;
 
-/** One paragraph of the contract, addressable by a stable ordinal ID. */
+/** One paragraph of the contract, addressable by a stable identity. */
 export interface ContractParagraph {
 	/**
 	 * Stable rule identity: a hash of the paragraph's exact text.
@@ -34,54 +27,23 @@ export interface ContractParagraph {
 	 * paragraph is a different rule, and that is the honest reading.
 	 */
 	readonly id: string;
-	/** 1-based position among the contract's paragraphs. */
+	/** 1-based position among the contract's paragraphs, for display only. */
 	readonly ordinal: number;
-	/** Full paragraph text, whitespace-normalized. Used verbatim as classifier criteria. */
+	/** Full paragraph text, whitespace-normalized. Sent verbatim as the criterion. */
 	readonly text: string;
 	/** Short leading clause, used when citing the rule in a warning. */
 	readonly label: string;
 }
 
-/**
- * True for a directive bullet.
- *
- * The contract is written that way: what the Hooman wants enforced is a run of
- * bullets, and the prose around them explains. Following the file's own shape
- * means a new bullet is judged the moment it is written, with no list of mine
- * to update - which is the whole point of deriving the configuration from the
- * file he edits.
- */
-export function isDirective(paragraph: ContractParagraph): boolean {
-	return /^-\s+\S/.test(paragraph.text);
-}
-
-/** A paragraph the classifier can judge from an agent's user-facing message. */
+/** A rule: a paragraph plus the criterion the classifier is asked against. */
 export interface CheckableRule extends ContractParagraph {
-	/** What the message does when it violates this paragraph. */
+	/** What the message does when it breaks this paragraph. */
 	readonly violation: string;
-}
-
-/** A paragraph the classifier must not judge from a user-facing message. */
-export interface SkippedParagraph extends ContractParagraph {
-	/** Why this paragraph is not message-checkable. */
-	readonly reason: string;
 }
 
 export interface RulePack {
 	readonly rules: readonly CheckableRule[];
-	readonly skipped: readonly SkippedParagraph[];
 }
-
-/** How one contract paragraph is treated by the checker. */
-export interface RuleRegistration {
-	/** Present when checkable: the violation phrasing handed to the classifier. */
-	readonly violation?: string;
-	/** Present when not checkable: the reason it is out of scope. */
-	readonly outOfScope?: string;
-}
-
-/** Every contract paragraph, keyed by {@link paragraphFingerprint}. */
-export type RuleRegistry = Readonly<Record<string, RuleRegistration>>;
 
 /** Stable 10-hex identity for a paragraph's text. */
 export function paragraphHash(text: string): string {
@@ -101,11 +63,22 @@ export function buildRuleLabel(text: string, max = 72): string {
 }
 
 /**
+ * Criterion derived from a paragraph, so an edit needs no code change.
+ *
+ * Polarity-aware on purpose: these directives are written as prohibitions, so
+ * the criterion describes doing the forbidden thing, and the paragraph's own
+ * words travel with the question.
+ */
+export function violationCriterion(paragraph: ContractParagraph): string {
+	return `The message does, advises, or proposes exactly what this paragraph forbids, or fails the standard it sets: "${paragraph.text}"`;
+}
+
+/**
  * Slice the contract into paragraphs.
  *
  * Blank lines separate paragraphs, except inside fenced code blocks, which stay
- * attached to the paragraph that introduces them. Headings and frontmatter are
- * structure, not rules, and are dropped.
+ * attached to the paragraph that introduces them. Each top-level bullet is its
+ * own rule. Headings and frontmatter are structure, not rules.
  */
 export function parseContractParagraphs(
 	source: string,
@@ -135,8 +108,6 @@ export function parseContractParagraphs(
 			flush();
 			continue;
 		}
-		// Each top-level bullet is its own rule; the contract's prime directives
-		// are a run of bullets with no blank lines between them.
 		if (BULLET_RE.test(line)) {
 			flush();
 			current.push(line);
@@ -146,151 +117,35 @@ export function parseContractParagraphs(
 	}
 	flush();
 
-	return blocks.map((text, index) => ({
-		id: paragraphHash(text),
-		ordinal: index + 1,
-		text,
-		label: buildRuleLabel(text),
+	const seen = new Set<string>();
+	const paragraphs: ContractParagraph[] = [];
+	for (const [index, text] of blocks.entries()) {
+		const id = paragraphHash(text);
+		if (seen.has(id)) continue;
+		seen.add(id);
+		paragraphs.push({
+			id,
+			ordinal: index + 1,
+			text,
+			label: buildRuleLabel(text),
+		});
+	}
+	return paragraphs;
+}
+
+/**
+ * Build the pack from the contract as it stands right now.
+ *
+ * Every paragraph is a rule; the criterion is derived from the paragraph. Call
+ * this again when the file changes and the rules follow.
+ */
+export function buildRulePack(source: string): RulePack {
+	const rules = parseContractParagraphs(source).map((paragraph) => ({
+		...paragraph,
+		violation: violationCriterion(paragraph),
 	}));
-}
-
-/**
- * Pair every contract paragraph with its registration.
- *
- * Throws when a paragraph is unregistered, when a registration matches no
- * paragraph, or when a registration neither describes a violation nor an
- * out-of-scope reason. Tests call this against the shipped contract so drift
- * fails the build; the extension calls it inside a guard and stays silent
- * rather than checking against a half-known contract.
- */
-export function buildRulePack(
-	source: string,
-	registry: RuleRegistry,
-): RulePack {
-	const paragraphs = parseContractParagraphs(source);
-	const rules: CheckableRule[] = [];
-	const skipped: SkippedParagraph[] = [];
-	const consumed = new Set<string>();
-
-	for (const paragraph of paragraphs) {
-		const key = paragraphHash(paragraph.text);
-		const registration = registry[key];
-
-		if (!registration) {
-			if (!isDirective(paragraph)) continue;
-			throw new Error(
-				`Directive ${paragraph.id} is unregistered: ${JSON.stringify(paragraph.text.slice(0, 80))}. Register it as checkable or exempt it with a reason.`,
-			);
-		}
-		if (consumed.has(key)) {
-			throw new Error(
-				`Contract paragraphs share the rule id ${JSON.stringify(key)}; identical paragraphs cannot be registered separately.`,
-			);
-		}
-		consumed.add(key);
-
-		const { violation, outOfScope } = registration;
-		if (Boolean(violation) === Boolean(outOfScope)) {
-			throw new Error(
-				`Directive ${paragraph.id} must set exactly one of violation or outOfScope.`,
-			);
-		}
-
-		if (violation) {
-			rules.push({ ...paragraph, violation });
-		} else {
-			skipped.push({ ...paragraph, reason: outOfScope as string });
-		}
-	}
-
-	for (const fingerprint of Object.keys(registry)) {
-		if (!consumed.has(fingerprint)) {
-			throw new Error(
-				`Rule registration ${JSON.stringify(fingerprint)} matches no contract paragraph; it is stale.`,
-			);
-		}
-	}
-
 	if (rules.length === 0) {
-		throw new Error("The rule pack has no checkable rules.");
+		throw new Error("The contract has no paragraphs to judge.");
 	}
-
-	return { rules, skipped };
-}
-
-/**
- * Wording used for a paragraph whose text has changed (or was never registered),
- * derived from the paragraph itself so an edit needs no code change.
- *
- * It is deliberately polarity-aware: these directives are written as
- * prohibitions, so the criterion must describe doing the forbidden thing, not
- * "failing to follow" it. The paragraph's own words travel with the question.
- */
-export function genericViolation(paragraph: ContractParagraph): string {
-	return `The message does, advises, or proposes exactly what this paragraph forbids, or fails the standard it sets: "${paragraph.text}"`;
-}
-
-export interface RuntimeRulePack {
-	/** Rules to ask about right now, derived from the contract file as it stands. */
-	readonly pack: RulePack;
-	/** Paragraphs checked without a registration, using their live text as criteria. */
-	readonly unregistered: readonly ContractParagraph[];
-	/** Registry entries that match no paragraph in the current contract. */
-	readonly staleKeys: readonly string[];
-}
-
-/**
- * Build the pack for a live session.
- *
- * The contract is a file the Hooman edits while agents run, so this never
- * throws and never disables checking: a paragraph that has not been registered
- * yet is still checked, against its own live text, with generic violation
- * wording. Unregistered paragraphs and stale registrations are reported so the
- * registry can catch up — {@link buildRulePack} stays strict and is what the
- * test suite uses to insist that it does.
- *
- * A paragraph whose text changed at the front reads as a new paragraph here,
- * which is the honest reading: nobody has reviewed what it now means.
- */
-export function buildRuntimeRulePack(
-	source: string,
-	registry: RuleRegistry,
-): RuntimeRulePack {
-	const paragraphs = parseContractParagraphs(source);
-	const rules: CheckableRule[] = [];
-	const skipped: SkippedParagraph[] = [];
-	const unregistered: ContractParagraph[] = [];
-	const consumed = new Set<string>();
-
-	for (const paragraph of paragraphs) {
-		const key = paragraphHash(paragraph.text);
-		if (consumed.has(key)) continue;
-		consumed.add(key);
-
-		const registration = registry[key];
-		const { violation, outOfScope } = registration ?? {};
-		if (outOfScope) {
-			// An explicit exemption, recorded with its reason.
-			skipped.push({ ...paragraph, reason: outOfScope });
-			continue;
-		}
-		if (violation) {
-			rules.push({ ...paragraph, violation });
-			continue;
-		}
-		if (!isDirective(paragraph)) {
-			skipped.push({
-				...paragraph,
-				reason: "prose, not a directive a message can violate",
-			});
-			continue;
-		}
-		// A directive the Hooman wrote or edited: judged with criteria derived from
-		// its own words, so an edit takes effect on the next check with no code change.
-		unregistered.push(paragraph);
-		rules.push({ ...paragraph, violation: genericViolation(paragraph) });
-	}
-
-	const staleKeys = Object.keys(registry).filter((key) => !consumed.has(key));
-	return { pack: { rules, skipped }, unregistered, staleKeys };
+	return { rules };
 }

@@ -4,12 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { buildRulePack } from "../src/compliance-rules.ts";
-import { COMPLIANCE_REGISTRY } from "../src/compliance-registry.ts";
 
 // Rule identity is a hash of the paragraph text, so tests look the rule up
 // rather than naming a position that shifts whenever the contract is edited.
 const CONTRACT = readFileSync(new URL("../prompts/default.md", import.meta.url), "utf8");
-const PACK = buildRulePack(CONTRACT, COMPLIANCE_REGISTRY);
+const PACK = buildRulePack(CONTRACT);
 const TOLSTOY_ID = PACK.rules.find((rule) => rule.text.includes("NEVER WRITE LIKE TOLSTOY"))?.id;
 if (!TOLSTOY_ID) throw new Error("the Tolstoy rule is not checkable in the shipped contract");
 
@@ -333,7 +332,8 @@ describe("live contract edits", () => {
 		);
 
 		expect(JSON.stringify(h.classifyCalls[1])).toContain("ALWAYS TELL ME A STORY WHEN YOU COMMIT");
-		expect(h.notifications.some((note) => note.text.includes("generic wording"))).toBe(true);
+		// No notification, no registration step: the file is the configuration.
+		expect(h.notifications.some((note) => note.text.includes("unregistered"))).toBe(false);
 	});
 
 	test("editing an existing paragraph changes what the classifier is asked", async () => {

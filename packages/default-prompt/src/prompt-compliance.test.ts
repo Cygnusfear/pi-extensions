@@ -343,16 +343,15 @@ describe("classifier state", () => {
 describe("calibration fixtures", () => {
 	test("every fixture names exactly one live rule per expectation", async () => {
 		const { COMPLIANCE_FIXTURES } = await import("./compliance-fixtures.ts");
-		const { readFileSync } = await import("node:fs");
 		const { buildRulePack } = await import("./compliance-rules.ts");
-		const { COMPLIANCE_REGISTRY } = await import("./compliance-registry.ts");
-		const path = await import("node:path");
+		const { readFileSync } = await import("node:fs");
+		const nodePath = await import("node:path");
 		const { fileURLToPath } = await import("node:url");
 		const contract = readFileSync(
-			path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "prompts", "default.md"),
+			nodePath.resolve(nodePath.dirname(fileURLToPath(import.meta.url)), "..", "prompts", "default.md"),
 			"utf8",
 		);
-		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
+		const pack = buildRulePack(contract);
 		expect(COMPLIANCE_FIXTURES.length).toBeGreaterThan(0);
 		for (const fixture of COMPLIANCE_FIXTURES) {
 			const resolution = resolveFixtureRules(pack.rules, fixture.expectRules);
