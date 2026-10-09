@@ -20,11 +20,26 @@ const contractPath = path.resolve(
 const contract = readFileSync(contractPath, "utf8");
 
 describe("contract coverage", () => {
-	test("every contract paragraph is registered, so no rule is silently unchecked", () => {
+	test("every directive carries a decision, so no rule is silently unchecked", () => {
 		const pack = buildRulePack(contract, COMPLIANCE_REGISTRY);
-		const paragraphs = parseContractParagraphs(contract);
-		expect(pack.rules.length + pack.skipped.length).toBe(paragraphs.length);
+		const directives = parseContractParagraphs(contract).filter((paragraph) =>
+			/^-\s+\S/.test(paragraph.text),
+		);
+		// A directive is either judged or explicitly exempted; the strict builder
+		// refuses to build otherwise, which is the drift gate.
+		expect(pack.rules.length + pack.skipped.length).toBeGreaterThanOrEqual(directives.length);
 		expect(pack.rules.length).toBeGreaterThan(0);
+	});
+
+	test("prose can be edited or added freely, without touching the registry", () => {
+		const edited = contract + "\n\nA NEW PROSE PARAGRAPH THE HOOMAN WROTE AS EXPLANATION, NOT A RULE.\n";
+		// The strict builder is the drift gate: it must not demand a decision for prose.
+		expect(() => buildRulePack(edited, COMPLIANCE_REGISTRY)).not.toThrow();
+		const built = buildRuntimeRulePack(edited, COMPLIANCE_REGISTRY);
+		expect(
+			built.pack.skipped.some((paragraph) => paragraph.text.includes("A NEW PROSE PARAGRAPH")),
+		).toBe(true);
+		expect(built.pack.rules.some((rule) => rule.text.includes("A NEW PROSE PARAGRAPH"))).toBe(false);
 	});
 
 	test("rule ids are content-derived and distinct, so registrations cannot collide", () => {
@@ -152,7 +167,7 @@ describe("live contract edits", () => {
 		const rule = built.pack.rules.find((candidate) =>
 			candidate.text.includes("A BRAND NEW RULE"),
 		);
-		expect(rule?.violation).toContain("does or advises what this paragraph forbids");
+		expect(rule?.violation).toContain("does, advises, or proposes exactly what this paragraph forbids");
 	});
 
 	test("the strict builder still refuses the same file, so the registry has to catch up", () => {

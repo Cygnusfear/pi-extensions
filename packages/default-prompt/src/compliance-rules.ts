@@ -42,6 +42,19 @@ export interface ContractParagraph {
 	readonly label: string;
 }
 
+/**
+ * True for a directive bullet.
+ *
+ * The contract is written that way: what the Hooman wants enforced is a run of
+ * bullets, and the prose around them explains. Following the file's own shape
+ * means a new bullet is judged the moment it is written, with no list of mine
+ * to update - which is the whole point of deriving the configuration from the
+ * file he edits.
+ */
+export function isDirective(paragraph: ContractParagraph): boolean {
+	return /^-\s+\S/.test(paragraph.text);
+}
+
 /** A paragraph the classifier can judge from an agent's user-facing message. */
 export interface CheckableRule extends ContractParagraph {
 	/** What the message does when it violates this paragraph. */
@@ -164,8 +177,9 @@ export function buildRulePack(
 		const registration = registry[key];
 
 		if (!registration) {
+			if (!isDirective(paragraph)) continue;
 			throw new Error(
-				`Contract paragraph ${paragraph.id} is unregistered: ${JSON.stringify(paragraph.text.slice(0, 80))}. Register it in compliance-registry.ts as checkable or out of scope.`,
+				`Directive ${paragraph.id} is unregistered: ${JSON.stringify(paragraph.text.slice(0, 80))}. Register it as checkable or exempt it with a reason.`,
 			);
 		}
 		if (consumed.has(key)) {
@@ -178,7 +192,7 @@ export function buildRulePack(
 		const { violation, outOfScope } = registration;
 		if (Boolean(violation) === Boolean(outOfScope)) {
 			throw new Error(
-				`Contract paragraph ${paragraph.id} must set exactly one of violation or outOfScope.`,
+				`Directive ${paragraph.id} must set exactly one of violation or outOfScope.`,
 			);
 		}
 
@@ -204,9 +218,16 @@ export function buildRulePack(
 	return { rules, skipped };
 }
 
-/** Wording used for a paragraph that was never registered, so a live contract still runs. */
+/**
+ * Wording used for a paragraph whose text has changed (or was never registered),
+ * derived from the paragraph itself so an edit needs no code change.
+ *
+ * It is deliberately polarity-aware: these directives are written as
+ * prohibitions, so the criterion must describe doing the forbidden thing, not
+ * "failing to follow" it. The paragraph's own words travel with the question.
+ */
 export function genericViolation(paragraph: ContractParagraph): string {
-	return `The message does or advises what this paragraph forbids: "${paragraph.label}".`;
+	return `The message does, advises, or proposes exactly what this paragraph forbids, or fails the standard it sets: "${paragraph.text}"`;
 }
 
 export interface RuntimeRulePack {
@@ -248,14 +269,26 @@ export function buildRuntimeRulePack(
 
 		const registration = registry[key];
 		const { violation, outOfScope } = registration ?? {};
+		if (outOfScope) {
+			// An explicit exemption, recorded with its reason.
+			skipped.push({ ...paragraph, reason: outOfScope });
+			continue;
+		}
 		if (violation) {
 			rules.push({ ...paragraph, violation });
-		} else if (outOfScope) {
-			skipped.push({ ...paragraph, reason: outOfScope });
-		} else {
-			unregistered.push(paragraph);
-			rules.push({ ...paragraph, violation: genericViolation(paragraph) });
+			continue;
 		}
+		if (!isDirective(paragraph)) {
+			skipped.push({
+				...paragraph,
+				reason: "prose, not a directive a message can violate",
+			});
+			continue;
+		}
+		// A directive the Hooman wrote or edited: judged with criteria derived from
+		// its own words, so an edit takes effect on the next check with no code change.
+		unregistered.push(paragraph);
+		rules.push({ ...paragraph, violation: genericViolation(paragraph) });
 	}
 
 	const staleKeys = Object.keys(registry).filter((key) => !consumed.has(key));
