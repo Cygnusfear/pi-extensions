@@ -476,7 +476,14 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		const hoomanRequest = findLastMessageText(readMessages(event), "user");
+		const transcript = readMessages(event);
+		const hoomanRequest = findLastMessageText(transcript, "user");
+		const hoomanMessages = transcript.filter(
+			(candidate) =>
+				candidate !== null &&
+				typeof candidate === "object" &&
+				(candidate as { role?: unknown }).role === "user",
+		).length;
 		const model = agentModelId(event.message, ctx);
 		const classifierId = `${COMPLIANCE_CLASSIFIER.provider}/${COMPLIANCE_CLASSIFIER.id}`;
 
@@ -490,7 +497,12 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			result = await host.classify(
 				resolved.model,
 				{
-					state: buildClassifierState(agentMessage, hoomanRequest, event.turnIndex),
+					state: buildClassifierState(
+						agentMessage,
+						hoomanRequest,
+						event.turnIndex,
+						hoomanMessages <= 1,
+					),
 					questions,
 				},
 				// Deliberately not ctx.signal: a turn boundary is exactly where that signal fires.

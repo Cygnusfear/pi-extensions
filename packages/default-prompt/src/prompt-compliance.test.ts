@@ -324,11 +324,14 @@ describe("classifier host", () => {
 });
 
 describe("classifier state", () => {
-	test("carries the agent message, the request, and the turn index", () => {
+	test("carries the agent message, the request, the turn index, and the conversation boundary", () => {
 		const state = buildClassifierState("agent text", "hooman text", 7);
 		expect(state.turn_index).toBe(7);
 		expect(state.agent_message_to_hooman).toBe("agent text");
 		expect(state.hooman_request_being_answered).toBe("hooman text");
+		// Opening-message rules need this fact; a classifier cannot infer it.
+		expect(state.first_message_in_conversation).toBe(false);
+		expect(buildClassifierState("a", "b", 1, true).first_message_in_conversation).toBe(true);
 	});
 
 	test("bounds the message so one turn cannot send an unbounded prompt", () => {

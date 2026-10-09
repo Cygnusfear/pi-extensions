@@ -284,7 +284,7 @@ export const COMPLIANCE_REGISTRY: RuleRegistry = {
 	},
 	// P68 - When this is the first text in a conversation, begin the user-facing
 	"when this is the first text in a conversation, b": {
-		violation: "The message is the first text of a conversation with the Hooman and does not begin with the dragon emoji. A message sent to peers, or any later message in a conversation, is not this rule.",
+		violation: "state.first_message_in_conversation is true and the message does not begin with the dragon emoji. When that flag is false the rule cannot be violated, whatever the message says.",
 	},
 	// P69 - - When the requested task is complete or no authorized action remain
 	"- when the requested task is complete or no auth": {

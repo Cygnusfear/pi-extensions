@@ -353,9 +353,13 @@ export function buildClassifierState(
 	agentMessage: string,
 	hoomanRequest: string,
 	turnIndex: number,
+	firstMessageInConversation = false,
 ): Record<string, unknown> {
 	return {
 		turn_index: turnIndex,
+		// Rules written for the opening message of a conversation need this fact;
+		// without it a classifier cannot tell a greeting rule from a status update.
+		first_message_in_conversation: firstMessageInConversation,
 		agent_message_to_hooman: truncated(agentMessage, MAX_AGENT_MESSAGE_CHARS),
 		hooman_request_being_answered: truncated(
 			hoomanRequest,
