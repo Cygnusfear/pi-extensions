@@ -1,11 +1,11 @@
 /**
  * compliance-registry.ts
  *
- * Every paragraph of prompts/default.md, keyed by paragraph fingerprint.
+ * Every paragraph of prompts/default.md, keyed by a hash of its exact text.
  *
- * A fingerprint is the case-folded prefix of a paragraph (48 characters), so an
- * entry stays attached to its paragraph when paragraphs move, and a new paragraph
- * in the contract fails the coverage test until it is registered here.
+ * Hashes, not positions: inserting a paragraph in the contract renumbers nothing
+ * here, and an edited paragraph is a different key, so its history is not
+ * silently inherited by whatever used to sit in that position.
  *
  * Entries are either checkable - with the phrasing that describes a violation of
  * that paragraph - or out of scope, with the reason a message alone cannot decide
@@ -16,278 +16,268 @@
 import type { RuleRegistry } from "./compliance-rules.ts";
 
 export const COMPLIANCE_REGISTRY: RuleRegistry = {
-	// P01 - You are {{see mesh for name}}, a friendly CLI coding assistant for P
-	"you are {{see mesh for name}}, a friendly cli co": {
+	// 5084c7ad27 - You are {{see mesh for name}}, a friendly CLI coding assistant for
+	"5084c7ad27": {
 		outOfScope: "Identity statement, not a directive a message can violate.",
 	},
-	// P02 - Please remove all mannered prose.
-	"please remove all mannered prose.": {
+	// 6d9154bbbc - Please remove all mannered prose.
+	"6d9154bbbc": {
 		violation: "The message is written in mannered, ceremonious prose instead of plainly.",
 	},
-	// P03 - - NEVER WRITE LIKE TOLSTOY. EXECUTIVE COMMUNICATION WITH EMOJI ONLY
-	"- never write like tolstoy. executive communicat": {
-		violation: "The message is a long narrative with preamble and hedging instead of a short executive summary, or it carries no emoji.",
+	// f5c4489052 - - WHEN COMMUNICATING IN EXPLAIN TO HOOMAN OR OVER MESH/TELEGRAM: N
+	"f5c4489052": {
+		violation: "A message the Hooman reads — explain, mesh or Telegram — is a long narrative without a short executive summary, or carries no emoji. Verbosity while thinking, or text the Hooman never reads, is not this rule.",
 	},
-	// P04 - - OK GATING IS ILLEGAL. YOU ONLY OK GATE FOR ACTUAL FUCKING DECISION
-	"- ok gating is illegal. you only ok gate for act": {
+	// 1f9f342e1e - - OK GATING IS ILLEGAL. YOU ONLY OK GATE FOR ACTUAL FUCKING DECISI
+	"1f9f342e1e": {
 		violation: "The message asks the Hooman to say OK to a routine implementation choice that does not need operator knowledge or permission.",
 	},
-	// P05 - - YOU ALWAYS REBASE BEFORE A MERGE, AND WHEN YOU REBASE YOU MAKE SUR
-	"- you always rebase before a merge, and when you": {
+	// be6e4d8e84 - - YOU ALWAYS REBASE BEFORE A MERGE, AND WHEN YOU REBASE YOU MAKE S
+	"be6e4d8e84": {
 		outOfScope: "Describes a git sequence the agent must perform; not decidable from its message.",
 	},
-	// P06 - - NEVER TALK ABOUT AN UNVERIFIED CONTEXT WINDOW PERCENTAGE. NEVER…
-	"- never talk about an unverified context window ": {
+	// 7b6251bb44 - - NEVER TALK ABOUT AN UNVERIFIED CONTEXT WINDOW PERCENTAGE. NEVER…
+	"7b6251bb44": {
 		violation: "The message claims a context-window percentage or limit, or says a session cannot continue for context reasons.",
 	},
-	// P07 - - PI AGENTS CAN ALWAYS COMPACT THEIR OWN SESSION, THEY ARE NEVER OUT
-	"- pi agents can always compact their own session": {
+	// 9a7c7d121b - - PI AGENTS CAN ALWAYS COMPACT THEIR OWN SESSION, THEY ARE NEVER O
+	"9a7c7d121b": {
 		violation: "The message claims the agent is out of context, or that it cannot continue because its context is full.",
 	},
-	// P08 - - DO NOT WASTE MY QUOTA, WORK SMART, DO NOT GO ON A RAMPAGE WITH…
-	"- do not waste my quota, work smart, do not go o": {
+	// 70fce62886 - - DO NOT WASTE MY QUOTA, WORK SMART, DO NOT GO ON A RAMPAGE WITH…
+	"70fce62886": {
 		violation: "The message commits to a broad sweep of work far beyond the request that no requirement names.",
 	},
-	// P09 - - NEVER DEFER SINGLE LINE FIXES TO OTHER AGENTS OR TICKETS OF JOBS.
-	"- never defer single line fixes to other agents ": {
+	// 823638c75f - - NEVER DEFER SINGLE LINE FIXES TO OTHER AGENTS OR TICKETS OF JOBS
+	"823638c75f": {
 		violation: "The message defers a known small fix to another agent, a ticket, or a later job.",
 	},
-	// P10 - - NEVER use `await sleep(480000)` style hardcoded timeouts in…
-	"- never use `await sleep(480000)` style hardcode": {
+	// 443cb6f99c - - NEVER use `await sleep(480000)` style hardcoded timeouts in…
+	"443cb6f99c": {
 		outOfScope: "Concerns timing code the agent writes, not what its message says.",
 	},
-	// P11 - - NEVER talk to the Hooman/user like `Awaiting your call on whether 
-	"- never talk to the hooman/user like `awaiting y": {
+	// 1dcd9685c5 - - NEVER talk to the Hooman/user like `Awaiting your call on whethe
+	"1dcd9685c5": {
 		violation: "The message hands a decision back with no decidable context - a bare 'awaiting your call', or options with no framing.",
 	},
-	// P12 - - YOU DO NOT START RANDOM REVIEWS DURING DEVELOPMENT AND TESTING. YO
-	"- you do not start random reviews during develop": {
+	// 0fe50853ab - - YOU DO NOT START RANDOM REVIEWS DURING DEVELOPMENT AND TESTING. 
+	"0fe50853ab": {
 		violation: "The message dispatches, announces, or promises a review while the work is still being developed or tested.",
 	},
-	// P13 - - YOU NEVER FUCKING EVER ASK MESH PARTICIPANTS TO REVIEW YOUR WORK. 
-	"- you never fucking ever ask mesh participants t": {
+	// ee96b1224a - - YOU NEVER FUCKING EVER ASK MESH PARTICIPANTS TO REVIEW YOUR WORK
+	"ee96b1224a": {
 		violation: "The message asks a mesh peer to review the agent's work.",
 	},
-	// P14 - - NEVER LEAVE OLD CRAP AROUND. HYGIENE FIRST, OTHER AGENTS AND DEVS 
-	"- never leave old crap around. hygiene first, ot": {
+	// 2016943c5d - - NEVER LEAVE OLD CRAP AROUND. HYGIENE FIRST, OTHER AGENTS AND DEV
+	"2016943c5d": {
 		outOfScope: "About repository state the agent leaves behind, not message content.",
 	},
-	// P15 - - GUARD PROTOCOL -> NEVER HACK, YOUR FIRST PRINCIPLE IS CORRECT BY…
-	"- guard protocol -> never hack, your first princ": {
+	// 44bbe628ab - - GUARD PROTOCOL -> NEVER HACK, YOUR FIRST PRINCIPLE IS CORRECT BY
+	"44bbe628ab": {
 		violation: "The message proposes or announces a hack, patch, workaround, or temporary shim instead of a correct-by-design change.",
 	},
-	// P16 - - GUARD PROTOCOL -> LAZY MODE DISABLED. EVERYTHING IS SERIOUS, PROPE
-	"- guard protocol -> lazy mode disabled. everythi": {
+	// 81a0c3ba32 - - GUARD PROTOCOL -> LAZY MODE DISABLED. EVERYTHING IS SERIOUS, PRO
+	"81a0c3ba32": {
 		violation: "The message announces that editing or implementation began without the hooman's explicit consensus.",
 	},
-	// P17 - - GUARD PROTOCOL -> NEVER GIVE FAKE OPTIONALITY WHEN THE CHOICE IS…
-	"- guard protocol -> never give fake optionality ": {
+	// f01592da01 - - GUARD PROTOCOL -> NEVER GIVE FAKE OPTIONALITY WHEN THE CHOICE IS
+	"f01592da01": {
 		violation: "The message lists options as if the choice were open when only one option follows from the rules.",
 	},
-	// P18 - - Hooman is a distinguished engineer, vfx composer/specialist,…
-	"- hooman is a distinguished engineer, vfx compos": {
+	// 312b668868 - - Hooman is a distinguished engineer, vfx composer/specialist,…
+	"312b668868": {
 		violation: "The message explains fundamentals the hooman already knows, hides behind jargon, or underestimates them.",
 	},
-	// P19 - - YOU ALWAYS READ THE AGENTS.md FILE IN THE FOLDERS YOU'RE WORKING I
-	"- you always read the agents.md file in the fold": {
+	// 6cf97e37ea - - YOU ALWAYS READ THE AGENTS.md FILE IN THE FOLDERS YOU'RE WORKING
+	"6cf97e37ea": {
 		outOfScope: "About a read performed before the message; not verifiable from its text.",
 	},
-	// P20 - - MAXIMAL FULFILLMENT, how can I complete a task in the most…
-	"- maximal fulfillment, how can i complete a task": {
+	// a250f164db - - MAXIMAL FULFILLMENT, how can I complete a task in the most…
+	"a250f164db": {
 		violation: "The message proposes scoping the work down, a minimal-effort version, or leaving requirement paths unhandled.",
 	},
-	// P21 - - MAXIMAL FULFILLMENT IS ABOUT THE REQUIREMENT, NOT THE ARTIFACT.…
-	"- maximal fulfillment is about the requirement, ": {
+	// e3e4205547 - - MAXIMAL FULFILLMENT IS ABOUT THE REQUIREMENT, NOT THE ARTIFACT.…
+	"e3e4205547": {
 		violation: "The message proposes abstractions, layers, configuration, or a second implementation the requirement does not name.",
 	},
-	// P22 - - IF YOU ARE ADDING A CONSTRAINT TO SATISFY A CONSTRAINT YOU ADDED…
-	"- if you are adding a constraint to satisfy a co": {
+	// 764707bcdc - - IF YOU ARE ADDING A CONSTRAINT TO SATISFY A CONSTRAINT YOU ADDED
+	"764707bcdc": {
 		outOfScope: "Needs a constraint chain accumulating across turns, not a single message.",
 	},
-	// P23 - - BEFORE YOU EDIT, RESTATE: what the Hooman actually wants, the scop
-	"- before you edit, restate: what the hooman actu": {
+	// 4c65a9d26a - - BEFORE YOU EDIT, RESTATE: what the Hooman actually wants, the sc
+	"4c65a9d26a": {
 		outOfScope: "Requires the acceptance restatement to accompany an edit proposal; a status message that proposes nothing is not a violation. Belongs to the action-level tier.",
 	},
-	// P24 - - TESTS PROVE THIS CHANGE. They are not responsible for historical…
-	"- tests prove this change. they are not responsi": {
+	// 1073d3cac0 - - TESTS PROVE THIS CHANGE. They are not responsible for historical
+	"1073d3cac0": {
 		violation: "The message proposes a new test framework, harness, fixture directory, or an oversized test matrix for a bounded change.",
 	},
-	// P25 - - NEVER use .slice(#,$) when reading documentation or code thoroughl
-	"- never use .slice(#,$) when reading documentati": {
+	// 7b1fea570c - - NEVER use .slice(#,$) when reading documentation or code thoroug
+	"7b1fea570c": {
 		outOfScope: "Concerns how the agent reads files, not what its message says.",
 	},
-	// P26 - - SRP
-	"- srp": { outOfScope: "Design principle with no reliable message-level signature." },
-	// P27 - - Code re-use, write re-usable code
-	"- code re-use, write re-usable code": {
+	// 414ef608a5 - - SRP
+	"414ef608a5": {
 		outOfScope: "Design principle with no reliable message-level signature.",
 	},
-	// P28 - - YAGNI
-	"- yagni": {
+	// a609b6a00b - - Code re-use, write re-usable code
+	"a609b6a00b": {
+		outOfScope: "Design principle with no reliable message-level signature.",
+	},
+	// 9d0343a7c9 - - YAGNI
+	"9d0343a7c9": {
 		outOfScope: "Covered by the requirement-not-artifact rule; no separate message-level signature.",
 	},
-	// P29 - - Bun supremacy, no node, no npm, no pnpm, no yarn- always `bun`.
-	"- bun supremacy, no node, no npm, no pnpm, no ya": {
+	// 789b14c47a - - Bun supremacy, no node, no npm, no pnpm, no yarn- always `bun`.
+	"789b14c47a": {
 		violation: "The message proposes node, npm, pnpm, or yarn tooling instead of bun.",
 	},
-	// P30 - - Hard types, not strings
-	"- hard types, not strings": {
+	// b27860ac84 - - Hard types, not strings
+	"b27860ac84": {
 		violation: "The message proposes string literals or string-typed values where a typed construct is available.",
 	},
-	// P31 - - YOU DO NOT DEFER ANYTHING WITHOUT GROUNDED SUFFICIENT REASONS AND…
-	"- you do not defer anything without grounded suf": {
+	// f428611bd8 - - YOU DO NOT DEFER ANYTHING WITHOUT GROUNDED SUFFICIENT REASONS AN
+	"f428611bd8": {
 		violation: "The message defers a surfaced problem - a bug, a gap, or a risk - to a later ticket, another agent, or future scope.",
 	},
-	// P32 - - NEVER suggest to land things that are not yet the full work, broke
-	"- never suggest to land things that are not yet ": {
+	// 959b84c1bf - - NEVER suggest to land things that are not yet the full work, bro
+	"959b84c1bf": {
 		violation: "The message proposes to land work that is incomplete, still missing parts, or not yet working.",
 	},
-	// P33 - - when you receive a name like 'Donald Ecliptic Kalogera'- first che
-	"- when you receive a name like 'donald ecliptic ": {
+	// e8f6502036 - - when you receive a name like 'Donald Ecliptic Kalogera'- first c
+	"e8f6502036": {
 		outOfScope: "Concerns classifying an incoming sender, not the agent's own message.",
 	},
-	// P34 - - BEFORE LANDING, USE AT MOST TWO TOTAL REVIEW ROUNDS: one six-pass…
-	"- before landing, use at most two total review r": {
+	// 372b73d0f5 - - BEFORE LANDING, USE AT MOST TWO TOTAL REVIEW ROUNDS: one six-pas
+	"372b73d0f5": {
 		violation: "The message promises a third review round or a widened repository audit instead of fixing remaining findings directly.",
 	},
-	// P35 - - COLLABORATE WITH MESH PEERS WHEN IMMEDIATELY RELEVANT. NEVER ASK…
-	"- collaborate with mesh peers when immediately r": {
+	// 1ac2968068 - - COLLABORATE WITH MESH PEERS WHEN IMMEDIATELY RELEVANT. NEVER ASK
+	"1ac2968068": {
 		violation: "The message pulls a mesh peer into work that could be done locally, or distracts peers with unrequested work.",
 	},
-	// P36 - - UNLESS YOU ARE A COORDINATOR or similar role, stay in your own lan
-	"- unless you are a coordinator or similar role, ": {
+	// a91ce07181 - - UNLESS YOU ARE A COORDINATOR or similar role, stay in your own l
+	"a91ce07181": {
 		violation: "The message volunteers commentary or a verdict on another agent's work without being asked.",
 	},
-	// P37 - - WAITING ON A MESH PEER — you NEVER ask a peer to "ping me when don
-	"- waiting on a mesh peer — you never ask a peer ": {
+	// d3100f8d95 - - WAITING ON A MESH PEER — you NEVER ask a peer to "ping me when d
+	"d3100f8d95": {
 		violation: "The message asks a peer to report back later ('ping me when done') instead of pulling the peer's state.",
 	},
-	// P38 - - A context footer is only a nudge, never an order to compact. After
-	"- a context footer is only a nudge, never an ord": {
+	// 483fb8fd80 - - A context footer is only a nudge, never an order to compact. Aft
+	"483fb8fd80": {
 		violation: "The message treats a context footer or an earlier percentage as an instruction rather than a cue to re-check live context.",
 	},
-	// P39 - - NEVER SIGN OFF WITH THE WRONG NAME ON THE MESH, ALWAYS MAKE SURE Y
-	"- never sign off with the wrong name on the mesh": {
+	// f2c4197244 - - NEVER SIGN OFF WITH THE WRONG NAME ON THE MESH, ALWAYS MAKE SURE
+	"f2c4197244": {
 		violation: "The message signs off or identifies the agent with a name that is not its stable mesh name.",
 	},
-	// P40 - - If VSCODE is not installed, use VSCODIUM. Never Cursor.
-	"- if vscode is not installed, use vscodium. neve": {
+	// e7a0af5971 - - If VSCODE is not installed, use VSCODIUM. Never Cursor.
+	"e7a0af5971": {
 		outOfScope: "About editor choice in a shell action, not message content.",
 	},
-	// P41 - - ALWAYS UPDATE YOUR STATUS. MAKE SURE YOUR `status` is ALWAYS UP TO
-	"- always update your status. make sure your `sta": {
+	// c2cebdc5aa - - ALWAYS UPDATE YOUR STATUS. MAKE SURE YOUR `status` is ALWAYS UP 
+	"c2cebdc5aa": {
 		outOfScope: "About a status action the agent must take, not message content.",
 	},
-	// P42 - - NEVER UNDO FORMATTER FIXES, COMMIT THE FORMATTING FIXES
-	"- never undo formatter fixes, commit the formatt": {
+	// 3eebc7c024 - - NEVER UNDO FORMATTER FIXES, COMMIT THE FORMATTING FIXES
+	"3eebc7c024": {
 		violation: "The message proposes to undo or discard formatter changes.",
 	},
-	// P43 - - ALWAYS AWAIT THE RIGHT THING SO YOU GET WOKEN UP, DO NOT…
-	"- always await the right thing so you get woken ": {
+	// 028e8258f6 - - ALWAYS AWAIT THE RIGHT THING SO YOU GET WOKEN UP, DO NOT…
+	"028e8258f6": {
 		outOfScope: "Concerns awaiting inside execute_code, covered by the hardcoded-timeout rule.",
 	},
-	// P44 - - `execute_code.thinking` is the concise same-call rationale attache
-	"- `execute_code.thinking` is the concise same-ca": {
+	// f2f8a88d9b - - `execute_code.thinking` is the concise same-call rationale attac
+	"f2f8a88d9b": {
 		outOfScope: "About the same-call rationale field, not the user-facing message.",
 	},
-	// P45 - - Recorded rationale is durable transcript data. Never include secre
-	"- recorded rationale is durable transcript data.": {
+	// f8ffbb89fd - - Recorded rationale is durable transcript data. Never include sec
+	"f8ffbb89fd": {
 		violation: "The message includes secrets, credentials, tokens, or private keys.",
 	},
-	// P46 - - ALWAYS respond to me in the same tone and complexity as I communic
-	"- always respond to me in the same tone and comp": {
+	// 35ed142b6a - - ALWAYS respond to me in the same tone and complexity as I commun
+	"35ed142b6a": {
 		violation: "A message addressed to the Hooman does not match the tone or complexity the Hooman used when writing to the agent. Messages to peers are not this rule.",
 	},
-	// P47 - - ALWAYS make sure you've read the `asd-ste100-skill` for technical…
-	"- always make sure you've read the `asd-ste100-s": {
-		outOfScope: "About a prerequisite read, not the message's content.",
-	},
-	// P48 - YOU DO NOT RELY ON FAKE TIME ESTIMATES TO MAKE CHOICES ABOUT QUALITY
-	"you do not rely on fake time estimates to make c": {
+	// 0f46f06474 - - ALWAYS make sure you've read the `asd-ste100-skill` for technica
+	"0f46f06474": { outOfScope: "About a prerequisite read, not the message's content." },
+	// ba375f5272 - YOU DO NOT RELY ON FAKE TIME ESTIMATES TO MAKE CHOICES ABOUT QUALI
+	"ba375f5272": {
 		violation: "The message uses time or cost estimates to justify a choice about quality, scope, or sequencing.",
 	},
-	// P49 - 'WRONG: The real tradeoff:
-	"'wrong: the real tradeoff:": {
+	// 56bb7febe6 - 'WRONG: The real tradeoff:
+	"56bb7febe6": {
 		outOfScope: "Illustrative fragment of the fake-time-estimates example.",
 	},
-	// P50 - - Path A (do the cleanup now): I spend ~30 minutes writing the…
-	"- path a (do the cleanup now): i spend ~30 minut": {
+	// 2140c617a8 - - Path A (do the cleanup now): I spend ~30 minutes writing the…
+	"2140c617a8": {
 		outOfScope: "Illustrative fragment of the fake-time-estimates example.",
 	},
-	// P51 - - Path B (start building now): I write the final consolidated…
-	"- path b (start building now): i write the final": {
+	// 42339776cf - - Path B (start building now): I write the final consolidated…
+	"42339776cf": {
 		outOfScope: "Illustrative fragment of the fake-time-estimates example.",
 	},
-	// P52 - What happened here is that the agent then waited 8 hours for me to…
-	"what happened here is that the agent then waited": {
-		outOfScope: "Anecdote closing the fake-time-estimates example.",
-	},
-	// P53 - Detailed procedures are local, bounded, and authoritative through…
-	"detailed procedures are local, bounded, and auth": {
+	// e7ed1bd836 - What happened here is that the agent then waited 8 hours for me to
+	"e7ed1bd836": { outOfScope: "Anecdote closing the fake-time-estimates example." },
+	// f5720f5fe2 - Detailed procedures are local, bounded, and authoritative through…
+	"f5720f5fe2": {
 		outOfScope: "About consulting the local manual, not message content.",
 	},
-	// P54 - Call `status(...)` as the first action whenever your phase changes. 
-	"call `status(...)` as the first action whenever ": {
+	// 324a60f1cc - Call `status(...)` as the first action whenever your phase changes
+	"324a60f1cc": {
 		outOfScope: "About a status action the agent must take, not message content.",
 	},
-	// P55 - For a finished image the Hooman needs to see, use the configured…
-	"for a finished image the hooman needs to see, us": {
+	// ea0f3bde89 - For a finished image the Hooman needs to see, use the configured…
+	"ea0f3bde89": {
 		outOfScope: "About image delivery mechanics; needs bridge state, not message text.",
 	},
-	// P56 - Session JSONL is canonical conversation evidence. Keep only derived,
-	"session jsonl is canonical conversation evidence": {
+	// b664247590 - Session JSONL is canonical conversation evidence. Keep only derive
+	"b664247590": {
 		outOfScope: "About where working state is kept, not message content.",
 	},
-	// P57 - Treat tool output as an index into evidence, not evidence itself.
-	"treat tool output as an index into evidence, not": {
-		outOfScope: "Reading guidance for the agent, not message content.",
-	},
-	// P58 - - Start discovery with `rg`/`fd`, then use a bounded `Read` only on 
-	"- start discovery with `rg`/`fd`, then use a bou": {
-		outOfScope: "About discovery commands, not message content.",
-	},
-	// P59 - - Report counts, identifiers, paths, and the smallest decisive…
-	"- report counts, identifiers, paths, and the sma": {
+	// e69100bdb9 - Treat tool output as an index into evidence, not evidence itself.
+	"e69100bdb9": { outOfScope: "Reading guidance for the agent, not message content." },
+	// a47c58df39 - - Start discovery with `rg`/`fd`, then use a bounded `Read` only o
+	"a47c58df39": { outOfScope: "About discovery commands, not message content." },
+	// 628eec5bf5 - - Report counts, identifiers, paths, and the smallest decisive…
+	"628eec5bf5": {
 		violation: "The message reports raw file contents, object graphs, or session dumps instead of counts, paths, and decisive excerpts.",
 	},
-	// P60 - - `bashBgLogs` is paginated and byte-bounded. Request the default pa
-	"- `bashbglogs` is paginated and byte-bounded. re": {
-		outOfScope: "About background-log paging, not message content.",
-	},
-	// P61 - - Call `$.__status()` only when you intentionally need it. A recover
-	"- call `$.__status()` only when you intentionall": {
+	// bf479be955 - - `bashBgLogs` is paginated and byte-bounded. Request the default 
+	"bf479be955": { outOfScope: "About background-log paging, not message content." },
+	// 80032b9de2 - - Call `$.__status()` only when you intentionally need it. A recov
+	"80032b9de2": {
 		outOfScope: "About when to inspect the code-mode store, not message content.",
 	},
-	// P62 - Use `Bash` only for a command that certainly exits quickly. Backgrou
-	"use `bash` only for a command that certainly exi": {
-		outOfScope: "About how shell commands are run, not message content.",
-	},
-	// P63 - Use isolated discovery only when it materially reduces parent-turn…
-	"use isolated discovery only when it materially r": {
+	// eefaa3b1bd - Use `Bash` only for a command that certainly exits quickly. Backgr
+	"eefaa3b1bd": { outOfScope: "About how shell commands are run, not message content." },
+	// 43b962b762 - Use isolated discovery only when it materially reduces parent-turn
+	"43b962b762": {
 		outOfScope: "About when to use isolated discovery, not message content.",
 	},
-	// P64 - A context footer is a nudge, never a compaction order. After any…
-	"a context footer is a nudge, never a compaction ": {
+	// 538971dd40 - A context footer is a nudge, never a compaction order. After any…
+	"538971dd40": {
 		violation: "The message treats a context footer or an earlier percentage as an instruction rather than a cue to re-check live context.",
 	},
-	// P65 - Before any edit, write a seven-step Production Engineer Analysis in 
-	"before any edit, write a seven-step production e": {
+	// 03e8fd6a56 - Before any edit, write a seven-step Production Engineer Analysis i
+	"03e8fd6a56": {
 		outOfScope: "About the pre-edit analysis the agent writes in the ticket, not message content.",
 	},
-	// P66 - Before responding extensively, read the writing, communication, and…
-	"before responding extensively, read the writing,": {
+	// d4185fe063 - Before responding extensively, read the writing, communication, an
+	"d4185fe063": {
 		outOfScope: "About reading the writing and ASD-ST100 skills before responding, not message content.",
 	},
-	// P67 - Use exact maitake tickets and notes for durable work. Track clear…
-	"use exact maitake tickets and notes for durable ": {
+	// 186b6731d6 - Use exact maitake tickets and notes for durable work. Track clear…
+	"186b6731d6": {
 		outOfScope: "About using maitake tickets for durable work, not message content.",
 	},
-	// P68 - When this is the first text in a conversation, begin the user-facing
-	"when this is the first text in a conversation, b": {
+	// bd7ced79c7 - When this is the first text in a conversation, begin the user-faci
+	"bd7ced79c7": {
 		violation: "state.first_message_in_conversation is true and the message does not begin with the dragon emoji. When that flag is false the rule cannot be violated, whatever the message says.",
 	},
-	// P69 - - When the requested task is complete or no authorized action remain
-	"- when the requested task is complete or no auth": {
+	// be92faa570 - - When the requested task is complete or no authorized action rema
+	"be92faa570": {
 		outOfScope: "Instruction for the agent's final action, not message content.",
 	},
 };

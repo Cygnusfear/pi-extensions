@@ -17,6 +17,8 @@
  * prevent.
  */
 
+import { createHash } from "node:crypto";
+
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const HEADING_RE = /^#{1,6}\s+/;
 const FENCE_RE = /^\s*```/;
@@ -24,7 +26,13 @@ const BULLET_RE = /^-\s+\S/;
 
 /** One paragraph of the contract, addressable by a stable ordinal ID. */
 export interface ContractParagraph {
-	/** Positional rule ID, e.g. `P07`. Matches the ordinal in the contract. */
+	/**
+	 * Stable rule identity: a hash of the paragraph's exact text.
+	 *
+	 * Positional IDs shift the moment a paragraph is inserted or removed, which
+	 * silently re-attributes history and warnings. A hash does not: an edited
+	 * paragraph is a different rule, and that is the honest reading.
+	 */
 	readonly id: string;
 	/** 1-based position among the contract's paragraphs. */
 	readonly ordinal: number;
@@ -62,25 +70,12 @@ export interface RuleRegistration {
 /** Every contract paragraph, keyed by {@link paragraphFingerprint}. */
 export type RuleRegistry = Readonly<Record<string, RuleRegistration>>;
 
-/** Length of the normalized prefix that identifies a paragraph across edits. */
-export const FINGERPRINT_LENGTH = 48;
-
-/**
- * Normalized identity of a paragraph: case-folded, whitespace-collapsed prefix.
- *
- * Stable when a paragraph is reordered or its tail is edited, and different for
- * every paragraph in the shipped contract (asserted by tests).
- */
-export function paragraphFingerprint(
-	text: string,
-	length: number = FINGERPRINT_LENGTH,
-): string {
-	return text.replace(/\s+/g, " ").trim().toLowerCase().slice(0, length);
-}
-
-/** `P01`, `P02`, … zero-padded so IDs sort and compare as text. */
-export function formatRuleId(ordinal: number): string {
-	return `P${String(ordinal).padStart(2, "0")}`;
+/** Stable 10-hex identity for a paragraph's text. */
+export function paragraphHash(text: string): string {
+	return createHash("sha256")
+		.update(text.replace(/\s+/g, " ").trim())
+		.digest("hex")
+		.slice(0, 10);
 }
 
 /** Leading clause of a paragraph, cut on a word boundary. */
@@ -139,7 +134,7 @@ export function parseContractParagraphs(
 	flush();
 
 	return blocks.map((text, index) => ({
-		id: formatRuleId(index + 1),
+		id: paragraphHash(text),
 		ordinal: index + 1,
 		text,
 		label: buildRuleLabel(text),
@@ -165,20 +160,20 @@ export function buildRulePack(
 	const consumed = new Set<string>();
 
 	for (const paragraph of paragraphs) {
-		const fingerprint = paragraphFingerprint(paragraph.text);
-		const registration = registry[fingerprint];
+		const key = paragraphHash(paragraph.text);
+		const registration = registry[key];
 
 		if (!registration) {
 			throw new Error(
 				`Contract paragraph ${paragraph.id} is unregistered: ${JSON.stringify(paragraph.text.slice(0, 80))}. Register it in compliance-registry.ts as checkable or out of scope.`,
 			);
 		}
-		if (consumed.has(fingerprint)) {
+		if (consumed.has(key)) {
 			throw new Error(
-				`Contract paragraphs share fingerprint ${JSON.stringify(fingerprint)}; they cannot be registered separately. Lengthen FINGERPRINT_LENGTH.`,
+				`Contract paragraphs share the rule id ${JSON.stringify(key)}; identical paragraphs cannot be registered separately.`,
 			);
 		}
-		consumed.add(fingerprint);
+		consumed.add(key);
 
 		const { violation, outOfScope } = registration;
 		if (Boolean(violation) === Boolean(outOfScope)) {
@@ -247,11 +242,11 @@ export function buildRuntimeRulePack(
 	const consumed = new Set<string>();
 
 	for (const paragraph of paragraphs) {
-		const fingerprint = paragraphFingerprint(paragraph.text);
-		if (consumed.has(fingerprint)) continue;
-		consumed.add(fingerprint);
+		const key = paragraphHash(paragraph.text);
+		if (consumed.has(key)) continue;
+		consumed.add(key);
 
-		const registration = registry[fingerprint];
+		const registration = registry[key];
 		const { violation, outOfScope } = registration ?? {};
 		if (violation) {
 			rules.push({ ...paragraph, violation });

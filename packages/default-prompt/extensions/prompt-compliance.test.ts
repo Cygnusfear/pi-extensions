@@ -3,6 +3,16 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { buildRulePack } from "../src/compliance-rules.ts";
+import { COMPLIANCE_REGISTRY } from "../src/compliance-registry.ts";
+
+// Rule identity is a hash of the paragraph text, so tests look the rule up
+// rather than naming a position that shifts whenever the contract is edited.
+const CONTRACT = readFileSync(new URL("../prompts/default.md", import.meta.url), "utf8");
+const PACK = buildRulePack(CONTRACT, COMPLIANCE_REGISTRY);
+const TOLSTOY_ID = PACK.rules.find((rule) => rule.text.includes("NEVER WRITE LIKE TOLSTOY"))?.id;
+if (!TOLSTOY_ID) throw new Error("the Tolstoy rule is not checkable in the shipped contract");
+
 // Keep every observation out of the live state directory.
 const STATE_DIR = mkdtempSync(path.join(tmpdir(), "pi-compliance-test-"));
 process.env.PI_COMPLIANCE_STATE_DIR = STATE_DIR;
@@ -112,7 +122,10 @@ function turn(overrides: Record<string, unknown> = {}) {
 }
 
 const violationResult = {
-	answers: { P03: { type: "bool", probability: 0.97 }, P05: { type: "bool", probability: 0.02 } },
+	answers: {
+		[TOLSTOY_ID]: { type: "bool", probability: 0.97 },
+		"not-a-rule": { type: "bool", probability: 0.02 },
+	},
 	stopReason: "stop",
 };
 
@@ -124,12 +137,12 @@ describe("prompt-compliance wiring", () => {
 		expect(h.sent.length).toBe(1);
 		expect(h.sent[0].options.deliverAs).toBe("steer");
 		expect(h.sent[0].message.customType).toBe("prompt-compliance");
-		expect(h.sent[0].message.content).toContain("P03");
+		expect(h.sent[0].message.content).toContain(TOLSTOY_ID);
 		expect(h.sent[0].message.details.threshold).toBeGreaterThan(0);
 	});
 
 	test("stays silent on a clean message", async () => {
-		const h = await harness({ classify: () => Promise.resolve({ answers: { P03: { probability: 0.01 } }, stopReason: "stop" }) });
+		const h = await harness({ classify: () => Promise.resolve({ answers: { [TOLSTOY_ID]: { probability: 0.01 } }, stopReason: "stop" }) });
 		await h.fire(turn());
 		expect(h.classifyCalls.length).toBe(1);
 		expect(h.sent.length).toBe(0);
@@ -204,7 +217,7 @@ describe("prompt-compliance wiring", () => {
 	});
 
 	test("/compliance threshold raises the bar for a warning", async () => {
-		const h = await harness({ classify: () => Promise.resolve({ answers: { P03: { probability: 0.6 } }, stopReason: "stop" }) });
+		const h = await harness({ classify: () => Promise.resolve({ answers: { [TOLSTOY_ID]: { probability: 0.6 } }, stopReason: "stop" }) });
 		await h.command("threshold 0.8");
 		await h.fire(turn());
 		expect(h.sent.length).toBe(0);
@@ -216,7 +229,7 @@ describe("prompt-compliance wiring", () => {
 		await h.command("audit");
 		const audit = h.notifications.find((note) => note.text.includes("audit"));
 		expect(audit?.text).toContain("turn 1");
-		expect(audit?.text).toContain("P03");
+		expect(audit?.text).toContain(TOLSTOY_ID);
 	});
 
 	test("reports and disables itself when the host exposes no classifier", async () => {
@@ -248,7 +261,7 @@ describe("hit tracking", () => {
 		expect(lines.length).toBe(before + 1);
 		const entry = JSON.parse(lines[lines.length - 1]);
 		expect(entry.ok).toBe(true);
-		expect(entry.fired.map((hit: { id: string }) => hit.id)).toContain("P03");
+		expect(entry.fired.map((hit: { id: string }) => hit.id)).toContain(TOLSTOY_ID);
 	});
 
 	test("writes the daily report once and says where it is", async () => {

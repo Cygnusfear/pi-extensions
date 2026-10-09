@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
 	buildRulePack,
 	buildRuntimeRulePack,
-	paragraphFingerprint,
+	paragraphHash,
 	parseContractParagraphs,
 	type CheckableRule,
 } from "./compliance-rules.ts";
@@ -27,11 +27,14 @@ describe("contract coverage", () => {
 		expect(pack.rules.length).toBeGreaterThan(0);
 	});
 
-	test("paragraph fingerprints are distinct, so registrations cannot collide", () => {
-		const fingerprints = parseContractParagraphs(contract).map((paragraph) =>
-			paragraphFingerprint(paragraph.text),
-		);
-		expect(new Set(fingerprints).size).toBe(fingerprints.length);
+	test("rule ids are content-derived and distinct, so registrations cannot collide", () => {
+		const paragraphs = parseContractParagraphs(contract);
+		const ids = paragraphs.map((paragraph) => paragraph.id);
+		expect(new Set(ids).size).toBe(ids.length);
+		for (const paragraph of paragraphs) {
+			expect(paragraph.id).toMatch(/^[0-9a-f]{10}$/);
+			expect(paragraph.id).toBe(paragraphHash(paragraph.text));
+		}
 	});
 
 	test("every checkable rule carries violation phrasing and a citation label", () => {
@@ -39,7 +42,7 @@ describe("contract coverage", () => {
 		for (const rule of pack.rules) {
 			expect(rule.violation.length).toBeGreaterThan(10);
 			expect(rule.label.length).toBeGreaterThan(0);
-			expect(rule.id).toMatch(/^P\d{2,}$/);
+			expect(rule.id).toMatch(/^[0-9a-f]{10}$/);
 		}
 		expect(new Set(pack.rules.map((rule) => rule.id)).size).toBe(pack.rules.length);
 	});
@@ -54,7 +57,7 @@ describe("contract coverage", () => {
 
 describe("drift detection", () => {
 	const first = parseContractParagraphs(contract)[0];
-	const fingerprint = paragraphFingerprint(first.text);
+	const fingerprint = paragraphHash(first.text);
 
 	test("an unregistered paragraph fails the build", () => {
 		expect(() => buildRulePack(contract, {})).toThrow(/unregistered/);
@@ -105,10 +108,15 @@ describe("contract parsing", () => {
 		expect(asd?.text).toContain("R4-1");
 	});
 
-	test("rule IDs follow contract order", () => {
-		const paragraphs = parseContractParagraphs(contract);
-		expect(paragraphs[0].id).toBe("P01");
-		expect(paragraphs[1].ordinal).toBe(2);
+	test("a rule id does not move when a paragraph is inserted above it", () => {
+		const before = parseContractParagraphs(contract);
+		const target = before.find((paragraph) => paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"));
+		const inserted = contract.replace("## Prime directives\n", "## Prime directives\n\n- A NEW RULE ABOVE EVERYTHING ELSE.\n");
+		const after = parseContractParagraphs(inserted);
+		const same = after.find((paragraph) => paragraph.text.includes("NEVER WRITE LIKE TOLSTOY"));
+		expect(target?.id).toBe(same?.id);
+		// Position is what moved; identity is what did not.
+		expect(same?.ordinal).toBeGreaterThan(target?.ordinal ?? 0);
 	});
 });
 
