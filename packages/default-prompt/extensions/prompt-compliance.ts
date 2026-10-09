@@ -371,8 +371,17 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 						[
 							`Contract checker: ${enabled ? "on" : "off"} | threshold ${threshold}`,
 							pack
-								? `Rules: ${pack.rules.length} checkable, ${pack.skipped.length} out of scope`
+								? `Rules: ${pack.rules.length} judged, ${pack.skipped.length} not judged from a message`
 								: "Rules: not loaded yet",
+							pack && pack.skipped.length > 0
+								? `Not judged: ${pack.skipped
+										.slice(0, 6)
+										.map((paragraph) => paragraph.label.slice(0, 32))
+										.join(" · ")}${pack.skipped.length > 6 ? " …" : ""}`
+								: null,
+							cached && cached.unregistered.length > 0
+								? `Judging from the live text (derived criteria): ${cached.unregistered.length}`
+								: null,
 							`Warnings this session: ${cooldown.warningCount}`,
 							contractError ? `Contract error: ${contractError}` : null,
 							cached && (cached.unregistered.length > 0 || cached.staleKeys.length > 0)
