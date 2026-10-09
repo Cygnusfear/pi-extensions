@@ -94,13 +94,15 @@ export const COMPLIANCE_CLASSIFIER_DESCRIPTOR = {
 /**
  * Probability at or above which an answer counts as a violation.
  *
- * Measured on the fixture set in compliance-fixtures.ts against the shipped
- * rule pack: the planted violations scored 0.99+, while messages with nothing
- * to report stayed below 0.5 for every rule except one absence-shaped rule that
- * has since moved out of scope. 0.9 keeps every planted violation and leaves no
- * verdict on the clean fixtures; \`/compliance threshold\` moves it at runtime.
+ * Measured twice. On the fixture set the planted violations scored 0.997-1.0
+ * while clean messages stayed under 0.11. On the live fleet (2206 checks, 1036
+ * rule hits) most hits sit in the marginal band - 361 at 0.90-0.95, 346 at
+ * 0.95-0.97, 258 at 0.97-0.99 - and only 71 clear 0.99. A rule that fires on
+ * correct work trains its reader to skim, so the default sits where the measured
+ * violations live rather than where they merely lean positive.
+ * \`/compliance threshold\` moves it at runtime.
  */
-export const COMPLIANCE_VIOLATION_THRESHOLD = 0.9;
+export const COMPLIANCE_VIOLATION_THRESHOLD = 0.99;
 
 /** Longest agent message sent to the classifier. */
 export const MAX_AGENT_MESSAGE_CHARS = 8 * 1024;

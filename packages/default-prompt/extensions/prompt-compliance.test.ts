@@ -122,7 +122,7 @@ function turn(overrides: Record<string, unknown> = {}) {
 
 const violationResult = {
 	answers: {
-		[TOLSTOY_ID]: { type: "bool", probability: 0.97 },
+		[TOLSTOY_ID]: { type: "bool", probability: 0.999 },
 		"not-a-rule": { type: "bool", probability: 0.02 },
 	},
 	stopReason: "stop",
@@ -216,8 +216,8 @@ describe("prompt-compliance wiring", () => {
 	});
 
 	test("/compliance threshold raises the bar for a warning", async () => {
-		const h = await harness({ classify: () => Promise.resolve({ answers: { [TOLSTOY_ID]: { probability: 0.6 } }, stopReason: "stop" }) });
-		await h.command("threshold 0.8");
+		const h = await harness({ classify: () => Promise.resolve({ answers: { [TOLSTOY_ID]: { probability: 0.995 } }, stopReason: "stop" }) });
+		await h.command("threshold 0.999");
 		await h.fire(turn());
 		expect(h.sent.length).toBe(0);
 	});

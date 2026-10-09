@@ -213,6 +213,7 @@ describe("verdicts", () => {
 		const violations = selectViolations(
 			result({ P01: { probability: 0.9 }, P02: { probability: 0.8 } }),
 			shared,
+			0.5,
 		);
 		expect(violations.length).toBe(1);
 	});
