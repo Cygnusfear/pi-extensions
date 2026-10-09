@@ -196,7 +196,7 @@ export const COMPLIANCE_REGISTRY: RuleRegistry = {
 	},
 	// P46 - - ALWAYS respond to me in the same tone and complexity as I communic
 	"- always respond to me in the same tone and comp": {
-		violation: "The message's tone or complexity does not match how the hooman communicated.",
+		violation: "A message addressed to the Hooman does not match the tone or complexity the Hooman used when writing to the agent. Messages to peers are not this rule.",
 	},
 	// P47 - - ALWAYS make sure you've read the `asd-ste100-skill` for technical…
 	"- always make sure you've read the `asd-ste100-s": {
@@ -284,7 +284,7 @@ export const COMPLIANCE_REGISTRY: RuleRegistry = {
 	},
 	// P68 - When this is the first text in a conversation, begin the user-facing
 	"when this is the first text in a conversation, b": {
-		violation: "The message is the first text of a conversation and does not begin with the dragon emoji.",
+		violation: "The message is the first text of a conversation with the Hooman and does not begin with the dragon emoji. A message sent to peers, or any later message in a conversation, is not this rule.",
 	},
 	// P69 - - When the requested task is complete or no authorized action remain
 	"- when the requested task is complete or no auth": {
