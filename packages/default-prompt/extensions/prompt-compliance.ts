@@ -566,7 +566,10 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 						})),
 					},
 				},
-				{ deliverAs: "steer" },
+				// Delivered with the next turn, not mid-work: a note that interrupts an
+				// edit while the work is correct reads as noise, and noise is how a real
+				// finding later gets ignored. The agent reads it as it composes again.
+				{ deliverAs: "nextTurn" },
 			);
 		}
 

@@ -134,7 +134,7 @@ describe("prompt-compliance wiring", () => {
 		await h.fire(turn());
 		expect(h.classifyCalls.length).toBe(1);
 		expect(h.sent.length).toBe(1);
-		expect(h.sent[0].options.deliverAs).toBe("steer");
+		expect(h.sent[0].options.deliverAs).toBe("nextTurn");
 		expect(h.sent[0].message.customType).toBe("prompt-compliance");
 		expect(h.sent[0].message.content).toContain(TOLSTOY_ID);
 		expect(h.sent[0].message.details.threshold).toBeGreaterThan(0);
