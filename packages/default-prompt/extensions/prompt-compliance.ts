@@ -57,6 +57,21 @@ const CLASSIFIER_TIMEOUT_MS = 15_000;
  */
 const REGISTRATION_KEY = "__piPromptComplianceTeardown";
 
+/** Repo-local rules, judged alongside the bundled contract when present. */
+const REPO_RULES_RELATIVE = path.join(".agents", "RULES.md");
+
+/** Walk up from the session's cwd to the repo root, the way the prompt layer does. */
+function findRepoRoot(cwd: string): string {
+	let dir = path.resolve(cwd);
+	while (true) {
+		if (existsSync(path.join(dir, ".git"))) return dir;
+		const parent = path.dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return path.resolve(cwd);
+}
+
 /** Verdicts kept for `/compliance audit`. */
 const AUDIT_LIMIT = 20;
 
@@ -134,6 +149,12 @@ function agentModelId(message: unknown, ctx: unknown): string {
 	return "unknown";
 }
 
+/** The session's working directory, with a sane fallback for hosts that omit it. */
+function sessionCwd(ctx: unknown): string {
+	const cwd = (ctx as { cwd?: unknown }).cwd;
+	return typeof cwd === "string" && cwd.length > 0 ? cwd : process.cwd();
+}
+
 export default function promptComplianceExtension(pi: ExtensionAPI) {
 	const lifecycle: Record<string, unknown> = { pid: process.pid, key: REGISTRATION_KEY };
 	const previous = (globalThis as Record<string, unknown>)[REGISTRATION_KEY];
@@ -160,7 +181,9 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	let enabled = true;
 	let threshold = COMPLIANCE_VIOLATION_THRESHOLD;
 	let cached: {
-		mtimeMs: number;
+		/** Every rule source with its mtime; any change rebuilds the pack. */
+		signature: string;
+		sources: readonly string[];
 		pack: RulePack;
 		questions: Record<string, ClassifierQuestion>;
 	} | null = null;
@@ -184,20 +207,25 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 			"default.md",
 		);
 
-	const loadPack = async (): Promise<typeof cached> => {
-		if (!existsSync(contractPath)) {
-			contractError = `contract not found at ${contractPath}`;
+	const loadPack = async (cwd: string): Promise<typeof cached> => {
+		const candidates = [contractPath, path.join(findRepoRoot(cwd), REPO_RULES_RELATIVE)];
+		const sources: string[] = [];
+		const stamps: string[] = [];
+		for (const file of candidates) {
+			if (!existsSync(file)) continue;
+			const stat = await fs.stat(file);
+			sources.push(file);
+			stamps.push(`${file}:${stat.mtimeMs}`);
+		}
+		if (sources.length === 0) {
+			contractError = `no rule sources found (${candidates.join(", ")})`;
 			return null;
 		}
-		const stat = await fs.stat(contractPath);
-		if (cached && cached.mtimeMs === stat.mtimeMs) return cached;
-		const source = await fs.readFile(contractPath, "utf8");
-		const pack = buildRulePack(source);
-		cached = {
-			mtimeMs: stat.mtimeMs,
-			pack,
-			questions: buildQuestions(pack.rules),
-		};
+		const signature = stamps.join("|");
+		if (cached && cached.signature === signature) return cached;
+		const texts = await Promise.all(sources.map((file) => fs.readFile(file, "utf8")));
+		const pack = buildRulePack(...texts);
+		cached = { signature, sources, pack, questions: buildQuestions(pack.rules) };
 		contractError = null;
 		return cached;
 	};
@@ -247,7 +275,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 					return;
 				}
 				case "calibrate": {
-					const loaded = await loadPack().catch(() => null);
+					const loaded = await loadPack(sessionCwd(ctx)).catch(() => null);
 					const host = resolveClassifierHost(ctx.modelRegistry as unknown);
 					if (!loaded || !host) {
 						ctx.ui.notify(
@@ -307,7 +335,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				}
 				case "report": {
 					const days = Math.min(30, Math.max(1, Number.parseInt(value ?? "1", 10) || 1));
-					const loaded = await loadPack().catch(() => null);
+					const loaded = await loadPack(sessionCwd(ctx)).catch(() => null);
 					const rules = loaded?.pack.rules ?? [];
 					const ruleIds = rules.map((rule) => rule.id);
 					const observations = await readObservations();
@@ -361,8 +389,11 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 						[
 							`Contract checker: ${enabled ? "on" : "off"} | threshold ${threshold}`,
 							pack
-								? `Rules: ${pack.rules.length}, every one derived from the contract file`
+								? `Rules: ${pack.rules.length}, every one derived from its own text`
 								: "Rules: not loaded yet",
+							cached
+								? `Sources: ${cached.sources.map((file) => path.basename(path.dirname(file)) + "/" + path.basename(file)).join(", ")}`
+								: null,
 							`Warnings this session: ${cooldown.warningCount}`,
 							contractError ? `Contract error: ${contractError}` : null,
 							"Usage: /compliance on|off|status|audit|calibrate|threshold <0-1>",
@@ -406,7 +437,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		let pack: RulePack;
 		let questions: Record<string, ClassifierQuestion>;
 		try {
-			const loaded = await loadPack();
+			const loaded = await loadPack(sessionCwd(ctx));
 			if (!loaded) {
 				finish("contract unavailable", { contractError });
 				return;

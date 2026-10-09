@@ -134,18 +134,28 @@ export function parseContractParagraphs(
 }
 
 /**
- * Build the pack from the contract as it stands right now.
+ * Build the pack from the rule sources as they stand right now.
  *
- * Every paragraph is a rule; the criterion is derived from the paragraph. Call
- * this again when the file changes and the rules follow.
+ * Every paragraph is a rule; the criterion is derived from the paragraph. Pass
+ * every source that applies - the bundled contract and a repo's own rules - and
+ * call this again when any of them changes: the rules follow.
+ *
+ * Identity is the paragraph hash, so the same paragraph appearing in two
+ * sources is one rule, and a paragraph edited in either source is a new rule.
  */
-export function buildRulePack(source: string): RulePack {
-	const rules = parseContractParagraphs(source).map((paragraph) => ({
-		...paragraph,
-		violation: violationCriterion(paragraph),
-	}));
+export function buildRulePack(...sources: readonly string[]): RulePack {
+	const seen = new Set<string>();
+	const rules: CheckableRule[] = [];
+	for (const source of sources) {
+		if (source.trim().length === 0) continue;
+		for (const paragraph of parseContractParagraphs(source)) {
+			if (seen.has(paragraph.id)) continue;
+			seen.add(paragraph.id);
+			rules.push({ ...paragraph, violation: violationCriterion(paragraph) });
+		}
+	}
 	if (rules.length === 0) {
-		throw new Error("The contract has no paragraphs to judge.");
+		throw new Error("No rule sources with paragraphs to judge.");
 	}
 	return { rules };
 }

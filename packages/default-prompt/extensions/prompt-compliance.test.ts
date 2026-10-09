@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -33,6 +33,8 @@ async function harness(
 	options: {
 		classify?: (model: unknown, context: unknown) => Promise<unknown>;
 		contract?: string;
+		/** Contents for a temp repo's .agents/RULES.md; the repo is created either way. */
+		repo?: string;
 	} = {},
 ): Promise<Harness> {
 	const stateDir = mkdtempSync(path.join(tmpdir(), "pi-compliance-harness-"));
@@ -69,7 +71,15 @@ async function harness(
 
 	register(fakePi as any);
 
+	const repoDir = mkdtempSync(path.join(tmpdir(), "pi-compliance-repo-"));
+	mkdirSync(path.join(repoDir, ".git"), { recursive: true });
+	if (options.repo !== undefined) {
+		mkdirSync(path.join(repoDir, ".agents"), { recursive: true });
+		writeFileSync(path.join(repoDir, ".agents", "RULES.md"), options.repo);
+	}
+
 	const ctx = {
+		cwd: repoDir,
 		ui: {
 			notify(text: string, level: string) {
 				notifications.push({ text, level });
@@ -90,6 +100,7 @@ async function harness(
 		notifications,
 		stateDir,
 		contractPath,
+		repoDir,
 		setClassifier(result) {
 			classifier = () => Promise.resolve(result);
 		},
@@ -350,5 +361,39 @@ describe("live contract edits", () => {
 			}),
 		);
 		expect(JSON.stringify(h.classifyCalls[1])).toContain("NEVER WRITE LIKE TOLSTOY, EVER");
+	});
+});
+
+describe("repo-local rules", () => {
+	test("a repo's .agents/RULES.md is judged alongside the contract", async () => {
+		const h = await harness({ repo: "## Repo rules\n\n- NEVER EDIT THE VENDOR DIRECTORY.\n" });
+		await h.fire(turn());
+		expect(JSON.stringify(h.classifyCalls[0])).toContain("NEVER EDIT THE VENDOR DIRECTORY");
+	});
+
+	test("editing the repo rules is picked up on the next check, no reload", async () => {
+		const h = await harness({ repo: "- FIRST REPO RULE.\n" });
+		await h.fire(turn({ turnIndex: 1 }));
+		expect(JSON.stringify(h.classifyCalls[0])).toContain("FIRST REPO RULE");
+		writeFileSync(
+			path.join(h.repoDir, ".agents", "RULES.md"),
+			"- SECOND REPO RULE, REWRITTEN.\n",
+		);
+		await h.fire(
+			turn({
+				turnIndex: 2,
+				message: { role: "assistant", content: [{ type: "text", text: "Second message after the repo rules changed." }] },
+			}),
+		);
+		const asked = JSON.stringify(h.classifyCalls[1]);
+		expect(asked).toContain("SECOND REPO RULE, REWRITTEN");
+		expect(asked).not.toContain("FIRST REPO RULE");
+	});
+
+	test("a repo without that file judges the contract alone", async () => {
+		const h = await harness();
+		await h.fire(turn());
+		expect(JSON.stringify(h.classifyCalls[0])).toContain("NEVER WRITE LIKE TOLSTOY");
+		expect(h.notifications.some((note) => note.text.includes("no rule sources"))).toBe(false);
 	});
 });

@@ -53,6 +53,13 @@ describe("the contract is the configuration", () => {
 		expect(after?.id).not.toBe(before?.id);
 	});
 
+	test("several sources are one rule set: the same paragraph in two files is one rule", () => {
+		const shared = "- ALWAYS USE BUN, NEVER NPM.\n";
+		const pack = buildRulePack(shared, "## Repo rules\n\n" + shared + "- EDIT THE RULES FILE FREELY.\n");
+		expect(pack.rules.filter((rule) => rule.text.includes("ALWAYS USE BUN")).length).toBe(1);
+		expect(pack.rules.some((rule) => rule.text.includes("EDIT THE RULES FILE FREELY"))).toBe(true);
+	});
+
 	test("a paragraph added today is judged today", () => {
 		const edited = contract + "\n\n- A BRAND NEW RULE THE HOOMAN JUST WROTE.\n";
 		const added = buildRulePack(edited).rules.find((rule) =>
