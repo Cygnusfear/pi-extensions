@@ -34,7 +34,7 @@ The same prompt also tells agents to use short Maiboard ticket links, preferably
 - **Classifier** — `openrouter/perplexity/pplx-decider-v1.1-27b`, one bool question per checkable rule, probability threshold 0.9 by default. Measured: ~$0.0002 per check, ~1.2 s, no output tokens.
 - **Warning** — `pi.sendMessage(..., { deliverAs: "steer" })`, so the agent sees `⚠️ … P06 — NEVER TALK ABOUT AN UNVERIFIED CONTEXT WINDOW…` at its next reasoning step and corrects itself. No tool call is blocked and no turn is forced.
 - **Rate limiting** — one warning per turn, a 12-turn cooldown per rule, and a 40-warning session budget: a checker that nags is a quota leak.
-- **Fail-open** — a build without a classifier API, a provider error, or a contract that no longer matches the registry leaves the checker silent. It never fails a turn.
+- **Fail-open** — a build without a classifier API, a provider error, or a contract file that cannot be read leaves the checker silent. It never fails a turn.
 
 The extension host is probed structurally for `classify`, because this package's pinned pi types predate classifier models.
 
