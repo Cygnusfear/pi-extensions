@@ -1,0 +1,23 @@
+packages/default-prompt/README.md
+  s_17acfa267dfe69::t_d20bab32fb2c8b 35
+packages/default-prompt/extensions/prompt-compliance.ts
+  s_17acfa267dfe69::t_a6fc9719c6c805 569-572
+packages/default-prompt/extensions/prompt-compliance.test.ts
+  s_17acfa267dfe69::t_ccd1cfee98eaf0 137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7e3890b336e3dc9c2a6fd142c419dab942b6a042",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
