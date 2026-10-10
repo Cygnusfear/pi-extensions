@@ -70,7 +70,10 @@ export function buildRuleLabel(text: string, max = 72): string {
  * words travel with the question.
  */
 export function violationCriterion(paragraph: ContractParagraph): string {
-	return `The message does, advises, or proposes exactly what this paragraph forbids, or fails the standard it sets: "${paragraph.text}"`;
+	// The paragraph's own words are already in the question's instructions. Sending
+	// them a second time here made every check ~3x more expensive for no signal:
+	// the criterion only has to describe what breaking the rule looks like.
+	return "The message does, advises, or proposes exactly what the rule above forbids, or fails the standard it sets.";
 }
 
 /**

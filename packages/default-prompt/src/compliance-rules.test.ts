@@ -9,6 +9,7 @@ import {
 	violationCriterion,
 } from "./compliance-rules.ts";
 import { COMPLIANCE_FIXTURES } from "./compliance-fixtures.ts";
+import { buildQuestions } from "./prompt-compliance.ts";
 
 const contractPath = path.resolve(
 	path.dirname(fileURLToPath(import.meta.url)),
@@ -26,7 +27,16 @@ describe("the contract is the configuration", () => {
 		expect(pack.rules.length).toBeGreaterThan(0);
 		for (const rule of pack.rules) {
 			expect(rule.violation).toBe(violationCriterion(rule));
-			expect(rule.violation).toContain(rule.text);
+			// The rule's words travel once, in the question's instructions; the
+			// criterion only describes what breaking it looks like. Repeating the
+			// text here made every check ~31% more expensive for no signal.
+			expect(rule.violation).not.toContain(rule.text);
+			const question = buildQuestions([rule])[rule.id];
+			expect(question.type).toBe("bool");
+			if (question.type === "bool") {
+				expect(question.instructions).toContain(rule.text);
+				expect(question.criteria.true).toBe(rule.violation);
+			}
 		}
 	});
 
@@ -49,7 +59,8 @@ describe("the contract is the configuration", () => {
 			rule.text.includes("NEVER WRITE LIKE TOLSTOY"),
 		);
 		expect(after?.text).toContain("EVER, EVEN IN A HURRY");
-		expect(after?.violation).toContain("EVER, EVEN IN A HURRY");
+		const question = after ? buildQuestions([after])[after.id] : undefined;
+		expect(question && question.type === "bool" ? question.instructions : "").toContain("EVER, EVEN IN A HURRY");
 		expect(after?.id).not.toBe(before?.id);
 	});
 
@@ -66,7 +77,8 @@ describe("the contract is the configuration", () => {
 			rule.text.includes("A BRAND NEW RULE"),
 		);
 		expect(added).toBeDefined();
-		expect(added?.violation).toContain("A BRAND NEW RULE THE HOOMAN JUST WROTE");
+		const question = added ? buildQuestions([added])[added.id] : undefined;
+		expect(question && question.type === "bool" ? question.instructions : "").toContain("A BRAND NEW RULE THE HOOMAN JUST WROTE");
 	});
 
 	test("a rule id does not move when a paragraph is inserted above it", () => {
