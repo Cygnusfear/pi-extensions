@@ -411,6 +411,21 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				}
 				default: {
 					const pack = cached?.pack ?? null;
+					// A checker that fails silently reads as a checker that finds
+					// nothing: report its own failures with their causes.
+					let degraded: string | null = null;
+					try {
+						const stats = aggregateObservations(await readObservations(), Date.now() - 24 * 60 * 60 * 1000);
+						if (stats.failures > 0) {
+							const causes = stats.failureNotes
+								.slice(0, 2)
+								.map(({ note, count }) => `${count}× ${note.slice(0, 60)}`)
+								.join(", ");
+							degraded = `Checks that failed to run (24h): ${stats.failures}${causes ? ` — ${causes}` : ""}`;
+						}
+					} catch {
+						// Status must render even when the log cannot be read.
+					}
 					ctx.ui.notify(
 						[
 							`Contract checker: ${enabled ? "on" : "off"} | threshold ${threshold}`,
@@ -421,6 +436,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 								? `Sources: ${cached.sources.map((file) => path.basename(path.dirname(file)) + "/" + path.basename(file)).join(", ")}`
 								: null,
 							`Warnings this session: ${cooldown.warningCount}`,
+							degraded,
 							contractError ? `Contract error: ${contractError}` : null,
 							"Usage: /compliance on|off|status|audit|calibrate|threshold <0-1>",
 						]

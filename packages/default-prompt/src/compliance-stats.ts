@@ -83,6 +83,8 @@ export interface ModelStats {
 export interface ComplianceStats {
 	readonly checks: number;
 	readonly failures: number;
+	/** Why checks failed, most frequent first. */
+	readonly failureNotes: readonly { readonly note: string; readonly count: number }[];
 	readonly cost: number;
 	/** Observations that carried provider-reported usage. */
 	readonly usageReported: number;
@@ -116,6 +118,7 @@ export function aggregateObservations(
 	let failures = 0;
 	let cost = 0;
 	let usageReported = 0;
+	const failureCounts = new Map<string, number>();
 
 	for (const observation of observations) {
 		if (observation.ts < sinceMs) continue;
@@ -132,6 +135,8 @@ export function aggregateObservations(
 
 		if (!observation.ok) {
 			failures += 1;
+			const note = observation.note?.trim() || "no reason recorded";
+			failureCounts.set(note, (failureCounts.get(note) ?? 0) + 1);
 			continue;
 		}
 
@@ -151,7 +156,11 @@ export function aggregateObservations(
 		.map(([model, entry]) => ({ model, ...entry }))
 		.sort((left, right) => right.checks - left.checks);
 
-	return { checks, failures, cost, usageReported, models, ruleHits, ruleHitsByModel };
+	const failureNotes = [...failureCounts.entries()]
+		.map(([note, count]) => ({ note, count }))
+		.sort((left, right) => right.count - left.count);
+
+	return { checks, failures, failureNotes, cost, usageReported, models, ruleHits, ruleHitsByModel };
 }
 
 /** Rule IDs from `allRuleIds` with no hit in the window. */

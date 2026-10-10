@@ -68,6 +68,28 @@ describe("aggregation", () => {
 		const stats = aggregateObservations([observation(), observation({ ok: false })], now - DAY);
 		expect(stats.cost).toBeCloseTo(0.0004, 8);
 	});
+
+	test("keeps why a check failed, most frequent first — a degraded checker must say so", () => {
+		const stats = aggregateObservations(
+			[
+				observation({ ok: false, note: "Request aborted" }),
+				observation({ ok: false, note: "Request aborted" }),
+				observation({ ok: false, note: "System One API error (429)" }),
+				observation(),
+			],
+			now - DAY,
+		);
+		expect(stats.failures).toBe(3);
+		expect(stats.failureNotes).toEqual([
+			{ note: "Request aborted", count: 2 },
+			{ note: "System One API error (429)", count: 1 },
+		]);
+	});
+
+	test("records a failure that carries no reason rather than dropping it", () => {
+		const stats = aggregateObservations([observation({ ok: false, note: "" })], now - DAY);
+		expect(stats.failureNotes).toEqual([{ note: "no reason recorded", count: 1 }]);
+	});
 });
 
 describe("never-hit signal", () => {
