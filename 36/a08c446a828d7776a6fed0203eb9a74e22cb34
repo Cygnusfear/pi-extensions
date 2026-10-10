@@ -1,0 +1,23 @@
+packages/pi-mesh/extension/disabled.test.ts
+  s_688bf088156e75::t_b93a777a13bdc4 1-37
+packages/pi-mesh/extension/disabled.ts
+  s_688bf088156e75::t_a7eb4b6a5faaf0 1-28
+packages/pi-mesh/extension/pi-mesh.ts
+  s_688bf088156e75::t_1f0fa245de7586 16,1786-1787
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "36a08c446a828d7776a6fed0203eb9a74e22cb34",
+  "prompts": {},
+  "sessions": {
+    "s_688bf088156e75": {
+      "agent_id": {
+        "tool": "Jason Europa Corsi",
+        "id": "0d8c977c-e405-4c6d-a5ae-2d484af16794",
+        "model": "anthropic/claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
