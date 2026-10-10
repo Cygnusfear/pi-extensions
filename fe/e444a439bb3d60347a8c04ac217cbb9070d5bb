@@ -1,0 +1,21 @@
+packages/shared/src/session-nickname.ts
+  s_688bf088156e75::t_dcd3fef54637b0 803-832,834-835
+packages/shared/src/session-identity.test.ts
+  s_688bf088156e75::t_2a77b66efffdab 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fee444a439bb3d60347a8c04ac217cbb9070d5bb",
+  "prompts": {},
+  "sessions": {
+    "s_688bf088156e75": {
+      "agent_id": {
+        "tool": "Jason Europa Corsi",
+        "id": "0d8c977c-e405-4c6d-a5ae-2d484af16794",
+        "model": "anthropic/claude-opus-5-5"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
