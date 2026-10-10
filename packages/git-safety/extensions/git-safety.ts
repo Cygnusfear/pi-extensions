@@ -28,9 +28,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
 import { resolveDeciderHost } from "../../shared/src/decider.ts";
 import {
+	aggregateGitDecisions,
 	collectRepoSnapshot,
 	commandDirectory,
 	decideGitCommand,
+	needsDecision,
+	readGitDecisions,
+	renderGitDecisionReport,
 	type GitVerdict,
 } from "../../shared/src/git-decision.ts";
 
@@ -55,8 +59,15 @@ export default function (pi: ExtensionAPI) {
 	const cache = new Map<string, GitVerdict>();
 
 	pi.registerCommand("git-lock", {
-		description: "Git safety: /git-lock decide | block | off",
+		description: "Git safety: /git-lock decide | block | off | report [days]",
 		handler: async (_args, ctx) => {
+			const [verb, value] = _args.trim().toLowerCase().split(/\s+/);
+			if (verb === "report") {
+				const days = Math.min(30, Math.max(1, Number.parseInt(value ?? "1", 10) || 1));
+				const stats = aggregateGitDecisions(await readGitDecisions(), Date.now() - days * 24 * 60 * 60 * 1000);
+				ctx.ui.notify(renderGitDecisionReport(stats, days), "info");
+				return;
+			}
 			const arg = _args.trim().toLowerCase();
 			if (arg === "decide" || arg === "block" || arg === "off") {
 				mode = arg;
@@ -71,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`Git safety: ${mode}`, "info");
 				return;
 			}
-			ctx.ui.notify("Usage: /git-lock [decide|block|off]", "warning");
+			ctx.ui.notify("Usage: /git-lock [decide|block|off|report [days]]", "warning");
 		},
 	});
 
@@ -133,7 +144,9 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		if (!isBash || !GIT_CANDIDATE_RE.test(cmd)) return undefined;
+		// Cheap gate first: ordinary git traffic (status, log, add, commit, diff)
+		// never reaches the model, so it costs nothing and waits for nothing.
+		if (!isBash || !GIT_CANDIDATE_RE.test(cmd) || !needsDecision(cmd)) return undefined;
 
 		const cached = cache.get(cmd);
 		if (cached) return cached.block ? { block: true, reason: cached.reason } : undefined;
@@ -155,13 +168,17 @@ export default function (pi: ExtensionAPI) {
 
 		// The repository this command would touch, which is not always the one the
 		// session sits in (\`cd /other/repo && git reset --hard\`).
-		const snapshot = await collectRepoSnapshot(
-			commandDirectory(cmd, ctx.cwd, (event.input as { cwd?: unknown })?.cwd as string | undefined),
+		const dir = commandDirectory(
+			cmd,
+			ctx.cwd,
+			(event.input as { cwd?: unknown })?.cwd as string | undefined,
 		);
+		const snapshot = await collectRepoSnapshot(dir);
 		const verdict = await decideGitCommand({
 			host: resolveDeciderHost(ctx.modelRegistry as unknown),
 			command: cmd,
 			snapshot,
+			dir,
 			fallback,
 		});
 		if (cache.size >= VERDICT_CACHE_LIMIT) cache.clear();

@@ -20,7 +20,14 @@
  */
 
 import { execFile } from "node:child_process";
+import { appendFile, mkdir, readFile, rename, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
+
+const statFile = async (file: string): Promise<number> => (await stat(file)).size;
+const renameFile = async (from: string, to: string): Promise<void> => {
+	await rename(from, to);
+};
 import { promisify } from "node:util";
 import {
 	askDecider,
@@ -161,6 +168,43 @@ const ENUMERATED_DISASTERS: readonly { readonly re: RegExp; readonly reason: str
 	},
 ];
 
+/**
+ * The cheap gate before any model call.
+ *
+ * Only commands that can plausibly damage work are worth asking about: status,
+ * log, add, commit, diff and friends are pure string matches away from the
+ * provider, so a session's ordinary git traffic costs nothing and waits for
+ * nothing. The gate is deliberately wider than the old destructive-command
+ * matcher — a stash drop or a branch -D destroys work the matcher never flagged,
+ * and those are exactly the mistakes this guard exists to stop.
+ */
+const RISKY_VERB_RE = new RegExp(
+	[
+		"stash\\s+(drop|clear|pop)",
+		"branch\\s+(-D|--delete|-d\\s)",
+		"reset\\s+--hard",
+		"checkout\\s+(--|\\.)",
+		"restore\\b",
+		"clean\\s+-[a-zA-Z]*[fd]",
+		"push\\s+(--force|-f\\b|--delete)",
+		"commit\\s+--amend",
+		"tag\\s+(-d|--delete)",
+		"reflog",
+		"filter-branch",
+		"update-ref",
+		"gc\\b",
+		"prune",
+		"remote\\s+prune",
+		"worktree\\s+remove",
+		"submodule\\s+deinit",
+	].join("|"),
+);
+
+/** True when this command is worth a decision-model call. */
+export function needsDecision(command: string): boolean {
+	return RISKY_VERB_RE.test(command);
+}
+
 /** A deterministic disaster in this command, if any. */
 export function enumeratedDisaster(command: string): string | null {
 	for (const { re, reason } of ENUMERATED_DISASTERS) {
@@ -199,6 +243,121 @@ export const GIT_QUESTIONS: Readonly<Record<string, DeciderQuestion>> = {
 	},
 };
 
+/** Where decisions are recorded; override for tests. */
+export function gitDecisionDir(): string {
+	return process.env.PI_GIT_LOCK_STATE_DIR ?? path.join(homedir(), ".pi", "agent", "git-lock");
+}
+
+/** One recorded decision: what was asked, what was decided, what it cost. */
+export interface GitDecisionRecord {
+	readonly ts: number;
+	readonly pid: number;
+	readonly command: string;
+	readonly dir: string;
+	readonly block: boolean;
+	readonly source: GitVerdict["source"];
+	readonly reason: string;
+	readonly axes?: Readonly<Record<string, number>>;
+	readonly cost?: number;
+	readonly ms: number;
+	readonly model?: string;
+}
+
+const LOG_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Append one decision. Never throws: an audit trail must not break a guard. */
+export function recordGitDecision(record: GitDecisionRecord): void {
+	void (async () => {
+		try {
+			const dir = gitDecisionDir();
+			await mkdir(dir, { recursive: true });
+			const file = path.join(dir, "decisions.jsonl");
+			try {
+				const stat = await statFile(file);
+				if (stat > LOG_MAX_BYTES) await renameFile(file, `${file}.1`);
+			} catch {
+				// No log yet.
+			}
+			await appendFile(file, `${JSON.stringify(record)}\n`, "utf8");
+		} catch {
+			// Ignored on purpose.
+		}
+	})();
+}
+
+/** Read the log, including the rotated file, skipping lines that do not parse. */
+export async function readGitDecisions(): Promise<readonly GitDecisionRecord[]> {
+	const dir = gitDecisionDir();
+	const records: GitDecisionRecord[] = [];
+	for (const name of ["decisions.jsonl.1", "decisions.jsonl"]) {
+		try {
+			const text = await readFile(path.join(dir, name), "utf8");
+			for (const line of text.split("\n")) {
+				if (line.trim().length === 0) continue;
+				try {
+					const parsed = JSON.parse(line) as GitDecisionRecord;
+					if (typeof parsed?.ts === "number") records.push(parsed);
+				} catch {
+					// A truncated tail is not worth failing a report over.
+				}
+			}
+		} catch {
+			// Missing file: nothing recorded yet.
+		}
+	}
+	return records;
+}
+
+export interface GitDecisionStats {
+	readonly candidates: number;
+	readonly blocked: number;
+	readonly allowed: number;
+	readonly bySource: Readonly<Record<string, number>>;
+	readonly cost: number;
+	readonly blockedCommands: readonly { readonly command: string; readonly count: number }[];
+}
+
+/** Aggregate the log over a window. */
+export function aggregateGitDecisions(records: readonly GitDecisionRecord[], sinceMs: number): GitDecisionStats {
+	const window = records.filter((record) => record.ts >= sinceMs);
+	const bySource: Record<string, number> = {};
+	const blockedCounts = new Map<string, number>();
+	let cost = 0;
+	for (const record of window) {
+		bySource[record.source] = (bySource[record.source] ?? 0) + 1;
+		cost += record.cost ?? 0;
+		if (record.block) {
+			blockedCounts.set(record.command, (blockedCounts.get(record.command) ?? 0) + 1);
+		}
+	}
+	return {
+		candidates: window.length,
+		blocked: window.filter((record) => record.block).length,
+		allowed: window.filter((record) => !record.block).length,
+		bySource,
+		cost,
+		blockedCommands: [...blockedCounts.entries()]
+			.map(([command, count]) => ({ command, count }))
+			.sort((left, right) => right.count - left.count)
+			.slice(0, 10),
+	};
+}
+
+/** Human-readable report for /git-lock report. */
+export function renderGitDecisionReport(stats: GitDecisionStats, days: number): string {
+	const lines = [
+		`Git guard — last ${days === 1 ? "24 hours" : `${days} days`}: ${stats.candidates} candidate command(s), ${stats.blocked} blocked, ${stats.allowed} allowed`,
+		`Cost: ${stats.cost.toFixed(5)} · by source: ${Object.entries(stats.bySource).map(([source, count]) => `${source} ${count}`).join(", ") || "none"}`,
+	];
+	if (stats.blockedCommands.length > 0) {
+		lines.push("Most blocked:");
+		for (const { command, count } of stats.blockedCommands) {
+			lines.push(`  ${count}× ${command.slice(0, 100)}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 export interface GitVerdict {
 	readonly block: boolean;
 	readonly reason: string;
@@ -213,6 +372,8 @@ export interface DecideGitOptions {
 	/** Runs when no decision can be made (no host, provider error): the caller's own guard. */
 	readonly fallback: () => GitVerdict | null;
 	readonly timeoutMs?: number;
+	/** The directory the command acts on, recorded for the trail. */
+	readonly dir?: string;
 }
 
 /**
@@ -224,9 +385,27 @@ export interface DecideGitOptions {
  * becoming no protection at all.
  */
 export async function decideGitCommand(options: DecideGitOptions): Promise<GitVerdict> {
+	const startedAt = Date.now();
+	const record = (verdict: GitVerdict, axes?: Record<string, number>, cost?: number, model?: string): GitVerdict => {
+		recordGitDecision({
+			ts: Date.now(),
+			pid: process.pid,
+			command: options.command,
+			dir: options.dir ?? "",
+			block: verdict.block,
+			source: verdict.source,
+			reason: verdict.reason,
+			...(axes ? { axes } : {}),
+			...(cost !== undefined ? { cost } : {}),
+			ms: Date.now() - startedAt,
+			...(model ? { model } : {}),
+		});
+		return verdict;
+	};
+
 	const disaster = enumeratedDisaster(options.command);
 	if (disaster) {
-		return { block: true, reason: `🚫 ${disaster}`, source: "enum" };
+		return record({ block: true, reason: `🚫 ${disaster}`, source: "enum" });
 	}
 
 	const result = await askDecider(
@@ -235,6 +414,12 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 		GIT_QUESTIONS,
 		{ timeoutMs: options.timeoutMs ?? 2000 },
 	);
+	const axes: Record<string, number> = {};
+	for (const key of ["unrecoverable_loss", "repository_corruption", "shared_history_damage"]) {
+		const probability = result?.answers?.[key]?.probability;
+		if (typeof probability === "number") axes[key] = probability;
+	}
+	const cost = result?.usage?.cost?.total;
 	const fired = decideAboveThreshold(result, GIT_VERDICT_THRESHOLD, [
 		"unrecoverable_loss",
 		"repository_corruption",
@@ -243,9 +428,9 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 	if (fired.length === 0) {
 		if (!result) {
 			const fallback = options.fallback();
-			return fallback ?? { block: false, reason: "", source: "fallback" };
+			return record(fallback ?? { block: false, reason: "", source: "fallback" });
 		}
-		return { block: false, reason: "", source: "fallback" };
+		return record({ block: false, reason: "", source: "fallback" }, axes, cost);
 	}
 
 	const axis = fired[0] as GitVerdict["source"];
@@ -255,5 +440,9 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 			: axis === "repository_corruption"
 				? "writes inside .git — repository corruption is not recoverable from the work tree"
 				: "rewrites or deletes history other clones may already have";
-	return { block: true, reason: `🚫 ${options.command.trim().slice(0, 120)} — ${reason}`, source: axis };
+	return record(
+		{ block: true, reason: `🚫 ${options.command.trim().slice(0, 120)} — ${reason}`, source: axis },
+		axes,
+		cost,
+	);
 }

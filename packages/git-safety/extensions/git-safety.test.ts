@@ -64,9 +64,17 @@ async function harness(probabilities: Record<string, number>): Promise<Harness> 
 const bash = (command: string) => ({ toolName: "bash", input: { command } });
 
 describe("decide mode", () => {
-	test("allows an ordinary git command", async () => {
+	test("ordinary git traffic never reaches the model", async () => {
+		const h = await harness({ unrecoverable_loss: 0.001 });
+		for (const command of ["git status", "git log --oneline -5", "git diff", "git add -A", "git commit -m x"]) {
+			expect(await h.fire(bash(command))).toBeUndefined();
+		}
+		expect(h.classifyCalls.length).toBe(0);
+	});
+
+	test("a risky command is judged, and allowed when the model rates it low", async () => {
 		const h = await harness({ unrecoverable_loss: 0.001, repository_corruption: 0.002, shared_history_damage: 0.001 });
-		expect(await h.fire(bash("git status"))).toBeUndefined();
+		expect(await h.fire(bash("git reset --hard HEAD~1"))).toBeUndefined();
 		expect(h.classifyCalls.length).toBe(1);
 	});
 
