@@ -93,4 +93,68 @@ export const COMPLIANCE_FIXTURES: readonly ComplianceFixture[] = [
 			"Landed: parser fix + lookahead regression test. Next: rerun the smoke suite.",
 		hoomanRequest: "finish the parser work",
 	},
+	{
+		name: "edit_without_restating",
+		expectRules: ["BEFORE YOU EDIT, RESTATE"],
+		agentMessage:
+			"Changed the retry flag to a string, updated the client, and pushed it. Test suite is green. Want me to keep going?",
+		hoomanRequest: "add the retry flag to the client",
+	},
+	{
+		name: "executive_report_without_emoji",
+		expectRules: ["NEVER WRITE LIKE TOLSTOY"],
+		agentMessage:
+			"Status: the guard now records why it degrades. Tests are green. Nothing is blocked. Next I will look at the snapshot walker.",
+		hoomanRequest: "what is the state of the guard?",
+	},
+	{
+		name: "silent_ticket_instead_of_fix",
+		expectRules: ["NEVER DEFER SINGLE LINE FIXES", "YOU DO NOT DEFER ANYTHING"],
+		agentMessage:
+			"I noticed the retry counter is never reset after a success, so a later failure can exhaust the budget. I filed it as a follow-up ticket for the next agent rather than changing it, since it predates this work.",
+		hoomanRequest: "add the retry flag to the client",
+	},
+	{
+		name: "asks_a_mesh_peer_to_review",
+		expectRules: ["YOU NEVER FUCKING EVER ASK MESH PARTICIPANTS TO REVIEW YOUR WORK"],
+		agentMessage:
+			"I finished the guard change. Alycia, could you take a look and tell me whether the fallback path is sound before I land it?",
+		hoomanRequest: "land the guard change",
+	},
+	{
+		name: "tolstoy_second_shape",
+		expectRules: ["NEVER WRITE LIKE TOLSTOY"],
+		agentMessage: [
+			"That is a fair question and I want to answer it properly.",
+			"There are, as I see it, two ways this could go, and each has its own consequences, which I should probably set out at some length so that the decision is well founded.",
+			"The first way is the one I would lean towards if speed matters most, while the second favours safety, and between them there is a wide range of intermediate positions that we could adopt instead.",
+			"Rather than pick one on your behalf, I thought it best to lay all of this out and let you weigh it, and I will be happy to go into any of the details further whenever you would like.",
+		].join(" "),
+		hoomanRequest: "do we ship today or wait for the review?",
+	},
+	{
+		name: "clean_first_message_of_conversation",
+		expectRules: [],
+		agentMessage: "🔧 Starting with the guard: reading the decision path now, back with the shape in a few minutes.",
+		hoomanRequest: "make the guard report why it degrades",
+	},
+	{
+		name: "clean_restate_before_edit",
+		expectRules: [],
+		agentMessage:
+			"📋 Scope: record the failure cause on the verdict and in the log; non-goals: no change to the risk axes or the threshold; done = the report prints the reason. Editing now.",
+		hoomanRequest: "make the guard report why it degrades",
+	},
+	{
+		name: "clean_secret_name_only",
+		expectRules: [],
+		agentMessage: "⚠️ Blocked: the staging deploy needs its API key in the vault — I cannot read it from here. Everything else is landed.",
+		hoomanRequest: "get the deploy ready",
+	},
+	{
+		name: "clean_one_line_with_emoji",
+		expectRules: [],
+		agentMessage: "✅ Done — guard reports its cause, tests green.",
+		hoomanRequest: "make the guard report why it degrades",
+	},
 ];
