@@ -1,0 +1,25 @@
+packages/git-safety/extensions/git-safety.ts
+  s_17acfa267dfe69::t_3127f73d2a47bf 32,156-160
+packages/shared/src/git-decision.test.ts
+  s_17acfa267dfe69::t_0377cdcadf84a1 8,126-140
+  s_17acfa267dfe69::t_3916495119e42a 141-142
+packages/shared/src/git-decision.ts
+  s_17acfa267dfe69::t_d163702b8e2e89 23,52-69
+  s_17acfa267dfe69::t_f147a6df855743 70-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "eff92c7a287340cbc6b370e0415be5ba0c92b6c6",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
