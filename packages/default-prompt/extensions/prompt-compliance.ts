@@ -38,6 +38,7 @@ import {
 	evaluateCalibration,
 	extractAgentMessage,
 	findLastMessageText,
+	selectRulesForCheck,
 	textFingerprint,
 	formatWarning,
 	resolveClassifierHost,
@@ -194,6 +195,13 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 	let dailyReportChecked = false;
 	/** Fingerprint of the last judged message, so a boundary cannot re-charge for it. */
 	let lastJudged = "";
+	/** Rules that produced a hit recently; recomputed on a timer, not per check. */
+	let firedRecently = new Set<string>();
+	let firedRecentlyAt = 0;
+	/** Position in the cold-rule rotation. */
+	let rotation = 0;
+	/** Rule ids seen in this session; a rule appearing for the first time is asked at once. */
+	let knownRuleIds = new Set<string>();
 
 	// The contract is read fresh whenever the file changes (see loadPack), so an
 	// edit takes effect on the next check. PI_COMPLIANCE_CONTRACT points the
@@ -228,6 +236,24 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		cached = { signature, sources, pack, questions: buildQuestions(pack.rules) };
 		contractError = null;
 		return cached;
+	};
+
+	/** Which rules have produced a hit in the last 24h, from the hit log. */
+	const refreshFiredRecently = async (): Promise<void> => {
+		if (Date.now() - firedRecentlyAt < 5 * 60 * 1000) return;
+		firedRecentlyAt = Date.now();
+		try {
+			const observations = await readObservations();
+			const since = Date.now() - 24 * 60 * 60 * 1000;
+			const fired = new Set<string>();
+			for (const observation of observations) {
+				if (observation.ts < since) continue;
+				for (const hit of observation.fired ?? []) fired.add(hit.id);
+			}
+			firedRecently = fired;
+		} catch {
+			// Keep the previous set; a check without counts still works.
+		}
 	};
 
 	const record = (entry: AuditRecord): void => {
@@ -417,6 +443,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 		]
 			.filter((key) => typeof registry?.[key] === "function")
 			.slice(0, 40);
+		let answersAsked = { steady: 0, rotating: 0, total: 0 };
 		const diag: Record<string, unknown> = {
 			ts: Date.now(),
 			turn: (event as { turnIndex?: number }).turnIndex,
@@ -443,7 +470,19 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 				return;
 			}
 			pack = loaded.pack;
-			questions = loaded.questions;
+			// Rules that fire stay in every check; the rest take turns, so the
+			// prompt stays small without dropping any rule from the contract.
+			await refreshFiredRecently();
+			// A rule nobody has judged yet is asked immediately: it is new, so its
+			// threshold has never been exercised, and waiting for the rotation would
+			// leave it blind for a full cycle.
+			const steady = new Set(firedRecently);
+			for (const rule of pack.rules) if (!knownRuleIds.has(rule.id)) steady.add(rule.id);
+			knownRuleIds = new Set(pack.rules.map((rule) => rule.id));
+			const selection = selectRulesForCheck(pack.rules, steady, rotation);
+			rotation = selection.nextRotation;
+			questions = buildQuestions([...selection.steady, ...selection.rotating]);
+			answersAsked = { steady: selection.steady.length, rotating: selection.rotating.length, total: selection.steady.length + selection.rotating.length };
 		} catch (error) {
 			contractError = error instanceof Error ? error.message : String(error);
 			ctx.ui.notify(
@@ -637,6 +676,7 @@ export default function promptComplianceExtension(pi: ExtensionAPI) {
 
 		finish("checked", {
 			model,
+			...answersAsked,
 			classifierSource: resolved.source,
 			rules: pack.rules.length,
 			classifierError,

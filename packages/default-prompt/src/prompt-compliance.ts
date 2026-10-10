@@ -212,7 +212,7 @@ export function resolveClassifierHost(registry: unknown): ClassifierHost | null 
 			),
 		resolveClassifier: async (ref) => {
 			const resolved = await host.resolveDecider?.(ref.provider, ref.id);
-			if (!resolved) return { model: ref, source: "bare-ref" };
+			if (!resolved) return { model: ref, source: "descriptor" };
 			return {
 				model: resolved.model,
 				source: resolved.source === "descriptor" ? "descriptor" : resolved.source,
@@ -314,6 +314,54 @@ export function findLastMessageText(
 		if (text.length > 0) return text;
 	}
 	return "";
+}
+
+/** How many rarely-firing rules travel with every check. */
+export const ROTATION_BUDGET = 8;
+
+export interface RuleSelection {
+	/** Rules checked on every message: the ones that have produced signal. */
+	readonly steady: readonly CheckableRule[];
+	/** Rules checked on this message only, taken from the cold set in rotation order. */
+	readonly rotating: readonly CheckableRule[];
+	/** Index to pass as \`rotation\` on the next check. */
+	readonly nextRotation: number;
+}
+
+/**
+ * Pick the rules for one check.
+ *
+ * Sending all seventy rules every message is what made a check cost a tenth of a
+ * cent; sending only the ones that fire would stop watching the rest. So the
+ * rules that have produced a hit stay in every check, and the cold ones take
+ * turns in a fixed-size rotating window — over \`ceil(cold / budget)\` checks every
+ * rule has been asked, and no rule is ever dropped from the contract.
+ *
+ * Rotation is round-robin rather than random: coverage is then guaranteed
+ * instead of merely expected.
+ */
+export function selectRulesForCheck(
+	rules: readonly CheckableRule[],
+	firedRecently: ReadonlySet<string>,
+	rotation: number,
+	budget: number = ROTATION_BUDGET,
+): RuleSelection {
+	const steady: CheckableRule[] = [];
+	const cold: CheckableRule[] = [];
+	for (const rule of rules) {
+		if (firedRecently.has(rule.id)) steady.push(rule);
+		else cold.push(rule);
+	}
+	if (cold.length === 0 || budget <= 0) {
+		return { steady, rotating: [], nextRotation: 0 };
+	}
+	const take = Math.min(budget, cold.length);
+	const start = ((rotation % cold.length) + cold.length) % cold.length;
+	const rotating: CheckableRule[] = [];
+	for (let offset = 0; offset < take; offset++) {
+		rotating.push(cold[(start + offset) % cold.length]);
+	}
+	return { steady, rotating, nextRotation: (start + take) % cold.length };
 }
 
 /** One bool question per checkable rule, keyed by rule ID. */

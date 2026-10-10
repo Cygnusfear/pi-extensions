@@ -10,6 +10,7 @@ import {
 	findLastMessageText,
 	formatWarning,
 	resolveClassifierHost,
+	selectRulesForCheck,
 	resolveFixtureRules,
 	selectViolations,
 	MAX_AGENT_MESSAGE_CHARS,
@@ -338,6 +339,46 @@ describe("classifier state", () => {
 	test("bounds the message so one turn cannot send an unbounded prompt", () => {
 		const state = buildClassifierState("x".repeat(MAX_AGENT_MESSAGE_CHARS * 2), "", 1);
 		expect(String(state.agent_message_to_hooman).length).toBeLessThan(MAX_AGENT_MESSAGE_CHARS + 32);
+	});
+});
+
+describe("rule rotation", () => {
+	const rules = Array.from({ length: 20 }, (_, index) => ({
+		id: "r" + index,
+		ordinal: index,
+		text: "rule " + index,
+		label: "rule " + index,
+		violation: "v",
+	}));
+
+	test("rules that produced a hit are asked every time", () => {
+		const { steady } = selectRulesForCheck(rules, new Set(["r1", "r2"]), 0, 5);
+		expect(steady.map((rule) => rule.id)).toEqual(["r1", "r2"]);
+	});
+
+	test("cold rules take turns in a window of the given budget", () => {
+		const first = selectRulesForCheck(rules, new Set(), 0, 5);
+		expect(first.rotating.map((rule) => rule.id)).toEqual(["r0", "r1", "r2", "r3", "r4"]);
+		const second = selectRulesForCheck(rules, new Set(), first.nextRotation, 5);
+		expect(second.rotating.map((rule) => rule.id)).toEqual(["r5", "r6", "r7", "r8", "r9"]);
+	});
+
+	test("every cold rule is asked within ceil(cold / budget) checks — coverage, not luck", () => {
+		let rotation = 0;
+		const seen = new Set<string>();
+		for (let check = 0; check < 4; check++) {
+			const selection = selectRulesForCheck(rules, new Set(), rotation, 5);
+			for (const rule of selection.rotating) seen.add(rule.id);
+			rotation = selection.nextRotation;
+		}
+		expect(seen.size).toBe(rules.length);
+	});
+
+	test("a rule promoted to steady stops consuming the rotation window", () => {
+		const fired = new Set(["r0", "r1", "r2", "r3", "r4"]);
+		const selection = selectRulesForCheck(rules, fired, 0, 5);
+		expect(selection.steady.length).toBe(5);
+		expect(selection.rotating.some((rule) => fired.has(rule.id))).toBe(false);
 	});
 });
 
