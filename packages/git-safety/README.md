@@ -1,5 +1,12 @@
 # @pi-extensions/git-safety
 
+> **2026-10-10 — the confirm dialog is gone.** `/git-lock` now has `decide | block | off`
+> (default `decide`): a decision model reads the command together with the repository state
+> and blocks only what is unrecoverable — measured, `git reset --hard` scores 0.001 on a clean
+> tree and 0.976 on a dirty one, so the mistake is blocked and the deliberate command passes.
+> Enumerated disasters (reflog expire, `gc --prune=now`, `tag -d`) and provider failures fall
+> back to the deterministic matcher. ~330 ms and ~$0.00001 per candidate command.
+
 Protect your repository from destructive git commands and accidental `.git` corruption — with three configurable modes.
 
 ## Why

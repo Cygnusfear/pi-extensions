@@ -65,6 +65,7 @@ function toolCallText(block: { name?: unknown; arguments?: unknown }): string {
  * it is told — is decided without a provider in the loop.
  */
 
+import { resolveDeciderHost } from "../../shared/src/decider.ts";
 import type { CheckableRule } from "./compliance-rules.ts";
 
 /** The classifier the checker asks. Output cost is zero; input is billed per token. */
@@ -195,44 +196,27 @@ export interface ClassifierHost {
 /**
  * Reach the classifier through the session's model registry.
  *
- * Extensions in this repo are pinned to a pi version whose types predate
- * classifiers, so the capability is probed structurally and reported as absent
- * rather than assumed. A host without it leaves the checker switched off.
+ * The lookup and call logic lives once, in \`shared/src/decider.ts\`, because the
+ * git guard needs exactly the same plumbing; this keeps the judge's own API so
+ * nothing downstream moves.
  */
 export function resolveClassifierHost(registry: unknown): ClassifierHost | null {
-	if (!registry || typeof registry !== "object") return null;
-	const candidate = registry as Record<string, unknown>;
-	if (typeof candidate.classify !== "function") return null;
-	const classify = candidate.classify as ClassifierHost["classify"];
-
-	const call = (method: string, ...args: unknown[]): unknown => {
-		const fn = candidate[method];
-		if (typeof fn !== "function") return undefined;
-		return (fn as (...inner: unknown[]) => unknown).call(registry, ...args);
-	};
-
+	const host = resolveDeciderHost(registry);
+	if (!host) return null;
 	return {
 		classify: (model, context, options) =>
-			classify.call(registry, model, context, options),
+			host.classify(
+				model,
+				{ state: context.state, questions: context.questions },
+				options,
+			),
 		resolveClassifier: async (ref) => {
-			for (const method of ["findOfType", "getModelOfType"] as const) {
-				try {
-					const found = call(method, "classifier", ref.provider, ref.id);
-					if (found) return { model: found, source: method };
-				} catch {
-					// Fall through to the next lookup.
-				}
-			}
-			try {
-				const list = (await call("getAvailableOfType", "classifier", ref.provider)) as
-					| readonly { id?: unknown }[]
-					| undefined;
-				const found = list?.find((entry) => entry?.id === ref.id);
-				if (found) return { model: found, source: "getAvailableOfType" };
-			} catch {
-				// Fall through to the bare reference.
-			}
-			return { model: COMPLIANCE_CLASSIFIER_DESCRIPTOR, source: "descriptor" };
+			const resolved = await host.resolveDecider?.(ref.provider, ref.id);
+			if (!resolved) return { model: ref, source: "bare-ref" };
+			return {
+				model: resolved.model,
+				source: resolved.source === "descriptor" ? "descriptor" : resolved.source,
+			};
 		},
 	};
 }

@@ -6,6 +6,11 @@ import {
   isGitUnsafeBash,
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
+import { resolveDeciderHost } from "../../shared/src/decider.ts";
+import { collectRepoSnapshot, decideGitCommand } from "../../shared/src/git-decision.ts";
+
+/** Cheap gate before any model call: does this command even concern git? */
+const GIT_CANDIDATE_RE = /(^|[\s;&|(])(git|GIT_[A-Z_]+=)|\.git\b/;
 import { isLocked, lockError } from "./shell-utils";
 import { maiDep } from "../../shared/src/mai-binary";
 import { safeResponseJson } from "@pi-extensions/shared/safe-json";
@@ -808,23 +813,26 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
       if (killResult) throw new Error(processKillGuardError(killResult.reason));
 
       if (isGitLockActive()) {
-        const gitResult = isGitUnsafeBash(command);
-        if (gitResult) {
-          const title = gitResult.type === "destructive"
-            ? "⚠️ Destructive git operation"
-            : "⚠️ .git write detected";
-          const body = gitResult.type === "destructive"
-            ? gitResult.reason + "\n\nAllow?"
-            : gitResult.reason + "\n\nThis can corrupt your repository. Allow?";
-
-          const { approved } = await runGuardedConfirm(ctx, {
-            source: "git-safety",
-            tool: "bash",
-            reason: gitResult.reason,
-            title,
-            body,
+        // Same decision the git-safety extension makes, from the same code: the
+        // dialog is gone, and the model is an addition to the deterministic
+        // matcher rather than a replacement for it.
+        const mode = process.env.PI_GIT_LOCK_MODE ?? "decide";
+        if (mode === "block") {
+          const hit = isGitUnsafeBash(command);
+          if (hit) throw new Error(gitGuardError(hit.reason));
+        } else if (GIT_CANDIDATE_RE.test(command)) {
+          const verdict = await decideGitCommand({
+            host: resolveDeciderHost(ctx.modelRegistry as unknown),
+            command,
+            snapshot: await collectRepoSnapshot(resolvePath(explicitCwd ?? cwd, cwd)),
+            fallback: () => {
+              const hit = isGitUnsafeBash(command);
+              return hit
+                ? { block: true, reason: `${hit.reason} (deterministic guard; no decision model available)`, source: "fallback" as const }
+                : null;
+            },
           });
-          if (!approved) throw new Error(gitGuardError(gitResult.reason));
+          if (verdict.block) throw new Error(gitGuardError(verdict.reason));
         }
       }
       const timeoutMs = timeout ? timeout * 1000 : SUBPROCESS_TIMEOUT_MS;

@@ -1,91 +1,102 @@
 /**
  * Git Safety Extension
  *
- * Protects against destructive git commands and .git directory writes.
- * Three modes controlled via /git-lock:
- *   - block:   hard-block everything (default for workers)
- *   - confirm: show confirm dialog (default for interactive)
- *   - off:     no protection
+ * Protects against git commands that destroy work that exists nowhere else.
+ * Modes via /git-lock:
+ *   - decide: a decision model reads the command WITH the repository state and
+ *             blocks only what is unrecoverable (default for interactive)
+ *   - block:  hard-block anything the deterministic matcher flags (for workers)
+ *   - off:    no protection
  *
- * Regular git operations (add, commit, diff, push, branch, etc.) are NEVER blocked.
+ * The confirm dialog is gone: the operator approved it blindly 9.99 times out of
+ * 10, so it protected nothing and interrupted everything. What replaces it is
+ * the judgement the dialog never made — is this work recoverable? Measured:
+ * \`git reset --hard\` scores 0.001 on a clean tree and 0.976 on a dirty one,
+ * so the guard blocks the mistake and lets the deliberate command through.
  *
- * Also:
- * - Blocks sed (broken on macOS)
- * - Injects GIT_EDITOR=true for `git rebase --continue` to prevent hanging
+ * The model is an addition, never the only guard: enumerated disasters
+ * (reflog expire, gc --prune=now, published tag deletion) and a provider failure
+ * both fall back to the deterministic matcher.
+ *
+ * Always on, whatever the mode:
+ * - blocks sed (broken on macOS)
+ * - blocks process-kill broadcasts
+ * - injects GIT_EDITOR=true for \`git rebase --continue\` to prevent hanging
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensions/shared/git-guards";
-// Relative paths (not @pi-extensions/shared/...) for newly-added shared
-// modules. The extension loader caches @pi-extensions/shared's resolved
-// exports map at first load and does not refresh on /reload when
-// shared/package.json gains new export entries — so a package-name import
-// of a newly-added shared module fails to resolve until the host process
-// restarts. Relative paths bypass the cache entirely.
-import { runGuardedConfirm } from "../../shared/src/guarded-confirm.ts";
+import { resolveDeciderHost } from "../../shared/src/decider.ts";
+import {
+	collectRepoSnapshot,
+	decideGitCommand,
+	type GitVerdict,
+} from "../../shared/src/git-decision.ts";
 
 const REBASE_CONTINUE_RE = /\bgit\s+rebase\s+--continue\b/;
 const HAS_GIT_EDITOR_RE = /\bGIT_EDITOR\s*=/;
 
 const SED_RE = /\bsed\s+(-[a-zA-Z]\s+)*['"-]/;
 
-type GitLockMode = "block" | "confirm" | "off";
+/** Cheap gate before any model call: does this command even concern git? */
+const GIT_CANDIDATE_RE = /(^|[\s;&|(])(git|GIT_[A-Z_]+=)|\.git\b/;
+
+/** Verdicts are cached per exact command string; a rephrased command is judged fresh. */
+const VERDICT_CACHE_LIMIT = 200;
+
+type GitLockMode = "decide" | "block" | "off";
 
 export default function (pi: ExtensionAPI) {
-	let mode: GitLockMode = process.env.PI_TEAMS_WORKER === "1" ? "block" : "confirm";
-	// Publish mode via env so code-mode (separate extension) can read it
+	let mode: GitLockMode = process.env.PI_TEAMS_WORKER === "1" ? "block" : "decide";
+	// Published so code-mode's sandbox tools read the same mode.
 	process.env.PI_GIT_LOCK_MODE = mode;
 
-	// ── /git-lock command ──
+	const cache = new Map<string, GitVerdict>();
+
 	pi.registerCommand("git-lock", {
-		description: "Toggle git safety: /git-lock block | confirm | off",
+		description: "Git safety: /git-lock decide | block | off",
 		handler: async (_args, ctx) => {
 			const arg = _args.trim().toLowerCase();
-
-			if (arg === "block" || arg === "confirm" || arg === "off") {
+			if (arg === "decide" || arg === "block" || arg === "off") {
 				mode = arg;
 				process.env.PI_GIT_LOCK_MODE = mode;
 				ctx.ui.notify(`Git safety: ${mode}`, "info");
-			} else if (arg === "") {
-				// Toggle: confirm → off → block → confirm
-				const next: Record<GitLockMode, GitLockMode> = { confirm: "off", off: "block", block: "confirm" };
+				return;
+			}
+			if (arg === "") {
+				const next: Record<GitLockMode, GitLockMode> = { decide: "off", off: "block", block: "decide" };
 				mode = next[mode];
 				process.env.PI_GIT_LOCK_MODE = mode;
 				ctx.ui.notify(`Git safety: ${mode}`, "info");
-			} else {
-				ctx.ui.notify("Usage: /git-lock [block|confirm|off]", "warning");
+				return;
 			}
+			ctx.ui.notify("Usage: /git-lock [decide|block|off]", "warning");
 		},
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		const isBash = event.toolName === "bash" || event.toolName === "bash_bg_start";
+		const cmd: string = isBash ? ((event.input as any)?.command ?? "") : "";
+
 		// ── bash: inject GIT_EDITOR for rebase --continue (always, regardless of mode) ──
-		if (event.toolName === "bash" || event.toolName === "bash_bg_start") {
-			const cmd: string = (event.input as any)?.command ?? "";
-			if (REBASE_CONTINUE_RE.test(cmd) && !HAS_GIT_EDITOR_RE.test(cmd)) {
-				(event.input as any).command = cmd.replace(
-					REBASE_CONTINUE_RE,
-					"GIT_EDITOR=true git rebase --continue",
-				);
-			}
+		if (isBash && REBASE_CONTINUE_RE.test(cmd) && !HAS_GIT_EDITOR_RE.test(cmd)) {
+			(event.input as any).command = cmd.replace(
+				REBASE_CONTINUE_RE,
+				"GIT_EDITOR=true git rebase --continue",
+			);
 		}
 
 		// ── block sed (always, regardless of mode) ──
-		if (event.toolName === "bash" || event.toolName === "bash_bg_start") {
-			const cmd: string = (event.input as any)?.command ?? "";
-			if (SED_RE.test(cmd)) {
-				return {
-					block: true,
-					reason: "🚫 sed is blocked — it behaves differently on macOS and Linux. Use edit, apply_patch, ast-grep (TypeScript), or rs-hack (Rust) instead.",
-				};
-			}
+		if (isBash && SED_RE.test(cmd)) {
+			return {
+				block: true,
+				reason:
+					"🚫 sed is blocked — it behaves differently on macOS and Linux. Use edit, apply_patch, ast-grep (TypeScript), or rs-hack (Rust) instead.",
+			};
 		}
 
 		// ── block process-kill broadcast (always, regardless of mode) ──
-		// No setting can disable this. Broadcasting SIGKILL to the user's session
-		// has no legitimate agent workflow — only bugs produce these commands.
-		if (event.toolName === "bash" || event.toolName === "bash_bg_start") {
-			const cmd: string = (event.input as any)?.command ?? "";
+		if (isBash) {
 			const killHit = isProcessKillBroadcast(cmd);
 			if (killHit) {
 				return {
@@ -95,72 +106,62 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
-		// ── mode=off: skip all git guards ──
 		if (mode === "off") return undefined;
 
-		// ── detect dangerous operations ──
-		let result: { type: "destructive" | "git_write"; reason: string } | null = null;
-
-		if (event.toolName === "bash" || event.toolName === "bash_bg_start") {
-			result = isGitUnsafeBash((event.input as any)?.command ?? "");
-		}
-
+		// ── .git path writes: deterministic, no model call ──
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const p: string = (event.input as any)?.path ?? "";
 			if (isGitPath(p)) {
-				result = { type: "git_write", reason: `${event.toolName} to .git path: ${p}` };
+				return {
+					block: true,
+					reason: `🚫 ${event.toolName} to a .git path (${p}) — repository corruption is not recoverable from the work tree.`,
+				};
 			}
 		}
-
 		if (event.toolName === "apply_patch") {
 			const patch: string = (event.input as any)?.patchText ?? "";
 			const fileHeaders = patch.match(/\*\*\*\s+(?:Add|Delete|Update)\s+File:\s*(.+)/g);
-			if (fileHeaders) {
-				for (const h of fileHeaders) {
-					const p = h.replace(/\*\*\*\s+(?:Add|Delete|Update)\s+File:\s*/, "").trim();
-					if (isGitPath(p)) {
-						result = { type: "git_write", reason: `patch targets .git path: ${p}` };
-						break;
-					}
+			for (const header of fileHeaders ?? []) {
+				const p = header.replace(/\*\*\*\s+(?:Add|Delete|Update)\s+File:\s*/, "").trim();
+				if (isGitPath(p)) {
+					return {
+						block: true,
+						reason: `🚫 patch targets a .git path (${p}) — repository corruption is not recoverable from the work tree.`,
+					};
 				}
 			}
 		}
 
-		if (!result) return undefined;
+		if (!isBash || !GIT_CANDIDATE_RE.test(cmd)) return undefined;
 
-		// ── mode=confirm: show dialog (interactive only) ──
-		if (mode === "confirm" && ctx.hasUI) {
-			const title = result.type === "destructive"
-				? "⚠️ Destructive git operation"
-				: "⚠️ .git write detected";
-			const body = result.type === "destructive"
-				? `${result.reason}\n\nAllow?`
-				: `${result.reason}\n\nThis can corrupt your repository. Allow?`;
+		const cached = cache.get(cmd);
+		if (cached) return cached.block ? { block: true, reason: cached.reason } : undefined;
 
-			// Shared helper: registers a pending-interactions entry, fires
-			// the desktop notification IMMEDIATELY so the hooman is pulled
-			// to this pane even from another tab, awaits the confirm,
-			// always cleans up. SAME helper is called from
-			// code-mode/src/sandbox-tools.ts so sandbox `Bash()` /
-			// `Write()` / `Edit()` / `applyPatch()` / `hashEdit()` paths
-			// also surface the popup the same way.
-			const { approved } = await runGuardedConfirm(
-				{ confirmFn: ctx.ui.confirm.bind(ctx.ui) },
-				{
-					source: "git-safety",
-					tool: String(event.toolName ?? "unknown"),
-					reason: result.reason,
-					title,
-					body,
-				},
-			);
-			if (approved) return undefined;
+		// Fallback when no decision can be made: the deterministic matcher, which
+		// is what this guard did before. A missing model degrades to old behaviour,
+		// never to no protection.
+		const fallback = (): GitVerdict | null => {
+			const hit = isGitUnsafeBash(cmd);
+			return hit
+				? { block: true, reason: `🚫 ${hit.reason} (deterministic guard; no decision model available)`, source: "fallback" }
+				: null;
+		};
+
+		if (mode === "block") {
+			const verdict = fallback();
+			return verdict ? { block: true, reason: verdict.reason } : undefined;
 		}
 
-		// ── mode=block, or confirm denied, or no UI → hard block ──
-		return {
-			block: true,
-			reason: `🛡️ BLOCKED: ${result.reason}.`,
-		};
+		const snapshot = await collectRepoSnapshot(ctx.cwd);
+		const verdict = await decideGitCommand({
+			host: resolveDeciderHost(ctx.modelRegistry as unknown),
+			command: cmd,
+			snapshot,
+			fallback,
+		});
+		if (cache.size >= VERDICT_CACHE_LIMIT) cache.clear();
+		cache.set(cmd, verdict);
+
+		return verdict.block ? { block: true, reason: verdict.reason } : undefined;
 	});
 }
