@@ -362,7 +362,13 @@ export interface GitVerdict {
 	readonly block: boolean;
 	readonly reason: string;
 	/** Which axis fired, or "enum" / "fallback" for the deterministic paths. */
-	readonly source: "unrecoverable_loss" | "repository_corruption" | "shared_history_damage" | "enum" | "fallback";
+	readonly source:
+		| "unrecoverable_loss"
+		| "repository_corruption"
+		| "shared_history_damage"
+		| "enum"
+		| "model"
+		| "fallback";
 }
 
 export interface DecideGitOptions {
@@ -430,7 +436,7 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 			const fallback = options.fallback();
 			return record(fallback ?? { block: false, reason: "", source: "fallback" });
 		}
-		return record({ block: false, reason: "", source: "fallback" }, axes, cost);
+		return record({ block: false, reason: "", source: "model" }, axes, cost);
 	}
 
 	const axis = fired[0] as GitVerdict["source"];

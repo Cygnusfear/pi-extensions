@@ -7,7 +7,7 @@ import {
   isProcessKillBroadcast,
 } from "@pi-extensions/shared/git-guards";
 import { resolveDeciderHost } from "../../shared/src/decider.ts";
-import { collectRepoSnapshot, decideGitCommand } from "../../shared/src/git-decision.ts";
+import { collectRepoSnapshot, decideGitCommand, needsDecision } from "../../shared/src/git-decision.ts";
 
 /** Cheap gate before any model call: does this command even concern git? */
 const GIT_CANDIDATE_RE = /(^|[\s;&|(])(git|GIT_[A-Z_]+=)|\.git\b/;
@@ -820,11 +820,13 @@ export function createToolBindings(ctx: SandboxContext): Record<string, unknown>
         if (mode === "block") {
           const hit = isGitUnsafeBash(command);
           if (hit) throw new Error(gitGuardError(hit.reason));
-        } else if (GIT_CANDIDATE_RE.test(command)) {
+        } else if (GIT_CANDIDATE_RE.test(command) && needsDecision(command)) {
+          const commandCwd = resolvePath(explicitCwd ?? cwd, cwd);
           const verdict = await decideGitCommand({
             host: resolveDeciderHost(ctx.modelRegistry as unknown),
             command,
-            snapshot: await collectRepoSnapshot(resolvePath(explicitCwd ?? cwd, cwd)),
+            dir: commandCwd,
+            snapshot: await collectRepoSnapshot(commandCwd),
             fallback: () => {
               const hit = isGitUnsafeBash(command);
               return hit
