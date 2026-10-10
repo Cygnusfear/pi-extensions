@@ -1,0 +1,21 @@
+packages/default-prompt/src/compliance-rules.ts
+  s_17acfa267dfe69::t_c38769593c5cf0 73-76
+packages/default-prompt/src/compliance-rules.test.ts
+  s_17acfa267dfe69::t_4ef16f42fe26ef 12,30-39,62-63,80-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a3619846487b6a47913c35aec63aee1b28f3f427",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
