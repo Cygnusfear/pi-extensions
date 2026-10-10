@@ -1,0 +1,21 @@
+packages/code-mode/src/sandbox-tools.ts
+  s_17acfa267dfe69::t_1aba2bba61ab1c 10,823-824,828-829
+packages/shared/src/git-decision.ts
+  s_17acfa267dfe69::t_928d99bdbd2598 365-371,439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "33b6f3302d5d2bf2bd528cdb3cea895875a96928",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
