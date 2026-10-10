@@ -13,6 +13,7 @@ import {
   tellContentKey,
 } from "./inbound-dedup.ts";
 import { tellAttempts } from "./tell-target.ts";
+import { piMeshDisabled } from "./disabled.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MeshIdentity } from "@pi-extensions/shared/session-nickname";
 import {
@@ -1782,6 +1783,8 @@ export function formatTellAckReceipt(ack: MeshTellAckEnvelope): string {
 // ── Extension entry point ─────────────────────────────────────────────────────
 
 export default function piMeshExtension(pi: ExtensionAPI) {
+  // PI_MESH_DISABLED: load as nothing — before the binary check, the sidecar, any tool, hook or command.
+  if (piMeshDisabled()) return;
   let binPath = resolveBinPath();
   if (!binPath) {
     // Binary missing — kick off a background build now and notify the user
