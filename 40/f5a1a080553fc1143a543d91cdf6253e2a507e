@@ -1,0 +1,20 @@
+packages/git-safety/extensions/git-safety.test.ts
+  s_17acfa267dfe69::t_7c16e314711bbe 4-5,9-11
+  s_17acfa267dfe69::t_35318d36b4a7bd 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "40f5a1a080553fc1143a543d91cdf6253e2a507e",
+  "prompts": {},
+  "sessions": {
+    "s_17acfa267dfe69": {
+      "agent_id": {
+        "tool": "Charles Neutrino Vafa",
+        "id": "318da3ef-afca-42c7-b0a5-9e3df890bf93",
+        "model": "deepseek/deepseek-flash"
+      },
+      "human_author": "Alexander Mangel <cygnusfear@gmail.com>"
+    }
+  }
+}
