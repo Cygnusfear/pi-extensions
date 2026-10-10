@@ -29,6 +29,7 @@ import { isGitUnsafeBash, isGitPath, isProcessKillBroadcast } from "@pi-extensio
 import { resolveDeciderHost } from "../../shared/src/decider.ts";
 import {
 	collectRepoSnapshot,
+	commandDirectory,
 	decideGitCommand,
 	type GitVerdict,
 } from "../../shared/src/git-decision.ts";
@@ -152,7 +153,11 @@ export default function (pi: ExtensionAPI) {
 			return verdict ? { block: true, reason: verdict.reason } : undefined;
 		}
 
-		const snapshot = await collectRepoSnapshot(ctx.cwd);
+		// The repository this command would touch, which is not always the one the
+		// session sits in (\`cd /other/repo && git reset --hard\`).
+		const snapshot = await collectRepoSnapshot(
+			commandDirectory(cmd, ctx.cwd, (event.input as { cwd?: unknown })?.cwd as string | undefined),
+		);
 		const verdict = await decideGitCommand({
 			host: resolveDeciderHost(ctx.modelRegistry as unknown),
 			command: cmd,

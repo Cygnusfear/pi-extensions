@@ -5,6 +5,7 @@ import path from "node:path";
 import { resolveDeciderHost } from "./decider.ts";
 import {
 	collectRepoSnapshot,
+	commandDirectory,
 	decideGitCommand,
 	enumeratedDisaster,
 	EMPTY_SNAPSHOT,
@@ -119,6 +120,23 @@ describe("when no decision can be made", () => {
 			fallback: () => null,
 		});
 		expect(verdict.block).toBe(false);
+	});
+});
+
+describe("the directory a command acts on", () => {
+	test("follows a leading cd, because that is the repository at risk", () => {
+		expect(commandDirectory("cd /tmp/other && git reset --hard", "/Users/a/repo")).toBe("/tmp/other");
+		expect(commandDirectory("cd '../sibling' && git clean -fd", "/Users/a/repo")).toBe("/Users/a/sibling");
+		expect(commandDirectory("cd /tmp/other; git status", "/Users/a/repo")).toBe("/tmp/other");
+	});
+
+	test("an explicit cwd on the tool call wins", () => {
+		expect(commandDirectory("git status", "/Users/a/repo", "/tmp/explicit")).toBe("/tmp/explicit");
+	});
+
+	test("falls back to the session directory", () => {
+		expect(commandDirectory("git status", "/Users/a/repo")).toBe("/Users/a/repo");
+		expect(commandDirectory("cd /tmp && ls", "/Users/a/repo")).toBe("/tmp");
 	});
 });
 

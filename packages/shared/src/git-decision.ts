@@ -20,6 +20,7 @@
  */
 
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import {
 	askDecider,
@@ -46,6 +47,26 @@ export interface RepoSnapshot {
 	readonly branchShared: boolean;
 	/** A rebase/merge/cherry-pick is in progress; destructive commands are often intended then. */
 	readonly inProgress: string | null;
+}
+
+/**
+ * The directory a command actually acts on.
+ *
+ * The snapshot must describe the repository the command would touch, not the one
+ * the session happens to sit in: \`cd /other/repo && git reset --hard\` judged
+ * against the session's tree would clear a different repository than the one at
+ * risk.
+ */
+export function commandDirectory(command: string, sessionCwd: string, explicitCwd?: string): string {
+	if (typeof explicitCwd === "string" && explicitCwd.trim().length > 0) {
+		return path.resolve(sessionCwd, explicitCwd.trim());
+	}
+	const cd = command.match(/^\s*cd\s+(?:--\s+)?("[^"]+"|'[^']+'|\S+)\s*(?:&&|;)/);
+	if (cd) {
+		const target = cd[1].replace(/^["']|["']$/g, "");
+		return path.resolve(sessionCwd, target);
+	}
+	return path.resolve(sessionCwd);
 }
 
 export const EMPTY_SNAPSHOT: RepoSnapshot = {
