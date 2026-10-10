@@ -37,20 +37,23 @@ describe("decider host", () => {
 });
 
 describe("askDecider", () => {
-	test("returns undefined without a host", async () => {
-		expect(await askDecider(null, {}, questions)).toBeUndefined();
+	test("reports why it could not ask when there is no host", async () => {
+		expect(await askDecider(null, {}, questions)).toEqual({
+			ok: false,
+			reason: "no classifier host",
+		});
 	});
 
-	test("returns undefined on a provider error instead of throwing", async () => {
+	test("carries the provider's own message instead of throwing", async () => {
 		const host = resolveDeciderHost({
 			classify: () => Promise.resolve({ stopReason: "error", errorMessage: "nope" }),
 		});
-		expect(await askDecider(host, {}, questions)).toBeUndefined();
+		expect(await askDecider(host, {}, questions)).toEqual({ ok: false, reason: "nope" });
 	});
 
-	test("returns undefined when the host rejects", async () => {
+	test("carries the rejection reason when the host throws", async () => {
 		const host = resolveDeciderHost({ classify: () => Promise.reject(new Error("network")) });
-		expect(await askDecider(host, {}, questions)).toBeUndefined();
+		expect(await askDecider(host, {}, questions)).toEqual({ ok: false, reason: "network" });
 	});
 
 	test("passes the state and questions through and returns the answers", async () => {
@@ -61,8 +64,8 @@ describe("askDecider", () => {
 				return Promise.resolve({ answers: { q: { probability: 0.9 } }, stopReason: "stop" });
 			},
 		});
-		const result = await askDecider(host, { command: "git status" }, questions);
-		expect(result?.answers?.q?.probability).toBe(0.9);
+		const outcome = await askDecider(host, { command: "git status" }, questions);
+		expect(outcome.ok && outcome.result.answers?.q?.probability).toBe(0.9);
 		expect(JSON.stringify(seen)).toContain("git status");
 	});
 });

@@ -157,7 +157,7 @@ export default function (pi: ExtensionAPI) {
 		const fallback = (): GitVerdict | null => {
 			const hit = isGitUnsafeBash(cmd);
 			return hit
-				? { block: true, reason: `🚫 ${hit.reason} (deterministic guard; no decision model available)`, source: "fallback" }
+				? { block: true, reason: `🚫 ${hit.reason} (deterministic guard)`, source: "fallback" }
 				: null;
 		};
 

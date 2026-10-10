@@ -136,18 +136,23 @@ export function deciderSignal(ms: number): AbortSignal | undefined {
 }
 
 /**
- * Ask the model, never throwing.
+ * What came back from the decision model.
  *
- * Returns undefined when there is no host, no answer, or an error — the caller
- * decides what its own logic does in that case.
+ * The failure carries its reason: a guard that degrades because the model is
+ * unreachable must say why, or a silent 14% becomes invisible protection loss.
  */
+export type DeciderOutcome =
+	| { readonly ok: true; readonly result: DeciderResult }
+	| { readonly ok: false; readonly reason: string };
+
+/** Ask the model, never throwing: the caller decides what its own logic does. */
 export async function askDecider(
 	host: DeciderHost | null,
 	state: Record<string, unknown>,
 	questions: Readonly<Record<string, DeciderQuestion>>,
 	options: { readonly timeoutMs?: number } = {},
-): Promise<DeciderResult | undefined> {
-	if (!host) return undefined;
+): Promise<DeciderOutcome> {
+	if (!host) return { ok: false, reason: "no classifier host" };
 	const resolved = host.resolveDecider
 		? await host.resolveDecider(DECIDER_MODEL.provider, DECIDER_MODEL.id)
 		: ({ model: DECIDER_DESCRIPTOR, source: "descriptor" } as ResolvedDecider);
@@ -157,10 +162,12 @@ export async function askDecider(
 			{ state, questions },
 			{ signal: deciderSignal(options.timeoutMs ?? 15_000) },
 		);
-		if (result?.errorMessage || result?.stopReason === "error") return undefined;
-		return result;
-	} catch {
-		return undefined;
+		if (!result) return { ok: false, reason: "classifier returned nothing" };
+		if (result.errorMessage) return { ok: false, reason: result.errorMessage };
+		if (result.stopReason === "error") return { ok: false, reason: "classifier stopped with an error" };
+		return { ok: true, result };
+	} catch (error) {
+		return { ok: false, reason: error instanceof Error ? error.message : "classifier call threw" };
 	}
 }
 

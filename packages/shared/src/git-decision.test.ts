@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import path from "node:path";
+import path, { join } from "node:path";
 import { resolveDeciderHost } from "./decider.ts";
 import {
+	aggregateGitDecisions,
 	collectRepoSnapshot,
 	commandDirectory,
 	decideGitCommand,
 	enumeratedDisaster,
 	EMPTY_SNAPSHOT,
+	readGitDecisions,
+	renderGitDecisionReport,
 } from "./git-decision.ts";
 
 const hostAnswering = (answers: Record<string, number>, onCall?: (state: unknown) => void) =>
@@ -101,7 +105,7 @@ describe("verdicts", () => {
 });
 
 describe("when no decision can be made", () => {
-	test("the caller's own guard decides", async () => {
+	test("the caller's own guard decides, and the block says why no model answered", async () => {
 		const verdict = await decideGitCommand({
 			host: null,
 			command: "git reset --hard",
@@ -109,7 +113,39 @@ describe("when no decision can be made", () => {
 			fallback: () => ({ block: true, reason: "deterministic guard", source: "fallback" }),
 		});
 		expect(verdict.block).toBe(true);
-		expect(verdict.reason).toBe("deterministic guard");
+		expect(verdict.reason).toBe("deterministic guard (decision model unavailable: no classifier host)");
+		expect(verdict.failure).toBe("no classifier host");
+	});
+
+	test("a degraded decision is recorded with its cause, so it is diagnosable", async () => {
+		const dir = join(tmpdir(), `git-decision-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		process.env.PI_GIT_LOCK_STATE_DIR = dir;
+		try {
+			await decideGitCommand({
+				host: resolveDeciderHost({
+					classify: () => Promise.resolve({ stopReason: "error", errorMessage: "429 rate limited" }),
+				}),
+				command: "git reset --hard",
+				snapshot: EMPTY_SNAPSHOT,
+				fallback: () => null,
+			});
+			// Recording is fire-and-forget by design: wait for the write instead
+			// of assuming it landed in the same tick.
+			let records: Awaited<ReturnType<typeof readGitDecisions>> = [];
+			for (let attempt = 0; attempt < 40 && records.length === 0; attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 25));
+				records = await readGitDecisions();
+			}
+			expect(records.at(-1)?.source).toBe("fallback");
+			expect(records.at(-1)?.error).toBe("429 rate limited");
+			const stats = aggregateGitDecisions(records, Date.now() - 60_000);
+			expect(stats.byFailure["429 rate limited"]).toBe(1);
+			expect(renderGitDecisionReport(stats, 1)).toContain("429 rate limited");
+		} finally {
+			delete process.env.PI_GIT_LOCK_STATE_DIR;
+			await mkdir(dir, { recursive: true }).catch(() => {});
+			await rm(dir, { recursive: true, force: true }).catch(() => {});
+		}
 	});
 
 	test("with no fallback either, the command is allowed — never blocked on a guess", async () => {

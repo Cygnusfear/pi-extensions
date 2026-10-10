@@ -261,6 +261,8 @@ export interface GitDecisionRecord {
 	readonly cost?: number;
 	readonly ms: number;
 	readonly model?: string;
+	/** Set when the decision model did not answer, so the fallback decided. */
+	readonly error?: string;
 }
 
 const LOG_MAX_BYTES = 4 * 1024 * 1024;
@@ -313,6 +315,8 @@ export interface GitDecisionStats {
 	readonly blocked: number;
 	readonly allowed: number;
 	readonly bySource: Readonly<Record<string, number>>;
+	/** Why the decision model did not answer, when it did not. */
+	readonly byFailure: Readonly<Record<string, number>>;
 	readonly cost: number;
 	readonly blockedCommands: readonly { readonly command: string; readonly count: number }[];
 }
@@ -321,10 +325,12 @@ export interface GitDecisionStats {
 export function aggregateGitDecisions(records: readonly GitDecisionRecord[], sinceMs: number): GitDecisionStats {
 	const window = records.filter((record) => record.ts >= sinceMs);
 	const bySource: Record<string, number> = {};
+	const byFailure: Record<string, number> = {};
 	const blockedCounts = new Map<string, number>();
 	let cost = 0;
 	for (const record of window) {
 		bySource[record.source] = (bySource[record.source] ?? 0) + 1;
+		if (record.error) byFailure[record.error] = (byFailure[record.error] ?? 0) + 1;
 		cost += record.cost ?? 0;
 		if (record.block) {
 			blockedCounts.set(record.command, (blockedCounts.get(record.command) ?? 0) + 1);
@@ -335,6 +341,7 @@ export function aggregateGitDecisions(records: readonly GitDecisionRecord[], sin
 		blocked: window.filter((record) => record.block).length,
 		allowed: window.filter((record) => !record.block).length,
 		bySource,
+		byFailure,
 		cost,
 		blockedCommands: [...blockedCounts.entries()]
 			.map(([command, count]) => ({ command, count }))
@@ -349,6 +356,14 @@ export function renderGitDecisionReport(stats: GitDecisionStats, days: number): 
 		`Git guard — last ${days === 1 ? "24 hours" : `${days} days`}: ${stats.candidates} candidate command(s), ${stats.blocked} blocked, ${stats.allowed} allowed`,
 		`Cost: ${stats.cost.toFixed(5)} · by source: ${Object.entries(stats.bySource).map(([source, count]) => `${source} ${count}`).join(", ") || "none"}`,
 	];
+	const failures = Object.entries(stats.byFailure ?? {}).sort((left, right) => right[1] - left[1]);
+	if (failures.length > 0) {
+		lines.push(
+			`Decision model did not answer: ${stats.bySource.fallback ?? 0} · ${failures
+				.map(([reason, count]) => `${count}× ${reason.slice(0, 80)}`)
+				.join(", ")}`,
+		);
+	}
 	if (stats.blockedCommands.length > 0) {
 		lines.push("Most blocked:");
 		for (const { command, count } of stats.blockedCommands) {
@@ -369,6 +384,8 @@ export interface GitVerdict {
 		| "enum"
 		| "model"
 		| "fallback";
+	/** Why the decision model did not answer, when it did not. */
+	readonly failure?: string;
 }
 
 export interface DecideGitOptions {
@@ -405,6 +422,7 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 			...(cost !== undefined ? { cost } : {}),
 			ms: Date.now() - startedAt,
 			...(model ? { model } : {}),
+			...(verdict.failure ? { error: verdict.failure } : {}),
 		});
 		return verdict;
 	};
@@ -414,12 +432,13 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 		return record({ block: true, reason: `🚫 ${disaster}`, source: "enum" });
 	}
 
-	const result = await askDecider(
+	const outcome = await askDecider(
 		options.host,
 		{ command: options.command, repo: options.snapshot },
 		GIT_QUESTIONS,
 		{ timeoutMs: options.timeoutMs ?? 2000 },
 	);
+	const result = outcome.ok ? outcome.result : undefined;
 	const axes: Record<string, number> = {};
 	for (const key of ["unrecoverable_loss", "repository_corruption", "shared_history_damage"]) {
 		const probability = result?.answers?.[key]?.probability;
@@ -432,9 +451,15 @@ export async function decideGitCommand(options: DecideGitOptions): Promise<GitVe
 		"shared_history_damage",
 	]);
 	if (fired.length === 0) {
-		if (!result) {
-			const fallback = options.fallback();
-			return record(fallback ?? { block: false, reason: "", source: "fallback" });
+		if (!outcome.ok) {
+			const fallback = options.fallback() ?? { block: false, reason: "", source: "fallback" as const };
+			return record({
+				...fallback,
+				failure: outcome.reason,
+				reason: fallback.block
+					? `${fallback.reason} (decision model unavailable: ${outcome.reason})`
+					: "",
+			});
 		}
 		return record({ block: false, reason: "", source: "model" }, axes, cost);
 	}
