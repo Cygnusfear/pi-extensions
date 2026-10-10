@@ -800,8 +800,39 @@ export function onStableIdChange(listener: () => void): () => void {
 	return () => g.__piMeshStableIdListeners?.delete(listener);
 }
 
-/** Get the stable nickname for this process. Uses triple-name derivation for consistent style. */
+// ── Provided session identity ───────────────────────────────────────────────
+// The extension that owns this session's identity on the network when it is NOT pi-mesh (Sanga, after the
+// pi-mesh -> Sanga swap) publishes the name here. Without it every reader below fell back to a hash of the
+// session id, so 'Kirsten Io Kulkarni' showed as a different three-part name in the footer and the identity
+// block vanished from the prompt (Sanga san-dxhb711z). Contract, kept stable because other repos write it
+// directly (they cannot import this bundle): globalThis.__piSessionIdentity = { nickname, id?, source }, then
+// every listener in globalThis.__piMeshStableIdListeners is called.
+
+export const SESSION_IDENTITY_KEY = "__piSessionIdentity";
+
+export type SessionIdentity = { nickname: string; id?: string; source: string };
+
+/** Publish (or clear, with null) the session's identity; UIs subscribed via onStableIdChange re-render. */
+export function setSessionIdentity(identity: SessionIdentity | null): void {
+	const g = globalThis as any;
+	const next = identity && identity.nickname?.trim() ? { ...identity, nickname: identity.nickname.trim() } : null;
+	const cur = g[SESSION_IDENTITY_KEY] as SessionIdentity | null | undefined;
+	if ((cur?.nickname ?? null) === (next?.nickname ?? null) && (cur?.id ?? null) === (next?.id ?? null)) return;
+	g[SESSION_IDENTITY_KEY] = next;
+	const listeners = g.__piMeshStableIdListeners as Set<() => void> | undefined;
+	if (listeners) for (const fn of listeners) { try { fn(); } catch {} }
+}
+
+/** The provided identity, or null when no extension provides one. */
+export function getSessionIdentity(): SessionIdentity | null {
+	const v = (globalThis as any)[SESSION_IDENTITY_KEY] as SessionIdentity | null | undefined;
+	return v && typeof v.nickname === "string" && v.nickname.trim() ? v : null;
+}
+
+/** Get the stable nickname for this process: a provided identity first, else triple-name derivation. */
 export function getStableNickname(sessionIdFallback?: string | null): string | null {
+	const provided = getSessionIdentity();
+	if (provided) return provided.nickname;
 	const stableId = (globalThis as any)[STABLE_ID_KEY] as string | undefined;
 	const id = stableId ?? sessionIdFallback?.trim();
 	if (!id) return null;
