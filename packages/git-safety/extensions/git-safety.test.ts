@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir as osTmpdir } from "node:os";
+import path2 from "node:path";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+// Keep test decisions out of the live trail (~/.pi/agent/git-lock): the operator
+// reads that log to see what real agents did, and a test run is not that.
+process.env.PI_GIT_LOCK_STATE_DIR = mkdtempSync(path2.join(osTmpdir(), "git-safety-log-"));
 
 interface Harness {
 	readonly classifyCalls: unknown[];
