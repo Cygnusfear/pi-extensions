@@ -1,3 +1,31 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# pre-push — dispatcher preserving repo-local hooks while core.hooksPath
+# points at git-ai's bundled hook directory.
+#
+# Git hands pre-push the ref list on stdin, and BOTH consumers need it: the
+# repository's own pre-push and `git lfs pre-push`. Buffer it once and replay it
+# to each, so chaining cannot starve git-lfs of the refs it uploads from.
+
+set -e
+
+GIT_AI_HOOK_SELF="$0"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/local-hook-dispatch.sh
+. "${SCRIPT_DIR}/lib/local-hook-dispatch.sh"
+
+STDIN_FILE=$(mktemp "${TMPDIR:-/tmp}/git-ai-pre-push.XXXXXX") || {
+	printf >&2 "\n%s\n\n" "git-ai pre-push: cannot buffer stdin (mktemp failed), so a chained run would starve git-lfs of the ref list. Refusing the push rather than run half the hook."
+	exit 1
+}
+trap 'rm -f "$STDIN_FILE"' EXIT
+cat > "$STDIN_FILE"
+
+# Run the repository's own .git/hooks/pre-push first, with Git's original
+# arguments and the ref list. If it refuses, propagate that exit code and stop:
+# a refused push must not reach git-lfs.
+git_ai_run_local_hook "pre-push" "$@" < "$STDIN_FILE"
+
 command -v git-lfs >/dev/null 2>&1 || { printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks')."; exit 2; }
-git lfs pre-push "$@"
+git lfs pre-push "$@" < "$STDIN_FILE"
+
+exit 0
